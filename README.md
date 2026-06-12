@@ -1,4 +1,4 @@
-# tetriSH
+# MacMini_tetriSH
 
 > A terminal-based Battle Royale Tetris system written in C — combining a custom Unix shell, concurrent daemon processes, authenticated encrypted networking, and a bespoke application-layer protocol (HTTTP).
 
