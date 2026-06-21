@@ -1,0 +1,17 @@
+# .tetrishrc — tetriSH shell start-up file
+# One command per line; blank lines and lines starting with # are ignored.
+#
+# The shell prepends $PWD/bin to PATH (see init_root), so the daemon and
+# system-program binaries under ./bin are found by name.
+#
+# `dspawn <program> [args...]` daemonises, registers the daemon in
+# tmp/daemons.reg, then execs <program>. Inspect running daemons with `dcheck`.
+#
+# Daemon launch order: the logger first (so it captures everything), then the
+# game server, then the optional social layer (the game runs without it).
+#
+# These daemons are not built yet — uncomment each line as its binary lands:
+# dspawn tetrislogd
+# dspawn tetrisd
+# dspawn marketd
+# dspawn chatd

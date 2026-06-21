@@ -37,8 +37,10 @@ void	source_rc(t_root *sh, char **envp)
  * @brief Compute the candidate rc file paths.
  *
  * Resolves the project root into sh->current_dir and builds the project rc
- * path "<root>/.macminishellrc"; if $HOME is set, also builds the home rc
- * path. Either buffer is left empty if its source is unavailable.
+ * path. If $TETRISHRC is set it is used verbatim; otherwise the path is
+ * "<root>/.tetrishrc". If $HOME is set, also builds the home rc path
+ * "<home>/.tetrishrc". Either buffer is left empty if its source is
+ * unavailable.
  *
  * @param sh Shell root state (its current_dir is set here).
  * @param rc_path Output buffer (PATH_MAX) for the project rc path.
@@ -47,14 +49,19 @@ void	source_rc(t_root *sh, char **envp)
 void	get_rc_paths(t_root *sh, char *rc_path, char *home_path)
 {
 	const char	*home;
+	const char	*rc_env;
 
 	rc_path[0] = '\0';
 	home_path[0] = '\0';
 	sh->current_dir = resolve_project_root();
-	snprintf(rc_path, PATH_MAX, "%s/.macminishellrc", sh->current_dir);
+	rc_env = getenv("TETRISHRC");
+	if (rc_env && rc_env[0])
+		snprintf(rc_path, PATH_MAX, "%s", rc_env);
+	else
+		snprintf(rc_path, PATH_MAX, "%s/.tetrishrc", sh->current_dir);
 	home = getenv("HOME");
 	if (home)
-		snprintf(home_path, PATH_MAX, "%s/.macminishellrc", home);
+		snprintf(home_path, PATH_MAX, "%s/.tetrishrc", home);
 }
 
 /**
