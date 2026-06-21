@@ -6,6 +6,13 @@
 ################################################################################
 #                                    CONFIG                                    #
 ################################################################################
+#
+# Self-contained static library. Another Makefile builds it with:
+#     $(MAKE) -C libtetrisbrain
+# then links the archive + adds the header path when compiling its own code:
+#     gcc ... libtetrisbrain/libtetrisbrain.a -I libtetrisbrain/include ...
+#
+# It also carries its own tests:  $(MAKE) -C libtetrisbrain test
 
 NAME		:= libtetrisbrain.a
 CC			:= gcc
@@ -25,18 +32,18 @@ CYAN		:= \033[1;36m
 #                                DIRECTORIES                                   #
 ################################################################################
 
-SRC_DIR		:= libtetrisbrain
+SRC_DIR		:= src
 OBJ_DIR		:= obj
 INC_DIR		:= include
+INC			:= -I$(INC_DIR)
 
-# Header search path shared by the library and every test
-INC			:= -I./$(INC_DIR)
+HEADER		:= $(INC_DIR)/tetrisbrain.h
 
 ################################################################################
 #                                  SOURCES                                     #
 ################################################################################
 
-# Library : every .c under libtetrisbrain/ -> libtetrisbrain.a
+# Every .c under src/ is part of the library.
 SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
@@ -46,13 +53,11 @@ OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 all: $(NAME)
 
-# --- object rule ------------------------------------------------------------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	@ mkdir -p $(dir $@)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER)
+	@ mkdir -p $(OBJ_DIR)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 
-# --- static library ---------------------------------------------------------
 $(NAME): $(OBJ)
 	@ $(AR) $(ARFLAGS) $@ $(OBJ)
 	@ echo "\n$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) created ✔️"
@@ -61,15 +66,15 @@ $(NAME): $(OBJ)
 #                                    TESTS                                     #
 ################################################################################
 
-TESTS_DIR	:= tests
-TEST_BIN_DIR := $(TESTS_DIR)/bin
+TESTS_DIR		:= tests
+TEST_BIN_DIR	:= $(TESTS_DIR)/bin
 
-TEST_SRC	:= $(wildcard $(TESTS_DIR)/test_*.c)
-TEST_BINS	:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
+TEST_SRC		:= $(wildcard $(TESTS_DIR)/test_*.c)
+TEST_BINS		:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
 
-TEST_RUNNER	:= ./scripts/run_tests.sh
+TEST_RUNNER		:= ./scripts/run_tests.sh
 
-# Each test provides its own main() and links against the library.
+# Each test provides its own main() and links against the library archive.
 $(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(NAME)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
@@ -77,7 +82,7 @@ $(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(NAME)
 
 # Compile every test, then run them through the formatted runner.
 # Filter a subset with: make test FILTER=abilities
-test: $(TEST_BINS)
+test: $(NAME) $(TEST_BINS)
 	@ echo "\n$(CYAN)==> Running unit tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) unit $(TEST_BINS)
 
@@ -95,10 +100,4 @@ fclean: clean
 
 re: fclean all
 
-################################################################################
-#                              PHONY && PRECIOUS                               #
-################################################################################
-
 .PHONY:		all test clean fclean re
-
-.PRECIOUS:	$(OBJ_DIR)/%.o
