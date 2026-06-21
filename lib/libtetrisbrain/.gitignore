@@ -16,10 +16,6 @@
 *.gch
 *.pch
 
-# Build output directories
-bin/
-tests/bin/
-
 # Libraries
 *.lib
 *.a
@@ -40,6 +36,10 @@ tests/bin/
 *.x86_64
 *.hex
 
+# Build output directories
+bin/
+tests/unit/bin/
+
 # Debug files
 *.dSYM/
 *.su
@@ -55,5 +55,14 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# debug information files
-*.dwo
+# VSCode
+.vscode/
+.dist/
+
+# Program files
+*.tmp*
+.txt
+tmp/
+archive/
+failed_cmd.md
+quote.md
