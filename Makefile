@@ -22,7 +22,7 @@ LIB_DIRS    := $(wildcard lib/lib*)
 DAEMON_DIRS := $(wildcard src/tetrisd src/tetrislogd src/tetrisctl \
                           src/tetrisu src/chatd src/marketd)
 
-.PHONY: all libs shell daemons bin-link run stack clean fclean re
+.PHONY: all libs shell daemons bin-link run stack clean fclean reset re
 
 all: libs shell daemons
 
@@ -63,5 +63,14 @@ fclean:
 		$(MAKE) -C $$d fclean >/dev/null 2>&1 || true; \
 	done
 	@rm -rf $(BIN)
+
+# Like fclean but also wipes daemon runtime state: delegates to the shell's
+# own `reset` (drops its tmp/ and archive/) and clears the repo-level bin/tmp.
+reset:
+	@$(MAKE) -C $(SHELL_DIR) reset >/dev/null 2>&1 || true
+	@for d in $(LIB_DIRS) $(DAEMON_DIRS); do \
+		$(MAKE) -C $$d fclean >/dev/null 2>&1 || true; \
+	done
+	@rm -rf $(BIN) tmp
 
 re: fclean all
