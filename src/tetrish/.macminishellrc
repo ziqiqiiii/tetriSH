@@ -1,0 +1,9 @@
+# MacMini Shell start-up file
+# Add one command per line; blank lines and # comments are ignored.
+
+# Manifesting Mac Mini
+
+# cat ./src/system_programs/logo.txt
+# echo
+# cat banner.txt
+# echo
