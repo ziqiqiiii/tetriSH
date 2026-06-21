@@ -17,21 +17,26 @@ static void     daemon_work(const char *project_root);
  */
 int main(int argc, char **argv)
 {
-	(void)  argc;
-	(void)  argv;
+	char		*project_root;
+	const char	*name;
 
-	char *project_root = resolve_project_root();
-
+	project_root = resolve_project_root();
 	ensure_daemon_files(project_root);
 	daemon_spawn();
-	daemon_register(project_root, "deamon_eskimo");
+	name = (argc > 1) ? argv[1] : "deamon_eskimo";
+	daemon_register(project_root, name);
 	daemon_spawn_log(project_root);
 	daemon_log(project_root, "start of new deamon before deamon work");
+	if (argc > 1)
+	{
+		execvp(argv[1], &argv[1]);
+		daemon_log(project_root, "execvp of target daemon failed");
+		free(project_root);
+		return (1);
+	}
 	daemon_work(project_root);
-
 	free(project_root);
-
-	return 0;
+	return (0);
 }
 
 /**
