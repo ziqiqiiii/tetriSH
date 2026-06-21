@@ -73,7 +73,7 @@ This repository implements the **CoreStack Challenge** — a competitive alterna
 - **50.005 (Computer Systems Engineering)** — the `tetriSH` component: a full terminal-based Battle Royale Tetris system built in C, replacing PA1 (shell + daemon + IPC) and PA2 (authenticated, confidential client-server communication) with one large integrated system.
 - **50.003 (Elements of Software Construction)** — the `TetriSocial` component: a live multiplayer chat layer and a points-based in-game marketplace built as independent C daemons that share the same corestack libraries.
 
-Both courses are served by a **single shared repository**. Every library, daemon, and test target is built by a single top-level `Makefile`. Both components share a common corestack of reusable C libraries (`libtetrissh`, `libhtttp`, `libtetrisbrain`, `libcoreipc`).
+Both courses are served by a **single shared repository**. Each library is a self-contained directory that builds its own `libXXX.a` (with its own `Makefile`, `src/`, `include/`, `tests/`); a top-level umbrella `Makefile` recurses into them and links the archives into the daemons. Both components share a common corestack of reusable C libraries (`libtetrissh`, `libhtttp`, `libtetrisbrain`, `libcoreipc`).
 
 This is **not a bonus project**. On the 50.005 side it replaces PA1 and PA2 entirely, with the same mark ceiling. There are no extra marks for attempting it — only a chance at a hardware prize (up to S$3,000 in Apple products for the top groups). On the 50.003 side it runs under the normal project rubric.
 
@@ -711,7 +711,7 @@ With many threads, default 8 MB stack × N threads = large virtual memory footpr
 |---------|------------------|--------------------|
 | `libtetrissh` | Full secure handshake: RSA-PSS cert auth, RSA-OAEP key wrap, AES-256 framing, `session_send/recv/close` | `chatd` uses it for all client sessions; `marketd` uses it for `tetrisu` TCP connections |
 | `libhtttp` | HTTTP parser, serialiser, method dispatch table, header map, status codes | `chatd` dispatches `CHAT`, `JOIN`, `LEAVE`, `ABILITY` methods; `marketd` dispatches `browse`, `purchase`, `equip` |
-| `libtetrisbrain` | Tetris game logic: board operations, SRS rotation, line clear, scoring, gravity, garbage injection | `libtetrisbrain/abilities.c` provides ability-aware board transforms called by `tetrisd/ability.c` |
+| `libtetrisbrain` | Tetris game logic: board operations, SRS rotation, line clear, scoring, gravity, garbage injection | `lib/libtetrisbrain/src/abilities.c` provides ability-aware board transforms called by `tetrisd/ability.c` |
 | `libcoreipc` | Thin wrappers: Unix socket helpers, lock-free ring buffer, atomic drop counter, mq helpers | Both `chatd` and `marketd` use the ring buffer + logshipper pattern; all daemons use the Unix socket helpers |
 
 ### Architectural purity rule
@@ -787,7 +787,16 @@ A task is done when: the feature compiles clean under `gcc -Wall -Wextra -Werror
 
 ## 12. Build System
 
-Single top-level `Makefile`. No external build tools beyond `gcc`, `ar`, `make`, and `pkg-config` for SQLite.
+Each corestack library is a **self-contained directory** — its own `Makefile`,
+`src/`, `include/`, and `tests/` — that builds `lib/libXXX/libXXX.a` in place and runs
+its own unit tests (`make -C lib/libXXX [test]`). A top-level umbrella `Makefile`
+recurses into each library (in dependency order) and links the `.a` archives into
+the binaries, adding each library's header path with `-I lib/libXXX/include`. No
+external build tools beyond `gcc`, `ar`, `make`, and `pkg-config` for SQLite.
+
+> Status: `libtetrisbrain` is implemented self-contained today and builds/tests
+> via `make -C lib/libtetrisbrain`. The umbrella `Makefile` and remaining libraries
+> land as the corestack is built out.
 
 ### Compilation flags
 
@@ -885,91 +894,64 @@ Critical memory rules enforced by code review:
 ```
 project/
     bin/
-        tetrish
-        tetrisd
-        tetrislogd
-        tetrisctl
-        tetrisu
-        chatd
-        chatctl
-        marketd
-        marketctl
+        tetrish tetrisd tetrislogd tetrisctl tetrisu
+        chatd chatctl marketd marketctl
+
+    # --- self-contained libraries (each owns its Makefile/src/include/tests) ---
     lib/
-        libtetrissh.a
-        libhtttp.a
-        libtetrisbrain.a
-        libcoreipc.a
-        libchatcore.a
-        libmarketcore.a
-    include/
-        tetrissh.h
-        htttp.h
-        tetrisbrain.h
-        coreipc.h
-        chatcore.h
-        marketcore.h
-        game_event.h         ← shared event contract (frozen Week 4)
-        loadout_ipc.h        ← loadout wire format (frozen when both sides in review)
+        libtetrissh/
+            Makefile  include/tetrissh.h  src/*.c  tests/test_*.c
+            libtetrissh.a        ← built in place by `make -C lib/libtetrissh`
+        libhtttp/
+            Makefile  include/htttp.h  src/*.c  tests/test_*.c
+            libhtttp.a
+        libtetrisbrain/
+            Makefile  scripts/run_tests.sh
+            include/tetrisbrain.h
+            src/
+                board.c pieces.c gravity.c lineclear.c scoring.c
+                abilities.c      ← ability-aware board transforms (pure logic only)
+            tests/test_*.c
+            libtetrisbrain.a
+        libcoreipc/
+            Makefile  include/coreipc.h
+            src/ring_buffer.c src/mq_helpers.c src/unix_socket.c
+            tests/test_*.c  libcoreipc.a
+        libchatcore/
+            Makefile  include/chatcore.h
+            src/room_registry.c src/rate_limiter.c src/role.c src/event_formatter.c
+            tests/test_*.c  libchatcore.a
+        libmarketcore/
+            Makefile  include/marketcore.h
+            src/ledger.c src/inventory.c src/catalogue.c src/theme_loader.c
+            tests/test_*.c  libmarketcore.a
+
+    include/                     ← cross-component shared headers only
+        game_event.h             ← shared event contract (frozen Week 4)
+        loadout_ipc.h            ← loadout wire format (frozen when both sides in review)
         common_types.h
     auth/
-        server.crt
-        server.key
-        cacsertificate.crt
-        gen_test_certs.sh
+        server.crt  server.key  cacsertificate.crt  gen_test_certs.sh
     sample.tetrishrc
     var/
-        log/                 (created at runtime)
-        run/                 (sock files, pid files)
-    src/
+        log/                     (created at runtime)
+        run/                     (sock files, pid files)
+    src/                         ← daemons + clients (link the .a archives above)
         tetrish/
         tetrisd/
-            ability.c        ← server-side ability dispatch
-            event_pub.c      ← game_event.h publisher
-            loadout.c        ← synchronous loadout query to marketd
-            garbage.c        ← Battle Royale POSIX MQ integration
+            ability.c            ← server-side ability dispatch
+            event_pub.c          ← game_event.h publisher
+            loadout.c            ← synchronous loadout query to marketd
+            garbage.c            ← Battle Royale POSIX MQ integration
         tetrislogd/
         tetrisctl/
         tetrisu/
-            chat_net.c
-            render_chat.c
-            render_market.c
-        libtetrissh/
-        libhtttp/
-        libtetrisbrain/
-            board.c
-            pieces.c
-            gravity.c
-            lineclear.c
-            scoring.c
-            abilities.c      ← ability-aware board transforms (pure logic only)
-        libcoreipc/
-            ring_buffer.c
-            mq_helpers.c
-            unix_socket.c
-        libchatcore/
-            room_registry.c
-            rate_limiter.c
-            role.c
-            event_formatter.c
-        libmarketcore/
-            ledger.c
-            inventory.c
-            catalogue.c
-            theme_loader.c
-        chatd/
-        chatctl/
-        marketd/
-        marketctl/
-    tests/
-        test_tetrisbrain.c
-        test_htttp_parser.c
-        test_game_event.c
-        test_market_points.c
-        test_chatcore.c
+            chat_net.c  render_chat.c  render_market.c
+        chatd/  chatctl/  marketd/  marketctl/
     docs/
         architecture.md
         threat_model.md
-    Makefile
+    Makefile                     ← umbrella: recurse into libs, link + build bins (planned)
     README.md
     AGENTS.md
 ```

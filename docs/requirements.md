@@ -149,7 +149,10 @@ make test-system        # full clean build + scripted tetrisu sessions
 make test               # all three in order
 ```
 
-All tiers must pass under `valgrind --leak-check=full --error-exitcode=1`.
+Each library is self-contained and also runs its own unit tests standalone
+(`make -C lib/libtetrisbrain test`, etc.); the umbrella `make test-unit` simply
+recurses into each library's test target. All tiers must pass under
+`valgrind --leak-check=full --error-exitcode=1`.
 
 | File | Tier | Covers |
 |------|------|--------|
@@ -162,6 +165,10 @@ All tiers must pass under `valgrind --leak-check=full --error-exitcode=1`.
 ---
 
 ## Binary linkage reference
+
+Each corestack library below is a self-contained directory producing
+`lib/libXXX/libXXX.a`. A binary links the archives it needs and adds each library's
+header path (`-I lib/libXXX/include`); the `-l*` entries are external system libs.
 
 | Binary | Libraries |
 |--------|-----------|

@@ -152,7 +152,7 @@ Prepare for any of these. The architecture should make all of them a small diff.
 
 **Q: Show me the line clear function. Walk through it on a board where rows 18 and 20 are full.**
 
-> Preparation: Show `libtetrisbrain/lineclear.c`. The function scans from the top row down. Rows 18 and 20 are full (`all CELL_FILLED`). The function removes them by shifting all rows above each cleared row down by one. Order matters: row 20 is removed first (bottom up), shifting rows 0–19 down by 1. Then row 18 (now effectively row 18 again) is removed, shifting rows 0–17 down. Two blank rows are inserted at the top. Returns `lines_cleared = 2`.
+> Preparation: Show `lib/libtetrisbrain/src/lineclear.c`. The function scans from the top row down. Rows 18 and 20 are full (`all CELL_FILLED`). The function removes them by shifting all rows above each cleared row down by one. Order matters: row 20 is removed first (bottom up), shifting rows 0–19 down by 1. Then row 18 (now effectively row 18 again) is removed, shifting rows 0–17 down. Two blank rows are inserted at the top. Returns `lines_cleared = 2`.
 
 **Q: A garbage row arrives from another room while the local ticker is mid-tick. What synchronises this?**
 

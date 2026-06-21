@@ -28,7 +28,7 @@ A terminal-based Battle Royale Tetris system written entirely in C, spanning two
 - **50.005** → `tetriSH`: shell + daemon + secure client-server game (replaces PA1 + PA2)
 - **50.003** → `TetriSocial`: live chat (`chatd`) + points marketplace (`marketd`) as independent daemons
 
-Both share a corestack of static libraries. Everything builds from one `Makefile`.
+Both share a corestack of static libraries. Each library is **self-contained** — its own directory with a `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libXXX.a` and tested standalone with `make -C lib/libXXX test`. A top-level umbrella `Makefile` will be added to recurse into the libraries and link the `.a` archives into the binaries as those land.
 
 ---
 
@@ -47,6 +47,8 @@ Both share a corestack of static libraries. Everything builds from one `Makefile
 | `marketctl` | Zi Qi | Admin CLI for `marketd` |
 
 ## Libraries and boundaries
+
+Every library is a self-contained directory: `lib/libXXX/{Makefile, include/XXX.h, src/*.c, tests/test_*.c}`, built standalone with `make -C lib/libXXX` (and tested with `make -C lib/libXXX test`) into `lib/libXXX/libXXX.a`. Consumers compile against it by adding the archive and `-I lib/libXXX/include`. Do not scatter a library's sources outside its directory or its header outside its own `include/`.
 
 | Library | Owner | Rule |
 |---------|-------|------|
@@ -129,7 +131,7 @@ Same pattern for `chatd`. `marketd` replaces `ticker_thread` with `event_consume
 
 The live checkoff Q&A can ask about **any line of submitted code**. Comments should be short enough that teammates will read them, but specific enough to answer "why is this here?" quickly.
 
-Use style already in `libtetrisbrain/board.c` and `libtetrisbrain/pieces.c`:
+Use style already in `lib/libtetrisbrain/src/board.c` and `lib/libtetrisbrain/src/pieces.c`:
 
 - Comment non-obvious rules, edge cases, data tables, IPC choices, locking choices, and failure behavior.
 - Prefer 1-4 line comments near code they explain.
@@ -217,12 +219,27 @@ Impact: <which other files are affected and how>
 
 ## Build and memory safety
 
+Each library builds and tests standalone (this is the current build path — there is no root Makefile yet):
+
 ```bash
-make all              # build everything
-make test             # all three test tiers under valgrind
-make test-unit        # libtetrisbrain, libhtttp, libchatcore, libmarketcore
-make test-integration # game_event.h pipeline across real sockets
+make -C lib/libtetrisbrain          # -> lib/libtetrisbrain/libtetrisbrain.a
+make -C lib/libtetrisbrain test     # formatted unit-test run
+make -C lib/libtetrisbrain test FILTER=abilities   # one suite
+make -C lib/libtetrisbrain clean    # objects + test binaries
+```
+
+The planned umbrella `Makefile` will expose the usual top-level targets once binaries exist:
+
+```bash
+make all              # build every self-contained library (+ binaries)
+make test             # recurse into each library's own test target
 make clean && make all # always verify clean build before checkoff
+```
+
+Link a library into other code with the archive + its include path:
+
+```bash
+gcc ... lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include ...
 ```
 
 **Valgrind is mandatory on every PR:**
@@ -246,9 +263,18 @@ src/tetrisd/
     event_pub.c       ← game_event.h publisher to chatd + marketd
     garbage.c         ← Battle Royale POSIX mq integration
     loadout.c         ← synchronous loadout query to marketd at JOIN time
-src/libtetrisbrain/
-    abilities.c       ← ability-aware BOARD TRANSFORMS ONLY (pure, no IPC)
-include/
+lib/                      ← all self-contained libraries live here
+    libtetrisbrain/       ← self-contained library (one per corestack lib)
+        Makefile          ← make -C lib/libtetrisbrain [test|clean|fclean|re]
+        include/
+            tetrisbrain.h ← public header (consumers: -I lib/libtetrisbrain/include)
+        src/
+            abilities.c   ← ability-aware BOARD TRANSFORMS ONLY (pure, no IPC)
+            board.c pieces.c gravity.c lineclear.c scoring.c
+        tests/test_*.c    ← unit tests, each with its own main()
+        scripts/run_tests.sh
+        libtetrisbrain.a  ← generated archive
+include/                  ← cross-component shared headers only
     game_event.h      ← FROZEN after Week 4
     loadout_ipc.h     ← FROZEN once both sides in review
     common_types.h

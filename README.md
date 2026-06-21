@@ -284,6 +284,12 @@ All paths are relative to the project root. No hard-coded paths exist in the sou
 
 ## File System Layout
 
+Each library is a **self-contained directory** — it owns its `Makefile`,
+`src/`, `include/`, and `tests/`, and builds its archive (`libXXX.a`) in place.
+A top-level umbrella `Makefile` will be added to recurse into the libraries and
+link the archives into the binaries as those land; for now each library builds
+and is tested on its own.
+
 ```
 project/
     bin/
@@ -292,14 +298,17 @@ project/
         tetrislogd
         tetrisctl
         tetrisu
-    lib/
-        libtetrissh.a
-        libhtttp.a
-        libtetrisbrain.a
-    include/
-        tetrissh.h
-        htttp.h
-        tetrisbrain.h
+    lib/                           ← all self-contained libraries live here
+        libtetrisbrain/            ← self-contained library (pattern for all libs)
+            Makefile               ← make -C lib/libtetrisbrain [test|clean|fclean|re]
+            include/tetrisbrain.h  ← public header (-I lib/libtetrisbrain/include)
+            src/*.c                ← board, pieces, gravity, lineclear, scoring, abilities
+            tests/test_*.c         ← unit tests (each with its own main)
+            scripts/run_tests.sh   ← formatted test runner
+            obj/                   ← generated objects
+            libtetrisbrain.a       ← generated archive
+        libtetrissh/               ← same self-contained layout
+        libhtttp/                  ← same self-contained layout
     auth/
         server.crt
         server.key
@@ -315,11 +324,8 @@ project/
         tetrislogd/
         tetrisctl/
         tetrisu/
-        libtetrissh/
-        libhtttp/
-        libtetrisbrain/
-    tests/
-    Makefile
+    include/                   ← cross-component shared headers only
+    Makefile                   ← umbrella, recurses into each library (planned)
     README.md
 ```
 
@@ -334,23 +340,29 @@ cd tetriSH
 
 # Generate certificates (first time only)
 bash auth/generate_keys.sh
-
-# Build everything
-make
-
-# Clean build
-make clean && make
 ```
 
 Requirements: `gcc`, `make`, `OpenSSL` (libssl + libcrypto), POSIX-compliant OS (Linux recommended).
 
-To build a specific component:
+Each library is self-contained and builds and tests on its own — this is the current build path:
 
 ```bash
-make tetrish
-make tetrisd
-make tetrisu
-make libtetrissh
+make -C lib/libtetrisbrain          # build lib/libtetrisbrain/libtetrisbrain.a
+make -C lib/libtetrisbrain test     # run its unit tests (formatted output)
+make -C lib/libtetrisbrain clean    # remove its objects + test binaries
+```
+
+Once the binaries are added, a top-level umbrella `Makefile` will build everything from the repo root:
+
+```bash
+make             # build all libraries + binaries
+make clean && make   # clean build
+```
+
+To compile your own code against a library, link the archive and add its include path:
+
+```bash
+gcc my_program.c lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include -o my_program
 ```
 
 ---

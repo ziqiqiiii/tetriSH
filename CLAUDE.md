@@ -8,18 +8,32 @@ tetriSH is a terminal-based Battle Royale Tetris system in C, built for the Core
 
 ## Build & Test
 
-No Makefile exists yet. Compile manually:
+Each library is **self-contained**: it owns a Makefile that builds its archive
+(`libXXX.a`) in place and runs its own tests. There is no root Makefile yet —
+build and test each library directly. A top-level umbrella `Makefile` will be
+added to recurse into the libraries and link their `.a` files into the binaries
+once those exist.
 
 ```bash
-# Build and run tests for libtetrisbrain/board.c
-gcc -I libtetrisbrain/ tests/test_board.c libtetrisbrain/board.c -o tests/test_board
-./tests/test_board
+# Build a library standalone (produces lib/libtetrisbrain/libtetrisbrain.a):
+make -C lib/libtetrisbrain
+make -C lib/libtetrisbrain clean   # remove objects + test binaries
+make -C lib/libtetrisbrain fclean  # also remove the .a archive
+make -C lib/libtetrisbrain re      # fclean + rebuild
 
-# General pattern for compiling a test against multiple source files:
-gcc -I libtetrisbrain/ tests/<test>.c libtetrisbrain/<module>.c [...] -o tests/<test>
+# Run that library's own unit tests (formatted output):
+make -C lib/libtetrisbrain test
+make -C lib/libtetrisbrain test FILTER=abilities   # run a single suite
 ```
 
-Final build will use `make` with targets per binary (`tetrish`, `tetrisd`, `tetrisu`, `libtetrissh`, etc.) and OpenSSL (`-lssl -lcrypto`).
+**Linking a library into other code** — add the archive and its header path:
+
+```bash
+gcc ... lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include ...
+```
+
+The networked binaries (`tetrish`, `tetrisd`, `tetrisu`, ...) will each link the
+library archives they need plus OpenSSL (`-lssl -lcrypto`).
 
 ## Architecture
 
@@ -41,13 +55,29 @@ TCP (POSIX sockets)
 
 **Libraries (statically linked):**
 
+Each library is a self-contained directory with its own `Makefile`, `src/`,
+`include/`, and `tests/`, and builds into `lib/libXXX/libXXX.a` (see layout below).
+
 - `libtetrisbrain/` — pure game logic (no I/O, no networking); linked into `tetrisd` and optionally `tetrisu` for client-side prediction
 - `libtetrissh/` — secure session handshake and encrypted framing; linked into both `tetrisd` and `tetrisu`
 - `libhtttp/` — HTTTP parser and serialiser; linked into both `tetrisd` and `tetrisu`
 
+**Self-contained library layout** (every `libXXX/` follows this):
+
+```
+libXXX/
+├── Makefile          # make -C lib/libXXX [test|clean|fclean|re]; builds libXXX.a
+├── include/XXX.h     # public header — consumers add -I lib/libXXX/include
+├── src/*.c           # implementation
+├── tests/test_*.c    # unit tests, each with its own main()
+├── scripts/run_tests.sh
+├── obj/              # generated objects
+└── libXXX.a          # generated archive
+```
+
 ## libtetrisbrain API (tetrisbrain.h)
 
-The header declares all modules. Implement each in its own `.c` file under `libtetrisbrain/`:
+The header lives at `lib/libtetrisbrain/include/tetrisbrain.h` and declares all modules. Implement each in its own `.c` file under `lib/libtetrisbrain/src/`:
 
 | File | Responsibility |
 |---|---|
