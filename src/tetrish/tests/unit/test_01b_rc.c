@@ -52,12 +52,13 @@ static void	test_get_rc_paths_sets_exe_dir_path(void)
 	char	*exe_dir;
 
 	memset(&sh, 0, sizeof(sh));
+	unsetenv("TETRISHRC");
 	get_rc_paths(&sh, rc_path, home_path);
 	exe_dir = resolve_project_root();
-	snprintf(expected, sizeof(expected), "%s/.macminishellrc", exe_dir);
+	snprintf(expected, sizeof(expected), "%s/.tetrishrc", exe_dir);
 	TEST_ASSERT_EQUAL_STRING(expected, rc_path);
-	free(exe_dir);
 	free(sh.current_dir);
+	free(exe_dir);
 }
 
 static void	test_get_rc_paths_sets_home_path(void)
@@ -73,7 +74,7 @@ static void	test_get_rc_paths_sets_home_path(void)
 	get_rc_paths(&sh, rc_path, home_path);
 	if (home)
 	{
-		snprintf(expected, sizeof(expected), "%s/.macminishellrc", home);
+		snprintf(expected, sizeof(expected), "%s/.tetrishrc", home);
 		TEST_ASSERT_EQUAL_STRING(expected, home_path);
 	}
 	else
@@ -260,12 +261,13 @@ static void	test_source_rc_creates_rc_when_missing(void)
 	exe_dir = resolve_project_root();
 	if (!exe_dir)
 		TEST_IGNORE_MESSAGE("resolve_project_root returned NULL");
-	snprintf(rc_check, sizeof(rc_check), "%s/.macminishellrc", exe_dir);
+	snprintf(rc_check, sizeof(rc_check), "%s/.tetrishrc", exe_dir);
 	unlink(rc_check);
 	memset(&sh, 0, sizeof(sh));
 	g_gnl_total = 0;
 	g_gnl_lines = NULL;
 	unsetenv("HOME");
+	unsetenv("TETRISHRC");
 	source_rc(&sh, NULL);
 	TEST_ASSERT_EQUAL_INT(0, access(rc_check, F_OK));
 	unlink(rc_check);

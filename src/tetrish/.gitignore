@@ -67,3 +67,7 @@ tmp/
 archive/
 failed_cmd.md
 quote.md
+
+# Test-generated start-up file (create_empty_rc writes one when none exists)
+tests/unit/.tetrishrc
+tests/integration/.tetrishrc
