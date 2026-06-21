@@ -93,12 +93,14 @@ void board_clear_cells(board_t *b, int cols[], int rows[], int count) {
 
 // Princess: laser blast clears columns [start_col, end_col] inclusive across
 // every row, with no compaction. Out-of-range bounds are clamped to the
-// board so a bad target can't write OOB.
+// board so a bad target can't write OOB. Cells are zeroed with memset (not a
+// compound-literal assignment) so the cleared cells - padding included - are
+// byte-identical to a board_init'd board, which callers compare against.
 void board_delete_columns(board_t *b, int start_col, int end_col) {
   if (start_col < 0) start_col = 0;
   if (end_col >= BOARD_WIDTH) end_col = BOARD_WIDTH - 1;
 
   for (int row = 0; row < BOARD_HEIGHT; row++)
     for (int col = start_col; col <= end_col; col++)
-      b->cells[row][col] = (cell_t){CELL_EMPTY, 0};
+      memset(&b->cells[row][col], 0, sizeof(cell_t));
 }
