@@ -1,5 +1,39 @@
 #include "tetrisu.h"
 
+#define BACKGROUND_SOURCE_PIXELS_Y	1086
+#define BACKGROUND_SOURCE_PIXELS_X	1448
+
+static int	max_int(int a, int b)
+{
+	if (a > b)
+		return (a);
+	return (b);
+}
+
+static void	fit_background_to_terminal(render_ctx_t *ctx,
+	int std_rows, int std_cols)
+{
+	double	image_ratio;
+	int		rows;
+	int		cols;
+
+	image_ratio = (double)BACKGROUND_SOURCE_PIXELS_X
+		/ BACKGROUND_SOURCE_PIXELS_Y;
+	cols = std_cols;
+	rows = (int)((double)cols * ctx->cell_px_x
+		/ (image_ratio * ctx->cell_px_y) + 0.5);
+	if (rows > std_rows)
+	{
+		rows = std_rows;
+		cols = (int)((double)rows * ctx->cell_px_y * image_ratio
+			/ ctx->cell_px_x + 0.5);
+	}
+	ctx->bg_rows = max_int(rows, 1);
+	ctx->bg_cols = max_int(cols, 1);
+	ctx->bg_row = (std_rows - ctx->bg_rows) / 2;
+	ctx->bg_col = (std_cols - ctx->bg_cols) / 2;
+}
+
 /**
  * @brief Starts notcurses and blits image_path across the standard plane.
  *
@@ -20,6 +54,11 @@ render_ctx_t	render_init(const char *image_path)
 	notcurses_options		opts;
 	struct ncvisual			*ncv;
 	struct ncvisual_options	vopts;
+	ncplane_options			bg_opts;
+	unsigned				std_rows;
+	unsigned				std_cols;
+	unsigned				cell_px_y;
+	unsigned				cell_px_x;
 
 	memset(&opts, 0, sizeof(opts));
 	ctx.nc = notcurses_init(&opts, NULL);
@@ -30,10 +69,21 @@ render_ctx_t	render_init(const char *image_path)
 		exit(1);
 	}
 	ctx.std = notcurses_stdplane(ctx.nc);
+	ctx.bg_plane = NULL;
 	ctx.menu_plane = NULL;
 	ctx.bunny_plane = NULL;
+	ncplane_dim_yx(ctx.std, &std_rows, &std_cols);
+	cell_px_y = 2;
+	cell_px_x = 1;
+	ncplane_pixel_geom(ctx.std, NULL, NULL, &cell_px_y, &cell_px_x,
+		NULL, NULL);
+	ctx.cell_px_y = (int)cell_px_y;
+	ctx.cell_px_x = (int)cell_px_x;
+	fit_background_to_terminal(&ctx, (int)std_rows, (int)std_cols);
 	ctx.menu_row = 0;
 	ctx.menu_col = 0;
+	ctx.bunny_rows = 0;
+	ctx.bunny_cols = 0;
 	ncv = ncvisual_from_file(image_path);
 	if (ncv == NULL)
 	{
@@ -41,9 +91,17 @@ render_ctx_t	render_init(const char *image_path)
 		fprintf(stderr, "tetrisu: failed to load image %s\n", image_path);
 		exit(1);
 	}
+	memset(&bg_opts, 0, sizeof(bg_opts));
+	bg_opts.y = ctx.bg_row;
+	bg_opts.x = ctx.bg_col;
+	bg_opts.rows = ctx.bg_rows;
+	bg_opts.cols = ctx.bg_cols;
+	ctx.bg_plane = ncplane_create(ctx.std, &bg_opts);
 	memset(&vopts, 0, sizeof(vopts));
-	vopts.n = ctx.std;
-	vopts.scaling = NCSCALE_SCALE;
+	vopts.n = ctx.bg_plane;
+	vopts.scaling = NCSCALE_STRETCH;
+	vopts.blitter = NCBLIT_4x2;
+	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	ncvisual_blit(ctx.nc, ncv, &vopts);
 	ncvisual_destroy(ncv);
 	notcurses_render(ctx.nc);
@@ -60,8 +118,18 @@ render_ctx_t	render_init(const char *image_path)
 uint32_t	render_wait_key(render_ctx_t *ctx)
 {
 	ncinput	ni;
+	uint32_t	key;
 
-	return (notcurses_get(ctx->nc, NULL, &ni));
+	while (1)
+	{
+		key = notcurses_get(ctx->nc, NULL, &ni);
+		if (key == (uint32_t)-1)
+			return (key);
+		/* Ignore key-up events: terminals/notcurses can report both press and
+		 * release for one arrow tap, and selection should move once per tap. */
+		if (ni.evtype != NCTYPE_RELEASE)
+			return (key);
+	}
 }
 
 /**

@@ -26,7 +26,8 @@
 # define TETRISU_BIN_PATH	"./bin/tetrisu"
 # endif
 
-# define SPLASH_ASSET_PATH	ASSET_DIR "/splash.png"
+# define SPLASH_ASSET_PATH	ASSET_DIR "/homepage.png"
+# define BUNNY_ASSET_PATH	ASSET_DIR "/bunny_ghost_pointer.png"
 # define MENU_ITEM_COUNT	4
 
 typedef enum
@@ -41,17 +42,26 @@ typedef struct
   int	selected;
 }	menu_selection_t;
 
-// Bundles every notcurses handle the render layer needs across calls: the
-// context, the full-screen standard plane (carries the background image),
-// and the two small overlay planes drawn on top of it.
+// Bundles every notcurses handle the render layer needs across calls. The
+// background geometry records the rendered image size, so menu overlays can
+// follow the art even when notcurses scales it to different terminals.
 typedef struct
 {
   struct notcurses	*nc;
   struct ncplane	*std;
+  struct ncplane	*bg_plane;
   struct ncplane	*menu_plane;
   struct ncplane	*bunny_plane;
+  int				bg_row;
+  int				bg_col;
+  int				bg_rows;
+  int				bg_cols;
+  int				cell_px_y;
+  int				cell_px_x;
   int				menu_row;
   int				menu_col;
+  int				bunny_rows;
+  int				bunny_cols;
 }	render_ctx_t;
 
 /* APP_STATE.C */
