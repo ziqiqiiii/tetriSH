@@ -146,7 +146,7 @@ TCP is provided by the kernel. We implement the upper two layers ourselves. No T
 | `tetrisd` | Concurrent game server — the core of the system; contains the game loop, room management, player state, signal handling, IPC to logger and control plane |
 | `tetrislogd` | Dedicated logger daemon — separate process; receives log records from `tetrisd` over IPC and writes them to disk |
 | `tetrisctl` | Admin CLI — communicates with a running `tetrisd` over a local IPC control plane (not the public TCP port) |
-| `tetrisu` | Terminal-based game client — connects via TCP, establishes secure session, sends HTTTP game actions, renders server-pushed STATE frames in ncurses |
+| `tetrisu` | Terminal-based game client — connects via TCP, establishes secure session, sends HTTTP game actions, renders server-pushed STATE frames in notcurses |
 
 #### tetrish: the shell
 
@@ -205,7 +205,9 @@ Required behaviour:
 - Handle keyboard input non-blocking (so input and network reading happen simultaneously)
 - Exit cleanly on `q` or `SIGINT`
 
-Our rendering: **ncurses** with Unicode half-block characters (`▀`) and 24-bit ANSI true colour. Character/ability animations are rendered as pixel-art-style sprites. For SSH sessions where `COLORTERM` may not propagate, we gracefully degrade to 256-colour mode.
+Our rendering: **notcurses**, not plain ncurses. notcurses' plane model lets us blit a real image (`ncvisual_from_file` + `ncvisual_blit`) directly onto the standard plane as a backdrop, then layer separate small planes on top for UI elements (menu text, the selection indicator) without disturbing the background — plain ncurses has no equivalent (it owns and clears the whole screen on its own internal buffer, so an externally-rendered image can't coexist with curses-drawn content). 24-bit truecolor via `ncplane_set_fg_rgb8`/`set_bg_rgb8`. Character/ability animations are rendered as pixel-art-style sprites.
+
+Tradeoff accepted: notcurses pulls in `ffmpeg` as a hard dependency (for image/video decoding) versus plain ncurses' zero extra deps. Also, notcurses queries the terminal at startup for capabilities (palette, pixel dimensions, Kitty/Sixel support) and blocks until it gets replies — a real terminal answers instantly, but this means **no automated integration test drives the built binary through a scripted pseudo-terminal** (forkpty); there's no documented option to skip the probe. Verification for `tetrisu`'s rendering is manual (`make -C src/tetrisu run`), backed by unit tests on the pure state/selection logic only.
 
 ---
 
@@ -483,7 +485,7 @@ TetriSocial extends `tetriSH` with a **live multiplayer chat layer** and a **poi
 - Two admin CLIs: `chatctl`, `marketctl`
 - Two domain libraries: `libchatcore`, `libmarketcore`
 - A new shared event contract: `game_event.h` (in the corestack repo)
-- A split-screen ncurses marketplace TUI integrated into `tetrisu`
+- A split-screen notcurses marketplace TUI integrated into `tetrisu`
 - **Tetris Battle Gaiden characters** purchasable from the marketplace, with server-enforced abilities
 
 The social and economy layers are deliberately **fire-and-forget** with respect to `tetriSH`. Neither `chatd` nor `marketd` can stall the game daemon under any failure condition.
@@ -593,7 +595,7 @@ Fan-out destinations via `dest_mask`:
 
 | ID | Requirement |
 |----|-------------|
-| FR-U1 | Full-screen split-panel ncurses marketplace accessible from the lobby, with three TAB-navigable panes: **Balance/Stats**, **Store**, **Loadout** |
+| FR-U1 | Full-screen split-panel notcurses marketplace accessible from the lobby, with three TAB-navigable panes: **Balance/Stats**, **Store**, **Loadout** |
 | FR-U2 | Balance pane: current point balance, rank, games played, wins |
 | FR-U3 | Store pane: purchasable items (themes, characters, Gaiden abilities) with point costs; `[B] Buy` |
 | FR-U4 | Loadout pane: currently equipped theme, character, ability; `[E] Equip`, `[U] Unequip`, `[P] Preview` |
@@ -839,7 +841,7 @@ libmarketcore       ← depends on SQLite (-lsqlite3)
 | `tetrisd` | `libtetrissh libhtttp libtetrisbrain libcoreipc -lssl -lcrypto -lm -lpthread` |
 | `tetrislogd` | `-lpthread` |
 | `tetrisctl` | *(none from corestack)* |
-| `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto -lncurses -lpthread` |
+| `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto $(pkg-config --libs notcurses) -lpthread` |
 | `chatd` | `libtetrissh libhtttp libcoreipc libchatcore -lssl -lcrypto -lpthread` |
 | `chatctl` | *(none from corestack)* |
 | `marketd` | `libtetrissh libhtttp libcoreipc libmarketcore -lssl -lcrypto -lsqlite3 -lpthread` |
