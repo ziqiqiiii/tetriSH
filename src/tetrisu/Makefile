@@ -39,17 +39,27 @@ ASSET_DIR	:= $(CURDIR)/assets
 
 NOTCURSES_CFLAGS	:= $(shell pkg-config --cflags notcurses)
 NOTCURSES_LIBS		:= $(shell pkg-config --libs notcurses)
+AUDIO_DEPS		:= sdl2 SDL2_mixer
+AUDIO_AVAILABLE	:= $(shell pkg-config --exists $(AUDIO_DEPS) 2>/dev/null && echo 1 || echo 0)
 
 FLAGS		+= -I. $(NOTCURSES_CFLAGS) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
 
+ifeq ($(AUDIO_AVAILABLE),1)
+SDL_CFLAGS	:= $(shell pkg-config --cflags $(AUDIO_DEPS))
+SDL_LIBS	:= $(shell pkg-config --libs $(AUDIO_DEPS))
+FLAGS		+= $(SDL_CFLAGS) -DTETRISU_ENABLE_AUDIO=1
+LDLIBS		:= $(NOTCURSES_LIBS) $(SDL_LIBS)
+else
+FLAGS		+= -DTETRISU_ENABLE_AUDIO=0
 LDLIBS		:= $(NOTCURSES_LIBS)
+endif
 
 ################################################################################
 #                                  SOURCES                                     #
 ################################################################################
 
 LOGIC_SRC	:= app_state.c
-MENU_SRC	:= render_background.c render_menu.c
+MENU_SRC	:= render_background.c render_menu.c render_intro.c audio.c
 SRC			:= main.c $(LOGIC_SRC) $(MENU_SRC)
 OBJ			:= $(SRC:%.c=$(OBJ_DIR)/%.o)
 

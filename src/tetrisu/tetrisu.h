@@ -26,8 +26,17 @@
 # define TETRISU_BIN_PATH	"./bin/tetrisu"
 # endif
 
+# ifndef TETRISU_ENABLE_AUDIO
+# define TETRISU_ENABLE_AUDIO	0
+# endif
+
 # define SPLASH_ASSET_PATH	ASSET_DIR "/homepage.png"
 # define BUNNY_ASSET_PATH	ASSET_DIR "/bunny_ghost_pointer.png"
+# define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
+# define INTRO_AUDIO_PATH	ASSET_DIR "/intro.mp3"
+# define HOME_BGM_PATH		ASSET_DIR "/tetris_theme.mp3"
+# define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
+# define MENU_SELECT_SFX_PATH	ASSET_DIR "/menu_select.wav"
 # define MENU_ITEM_COUNT	4
 
 typedef enum
@@ -41,6 +50,15 @@ typedef struct
 {
   int	selected;
 }	menu_selection_t;
+
+typedef struct
+{
+  int	enabled;
+  int	music_volume;
+  void	*music;
+  void	*menu_move_sfx;
+  void	*menu_select_sfx;
+}	audio_ctx_t;
 
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
@@ -79,5 +97,22 @@ void			render_teardown(render_ctx_t *ctx);
 void			render_menu_create(render_ctx_t *ctx);
 void			render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m);
 void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
+
+/* RENDER_INTRO.C */
+int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
+					const char *video_path, const char *audio_path);
+
+/* AUDIO.C */
+int				audio_init(audio_ctx_t *audio);
+void			audio_play_music(audio_ctx_t *audio, const char *path);
+void			audio_play_once(audio_ctx_t *audio, const char *path);
+void			audio_stop_music(audio_ctx_t *audio);
+void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
+					const char *select_path);
+void			audio_play_menu_move(audio_ctx_t *audio);
+void			audio_play_menu_select(audio_ctx_t *audio);
+void			audio_volume_up(audio_ctx_t *audio);
+void			audio_volume_down(audio_ctx_t *audio);
+void			audio_teardown(audio_ctx_t *audio);
 
 # endif
