@@ -51,11 +51,11 @@ Must be demonstrable to pass (zero risk otherwise):
 | ID | Requirement |
 |----|-------------|
 | FR-M1 | Consume `POINTS_EARNED` and `ABILITY_USED` events from tetrisd via `SOCK_DGRAM`; credit player balances atomically |
-| FR-M2 | Points ledger in `libmarketcore`, protected by mutex for concurrent R/W |
-| FR-M3 | Serve tetrisu marketplace TUI via Unix `SOCK_STREAM`: `browse`, `purchase`, `equip` |
-| FR-M4 | Player inventory as a bitfield per player; equipped loadout (`theme`, `character`, `ability`) as a separate selection record |
-| FR-M5 | Validate ownership + equipped state before tetrisd honours an `ABILITY` activation |
-| FR-M6 | Persist ledger + inventory to append-only binary ledger file; replay full ledger on startup |
+| FR-M2 | Points/account state in `libcoredb`, protected by a DB mutex for append + replay-safe updates |
+| FR-M3 | Serve tetrisu marketplace TUI via Unix `SOCK_STREAM`: `browse`, `purchase`, `equip theme` |
+| FR-M4 | Player inventory as a bitfield per player; equipped theme is durable account state, while chosen character is per-game state in `tetrisu`/`tetrisd` |
+| FR-M5 | Validate ownership before tetrisd accepts a per-game character choice or honours an `ABILITY` activation |
+| FR-M6 | Persist account, points, inventory, equipped-theme, and high-score events to an append-only binary DB file; replay on `coredb_open()` |
 | FR-M7 | Unix `SOCK_STREAM` control plane for `marketctl`: `award`, `deduct`, `inventory`, `reset` |
 
 ### Gaiden abilities
@@ -73,7 +73,7 @@ Must be demonstrable to pass (zero risk otherwise):
 | FR-U1 | Full-screen split-panel notcurses marketplace from lobby; three TAB-navigable panes: Balance/Stats, Store, Loadout |
 | FR-U2 | Balance pane: current points, rank, games played, wins |
 | FR-U3 | Store pane: purchasable items with costs; `[B] Buy` |
-| FR-U4 | Loadout pane: equipped theme/character/ability; `[E] Equip`, `[U] Unequip`, `[P] Preview` |
+| FR-U4 | Loadout pane: equipped theme plus current per-game character choice; `[E] Equip Theme`, `[C] Choose Character`, `[P] Preview` |
 | FR-U5 | Split chat panel alongside game board during active sessions |
 
 ---
@@ -89,7 +89,7 @@ Must be demonstrable to pass (zero risk otherwise):
 | NFR-CO3 | Deadlock prevention by lock ordering. Multiple locks always acquired in globally consistent order (ascending pointer address). Documented and enforced. |
 | NFR-CO4 | Non-blocking IPC from tetrisd. All `SOCK_DGRAM` sends to `chatd.sock` and `marketd.sock` use `MSG_DONTWAIT`. Game loop never stalled by social layer. |
 | NFR-CO5 | Lock-free log shipping. `libcoreipc` ring buffer. Non-blocking push; drop counter observable. |
-| NFR-CO6 | Atomic ledger credit. `player_ledger_t` mutex held for full read-modify-write. |
+| NFR-CO6 | Atomic DB update. `libcoredb` appends and flushes the event before applying the matching hash-table mutation under its DB mutex. |
 
 ### Reliability
 
@@ -97,9 +97,9 @@ Must be demonstrable to pass (zero risk otherwise):
 |----|-------------|
 | NFR-R1 | Game never blocked by social layer. If `chatd`/`marketd` not running, `tetrisd` continues normally. |
 | NFR-R2 | `chatd` survives slow/dead client. Broadcast is write-nonblocking; slow client is kicked, not waited on. |
-| NFR-R3 | Ledger durability. Append-only binary file is authoritative. Replay on startup. No points lost across restarts. |
+| NFR-R3 | Core DB durability. Append-only binary file is authoritative. Replay on startup. No account, points, inventory, theme-equip, or high-score events lost across restarts. |
 | NFR-R4 | No memory leaks or undefined behaviour. All code paths clean under `valgrind --leak-check=full --error-exitcode=1`. |
-| NFR-R5 | Graceful shutdown. `chatd` and `marketd` handle `SIGTERM`: stop listener, drain ring buffer to tetrislogd, flush ledger file, exit. |
+| NFR-R5 | Graceful shutdown. `chatd` and `marketd` handle `SIGTERM`: stop listener, drain ring buffer to tetrislogd, flush `libcoredb` file, exit. |
 | NFR-R6 | `tetrislogd` reconnect. If tetrislogd unreachable, daemons continue. Ring buffer drops incremented. Resumes automatically when tetrislogd comes back. |
 
 ### Performance
@@ -108,9 +108,9 @@ Must be demonstrable to pass (zero risk otherwise):
 |----|-------------|
 | NFR-P1 | Chat latency ≤ 50 ms end-to-end on localhost, up to 16 concurrent clients per room |
 | NFR-P2 | Marketplace response ≤ 20 ms (browse/purchase via Unix SOCK_STREAM) |
-| NFR-P3 | Points credit reflected in ledger within one event_consumer_thread tick |
+| NFR-P3 | Points credit reflected in `libcoredb` state within one event_consumer_thread tick |
 | NFR-P4 | Rate limiter overhead < 1 µs per check; no per-bucket mutex on hot path |
-| NFR-P5 | `marketd` startup: complete ledger replay within 2 seconds for ≤ 10,000 records |
+| NFR-P5 | `marketd` startup: complete `libcoredb` replay within 2 seconds for ≤ 10,000 records |
 
 ---
 
@@ -123,11 +123,11 @@ Must be demonstrable to pass (zero risk otherwise):
 | S2 | 5 | Shell + chatd skeleton | `tetrish`: REPL, builtins, rc_parser, process (dspawn/dcheck) | `libhtttp`: dispatch; `chatd/client.c` handshake | `game_event.h` schema frozen; `chatd/main.c` + listener |
 | S3 | 6 | tetrisd scaffolding | `tetrisd`: main, listener, client, logshipper, signal_handler | `tetrisd`: ctl_listener; `tetrislogd`; `tetrisctl` | `tetrisd`: room.c skeleton; JOIN/LEAVE/START dispatch |
 | S4 | 7 | Game loop end-to-end | `tetrisd`: ticker, room_t mutex, STATE broadcast | `libtetrisbrain`: board, pieces, gravity, lineclear, scoring | First playable session: two tetrisu clients, pieces falling, lines clearing |
-| S5 | 8 | Chat full + market scaffold | `chatd`: room_registry, event_consumer; `libchatcore` full; `chatctl` | `marketd`: main, client; `libmarketcore`: points, inventory | `event_pub.c` wired into tetrisd; chatd narration broadcasting |
-| S6 | 9 | Market full + ability logic | `tetrisd`: ability, loadout, event_pub; ability flags in room_t | `marketd`: ledger, catalogue, loadout_server; `marketctl` | Ability full-stack: Freeze, Shield, Garbage Surge activate end-to-end |
-| S7 | 10 | Battle Royale + tetrisu TUI | `tetrisd/garbage.c` POSIX MQ integration | `libmarketcore` ledger persistence; `marketd/persist_thread` | `tetrisu`: chat_net, render_chat, render_market |
+| S5 | 8 | Chat full + market scaffold | `chatd`: room_registry, event_consumer; `libchatcore` full; `chatctl` | `marketd`: main, client; `libcoredb`: skeleton, auth, hash table | `event_pub.c` wired into tetrisd; chatd narration broadcasting |
+| S6 | 9 | Market full + ability logic | `tetrisd`: ability, loadout, event_pub; ability flags in room_t | `marketd`: catalogue, loadout_server, libcoredb-backed points/inventory; `marketctl` | Ability full-stack: Freeze, Shield, Garbage Surge activate end-to-end |
+| S7 | 10 | Battle Royale + tetrisu TUI | `tetrisd/garbage.c` POSIX MQ integration | `libcoredb` append/replay persistence; `marketd` calls coredb APIs | `tetrisu`: chat_net, render_chat, render_market |
 | S8 | 11 | Integration hardening | IPC pipeline integration tests; signal shutdown paths; valgrind baseline | HTTTP parser edge-case tests; loadout sync; helgrind on marketd | `test_game_event.c`; full-stack integration test |
-| S9 | 12 | System tests + concurrency | helgrind on chatd; broadcast race tests; chatroom lifecycle stress | Ledger atomicity under concurrent threads; test_market_points.c | `tests/` complete; README; `docs/architecture.md` |
+| S9 | 12 | System tests + concurrency | helgrind on chatd; broadcast race tests; chatroom lifecycle stress | Core DB atomicity under concurrent threads; test_coredb_auth.c, test_coredb_replay.c, test_coredb_hash.c, test_coredb_points.c, test_coredb_inventory.c | `tests/` complete; README; `docs/architecture.md` |
 | S10 | 13 | Checkoff | Demo dry-run; live extension practice | `docs/threat_model.md` | Tagged `v1.0-br`; clean build from fresh checkout verified |
 
 ### Release tags
@@ -143,7 +143,7 @@ Must be demonstrable to pass (zero risk otherwise):
 ## Test pyramid
 
 ```
-make test-unit          # libtetrisbrain, libhtttp, libchatcore, libmarketcore
+make test-unit          # libtetrisbrain, libhtttp, libchatcore, libcoredb
 make test-integration   # game_event.h pipeline across real SOCK_DGRAM sockets
 make test-system        # full clean build + scripted tetrisu sessions
 make test               # all three in order
@@ -159,7 +159,11 @@ recurses into each library's test target. All tiers must pass under
 | `test_tetrisbrain.c` | Unit | board ops, SRS rotation, line clear, scoring, ability transforms |
 | `test_htttp_parser.c` | Unit + Whitebox | all parser paths, all error branches, edge-case frames |
 | `test_game_event.c` | Integration | publish → consume pipeline across real SOCK_DGRAM sockets |
-| `test_market_points.c` | Unit + Concurrency | ledger correctness, inventory, concurrent credit/debit |
+| `test_coredb_auth.c` | Unit | account create/verify, wrong-password rejection, auth persistence |
+| `test_coredb_replay.c` | Unit | append-only record replay, last-good-record recovery |
+| `test_coredb_hash.c` | Unit | username hash table lookup and resize at 75% load factor |
+| `test_coredb_points.c` | Unit + Concurrency | points credit/debit correctness and persistence |
+| `test_coredb_inventory.c` | Unit | character/theme grant, ownership bitfields, equipped-theme persistence |
 | `test_chatcore.c` | Unit | token-bucket, room lifecycle, role management |
 
 ---
@@ -179,5 +183,5 @@ header path (`-I lib/libXXX/include`); the `-l*` entries are external system lib
 | `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto $(pkg-config --libs notcurses) -lpthread` |
 | `chatd` | `libtetrissh libhtttp libcoreipc libchatcore -lssl -lcrypto -lpthread` |
 | `chatctl` | *(none from corestack)* |
-| `marketd` | `libtetrissh libhtttp libcoreipc libmarketcore -lssl -lcrypto -lsqlite3 -lpthread` |
+| `marketd` | `libtetrissh libhtttp libcoreipc libcoredb -lssl -lcrypto -lpthread` |
 | `marketctl` | *(none from corestack)* |

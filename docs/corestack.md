@@ -483,7 +483,7 @@ TetriSocial extends `tetriSH` with a **live multiplayer chat layer** and a **poi
 
 - Two new daemons: `chatd` (live chat), `marketd` (points marketplace)
 - Two admin CLIs: `chatctl`, `marketctl`
-- Two domain libraries: `libchatcore`, `libmarketcore`
+- Two domain libraries: `libchatcore`, `libcoredb`
 - A new shared event contract: `game_event.h` (in the corestack repo)
 - A split-screen notcurses marketplace TUI integrated into `tetrisu`
 - **Tetris Battle Gaiden characters** purchasable from the marketplace, with server-enforced abilities
@@ -513,11 +513,11 @@ The social and economy layers are deliberately **fire-and-forget** with respect 
 | ID | Requirement |
 |----|-------------|
 | FR-M1 | Consume `POINTS_EARNED` and `ABILITY_USED` events from `tetrisd` via `SOCK_DGRAM` to credit player point balances atomically |
-| FR-M2 | Maintain a points ledger (player → balance) in `libmarketcore`, protected by a mutex for concurrent R/W |
-| FR-M3 | Serve `tetrisu`'s marketplace TUI via Unix `SOCK_STREAM`: handle `browse`, `purchase`, and `equip` request/response flows |
-| FR-M4 | Manage player inventory: owned items stored as a bitfield per player; equipped loadout (`theme`, `character`, `ability`) is a separate selection record |
-| FR-M5 | Validate that an ability is owned and equipped before `tetrisd` honours an `ABILITY` activation request |
-| FR-M6 | Persist the points ledger and inventory to an append-only binary ledger file on disk; replay the full ledger on `marketd` startup to restore state |
+| FR-M2 | Maintain durable account/points state in `libcoredb`, protected by a DB mutex for append + replay-safe updates |
+| FR-M3 | Serve `tetrisu`'s marketplace TUI via Unix `SOCK_STREAM`: handle `browse`, `purchase`, and `equip theme` request/response flows |
+| FR-M4 | Manage player inventory: owned items stored as a bitfield per player; equipped theme is durable account state, while chosen character is per-game state in `tetrisu`/`tetrisd` |
+| FR-M5 | Validate ownership before `tetrisd` accepts a per-game character choice or honours an `ABILITY` activation request |
+| FR-M6 | Persist account, points, inventory, equipped-theme, and high-score events to an append-only binary DB file; replay on `coredb_open()` to restore state |
 | FR-M7 | Expose a Unix `SOCK_STREAM` control plane for `marketctl`: `award <player> <pts>`, `deduct <player> <pts>`, `inventory <player>`, `reset <player>` |
 
 ---
@@ -533,14 +533,33 @@ The social and economy layers are deliberately **fire-and-forget** with respect 
 | FR-LC3 | Role management: assign and query `player / spectator / admin` role per session |
 | FR-LC4 | Game event formatter: translate a `game_event_t` into a human-readable narration string for broadcast |
 
-#### libmarketcore
+#### libcoredb
 
 | ID | Requirement |
 |----|-------------|
-| FR-LM1 | Points ledger: thread-safe `credit()`, `debit()`, `balance()` operations over a `player_ledger_t` hash map |
-| FR-LM2 | Inventory system: `grant_item()`, `has_item()`, `equip()`, `loadout()` over a per-player owned-items bitfield |
-| FR-LM3 | Theme loader: map a `theme_id` to a `theme_t` struct (`bg_color`, `piece_colors[7]`, `border_glyph`, `piece_glyphs[7]`); provide to `tetrisu` at game start |
-| FR-LM4 | Ability registry: `validate_equipped_ability(player_id, ability_enum)` — returns true only if the player owns and has equipped the ability |
+| FR-LD1 | Account auth: `coredb_create_user()` and `coredb_verify_user()` store salted PBKDF2-HMAC-SHA256 password hashes, never raw passwords |
+| FR-LD2 | Points balance: thread-safe `coredb_credit_points()` and `coredb_get_balance()` over replayed in-memory user state |
+| FR-LD3 | Inventory/theme: `coredb_grant_character()`, `coredb_grant_theme()`, `coredb_equip_theme()` over per-player ownership bitfields and persistent theme selection |
+| FR-LD4 | High score: `coredb_set_high_score()` persists the best score for leaderboard reads |
+| FR-LD5 | Durable storage: append binary event to disk, flush, then update hash table under the DB mutex |
+| FR-LD6 | Startup replay: `coredb_open()` verifies records and replays the last good prefix into an in-memory hash table |
+
+Architecture:
+
+```text
+Disk append-only DB file
+        |
+        | replay on startup
+        v
+In-memory hash table
+        |
+        | later: bulk rebuild
+        v
+Future B+ tree leaderboard index
+```
+
+The disk file is authoritative. The hash table is live state rebuilt from disk.
+The future B+ tree is a rebuildable read index, not the source of truth.
 
 ---
 
@@ -559,7 +578,7 @@ typedef enum {
     GE_GARBAGE_SENT       = 6,
     GE_ABILITY_USED       = 7,
     GE_ITEM_PURCHASED     = 8,
-    GE_CHARACTER_EQUIPPED = 9,
+    GE_CHARACTER_SELECTED = 9,
     /* new types appended ONLY — no renumbering after freeze */
 } game_event_type_t;
 
@@ -598,7 +617,7 @@ Fan-out destinations via `dest_mask`:
 | FR-U1 | Full-screen split-panel notcurses marketplace accessible from the lobby, with three TAB-navigable panes: **Balance/Stats**, **Store**, **Loadout** |
 | FR-U2 | Balance pane: current point balance, rank, games played, wins |
 | FR-U3 | Store pane: purchasable items (themes, characters, Gaiden abilities) with point costs; `[B] Buy` |
-| FR-U4 | Loadout pane: currently equipped theme, character, ability; `[E] Equip`, `[U] Unequip`, `[P] Preview` |
+| FR-U4 | Loadout pane: equipped theme plus current per-game character choice; `[E] Equip Theme`, `[C] Choose Character`, `[P] Preview` |
 | FR-U5 | Split chat panel alongside the game board during active sessions, showing room messages and system event narration |
 
 `tetrisu` maintains two concurrent TCP connections: one to `tetrisd` (the existing game socket) and one to `chatd` (a second socket for the chat layer). A two-producer / one-consumer POSIX message queue mediates event delivery from `chatd` to the `tetrisu` render thread.
@@ -631,7 +650,7 @@ TetriSocial implements four characters inspired by **Tetris Battle Gaiden**, eac
 ```
 tetrisu sends HTTTP ABILITY frame
    → tetrisd/ability.c receives it
-   → query marketd via POSIX mq (loadout_ipc.h) to validate ownership
+   → validate current per-game character against marketd-owned inventory
    → if valid: apply ability flags in room_t under room mutex
    → publish GE_ABILITY_USED event via game_event.h to chatd (narration) + marketd (deduct charge)
    → broadcast STATE to all clients
@@ -653,8 +672,7 @@ tetrisu sends HTTTP ABILITY frame
 | `tetrish` → daemon lifecycle | Signals + PID file | shell → daemon | Standard UNIX daemon pattern; `tetrish` writes PIDs from `dspawn`, reads them for `dcheck` |
 | `tetrisd` → `chatd` | Unix domain socket (`SOCK_DGRAM`) + `MSG_DONTWAIT` | One-way, fire-and-forget | Same pattern as logshipper; game loop never stalls on social layer failure |
 | `tetrisd` → `marketd` | Unix domain socket (`SOCK_DGRAM`) + `MSG_DONTWAIT` | One-way, fire-and-forget | Game loop never stalls on economy layer failure |
-| `marketd` → `tetrisd` (loadout query) | Unix domain socket (`SOCK_STREAM`) | Synchronous request/response | JOIN-time loadout query from `tetrisd` to `marketd` before game starts |
-| `marketd` → `tetrisd` (async equip) | POSIX message queue | One-way, fire-and-forget | Async `GE_CHARACTER_EQUIPPED` updates back to `tetrisd` after marketplace equip |
+| `tetrisd` → `marketd` (ownership/theme query) | Unix domain socket (`SOCK_STREAM`) | Synchronous request/response | JOIN-time query validates selected character ownership and fetches equipped theme before game starts |
 | `tetrisu` → `chatd` | TCP + `libtetrissh` + HTTTP | Bidirectional | Second TCP socket on `tetrisu`; same secure session pattern as game socket |
 | `chatctl` → `chatd` | Unix domain socket (`SOCK_STREAM`) | Request / response | Admin control plane; isolated from public TCP |
 | `marketctl` → `marketd` | Unix domain socket (`SOCK_STREAM`) | Request / response | Admin control plane; isolated from public TCP |
@@ -692,10 +710,9 @@ signal_thread           SIGTERM, SIGHUP
 ### marketd thread summary
 
 ```
-event_consumer_thread   reads game_event_t from tetrisd SOCK_DGRAM → credits points ledger
-store_thread            listens on SOCK_STREAM for tetrisu browse/purchase/equip requests
-loadout_server_thread   listens on SOCK_STREAM for tetrisd synchronous loadout queries
-persist_thread          drains pending ledger writes to disk (off critical path)
+event_consumer_thread   reads game_event_t from tetrisd SOCK_DGRAM → credits libcoredb points state
+store_thread            listens on SOCK_STREAM for tetrisu browse/purchase/equip-theme requests
+loadout_server_thread   listens on SOCK_STREAM for tetrisd synchronous ownership/theme queries
 logshipper_thread       drains ring_buffer → SOCK_DGRAM to tetrislogd
 ctl_listener_thread     separate Unix socket for marketctl commands
 signal_thread           SIGTERM, SIGHUP
@@ -712,9 +729,10 @@ With many threads, default 8 MB stack × N threads = large virtual memory footpr
 | Library | What it provides | How 50.003 uses it |
 |---------|------------------|--------------------|
 | `libtetrissh` | Full secure handshake: RSA-PSS cert auth, RSA-OAEP key wrap, AES-256 framing, `session_send/recv/close` | `chatd` uses it for all client sessions; `marketd` uses it for `tetrisu` TCP connections |
-| `libhtttp` | HTTTP parser, serialiser, method dispatch table, header map, status codes | `chatd` dispatches `CHAT`, `JOIN`, `LEAVE`, `ABILITY` methods; `marketd` dispatches `browse`, `purchase`, `equip` |
+| `libhtttp` | HTTTP parser, serialiser, method dispatch table, header map, status codes | `chatd` dispatches `CHAT`, `JOIN`, `LEAVE`, `ABILITY` methods; `marketd` dispatches `browse`, `purchase`, `equip theme` |
 | `libtetrisbrain` | Tetris game logic: board operations, SRS rotation, line clear, scoring, gravity, garbage injection | `lib/libtetrisbrain/src/abilities.c` provides ability-aware board transforms called by `tetrisd/ability.c` |
 | `libcoreipc` | Thin wrappers: Unix socket helpers, lock-free ring buffer, atomic drop counter, mq helpers | Both `chatd` and `marketd` use the ring buffer + logshipper pattern; all daemons use the Unix socket helpers |
+| `libcoredb` | Append-only account DB: auth, points, inventory, equipped theme, high score | `marketd` owns durable account/market state by calling `coredb_*` APIs; selected character remains per-game state in `tetrisu`/`tetrisd` |
 
 ### Architectural purity rule
 
@@ -730,7 +748,7 @@ With many threads, default 8 MB stack × N threads = large virtual memory footpr
 | **Networking and Security** (50.005) | `libtetrissh`, `libhtttp`, secure session correctness, HTTTP parser and serialiser, threat model, request dispatch | **Zi Qi** |
 | **Application and Integration** (50.005 + 50.003) | `tetrisu`, `libtetrisbrain`, room lifecycle, game loop, build system, integration tests | **Sanjan & Zi Qi** |
 | **Social Systems** (50.003) | `chatd` process model, concurrency, `libchatcore`, `chatctl`, `event_pub.c` in `tetrisd` | **Sanjan** |
-| **Economy & Protocol** (50.003) | `marketd` (TCP, libtetrissh integration, BUY/EQUIP dispatch), `libmarketcore`, `loadout_server.c`, loadout IPC wire format (`loadout_ipc.h`), `marketctl` | **Zi Qi** |
+| **Economy & Protocol** (50.003) | `marketd` (TCP, libtetrissh integration, BUY/THEME-EQUIP dispatch), `libcoredb`, `loadout_server.c`, loadout IPC wire format (`loadout_ipc.h`), `marketctl` | **Zi Qi** |
 
 ---
 
@@ -743,11 +761,11 @@ With many threads, default 8 MB stack × N threads = large virtual memory footpr
 | S2 | 5 | Shell + chatd skeleton | `tetrish`: REPL, builtins, `rc_parser.c`, `process.c` (dspawn/dcheck) | `libhtttp`: `dispatch.c`; `chatd/client.c` handshake path | `game_event.h` schema frozen; `chatd/main.c` + listener |
 | S3 | 6 | tetrisd scaffolding | `tetrisd`: `main.c`, `listener.c`, `client.c`, `logshipper.c`, `signal_handler.c` | `tetrisd`: `ctl_listener.c`; `tetrislogd`; `tetrisctl` | `tetrisd`: `room.c` skeleton; basic JOIN/LEAVE/START dispatch |
 | S4 | 7 | Game loop end-to-end | `tetrisd`: `ticker.c`; `room_t` mutex discipline; STATE broadcast | `libtetrisbrain`: `board.c`, `pieces.c`, `gravity.c`, `lineclear.c`, `scoring.c` | First playable session: two `tetrisu` clients, pieces falling, lines clearing |
-| S5 | 8 | Chat full + market scaffold | `chatd`: `room_registry.c`, `event_consumer.c`; `libchatcore` full; `chatctl` | `marketd`: `main.c`, `client.c`; `libmarketcore`: `points.c`, `inventory.c` | `game_event.h` publisher wired into `tetrisd/event_pub.c`; chatd narration broadcasting |
-| S6 | 9 | Market full + ability logic | `tetrisd`: `ability.c`, `loadout.c`, `event_pub.c`; ability flags in `room_t` | `marketd`: `ledger.c`, `catalogue.c`, `loadout_server.c`; `marketctl` | Ability full-stack: Freeze, Shield, Garbage Surge activate end-to-end |
-| S7 | 10 | Battle Royale + tetrisu TUI | `tetrisd/garbage.c` Battle Royale POSIX MQ integration | `libmarketcore` ledger persistence; `marketd persist_thread` | `tetrisu`: `chat_net.c`, `render_chat.c`, `render_market.c` (split-screen TUI) |
+| S5 | 8 | Chat full + market scaffold | `chatd`: `room_registry.c`, `event_consumer.c`; `libchatcore` full; `chatctl` | `marketd`: `main.c`, `client.c`; `libcoredb`: skeleton, auth, hash table | `game_event.h` publisher wired into `tetrisd/event_pub.c`; chatd narration broadcasting |
+| S6 | 9 | Market full + ability logic | `tetrisd`: `ability.c`, `loadout.c`, `event_pub.c`; ability flags in `room_t` | `marketd`: `catalogue.c`, `loadout_server.c`, libcoredb-backed points/inventory; `marketctl` | Ability full-stack: Freeze, Shield, Garbage Surge activate end-to-end |
+| S7 | 10 | Battle Royale + tetrisu TUI | `tetrisd/garbage.c` Battle Royale POSIX MQ integration | `libcoredb` append/replay persistence; `marketd` calls coredb APIs | `tetrisu`: `chat_net.c`, `render_chat.c`, `render_market.c` (split-screen TUI) |
 | S8 | 11 | Integration hardening | IPC pipeline integration tests; signal shutdown paths; `valgrind` baseline | HTTTP parser edge-case tests; loadout sync protocol; `helgrind` on `marketd` | `tests/test_game_event.c`; ability + chat + market full-stack integration test |
-| S9 | 12 | System tests + concurrency | `helgrind` on `chatd`; broadcast race tests; chatroom lifecycle stress | Ledger atomicity under concurrent threads; `test_market_points.c` concurrency cases | `tests/` suite complete; README, `docs/architecture.md`, known limitations |
+| S9 | 12 | System tests + concurrency | `helgrind` on `chatd`; broadcast race tests; chatroom lifecycle stress | Core DB atomicity under concurrent threads; `test_coredb_auth.c`, `test_coredb_replay.c`, `test_coredb_hash.c`, `test_coredb_points.c`, `test_coredb_inventory.c` | `tests/` suite complete; README, `docs/architecture.md`, known limitations |
 | S10 | 13 | Checkoff | Checkoff demo dry-run; live extension practice | `docs/threat_model.md` | Tagged `v1.0-br` release; clean build from fresh checkout verified |
 
 ### Release tags
@@ -778,7 +796,11 @@ make test               # runs all three in order
 | `test_tetrisbrain.c` | Unit | `libtetrisbrain`: board operations, SRS rotation, line clear, scoring, ability transforms |
 | `test_htttp_parser.c` | Unit + Whitebox | `libhtttp`: all parser paths, all error branches, edge-case frames |
 | `test_game_event.c` | Integration | `game_event.h` publish → consume pipeline across real `SOCK_DGRAM` sockets |
-| `test_market_points.c` | Unit + Concurrency | `libmarketcore`: ledger correctness, inventory operations, concurrent credit/debit |
+| `test_coredb_auth.c` | Unit | `libcoredb`: account create/verify, wrong-password rejection, auth persistence |
+| `test_coredb_replay.c` | Unit | `libcoredb`: append-only record replay and last-good-record recovery |
+| `test_coredb_hash.c` | Unit | `libcoredb`: username hash table lookup and resize at 75% load factor |
+| `test_coredb_points.c` | Unit + Concurrency | `libcoredb`: points credit/debit correctness and persistence |
+| `test_coredb_inventory.c` | Unit | `libcoredb`: character/theme grant, ownership bitfields, equipped-theme persistence |
 | `test_chatcore.c` | Unit | `libchatcore`: token-bucket, room lifecycle, role management (to be added Sprint 5) |
 
 ### Definition of Done
@@ -794,7 +816,7 @@ Each corestack library is a **self-contained directory** — its own `Makefile`,
 its own unit tests (`make -C lib/libXXX [test]`). A top-level umbrella `Makefile`
 recurses into each library (in dependency order) and links the `.a` archives into
 the binaries, adding each library's header path with `-I lib/libXXX/include`. No
-external build tools beyond `gcc`, `ar`, `make`, and `pkg-config` for SQLite.
+external build tools beyond `gcc`, `ar`, and `make`.
 
 > Status: `libtetrisbrain` is implemented self-contained today and builds/tests
 > via `make -C lib/libtetrisbrain`. The umbrella `Makefile` and remaining libraries
@@ -830,7 +852,7 @@ libtetrissh         ← uses libcoreipc socket helpers
 libhtttp            ← no inter-library dependencies
 libtetrisbrain      ← no inter-library dependencies
 libchatcore         ← depends on libcoreipc
-libmarketcore       ← depends on SQLite (-lsqlite3)
+libcoredb           ← no internal dependencies; uses OpenSSL libcrypto for salts/PBKDF2
 ```
 
 ### Binary linkage
@@ -844,7 +866,7 @@ libmarketcore       ← depends on SQLite (-lsqlite3)
 | `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto $(pkg-config --libs notcurses) -lpthread` |
 | `chatd` | `libtetrissh libhtttp libcoreipc libchatcore -lssl -lcrypto -lpthread` |
 | `chatctl` | *(none from corestack)* |
-| `marketd` | `libtetrissh libhtttp libcoreipc libmarketcore -lssl -lcrypto -lsqlite3 -lpthread` |
+| `marketd` | `libtetrissh libhtttp libcoreipc libcoredb -lssl -lcrypto -lpthread` |
 | `marketctl` | *(none from corestack)* |
 
 ### TEST_BUILD flag
@@ -876,7 +898,7 @@ valgrind --tool=helgrind \
          ./bin/chatd --test-config
 ```
 
-**DRD** (second thread sanitizer for `marketd` ledger operations):
+**DRD** (second thread sanitizer for `marketd`/`libcoredb` update operations):
 ```bash
 valgrind --tool=drd \
          --error-exitcode=1 \
@@ -923,10 +945,11 @@ project/
             Makefile  include/chatcore.h
             src/room_registry.c src/rate_limiter.c src/role.c src/event_formatter.c
             tests/test_*.c  libchatcore.a
-        libmarketcore/
-            Makefile  include/marketcore.h
-            src/ledger.c src/inventory.c src/catalogue.c src/theme_loader.c
-            tests/test_*.c  libmarketcore.a
+        libcoredb/
+            Makefile  include/coredb.h
+            src/db.c src/db_storage.c src/db_replay.c src/db_hash.c
+            src/db_auth.c src/db_user.c src/db_points.c src/db_inventory.c src/db_score.c
+            tests/test_coredb_*.c  libcoredb.a
 
     include/                     ← cross-component shared headers only
         game_event.h             ← shared event contract (frozen Week 4)

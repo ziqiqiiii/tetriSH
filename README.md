@@ -116,6 +116,9 @@ TCP reliability, ordering, and congestion control are provided by the kernel. te
 | `libtetrissh` | Secure session: cert auth, RSA-wrapped AES key exchange, encrypted framing |
 | `libhtttp` | HTTTP protocol parser and serialiser |
 | `libtetrisbrain` | Tetris game logic: board, pieces, gravity, rotation, line clear, scoring |
+| `libcoreipc` | Unix socket helpers, POSIX mq helpers, ring buffer, non-blocking IPC utilities |
+| `libchatcore` | Chat room registry, token-bucket rate limiter, roles, game-event formatter |
+| `libcoredb` | Append-only account DB: auth, points, inventory, equipped theme, high score |
 
 All libraries are statically linked into the binaries that use them.
 
@@ -136,6 +139,14 @@ Key API surface (exact signatures defined in `include/tetrissh.h`):
 ### libtetrisbrain
 
 `libtetrisbrain` implements Tetris game rules with no I/O, no networking, and no side-effects — pure logic. `tetrisd` links against it for server-authoritative game state. `tetrisu` may optionally link against it for client-side prediction.
+
+### libcoredb
+
+`libcoredb` is our custom append-only account database. It stores durable player data: username, salted password hash, points, owned cosmetics, equipped theme, and high score. The disk file is authoritative. On startup, `libcoredb` replays the binary event file into an in-memory hash table. Writes append a new event to disk first and then apply the change to the hash table. The hash table resizes at a 75% load factor.
+
+Character ownership is durable, but the chosen character is per-game session state. `tetrisu` sends the current character choice to `tetrisd`; `tetrisd` validates ownership through `marketd` and stores the chosen character in game state, not in `libcoredb`.
+
+The current leaderboard path can scan and sort the hash table. A future B+ tree index will be bulk-built from the hash table for faster ranked queries. The B+ tree is a rebuildable read index, not the source of truth.
 
 ---
 
@@ -309,6 +320,15 @@ project/
             libtetrisbrain.a       ← generated archive
         libtetrissh/               ← same self-contained layout
         libhtttp/                  ← same self-contained layout
+        libcoreipc/                ← ring buffer, mq helpers, Unix socket helpers
+        libchatcore/               ← chat rooms, rate limiter, roles, event formatter
+        libcoredb/                 ← append-only account/market state DB
+            Makefile
+            include/coredb.h       ← public DB API
+            src/*.c                ← storage, replay, auth, hash, points, inventory
+            tests/test_coredb_*.c  ← auth, replay, hash, points, inventory tests
+            scripts/run_tests.sh
+            libcoredb.a
     auth/
         server.crt
         server.key

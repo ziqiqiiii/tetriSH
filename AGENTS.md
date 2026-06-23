@@ -58,7 +58,7 @@ Every library is a self-contained directory: `lib/libXXX/{Makefile, include/XXX.
 | `libtetrisbrain` | Both | **PURE LOGIC ONLY** — no I/O, no POSIX, no global state. See rule below |
 | `libcoreipc` | Sanjan | Ring buffer, mq helpers, Unix socket wrappers |
 | `libchatcore` | Sanjan | Room registry, token-bucket rate limiter, role management, event formatter |
-| `libmarketcore` | Zi Qi | Points ledger, inventory, catalogue, SQLite persistence |
+| `libcoredb` | Zi Qi | Append-only account DB: auth, points, inventory, theme equip, high score |
 
 ---
 
@@ -275,6 +275,10 @@ lib/                      ← all self-contained libraries live here
         tests/test_*.c    ← unit tests, each with its own main()
         scripts/run_tests.sh
         libtetrisbrain.a  ← generated archive
+    libcoredb/            ← append-only account/market state DB
+        Makefile          ← make -C lib/libcoredb [test|clean|fclean|re]
+        include/coredb.h  ← public DB API
+        src/ tests/       ← storage, replay, auth, hash, points, inventory tests
 include/                  ← cross-component shared headers only
     game_event.h      ← FROZEN after Week 4
     loadout_ipc.h     ← FROZEN once both sides in review
@@ -296,7 +300,7 @@ e.g.:
 [tetrisd] add garbage injection to ticker_thread via POSIX mq
 [libtetrisbrain] implement SRS rotation for all 7 tetrominoes
 [chatd] wire event_consumer_thread to game_event.h SOCK_DGRAM socket
-[marketd] add ledger replay on startup from append-only binary file
+[libcoredb] add append-only account replay
 ```
 
 The git history is part of prize evaluation. No "fix stuff", no "update", no squashed final commits.
