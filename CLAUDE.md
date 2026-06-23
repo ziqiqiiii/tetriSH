@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-tetriSH is a terminal-based Battle Royale Tetris system in C, built for the CoreStack Challenge (50.003 × 50.005) at SUTD. The project is in early development — currently only `libtetrisbrain` is partially implemented.
+tetriSH is a terminal-based Battle Royale Tetris system in C, built for the CoreStack Challenge (50.003 × 50.005) at SUTD. The project is in early development. `libtetrisbrain` is fully implemented and tested. `libcoredb` has only its skeleton (`coredb_open`/`coredb_close`) — the rest of its declared API (`coredb_create_user`, `coredb_verify_user`, points, inventory, theme, high score) is not yet implemented. No binaries (`tetrish`, `tetrisd`, ...) and no other libraries exist yet.
 
 ## Build & Test
 
@@ -23,7 +23,11 @@ make -C lib/libtetrisbrain re      # fclean + rebuild
 
 # Run that library's own unit tests (formatted output):
 make -C lib/libtetrisbrain test
-make -C lib/libtetrisbrain test FILTER=abilities   # run a single suite
+make -C lib/libtetrisbrain test FILTER=abilities   # run a single suite (libtetrisbrain only)
+
+# libcoredb follows the same pattern but has no FILTER support:
+make -C lib/libcoredb
+make -C lib/libcoredb test
 ```
 
 **Linking a library into other code** — add the archive and its header path:
@@ -80,12 +84,12 @@ libXXX/
 
 ## libtetrisbrain API (tetrisbrain.h)
 
-The header lives at `lib/libtetrisbrain/include/tetrisbrain.h` and declares all modules. Implement each in its own `.c` file under `lib/libtetrisbrain/src/`:
+The header lives at `lib/libtetrisbrain/include/tetrisbrain.h` and declares all modules, each implemented in its own `.c` file under `lib/libtetrisbrain/src/`. All modules below are implemented and their unit tests pass.
 
 | File | Responsibility |
 |---|---|
-| `board.c` | `board_init`, `board_get/set`, `board_in_bounds`, `board_inject_garbage`, `board_copy` — **done** |
-| `pieces.c` | `piece_spawn`, `piece_is_valid`, `piece_move`, `piece_rotate`, `piece_stamp` |
+| `board.c` | `board_init`, `board_get/set`, `board_in_bounds`, `board_inject_garbage`, `board_copy` |
+| `pieces.c` | `piece_spawn`, `piece_is_valid`, `piece_move`, `piece_rotate` (with wall kicks), `piece_stamp` |
 | `gravity.c` | `gravity_tick`, `piece_soft_drop`, `piece_hard_drop` |
 | `lineclear.c` | `board_clear_lines` (returns lines cleared 0–4) |
 | `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms` |
@@ -94,6 +98,10 @@ The header lives at `lib/libtetrisbrain/include/tetrisbrain.h` and declares all 
 `brain_result_t` return codes: `BRAIN_OK`, `BRAIN_BLOCKED`, `BRAIN_LOCKED`, `BRAIN_GAME_OVER`, `BRAIN_CLEARED`.
 
 Out-of-bounds reads via `board_get` return `CELL_FILLED` (solid wall), so collision checks work uniformly without range guards in every caller.
+
+## libcoredb API (coredb.h)
+
+The header lives at `lib/libcoredb/include/coredb.h` and declares the full account-DB API, but `lib/libcoredb/src/db.c` currently only implements `coredb_open`/`coredb_close` (the skeleton). Still to implement: `coredb_create_user`, `coredb_verify_user`, `coredb_credit_points`, `coredb_get_balance`, `coredb_grant_character`, `coredb_grant_theme`, `coredb_equip_theme`, `coredb_set_high_score`, `coredb_get_user` — and the append-only event replay + in-memory hash table described in [Key Design Constraints](#key-design-constraints).
 
 ## Key Design Constraints
 
