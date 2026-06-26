@@ -1,22 +1,13 @@
 #include "coredb.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-
-static size_t	test_strlen(const char *s)
-{
-	size_t	len;
-
-	len = 0;
-	while (s[len] != '\0')
-		len++;
-	return (len);
-}
 
 static void	write_result(const char *prefix, const char *name)
 {
-	(void)write(STDOUT_FILENO, prefix, test_strlen(prefix));
-	(void)write(STDOUT_FILENO, name, test_strlen(name));
+	(void)write(STDOUT_FILENO, prefix, strlen(prefix));
+	(void)write(STDOUT_FILENO, name, strlen(name));
 	(void)write(STDOUT_FILENO, "\n", 1);
 }
 
