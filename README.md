@@ -342,7 +342,7 @@ cd tetriSH
 bash auth/generate_keys.sh
 ```
 
-Requirements: `gcc`, `make`, `OpenSSL` (libssl + libcrypto), `notcurses` (+ `pkg-config`, pulls in `ffmpeg`) for `tetrisu`, POSIX-compliant OS (Linux recommended).
+Requirements: `gcc`, `make`, `OpenSSL` (libssl + libcrypto), POSIX-compliant OS (Linux recommended).
 
 Each library is self-contained and builds and tests on its own — this is the current build path:
 

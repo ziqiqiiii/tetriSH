@@ -70,7 +70,7 @@ Must be demonstrable to pass (zero risk otherwise):
 
 | ID | Requirement |
 |----|-------------|
-| FR-U1 | Full-screen split-panel notcurses marketplace from lobby; three TAB-navigable panes: Balance/Stats, Store, Loadout |
+| FR-U1 | Full-screen split-panel ncurses marketplace from lobby; three TAB-navigable panes: Balance/Stats, Store, Loadout |
 | FR-U2 | Balance pane: current points, rank, games played, wins |
 | FR-U3 | Store pane: purchasable items with costs; `[B] Buy` |
 | FR-U4 | Loadout pane: equipped theme/character/ability; `[E] Equip`, `[U] Unequip`, `[P] Preview` |
@@ -176,7 +176,7 @@ header path (`-I lib/libXXX/include`); the `-l*` entries are external system lib
 | `tetrisd` | `libtetrissh libhtttp libtetrisbrain libcoreipc -lssl -lcrypto -lm -lpthread` |
 | `tetrislogd` | `-lpthread` |
 | `tetrisctl` | *(none from corestack)* |
-| `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto $(pkg-config --libs notcurses) -lpthread` |
+| `tetrisu` | `libtetrissh libhtttp libcoreipc -lssl -lcrypto -lncurses -lpthread` |
 | `chatd` | `libtetrissh libhtttp libcoreipc libchatcore -lssl -lcrypto -lpthread` |
 | `chatctl` | *(none from corestack)* |
 | `marketd` | `libtetrissh libhtttp libcoreipc libmarketcore -lssl -lcrypto -lsqlite3 -lpthread` |

@@ -16,7 +16,6 @@
 | Need Q&A prep answers, checkoff structure, or the live extension task pool | `cat docs/checkoff-prep.md` |
 | Need the full FR/NFR tables, sprint plan, or binary linkage | `cat docs/requirements.md` |
 | Need the full architecture prose (handshake steps, thread diagrams, ability flow) | `cat docs/architecture.md` |
-| Touching `tetrisu` rendering (planes, image blitting, input, the forkpty-test limitation) | `cat docs/notcurses.md` |
 
 **Do not proactively load these on every message.** Read `AGENTS.md` rules first. Open the reference docs only when the current task requires the detail inside them.
 
@@ -41,7 +40,7 @@ Both share a corestack of static libraries. Each library is **self-contained** �
 | `tetrisd` | Sanjan | Concurrent game server — the core of the system |
 | `tetrislogd` | Sanjan | Dedicated logger daemon (separate process, not thread) |
 | `tetrisctl` | Zi Qi | Admin CLI — talks to `tetrisd` via Unix socket, never via TCP |
-| `tetrisu` | Both | notcurses terminal client — renders board, sends HTTTP moves |
+| `tetrisu` | Both | ncurses terminal client — renders board, sends HTTTP moves |
 | `chatd` | Sanjan | Live chat daemon (TetriSocial) |
 | `chatctl` | Sanjan | Admin CLI for `chatd` |
 | `marketd` | Zi Qi | Points marketplace daemon (TetriSocial) |
