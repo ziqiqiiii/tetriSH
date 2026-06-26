@@ -16,34 +16,13 @@ SHELL_DIR  := src/tetrish
 SHELL_BIN  := $(SHELL_DIR)/macmini_shell
 BIN        := bin
 
-UNAME      := $(shell uname)
-
-# notcurses detection / auto-install (same pattern as check-readline in tetrish)
-check-notcurses:
-ifeq ($(UNAME), Linux)
-	@ if ! printf '#include <notcurses/notcurses.h>\nint main(void){return 0;}\n' \
-		| $(CC) -xc - -lnotcurses -o /dev/null >/dev/null 2>&1; then \
-		echo "notcurses not found — installing libnotcurses-dev..."; \
-		sudo apt-get update -qq >/dev/null \
-			&& sudo apt-get install -y -qq libnotcurses-dev >/dev/null; \
-	fi
-endif
-ifeq ($(UNAME), Darwin)
-	@ if ! brew --prefix notcurses >/dev/null 2>&1; then \
-		echo "notcurses not found — installing notcurses via brew..."; \
-		brew install notcurses >/dev/null; \
-	fi
-endif
-
 # Build only the components that exist yet — the project is in early dev, so
 # the daemon directories are filled in over time.
 LIB_DIRS    := $(wildcard lib/lib*)
 DAEMON_DIRS := $(wildcard src/tetrisd src/tetrislogd src/tetrisctl \
                           src/tetrisu src/chatd src/marketd)
 
-.PHONY: all libs shell daemons bin-link run stack clean fclean reset re check-notcurses
-
-all: check-notcurses libs shell daemons
+all: libs shell daemons
 
 libs:
 	@for d in $(LIB_DIRS); do $(MAKE) -C $$d || exit 1; done
@@ -93,3 +72,5 @@ reset:
 	@rm -rf $(BIN) tmp
 
 re: fclean all
+
+.PHONY: all libs shell daemons bin-link run stack clean fclean reset re
