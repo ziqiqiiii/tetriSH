@@ -61,9 +61,6 @@ Each library is a self-contained directory with its own `Makefile`, `src/`,
 - `libtetrisbrain/` — pure game logic (no I/O, no networking); linked into `tetrisd` and optionally `tetrisu` for client-side prediction
 - `libtetrissh/` — secure session handshake and encrypted framing; linked into both `tetrisd` and `tetrisu`
 - `libhtttp/` — HTTTP parser and serialiser; linked into both `tetrisd` and `tetrisu`
-- `libcoreipc/` — Unix socket helpers, POSIX mq helpers, ring buffer, non-blocking IPC utilities
-- `libchatcore/` — chat room registry, token-bucket rate limiter, roles, game-event formatter
-- `libcoredb/` — append-only account DB for auth, points, inventory, equipped theme, and high score; `marketd` owns durable account/market state by calling it
 
 **Self-contained library layout** (every `libXXX/` follows this):
 
@@ -103,9 +100,6 @@ Out-of-bounds reads via `board_get` return `CELL_FILLED` (solid wall), so collis
 - No hard-coded paths anywhere; all paths come from `.tetrishrc`.
 - `tetrislogd` and `tetrisd` communicate over IPC with a non-blocking ring buffer — log records are dropped (not blocked) under pressure.
 - No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks.
-- Never call `libcoredb` while holding `room->mutex`; copy request data, unlock the room, then call `marketd`/`coredb` so disk I/O cannot stall game state.
-- `libcoredb` writes append-only records first, flushes, then updates its in-memory hash table under its DB mutex.
-- `libcoredb` stores salted password hashes only; use OpenSSL PBKDF2/RAND primitives, never raw passwords or custom crypto.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 
 ## HTTTP Protocol

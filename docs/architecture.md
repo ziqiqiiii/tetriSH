@@ -190,7 +190,7 @@ typedef enum {
     GE_GARBAGE_SENT       = 6,
     GE_ABILITY_USED       = 7,
     GE_ITEM_PURCHASED     = 8,
-    GE_CHARACTER_SELECTED = 9,
+    GE_CHARACTER_EQUIPPED = 9,
     /* append-only after Week 4 freeze — never renumber */
 } game_event_type_t;
 
@@ -222,18 +222,11 @@ typedef struct {
 ### tetrisu ↔ chatd
 `tetrisu` maintains **two concurrent TCP connections**: one to `tetrisd` (game) and one to `chatd` (chat). Independent HTTTP sessions. A two-producer / one-consumer POSIX message queue mediates delivery from the `chatd` network thread to the `tetrisu` render thread.
 
-### tetrisd ↔ marketd (ownership/theme query at JOIN time)
-At JOIN, `tetrisd/loadout.c` makes a **synchronous** request over Unix `SOCK_STREAM` to `marketd/loadout_server.c`. Wire format defined in `include/loadout_ipc.h`. The query validates that the per-game character chosen by `tetrisu` is owned and fetches the persisted equipped theme. This is the only blocking IPC call from tetrisd — it happens once per player join, not in the game loop.
+### tetrisd ↔ marketd (loadout query at JOIN time)
+At JOIN, `tetrisd/loadout.c` makes a **synchronous** request over Unix `SOCK_STREAM` to `marketd/loadout_server.c`. Wire format defined in `include/loadout_ipc.h`. This is the only blocking IPC call from tetrisd — it happens once per player join, not in the game loop.
 
-### tetrisu ↔ tetrisd (per-game character choice)
-Character selection is game-session state, not marketplace persistence. `tetrisu` sends the chosen character with JOIN/START-time game setup; `tetrisd` validates ownership through `marketd` and stores the choice in `room_t`/player state for that game only.
-
-### marketd + libcoredb durable state
-`libcoredb` is the durable owner for accounts and marketplace state. `marketd` still handles TCP/HTTTP marketplace requests and control-plane commands, but it calls `libcoredb` for account auth, points, inventory ownership, equipped theme, and high score.
-
-`coredb_open()` opens the append-only DB file and replays records into an in-memory hash table. Each mutating API appends a binary event to disk, flushes it, then applies the same event to the hash table under the DB mutex. The disk file is authoritative; the hash table is live state rebuilt from disk. A future B+ tree leaderboard index can be bulk-built from the hash table and discarded/rebuilt without losing data.
-
-Never call `libcoredb` while holding `room->mutex`. Copy player id, points delta, score, selected character id, or theme request data to locals, unlock the room, then call `marketd`/`coredb`. Disk I/O or a blocking marketplace query must not stall ticker or client threads that need the room lock.
+### marketd ↔ tetrisd (async equip update)
+When a player equips a new character or ability via the marketplace TUI, `marketd` publishes a `GE_CHARACTER_EQUIPPED` event back to `tetrisd` via POSIX mq (separate queue from Battle Royale). `tetrisd` updates the player's loadout in `room_t` on the next client_thread iteration.
 
 ---
 
@@ -251,7 +244,7 @@ Ability activation flow:
 ```
 tetrisu → HTTTP ABILITY frame
   → tetrisd/client_thread receives it
-  → tetrisd/ability.c validates: current character is owned via marketd
+  → tetrisd/ability.c validates: query marketd loadout (owns + equipped?)
   → if valid: apply flags in room_t under room->mutex
   → publish GE_ABILITY_USED to game_event pipeline (chatd narrates, marketd charges)
   → broadcast STATE
@@ -285,4 +278,3 @@ Optional: `max_rooms`, `max_players_per_room`, `tick_hz`, `log_level`, `ctl_sock
 | SOCK_STREAM for control plane | Needs request/response semantics; completely separate from public TCP so it works under TCP flood. |
 | libtetrisbrain is pure | Exhaustively unit-testable; compiles without linking OpenSSL or pthreads; cannot cause race conditions. |
 | Second TCP socket for chat | Chat failures can't interfere with game frame delivery; chatd can be deployed independently. |
-| libcoredb append/replay storage | One durable event log is easier to explain, test, and replay than scattered marketplace files; hash-table state is rebuilt at startup. |
