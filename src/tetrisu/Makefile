@@ -18,7 +18,6 @@ NAME		:= tetrisu
 CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
 RM			:= rm -rf
-UNAME		:= $(shell uname)
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -38,8 +37,8 @@ NAME_PATH	:= $(BIN_DIR)/$(NAME)
 HEADER		:= tetrisu.h
 ASSET_DIR	:= $(CURDIR)/assets
 
-NOTCURSES_CFLAGS	= $(shell pkg-config --cflags notcurses)
-NOTCURSES_LIBS		= $(shell pkg-config --libs notcurses)
+NOTCURSES_CFLAGS	:= $(shell pkg-config --cflags notcurses)
+NOTCURSES_LIBS		:= $(shell pkg-config --libs notcurses)
 AUDIO_DEPS		:= sdl2 SDL2_mixer
 AUDIO_AVAILABLE	:= $(shell pkg-config --exists $(AUDIO_DEPS) 2>/dev/null && echo 1 || echo 0)
 
@@ -49,10 +48,10 @@ ifeq ($(AUDIO_AVAILABLE),1)
 SDL_CFLAGS	:= $(shell pkg-config --cflags $(AUDIO_DEPS))
 SDL_LIBS	:= $(shell pkg-config --libs $(AUDIO_DEPS))
 FLAGS		+= $(SDL_CFLAGS) -DTETRISU_ENABLE_AUDIO=1
-LDLIBS		= $(NOTCURSES_LIBS) $(SDL_LIBS)
+LDLIBS		:= $(NOTCURSES_LIBS) $(SDL_LIBS)
 else
 FLAGS		+= -DTETRISU_ENABLE_AUDIO=0
-LDLIBS		= $(NOTCURSES_LIBS)
+LDLIBS		:= $(NOTCURSES_LIBS)
 endif
 
 ################################################################################
