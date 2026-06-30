@@ -12,32 +12,44 @@
 # include "macminidb.h"
 
 # include <errno.h>
+# include <fcntl.h>
+# include <limits.h>
 # include <pthread.h>
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
+# include <sys/stat.h>
+# include <unistd.h>
 
 # define DB_LOG_NAME			"players.log"
 # define DB_LOG_MAGIC			0x4D4D4442
 # define DB_HASH_BUCKETS		512
 # define DB_FLUSH_INTERVAL_S	1
 # define DB_FRAME_MAX			65536
+# define DB_FRAME_HDR			12		/* magic u32 + key_len u32 + val_len u32 */
 
 typedef struct s_hashmap	t_hashmap;
 typedef struct s_skiplist	t_skiplist;
-typedef struct s_dblog		t_dblog;
 typedef struct s_flusher	t_flusher;
 typedef struct s_catalogue	t_catalogue;
 
+typedef struct s_dblog
+{
+	int					fd;					/* append/read fd on the log file */
+	char				path[PATH_MAX];		/* <data_dir>/players.log */
+
+}	t_dblog;
+
 typedef struct s_macminidb
 {
-	pthread_rwlock_t	lock;		/* read-write lock, held in db.c only */
-	t_hashmap			*players;	/* username -> t_player* */
-	t_skiplist			*board;		/* leaderboard, ordered by (score, id) */
-	t_dblog				*log;		/* append-only durability */
-	t_flusher			*flusher;	/* 1s fsync thread */
-	t_catalogue			*cat;		/* characters + themes */
-	t_player_id			next_id;	/* monotonic id allocator */
+	pthread_rwlock_t	lock;				/* read-write lock, held in db.c only */
+	t_hashmap			*players;			/* username -> t_player* */
+	t_skiplist			*board;				/* leaderboard, ordered by (score, id) */
+	t_dblog				*log;				/* append-only durability */
+	t_flusher			*flusher;			/* 1s fsync thread */
+	t_catalogue			*cat;				/* characters + themes */
+	t_player_id			next_id;			/* monotonic id allocator */
+	
 }	t_macminidb;
 
 /* HASHMAP.C */
@@ -70,8 +82,14 @@ t_db_result			player_deserialise(const uint8_t *buf, size_t len, t_player *out);
 
 t_dblog				*log_open(const char *data_dir);
 void				log_close(t_dblog *log);
-t_db_result			log_append(t_dblog *log, const t_player *p);
 t_db_result			log_fsync(t_dblog *log);
+
+/* LOG_APPEND.C */
+
+t_db_result			log_append(t_dblog *log, const t_player *p);
+
+/* LOG_REPLAY.C */
+
 t_db_result			log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx);
 
 /* FLUSHER.C */
