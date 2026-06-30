@@ -27,10 +27,26 @@
 # define DB_FLUSH_INTERVAL_S	1
 # define DB_FRAME_MAX			65536
 # define DB_FRAME_HDR			12		/* magic u32 + key_len u32 + val_len u32 */
+# define DB_SKIP_MAXLVL			16		/* tower cap: > log_4(300 users) headroom */
+# define DB_SKIP_P				4		/* 1-in-P promotion; level grows ~log_P n */
 
-typedef struct s_skiplist	t_skiplist;
 typedef struct s_flusher	t_flusher;
 typedef struct s_catalogue	t_catalogue;
+
+typedef struct s_skipnode
+{
+	t_player			*player;		/* shared by ref, owned by the hash map */
+	int					height;			/* number of forward links in this tower */
+	struct s_skipnode	*forward[];		/* flexible tower: [0..height-1] */
+}	t_skipnode;
+
+typedef struct s_skiplist
+{
+	t_skipnode			*head;			/* sentinel tower of DB_SKIP_MAXLVL links */
+	int					level;			/* highest occupied level, 1-based count */
+	size_t				size;			/* number of live nodes (excl. sentinel) */
+	uint64_t			rng;			/* xorshift state for random_level */
+}	t_skiplist;
 
 typedef struct s_hm_entry
 {
@@ -81,11 +97,22 @@ t_hm_entry			*hashmap_find(t_hashmap *m, const char *username, size_t *out_idx);
 
 t_skiplist			*skiplist_create(void);
 void				skiplist_destroy(t_skiplist *s);
+t_skipnode			*node_new(t_player *p, int height);
+int					random_level(t_skiplist *s);
+
+/* SKIPLIST_OPS.C */
+
+int					skiplist_cmp(const t_player *a, const t_player *b);
+t_skipnode			**skiplist_seek(t_skiplist *s, const t_player *p, \
+						t_skipnode **upd);
 void				skiplist_insert(t_skiplist *s, t_player *p);
 void				skiplist_remove(t_skiplist *s, t_player *p);
-void				skiplist_update(t_skiplist *s, t_player *p, int64_t score);
-size_t				skiplist_topn(t_skiplist *s, t_rank_entry *out, size_t cap);
+
+/* SKIPLIST_READ.C */
+
 size_t				skiplist_rank(t_skiplist *s, t_player *p);
+size_t				skiplist_topn(t_skiplist *s, t_rank_entry *out, size_t cap);
+void				skiplist_update(t_skiplist *s, t_player *p, int64_t score);
 
 /* PLAYER_WRITE.C */
 
