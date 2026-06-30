@@ -23,6 +23,11 @@
 # include <unistd.h>
 
 # define DB_LOG_NAME			"players.log"
+# define DB_CHAR_CFG_NAME		"characters.cfg"
+# define DB_THEME_CFG_NAME		"themes.cfg"
+# define DB_MAX_CHARACTERS		64		/* catalogue cap: roster is ~tens of rows */
+# define DB_MAX_THEMES			64		/* catalogue cap: roster is ~tens of rows */
+# define DB_CFG_LINE_MAX		256		/* longest config line accepted */
 # define DB_LOG_MAGIC			0x4D4D4442
 # define DB_HASH_BUCKETS		512
 # define DB_FLUSH_INTERVAL_S	1
@@ -31,7 +36,13 @@
 # define DB_SKIP_MAXLVL			16		/* tower cap: > log_4(300 users) headroom */
 # define DB_SKIP_P				4		/* 1-in-P promotion; level grows ~log_P n */
 
-typedef struct s_catalogue	t_catalogue;
+typedef struct s_catalogue
+{
+	t_character		characters[DB_MAX_CHARACTERS];	/* loaded char rows */
+	size_t			char_count;						/* rows in characters[] */
+	t_theme			themes[DB_MAX_THEMES];			/* loaded theme rows */
+	size_t			theme_count;					/* rows in themes[] */
+}	t_catalogue;
 
 typedef struct s_skipnode
 {
@@ -154,11 +165,38 @@ void				flusher_stop(t_flusher *f);
 
 t_db_result			recovery_run(t_dblog *log, t_hashmap *hm, t_skiplist *sl, t_player_id *out_next_id);
 
+/* DB.C — shared db-internal helpers (lock held by the caller) */
+
+typedef struct s_find_ctx
+{
+	t_player_id	id;			/* id being searched for */
+	t_player	*match;		/* the located player, or NULL */
+}	t_find_ctx;
+
+t_player			*db_find_by_id(t_db *db, t_player_id id);
+t_db_result			db_persist(t_db *db, const t_player *p);
+bool				owned_has(const t_item_id *ids, size_t count, t_item_id id);
+t_db_result			owned_add(t_item_id *ids, size_t *count, t_item_id id);
+
 /* CATALOGUE.C */
 
 t_catalogue			*catalogue_load(const char *config_dir);
 void				catalogue_free(t_catalogue *c);
 const t_character	*catalogue_character(t_catalogue *c, t_item_id id);
 const t_theme		*catalogue_theme(t_catalogue *c, t_item_id id);
+
+/* CATALOGUE_CHARS.C */
+
+t_db_result			catalogue_parse_chars(const char *config_dir, t_catalogue *c);
+
+/* CATALOGUE_THEMES.C */
+
+t_db_result			catalogue_parse_themes(const char *config_dir, t_catalogue *c);
+
+/* CATALOGUE_PARSE.C */
+
+FILE				*catalogue_open(const char *config_dir, const char *name);
+int					catalogue_next_line(FILE *f, char *line, size_t cap);
+int					catalogue_split(char *line, char **fields, int max);
 
 #endif
