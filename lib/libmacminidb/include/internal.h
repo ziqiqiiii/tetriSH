@@ -19,6 +19,7 @@
 # include <stdlib.h>
 # include <string.h>
 # include <sys/stat.h>
+# include <time.h>
 # include <unistd.h>
 
 # define DB_LOG_NAME			"players.log"
@@ -30,7 +31,6 @@
 # define DB_SKIP_MAXLVL			16		/* tower cap: > log_4(300 users) headroom */
 # define DB_SKIP_P				4		/* 1-in-P promotion; level grows ~log_P n */
 
-typedef struct s_flusher	t_flusher;
 typedef struct s_catalogue	t_catalogue;
 
 typedef struct s_skipnode
@@ -67,6 +67,15 @@ typedef struct s_dblog
 	char				path[PATH_MAX];		/* <data_dir>/players.log */
 
 }	t_dblog;
+
+typedef struct s_flusher
+{
+	pthread_t			thread;			/* the 1s fsync worker */
+	t_dblog				*log;			/* log to sync; not owned by the flusher */
+	pthread_mutex_t		lock;			/* guards stop; paired with the condvar */
+	pthread_cond_t		cond;			/* timed 1s wait, signalled early on stop */
+	int					stop;			/* set by flusher_stop to end the loop */
+}	t_flusher;
 
 typedef struct s_macminidb
 {
