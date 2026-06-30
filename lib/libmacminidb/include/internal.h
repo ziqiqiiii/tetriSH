@@ -17,11 +17,11 @@
 # include <stdlib.h>
 # include <string.h>
 
-# define DB_LOG_NAME		"players.log"
-# define DB_LOG_MAGIC		0x4D4D4442
-# define DB_HASH_BUCKETS	512
+# define DB_LOG_NAME			"players.log"
+# define DB_LOG_MAGIC			0x4D4D4442
+# define DB_HASH_BUCKETS		512
 # define DB_FLUSH_INTERVAL_S	1
-# define DB_FRAME_MAX		65536
+# define DB_FRAME_MAX			65536
 
 typedef struct s_hashmap	t_hashmap;
 typedef struct s_skiplist	t_skiplist;
@@ -46,8 +46,7 @@ t_hashmap			*hashmap_create(size_t buckets);
 void				hashmap_destroy(t_hashmap *m);
 t_player			*hashmap_get(t_hashmap *m, const char *username);
 t_player			*hashmap_put(t_hashmap *m, t_player *p);
-void				hashmap_foreach(t_hashmap *m,
-						void (*fn)(t_player *, void *), void *ctx);
+void				hashmap_foreach(t_hashmap *m, void (*fn)(t_player *, void *), void *ctx);
 
 /* SKIPLIST.C */
 
@@ -62,8 +61,7 @@ size_t				skiplist_rank(t_skiplist *s, t_player *p);
 /* PLAYER.C */
 
 size_t				player_serialise(const t_player *p, uint8_t *buf, size_t cap);
-t_db_result			player_deserialise(const uint8_t *buf, size_t len,
-						t_player *out);
+t_db_result			player_deserialise(const uint8_t *buf, size_t len, t_player *out);
 
 /* LOG.C */
 
@@ -71,8 +69,7 @@ t_dblog				*log_open(const char *data_dir);
 void				log_close(t_dblog *log);
 t_db_result			log_append(t_dblog *log, const t_player *p);
 t_db_result			log_fsync(t_dblog *log);
-t_db_result			log_replay(t_dblog *log,
-						void (*cb)(const t_player *, void *), void *ctx);
+t_db_result			log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx);
 
 /* FLUSHER.C */
 
@@ -81,8 +78,7 @@ void				flusher_stop(t_flusher *f);
 
 /* RECOVERY.C */
 
-t_db_result			recovery_run(t_dblog *log, t_hashmap *hm, t_skiplist *sl,
-						t_player_id *out_next_id);
+t_db_result			recovery_run(t_dblog *log, t_hashmap *hm, t_skiplist *sl, t_player_id *out_next_id);
 
 /* CATALOGUE.C */
 

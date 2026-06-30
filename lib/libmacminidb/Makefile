@@ -38,7 +38,7 @@ OBJ_DIR		:= obj
 INC_DIR		:= include
 INC			:= -I$(INC_DIR) -I$(SRC_DIR)
 
-HEADER		:= $(INC_DIR)/macminidb.h $(SRC_DIR)/internal.h
+HEADER		:= $(INC_DIR)/macminidb.h $(INC_DIR)/internal.h
 
 ################################################################################
 #                                  SOURCES                                     #
