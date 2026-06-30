@@ -28,10 +28,22 @@
 # define DB_FRAME_MAX			65536
 # define DB_FRAME_HDR			12		/* magic u32 + key_len u32 + val_len u32 */
 
-typedef struct s_hashmap	t_hashmap;
 typedef struct s_skiplist	t_skiplist;
 typedef struct s_flusher	t_flusher;
 typedef struct s_catalogue	t_catalogue;
+
+typedef struct s_hm_entry
+{
+	t_player			*player;		/* owned here, shared by ref with skiplist */
+	struct s_hm_entry	*next;			/* separate-chaining bucket list */
+}	t_hm_entry;
+
+typedef struct s_hashmap
+{
+	t_hm_entry			**buckets;		/* array of bucket-list heads */
+	size_t				bucket_count;	/* length of the buckets array */
+	size_t				size;			/* number of live entries */
+}	t_hashmap;
 
 typedef struct s_dblog
 {
@@ -56,9 +68,14 @@ typedef struct s_macminidb
 
 t_hashmap			*hashmap_create(size_t buckets);
 void				hashmap_destroy(t_hashmap *m);
+void				hashmap_foreach(t_hashmap *m, void (*fn)(t_player *, void *), void *ctx);
+
+/* HASHMAP_OPS.C */
+
 t_player			*hashmap_get(t_hashmap *m, const char *username);
 t_player			*hashmap_put(t_hashmap *m, t_player *p);
-void				hashmap_foreach(t_hashmap *m, void (*fn)(t_player *, void *), void *ctx);
+size_t				hashmap_hash(const char *username, size_t bucket_count);
+t_hm_entry			*hashmap_find(t_hashmap *m, const char *username, size_t *out_idx);
 
 /* SKIPLIST.C */
 
