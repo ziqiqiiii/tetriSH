@@ -65,6 +65,12 @@ Each file is built around a single public/entry function, supported by file-priv
   are first called** from it.
 - `static` helpers are **forward-declared at the top of the file**, right after
   the includes, before any function body.
+- **No function exceeds 25 lines** (counting the body between the opening and
+  closing braces, excluding the signature, braces, and blank lines). Split longer
+  functions into `static` helpers.
+- **Each file holds at most 5 functions** (public + `static` helpers combined).
+  A file that needs more is doing too much — split it, using letter-suffixed
+  overflow files for the same stage (see §12).
 
 ```c
 #include "system_program.h"
