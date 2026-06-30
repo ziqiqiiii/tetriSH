@@ -5,7 +5,7 @@ typedef struct {
   int8_t drow;
 } cell_offset_t;
 
-// SHAPES[type][rotation][4 cells], offsets from piece_t.col/row.
+// SHAPES[type][rotation][4 cells], offsets from t_piece.col/row.
 // Coordinates are row-down (matches board.c), converted from the SRS
 // guideline's y-up tables via drow = -dy.
 //
@@ -74,24 +74,24 @@ static const cell_offset_t SHAPES[7][4][4] = {
 // JLSTZ) or rows 0-1 (O). I piece uses row=-1 because its spawn shape's
 // occupied cells are at local row 1, not row 0.
 // {Type, Column, Row, Rotation}
-static const piece_t SPAWN[7] = {
+static const t_piece SPAWN[7] = {
     [PIECE_I] = {PIECE_I, 3, -1, 0}, [PIECE_O] = {PIECE_O, 4, 0, 0},
     [PIECE_T] = {PIECE_T, 3, 0, 0},  [PIECE_S] = {PIECE_S, 3, 0, 0},
     [PIECE_Z] = {PIECE_Z, 3, 0, 0},  [PIECE_J] = {PIECE_J, 3, 0, 0},
     [PIECE_L] = {PIECE_L, 3, 0, 0},
 };
 
-piece_t piece_spawn(piece_type_t type) { return SPAWN[type]; }
+t_piece piece_spawn(t_piece_type type) { return SPAWN[type]; }
 
-// A corrupted piece_t (e.g. from a malformed network message) could carry a
+// A corrupted t_piece (e.g. from a malformed network message) could carry a
 // type/rotation outside the SHAPES/KICK_TRANSITION tables; guard every entry
 // point that indexes those tables by p->type/p->rotation.
-static bool piece_shape_in_range(const piece_t *p) {
+static bool piece_shape_in_range(const t_piece *p) {
   return p->type >= PIECE_I && p->type <= PIECE_L && p->rotation >= 0 &&
          p->rotation < 4;
 }
 
-bool piece_is_valid(const board_t *b, const piece_t *p) {
+bool piece_is_valid(const t_board *b, const t_piece *p) {
   if (!piece_shape_in_range(p)) return false;
   for (int i = 0; i < 4; i++) {
     int col = p->col + SHAPES[p->type][p->rotation][i].dcol;
@@ -148,7 +148,7 @@ static const cell_offset_t I_KICKS[8][5] = {
 
 // dir: +1 rotates clockwise, -1 rotates counter-clockwise. Adding 3 (instead
 // of subtracting 1) keeps the result non-negative before the % 4.
-brain_result_t piece_rotate(const board_t *b, piece_t *p, int dir) {
+t_brain_result piece_rotate(const t_board *b, t_piece *p, int dir) {
   if (!piece_shape_in_range(p)) return BRAIN_BLOCKED;
 
   int to = (p->rotation + (dir == 1 ? 1 : 3)) % 4;
@@ -165,7 +165,7 @@ brain_result_t piece_rotate(const board_t *b, piece_t *p, int dir) {
       (p->type == PIECE_I) ? I_KICKS[transition] : JLSTZ_KICKS[transition];
 
   for (int i = 0; i < 5; i++) {
-    piece_t cand = *p;
+    t_piece cand = *p;
     cand.rotation = to;
     cand.col += kicks[i].dcol;
     cand.row += kicks[i].drow;
@@ -177,8 +177,8 @@ brain_result_t piece_rotate(const board_t *b, piece_t *p, int dir) {
   return BRAIN_BLOCKED;
 }
 
-brain_result_t piece_move(const board_t *b, piece_t *p, int dcol, int drow) {
-  piece_t moved = *p;
+t_brain_result piece_move(const t_board *b, t_piece *p, int dcol, int drow) {
+  t_piece moved = *p;
   moved.col += dcol;
   moved.row += drow;
   if (!piece_is_valid(b, &moved)) return BRAIN_BLOCKED;
@@ -186,11 +186,11 @@ brain_result_t piece_move(const board_t *b, piece_t *p, int dcol, int drow) {
   return BRAIN_OK;
 }
 
-void piece_stamp(board_t *b, const piece_t *p) {
+void piece_stamp(t_board *b, const t_piece *p) {
   if (!piece_shape_in_range(p)) return;
   for (int i = 0; i < 4; i++) {
     int col = p->col + SHAPES[p->type][p->rotation][i].dcol;
     int row = p->row + SHAPES[p->type][p->rotation][i].drow;
-    board_set(b, col, row, (cell_t){CELL_FILLED, (uint8_t)p->type});
+    board_set(b, col, row, (t_cell){CELL_FILLED, (uint8_t)p->type});
   }
 }

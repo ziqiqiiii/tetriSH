@@ -4,12 +4,12 @@
 #include <stdio.h>
 
 void test_spawn_all_types_valid(void) {
-  piece_type_t types[] = {PIECE_I, PIECE_O, PIECE_T, PIECE_S,
+  t_piece_type types[] = {PIECE_I, PIECE_O, PIECE_T, PIECE_S,
                            PIECE_Z, PIECE_J, PIECE_L};
   for (int i = 0; i < 7; i++) {
-    board_t b;
+    t_board b;
     board_init(&b);
-    piece_t p = piece_spawn(types[i]);
+    t_piece p = piece_spawn(types[i]);
     assert(p.type == types[i]);
     assert(p.rotation == 0);
     assert(piece_is_valid(&b, &p));
@@ -25,11 +25,11 @@ void test_spawn_all_types_valid(void) {
 }
 
 void test_stamp_writes_cells(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   // T spawn: col=3,row=0, shape0 offsets (1,0)(0,1)(1,1)(2,1)
   // -> abs cells (4,0) (3,1) (4,1) (5,1)
-  piece_t p = piece_spawn(PIECE_T);
+  t_piece p = piece_spawn(PIECE_T);
   piece_stamp(&b, &p);
 
   assert(board_get(&b, 4, 0).type == CELL_FILLED);
@@ -45,9 +45,9 @@ void test_stamp_writes_cells(void) {
 }
 
 void test_move_blocked_by_walls_and_floor(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  piece_t p = piece_spawn(PIECE_I); // col=3,row=-1, occupies cols 3-6, row 0
+  t_piece p = piece_spawn(PIECE_I); // col=3,row=-1, occupies cols 3-6, row 0
 
   for (int i = 0; i < 3; i++)
     assert(piece_move(&b, &p, -1, 0) == BRAIN_OK);
@@ -71,9 +71,9 @@ void test_move_blocked_by_walls_and_floor(void) {
 }
 
 void test_rotate_basic_updates_rotation(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  piece_t p = piece_spawn(PIECE_T); // col=3,row=0,rotation=0
+  t_piece p = piece_spawn(PIECE_T); // col=3,row=0,rotation=0
 
   assert(piece_rotate(&b, &p, 1) == BRAIN_OK); // 0->R, no kick needed
   assert(p.rotation == 1);
@@ -84,10 +84,10 @@ void test_rotate_basic_updates_rotation(void) {
 }
 
 void test_jlstz_wall_kick(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   // T piece, R orientation, flush against the left wall.
-  piece_t p = {PIECE_T, -1, 0, 1};
+  t_piece p = {PIECE_T, -1, 0, 1};
   assert(piece_is_valid(&b, &p));
 
   // R->2: naive (0,0) kick puts a cell at col -1 (invalid).
@@ -101,10 +101,10 @@ void test_jlstz_wall_kick(void) {
 }
 
 void test_i_piece_wall_kick(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   // I piece, L orientation (single column at col+1), flush against left wall.
-  piece_t p = {PIECE_I, -1, 0, 3};
+  t_piece p = {PIECE_I, -1, 0, 3};
   assert(piece_is_valid(&b, &p));
 
   // L->0: naive (0,0) kick puts a cell at col -1 (invalid).
@@ -118,21 +118,21 @@ void test_i_piece_wall_kick(void) {
 }
 
 void test_rotate_blocked_returns_blocked(void) {
-  board_t b;
+  t_board b;
   for (int r = 0; r < BOARD_HEIGHT; r++)
     for (int c = 0; c < BOARD_WIDTH; c++)
-      board_set(&b, c, r, (cell_t){CELL_FILLED, 0});
+      board_set(&b, c, r, (t_cell){CELL_FILLED, 0});
 
   // Carve out exactly the T spawn shape's 4 cells: (4,0)(3,1)(4,1)(5,1).
-  board_set(&b, 4, 0, (cell_t){CELL_EMPTY, 0});
-  board_set(&b, 3, 1, (cell_t){CELL_EMPTY, 0});
-  board_set(&b, 4, 1, (cell_t){CELL_EMPTY, 0});
-  board_set(&b, 5, 1, (cell_t){CELL_EMPTY, 0});
+  board_set(&b, 4, 0, (t_cell){CELL_EMPTY, 0});
+  board_set(&b, 3, 1, (t_cell){CELL_EMPTY, 0});
+  board_set(&b, 4, 1, (t_cell){CELL_EMPTY, 0});
+  board_set(&b, 5, 1, (t_cell){CELL_EMPTY, 0});
 
-  piece_t p = piece_spawn(PIECE_T); // col=3,row=0,rotation=0
+  t_piece p = piece_spawn(PIECE_T); // col=3,row=0,rotation=0
   assert(piece_is_valid(&b, &p));
 
-  piece_t before = p;
+  t_piece before = p;
   assert(piece_rotate(&b, &p, 1) == BRAIN_BLOCKED);
   assert(p.type == before.type && p.col == before.col &&
          p.row == before.row && p.rotation == before.rotation);
@@ -141,9 +141,9 @@ void test_rotate_blocked_returns_blocked(void) {
 }
 
 void test_o_piece_rotate_is_noop(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  piece_t p = piece_spawn(PIECE_O); // col=4,row=0,rotation=0
+  t_piece p = piece_spawn(PIECE_O); // col=4,row=0,rotation=0
 
   assert(piece_rotate(&b, &p, 1) == BRAIN_OK);
   assert(p.rotation == 1);
@@ -158,9 +158,9 @@ void test_o_piece_rotate_is_noop(void) {
 }
 
 void test_invalid_type_rejected_safely(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  piece_t p = {(piece_type_t)99, 3, 0, 0}; // corrupted type, out of SHAPES range
+  t_piece p = {(t_piece_type)99, 3, 0, 0}; // corrupted type, out of SHAPES range
 
   assert(!piece_is_valid(&b, &p));
 
@@ -169,7 +169,7 @@ void test_invalid_type_rejected_safely(void) {
     for (int c = 0; c < BOARD_WIDTH; c++)
       assert(board_get(&b, c, r).type == CELL_EMPTY);
 
-  piece_t before = p;
+  t_piece before = p;
   assert(piece_rotate(&b, &p, 1) == BRAIN_BLOCKED);
   assert(p.type == before.type && p.col == before.col &&
          p.row == before.row && p.rotation == before.rotation);
@@ -178,9 +178,9 @@ void test_invalid_type_rejected_safely(void) {
 }
 
 void test_invalid_rotation_rejected_safely(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  piece_t p = {PIECE_T, 3, 0, 99}; // corrupted rotation, out of SHAPES range
+  t_piece p = {PIECE_T, 3, 0, 99}; // corrupted rotation, out of SHAPES range
 
   assert(!piece_is_valid(&b, &p));
 
@@ -189,7 +189,7 @@ void test_invalid_rotation_rejected_safely(void) {
     for (int c = 0; c < BOARD_WIDTH; c++)
       assert(board_get(&b, c, r).type == CELL_EMPTY);
 
-  piece_t before = p;
+  t_piece before = p;
   assert(piece_rotate(&b, &p, 1) == BRAIN_BLOCKED);
   assert(p.type == before.type && p.col == before.col &&
          p.row == before.row && p.rotation == before.rotation);

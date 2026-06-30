@@ -3,28 +3,28 @@
 // Each transform here backs one Tetris Battle Gaiden character special
 // (Princess, Wolfman, Mirurun, Halloween). The ability flags/cooldowns
 // themselves live in tetrisd/ability.c (server-side, not pure) - this file
-// only tests the underlying board_t transform.
+// only tests the underlying t_board transform.
 #include "tetrisbrain.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-static void fill_row(board_t *b, int row, cell_type_t type, uint8_t color) {
+static void fill_row(t_board *b, int row, t_cell_type type, uint8_t color) {
   for (int c = 0; c < BOARD_WIDTH; c++)
-    board_set(b, c, row, (cell_t){type, color});
+    board_set(b, c, row, (t_cell){type, color});
 }
 
-static void fill_board(board_t *b, cell_type_t type, uint8_t color) {
+static void fill_board(t_board *b, t_cell_type type, uint8_t color) {
   for (int r = 0; r < BOARD_HEIGHT; r++) fill_row(b, r, type, color);
 }
 
 // ---- board_cut_top (Wolfman: cut off the top N rows of the stack) ----
 
 void test_cut_top_shifts_rows_up_and_clears_bottom(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 2, 3, (cell_t){CELL_FILLED, 5});  // survives the cut
-  board_set(&b, 0, 19, (cell_t){CELL_FILLED, 9}); // bottom of the stack
+  board_set(&b, 2, 3, (t_cell){CELL_FILLED, 5});  // survives the cut
+  board_set(&b, 0, 19, (t_cell){CELL_FILLED, 9}); // bottom of the stack
 
   board_cut_top(&b, 3);
 
@@ -44,24 +44,24 @@ void test_cut_top_shifts_rows_up_and_clears_bottom(void) {
 }
 
 void test_cut_top_zero_is_noop(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
-  board_set(&before, 4, 10, (cell_t){CELL_FILLED, 3});
+  board_set(&before, 4, 10, (t_cell){CELL_FILLED, 3});
   board_copy(&after, &before);
 
   board_cut_top(&after, 0);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_cut_top_zero_is_noop\n");
 }
 
 void test_cut_top_clamped_to_board_height(void) {
-  board_t b, empty;
+  t_board b, empty;
   fill_board(&b, CELL_FILLED, 1);
   board_init(&empty);
 
   board_cut_top(&b, BOARD_HEIGHT + 5); // n > height must not read/write OOB
-  assert(memcmp(&b, &empty, sizeof(board_t)) == 0);
+  assert(memcmp(&b, &empty, sizeof(t_board)) == 0);
 
   printf("PASS test_cut_top_clamped_to_board_height\n");
 }
@@ -69,10 +69,10 @@ void test_cut_top_clamped_to_board_height(void) {
 // ---- board_cut_bottom (Mirurun: smash down + remove the bottom N lines) ----
 
 void test_cut_bottom_shifts_rows_down_and_clears_top(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 3, 0, (cell_t){CELL_FILLED, 7});  // top of the stack
-  board_set(&b, 4, 15, (cell_t){CELL_FILLED, 2}); // survives the smash
+  board_set(&b, 3, 0, (t_cell){CELL_FILLED, 7});  // top of the stack
+  board_set(&b, 4, 15, (t_cell){CELL_FILLED, 2}); // survives the smash
 
   board_cut_bottom(&b, 4);
 
@@ -92,24 +92,24 @@ void test_cut_bottom_shifts_rows_down_and_clears_top(void) {
 }
 
 void test_cut_bottom_zero_is_noop(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
-  board_set(&before, 1, 5, (cell_t){CELL_FILLED, 6});
+  board_set(&before, 1, 5, (t_cell){CELL_FILLED, 6});
   board_copy(&after, &before);
 
   board_cut_bottom(&after, 0);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_cut_bottom_zero_is_noop\n");
 }
 
 void test_cut_bottom_clamped_to_board_height(void) {
-  board_t b, empty;
+  t_board b, empty;
   fill_board(&b, CELL_FILLED, 1);
   board_init(&empty);
 
   board_cut_bottom(&b, BOARD_HEIGHT + 5);
-  assert(memcmp(&b, &empty, sizeof(board_t)) == 0);
+  assert(memcmp(&b, &empty, sizeof(t_board)) == 0);
 
   printf("PASS test_cut_bottom_clamped_to_board_height\n");
 }
@@ -117,9 +117,9 @@ void test_cut_bottom_clamped_to_board_height(void) {
 // ---- board_apply_gravity (Wolfman lvl4: suspended blocks fall) ----
 
 void test_apply_gravity_drops_floating_block_to_floor(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 4, 10, (cell_t){CELL_FILLED, 5}); // floating, nothing below
+  board_set(&b, 4, 10, (t_cell){CELL_FILLED, 5}); // floating, nothing below
 
   board_apply_gravity(&b);
 
@@ -131,10 +131,10 @@ void test_apply_gravity_drops_floating_block_to_floor(void) {
 }
 
 void test_apply_gravity_preserves_relative_order_within_column(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 0, 5, (cell_t){CELL_FILLED, 1});  // higher block
-  board_set(&b, 0, 10, (cell_t){CELL_FILLED, 2}); // lower block
+  board_set(&b, 0, 5, (t_cell){CELL_FILLED, 1});  // higher block
+  board_set(&b, 0, 10, (t_cell){CELL_FILLED, 2}); // lower block
 
   board_apply_gravity(&b);
 
@@ -146,14 +146,14 @@ void test_apply_gravity_preserves_relative_order_within_column(void) {
 }
 
 void test_apply_gravity_column_without_gaps_unchanged(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
   for (int r = 15; r < BOARD_HEIGHT; r++)
-    board_set(&before, 0, r, (cell_t){CELL_FILLED, 4}); // solid, no gaps
+    board_set(&before, 0, r, (t_cell){CELL_FILLED, 4}); // solid, no gaps
   board_copy(&after, &before);
 
   board_apply_gravity(&after);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_apply_gravity_column_without_gaps_unchanged\n");
 }
@@ -161,7 +161,7 @@ void test_apply_gravity_column_without_gaps_unchanged(void) {
 // ---- board_invert (Halloween "Dark": swap empty <-> filled) ----
 
 void test_invert_empty_cell_becomes_garbage(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   board_invert(&b);
@@ -173,9 +173,9 @@ void test_invert_empty_cell_becomes_garbage(void) {
 }
 
 void test_invert_filled_cell_becomes_empty(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 5, 10, (cell_t){CELL_FILLED, 3});
+  board_set(&b, 5, 10, (t_cell){CELL_FILLED, 3});
 
   board_invert(&b);
 
@@ -186,9 +186,9 @@ void test_invert_filled_cell_becomes_empty(void) {
 }
 
 void test_invert_garbage_cell_becomes_empty(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 6, 11, (cell_t){CELL_GARBAGE, 0});
+  board_set(&b, 6, 11, (t_cell){CELL_GARBAGE, 0});
 
   board_invert(&b);
 
@@ -200,9 +200,9 @@ void test_invert_garbage_cell_becomes_empty(void) {
 // ---- board_fill_rows (Halloween "Burn": fill N rows so they clear) ----
 
 void test_fill_rows_overwrites_bottom_rows_with_hole(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 0, BOARD_HEIGHT - 4, (cell_t){CELL_FILLED, 9}); // above the burn
+  board_set(&b, 0, BOARD_HEIGHT - 4, (t_cell){CELL_FILLED, 9}); // above the burn
 
   board_fill_rows(&b, 3, 5); // burn bottom 3 rows, hole at col 5
 
@@ -223,7 +223,7 @@ void test_fill_rows_overwrites_bottom_rows_with_hole(void) {
 }
 
 void test_fill_rows_hole_out_of_range_makes_rows_clearable(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   board_fill_rows(&b, 2, -1); // no hole -> rows come out fully solid
@@ -234,19 +234,19 @@ void test_fill_rows_hole_out_of_range_makes_rows_clearable(void) {
 }
 
 void test_fill_rows_zero_is_noop(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
-  board_set(&before, 2, 18, (cell_t){CELL_FILLED, 1});
+  board_set(&before, 2, 18, (t_cell){CELL_FILLED, 1});
   board_copy(&after, &before);
 
   board_fill_rows(&after, 0, 5);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_fill_rows_zero_is_noop\n");
 }
 
 void test_fill_rows_clamped_to_board_height(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   board_fill_rows(&b, BOARD_HEIGHT + 5, 3); // must not write OOB
@@ -262,7 +262,7 @@ void test_fill_rows_clamped_to_board_height(void) {
 // ---- board_clear_cells (Halloween "Bomb": clear a scattered set of cells) ----
 
 void test_clear_cells_clears_only_listed_cells(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   fill_row(&b, 5, CELL_FILLED, 1);
 
@@ -280,23 +280,23 @@ void test_clear_cells_clears_only_listed_cells(void) {
 }
 
 void test_clear_cells_count_zero_is_noop(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
-  board_set(&before, 7, 7, (cell_t){CELL_FILLED, 2});
+  board_set(&before, 7, 7, (t_cell){CELL_FILLED, 2});
   board_copy(&after, &before);
 
   int cols[] = {7};
   int rows[] = {7};
   board_clear_cells(&after, cols, rows, 0);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_clear_cells_count_zero_is_noop\n");
 }
 
 void test_clear_cells_ignores_out_of_bounds_indices(void) {
-  board_t before, after;
+  t_board before, after;
   board_init(&before);
-  board_set(&before, 7, 7, (cell_t){CELL_FILLED, 2});
+  board_set(&before, 7, 7, (t_cell){CELL_FILLED, 2});
   board_copy(&after, &before);
 
   // a malformed ABILITY frame could carry out-of-range targets; must not
@@ -304,7 +304,7 @@ void test_clear_cells_ignores_out_of_bounds_indices(void) {
   int cols[] = {-1, BOARD_WIDTH};
   int rows[] = {0, BOARD_HEIGHT};
   board_clear_cells(&after, cols, rows, 2);
-  assert(memcmp(&before, &after, sizeof(board_t)) == 0);
+  assert(memcmp(&before, &after, sizeof(t_board)) == 0);
 
   printf("PASS test_clear_cells_ignores_out_of_bounds_indices\n");
 }
@@ -312,7 +312,7 @@ void test_clear_cells_ignores_out_of_bounds_indices(void) {
 // ---- board_delete_columns (Princess: laser destroys a column range) ----
 
 void test_delete_columns_clears_inclusive_range(void) {
-  board_t b;
+  t_board b;
   fill_board(&b, CELL_FILLED, 3);
 
   board_delete_columns(&b, 2, 4);
@@ -329,7 +329,7 @@ void test_delete_columns_clears_inclusive_range(void) {
 }
 
 void test_delete_columns_single_column(void) {
-  board_t b;
+  t_board b;
   fill_board(&b, CELL_FILLED, 3);
 
   board_delete_columns(&b, 0, 0); // single-column laser shot
@@ -343,12 +343,12 @@ void test_delete_columns_single_column(void) {
 }
 
 void test_delete_columns_out_of_range_clamped(void) {
-  board_t b, empty;
+  t_board b, empty;
   fill_board(&b, CELL_FILLED, 3);
   board_init(&empty);
 
   board_delete_columns(&b, -5, BOARD_WIDTH + 5); // must not write OOB
-  assert(memcmp(&b, &empty, sizeof(board_t)) == 0);
+  assert(memcmp(&b, &empty, sizeof(t_board)) == 0);
 
   printf("PASS test_delete_columns_out_of_range_clamped\n");
 }
