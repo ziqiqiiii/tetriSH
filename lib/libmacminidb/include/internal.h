@@ -58,9 +58,12 @@ void				skiplist_update(t_skiplist *s, t_player *p, int64_t score);
 size_t				skiplist_topn(t_skiplist *s, t_rank_entry *out, size_t cap);
 size_t				skiplist_rank(t_skiplist *s, t_player *p);
 
-/* PLAYER.C */
+/* PLAYER_WRITE.C */
 
 size_t				player_serialise(const t_player *p, uint8_t *buf, size_t cap);
+
+/* PLAYER_READ.C */
+
 t_db_result			player_deserialise(const uint8_t *buf, size_t len, t_player *out);
 
 /* LOG.C */
