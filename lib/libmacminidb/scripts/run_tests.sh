@@ -37,7 +37,6 @@ run_unit() {
       continue
     fi
     echo "${YEL}--- ${t} ---${RST}"
-    echo ""
     output=$("$t" 2>&1) && rc=0 || rc=$?
     echo "$output" | awk -v grn="$GRN" -v red="$RED" -v rst="$RST" -v cyn="$CYN" -F: '
       /^-{3,}/ || /^OK$/ || /^FAIL$/ { next }
@@ -57,12 +56,12 @@ run_unit() {
       /^[0-9]/ { printf "\n%s  %s%s\n\n", cyn, $0, rst }
       { print "  " $0 }
     '
+    echo ""
     if [ "$rc" -eq 0 ]; then
       pass=$((pass+1))
     else
       fail=$((fail+1))
       echo "  ${RED}^^^ FAILED: ${t} (exit code ${rc})${RST}"
-      echo ""
     fi
   done
   if [ -n "$FILTER" ] && [ "$skipped" -gt 0 ]; then
