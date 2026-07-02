@@ -36,7 +36,9 @@ A POSIX-like shell implemented in C. Supports interactive prompts, command histo
 ## Prerequisites
 
 The repository-level Makefile installs the compiler toolchain, pkg-config,
-OpenSSL, Readline, ncurses/notcurses, SQLite, and Linux/WSL Valgrind packages:
+OpenSSL, Readline, ncurses/notcurses, and SQLite. On Linux/WSL it also tries to
+install Valgrind for memory-safety verification, but Valgrind is not needed to
+compile:
 
 ```bash
 make -C ../.. deps

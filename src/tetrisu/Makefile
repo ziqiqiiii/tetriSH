@@ -16,7 +16,7 @@
 
 NAME		:= tetrisu
 CC			:= gcc
-FLAGS		:= -Wall -Wextra -Werror
+BASE_FLAGS	:= -Wall -Wextra -Werror
 RM			:= rm -rf
 
 CLR_RMV		:= \033[0m
@@ -37,12 +37,14 @@ NAME_PATH	:= $(BIN_DIR)/$(NAME)
 HEADER		:= tetrisu.h
 ASSET_DIR	:= $(CURDIR)/assets
 
-NOTCURSES_CFLAGS	= $(shell pkg-config --cflags notcurses)
-NOTCURSES_LIBS		= $(shell pkg-config --libs notcurses)
+NOTCURSES_CFLAGS	= $(shell pkg-config --cflags notcurses 2>/dev/null)
+NOTCURSES_LIBS		= $(shell pkg-config --libs notcurses 2>/dev/null)
 AUDIO_DEPS		:= sdl2 SDL2_mixer
 AUDIO_AVAILABLE	:= $(shell pkg-config --exists $(AUDIO_DEPS) 2>/dev/null && echo 1 || echo 0)
 
-FLAGS		+= -I. $(NOTCURSES_CFLAGS) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
+# Keep notcurses flags lazy: direct `make -C src/tetrisu` may install the
+# package through the root Makefile before compiling the first object.
+FLAGS		= $(BASE_FLAGS) -I. $(NOTCURSES_CFLAGS) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
 
 ifeq ($(AUDIO_AVAILABLE),1)
 SDL_CFLAGS	:= $(shell pkg-config --cflags $(AUDIO_DEPS))
@@ -77,6 +79,15 @@ all: check-dependencies $(NAME_PATH)
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
 		$(MAKE) --no-print-directory -C ../.. deps; \
+	fi
+	@ if ! command -v pkg-config >/dev/null 2>&1; then \
+		echo "tetrisu: missing pkg-config; run 'make -C ../.. deps'."; \
+		exit 1; \
+	fi
+	@ if ! pkg-config --exists notcurses; then \
+		echo "tetrisu: missing notcurses development files."; \
+		echo "Run 'make -C ../.. deps' or install notcurses for your distro/Homebrew."; \
+		exit 1; \
 	fi
 
 $(OBJ_DIR)/%.o: %.c $(HEADER) | check-dependencies

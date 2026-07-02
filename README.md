@@ -362,11 +362,19 @@ cd tetriSH
 bash auth/generate_keys.sh
 ```
 
-The umbrella Makefile checks and installs the full native dependency set:
-GCC/binutils, make, pkg-config, OpenSSL, Readline, ncurses/notcurses, SQLite,
-and Valgrind (Linux/WSL only). Supported Linux package managers are apt,
-dnf/yum, pacman, zypper, and apk. macOS uses Homebrew plus the Xcode Command
-Line Tools.
+The umbrella Makefile checks and installs the full native build dependency set:
+GCC/binutils, make, pkg-config, OpenSSL, Readline, ncurses/notcurses, and
+SQLite. Supported Linux package managers are apt, dnf/yum, pacman, zypper, and
+apk. macOS uses Homebrew plus the Xcode Command Line Tools.
+
+On APT systems, Ubuntu may need its `universe` repository for
+`libnotcurses-dev`. If no APT notcurses development package is available, the
+Makefile can build notcurses from source with `INSTALL_NOTCURSES_FROM_SOURCE=1`
+(default). Fedora has `notcurses-devel`; RHEL-compatible systems usually need
+EPEL/CRB enabled. openSUSE Tumbleweed has `notcurses-devel`, while some Leap
+repos may not. Homebrew installs the `pkg-config` command through the `pkgconf`
+formula. Linux/WSL also attempts to install Valgrind for PR/checkoff
+memory-safety runs, but Valgrind is not required just to compile.
 
 ```bash
 make deps                         # check and install anything missing
@@ -382,7 +390,8 @@ installed on macOS; if the Command Line Tools are absent, `make` starts Apple's
 installer and asks you to rerun after it finishes.
 
 Valgrind is not reliably supported on current macOS releases. Run the mandatory
-memory-safety checks on Linux or WSL.
+memory-safety checks on Linux or WSL; use `REQUIRE_VALGRIND=1 make check-deps`
+when you want the dependency check to enforce it.
 
 Each library is self-contained and builds and tests on its own — this is the current build path:
 
