@@ -362,7 +362,27 @@ cd tetriSH
 bash auth/generate_keys.sh
 ```
 
-Requirements: `gcc`, `make`, `OpenSSL` (libssl + libcrypto), `notcurses` (+ `pkg-config`, pulls in `ffmpeg`) for `tetrisu`, POSIX-compliant OS (Linux recommended).
+The umbrella Makefile checks and installs the full native dependency set:
+GCC/binutils, make, pkg-config, OpenSSL, Readline, ncurses/notcurses, SQLite,
+and Valgrind (Linux/WSL only). Supported Linux package managers are apt,
+dnf/yum, pacman, zypper, and apk. macOS uses Homebrew plus the Xcode Command
+Line Tools.
+
+```bash
+make deps                         # check and install anything missing
+make check-deps                   # check only; never modifies the system
+make AUTO_INSTALL_DEPS=0          # check-only build for CI/managed machines
+make deps-info                    # show detected OS/WSL and dependency policy
+```
+
+Plain `make` runs `make deps` automatically before compiling. WSL is detected
+separately for diagnostics but uses its Linux distribution's package manager.
+Package installation may request sudo access. Homebrew itself must already be
+installed on macOS; if the Command Line Tools are absent, `make` starts Apple's
+installer and asks you to rerun after it finishes.
+
+Valgrind is not reliably supported on current macOS releases. Run the mandatory
+memory-safety checks on Linux or WSL.
 
 Each library is self-contained and builds and tests on its own — this is the current build path:
 

@@ -18,7 +18,6 @@ NAME		:= tetrisu
 CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
 RM			:= rm -rf
-UNAME		:= $(shell uname)
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -71,40 +70,22 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 #                                   BUILD                                      #
 ################################################################################
 
-all: $(NAME_PATH)
+all: check-dependencies $(NAME_PATH)
 
-check-notcurses:
-ifeq ($(shell pkg-config --exists notcurses 2>/dev/null && echo yes),yes)
-	@ true
-else ifeq ($(UNAME), Linux)
-	@ if ! printf '#include <notcurses/notcurses.h>\nint main(void){return 0;}\n' \
-		| $(CC) -xc - $(shell pkg-config --cflags notcurses 2>/dev/null) -lnotcurses -o /dev/null >/dev/null 2>&1; then \
-		for pkg in libnotcurses-dev notcurses-dev notcurses; do \
-			if apt-cache show $$pkg >/dev/null 2>&1; then \
-				echo "$(YELLOW)notcurses not found — installing $(CYAN)$$pkg$(CLR_RMV)..."; \
-				sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq $$pkg >/dev/null; \
-				break; \
-			fi; \
-		done; \
-		if ! pkg-config --exists notcurses >/dev/null 2>&1; then \
-			echo "$(RED)notcurses is required for tetrisu but no APT package was available$(CLR_RMV)"; \
-			exit 1; \
-		fi; \
+# A standalone tetrisu build uses the same cross-platform installer as root.
+# DEPS_READY avoids repeating the check when the umbrella Makefile invoked us.
+check-dependencies:
+	@ if [ "$(DEPS_READY)" != "1" ]; then \
+		$(MAKE) --no-print-directory -C ../.. deps; \
 	fi
-else ifeq ($(UNAME), Darwin)
-	@ if ! brew --prefix notcurses >/dev/null 2>&1; then \
-		echo "$(YELLOW)notcurses not found — installing $(CYAN)notcurses$(CLR_RMV) via brew..."; \
-		brew install notcurses >/dev/null; \
-	fi
-endif
 
-$(OBJ_DIR)/%.o: %.c $(HEADER)
+$(OBJ_DIR)/%.o: %.c $(HEADER) | check-dependencies
 	@ mkdir -p $(OBJ_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) -c $< -o $@
 	@ echo "ok"
 
-$(NAME_PATH): check-notcurses $(OBJ)
+$(NAME_PATH): $(OBJ)
 	@ mkdir -p $(BIN_DIR)
 	@ $(CC) $(FLAGS) $(OBJ) $(LDLIBS) -o $@
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built"
@@ -157,4 +138,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY:		all run test clean fclean re check-notcurses
+.PHONY:		all run test clean fclean re check-dependencies
