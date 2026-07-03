@@ -20,9 +20,6 @@ BIN        := bin
 
 UNAME_S           := $(shell uname -s)
 AUTO_INSTALL_DEPS ?= 1
-INSTALL_NOTCURSES_FROM_SOURCE ?= 1
-NOTCURSES_VERSION ?= v3.0.17
-NOTCURSES_PREFIX  ?= /usr/local
 REQUIRE_VALGRIND  ?= 0
 
 # Source-built dependencies usually install pkg-config metadata under
@@ -35,7 +32,7 @@ export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/u
 ifeq ($(UNAME_S),Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
-export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/openssl@3/lib/pkgconfig:$(BREW_PREFIX)/opt/readline/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sqlite/lib/pkgconfig:$(PKG_CONFIG_PATH)
+export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/openssl@3/lib/pkgconfig:$(BREW_PREFIX)/opt/readline/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
 endif
 endif
 
@@ -55,7 +52,7 @@ COMPONENT_MAKEFILES := $(wildcard src/tetrisd/Makefile \
                                   src/marketctl/Makefile)
 DAEMON_DIRS := $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
 
-.PHONY: all deps install-deps install-notcurses-from-source check-deps deps-info libs shell daemons \
+.PHONY: all deps install-deps check-deps deps-info libs shell daemons \
         bin-link run stack clean fclean reset re
 
 all: deps libs shell daemons
@@ -74,10 +71,9 @@ deps:
 		exit 1; \
 	fi
 
-# Package names cover the external linkage table in docs/requirements.md:
-# OpenSSL, Readline, ncurses/notcurses, SQLite, pthread/libm (provided by the
-# OS), plus the compiler toolchain and pkg-config. Valgrind is installed when
-# available, but it is a PR verification tool rather than a build dependency.
+# Root deps are shared by multiple components: compiler toolchain,
+# pkg-config, OpenSSL, Readline, and ncurses. Component-only render/audio
+# packages belong in that component's Makefile.
 install-deps:
 	@ set -eu; \
 	case "$(UNAME_S)" in \
@@ -99,43 +95,7 @@ install-deps:
 			if command -v apt-get >/dev/null 2>&1; then \
 				$$SUDO apt-get update; \
 				$$SUDO apt-get install -y build-essential pkg-config \
-					libssl-dev libreadline-dev libncurses-dev libsqlite3-dev; \
-				NOTCURSES_PKG=""; \
-				for pkg in libnotcurses-dev notcurses-dev; do \
-					if apt-cache show $$pkg >/dev/null 2>&1; then \
-						NOTCURSES_PKG="$$pkg"; \
-						break; \
-					fi; \
-				done; \
-				if [ -z "$$NOTCURSES_PKG" ] && [ -r /etc/os-release ]; then \
-					. /etc/os-release; \
-					if [ "$${ID:-}" = "ubuntu" ]; then \
-						echo "Ubuntu keeps libnotcurses-dev in universe; enabling universe if needed..."; \
-						if ! command -v add-apt-repository >/dev/null 2>&1; then \
-							$$SUDO apt-get install -y software-properties-common; \
-						fi; \
-						$$SUDO add-apt-repository -y universe || true; \
-						$$SUDO apt-get update; \
-						for pkg in libnotcurses-dev notcurses-dev; do \
-							if apt-cache show $$pkg >/dev/null 2>&1; then \
-								NOTCURSES_PKG="$$pkg"; \
-								break; \
-							fi; \
-						done; \
-					fi; \
-				fi; \
-				if [ -n "$$NOTCURSES_PKG" ]; then \
-					$$SUDO apt-get install -y $$NOTCURSES_PKG; \
-				elif [ "$(INSTALL_NOTCURSES_FROM_SOURCE)" = "1" ]; then \
-					echo "No APT notcurses development package found; building notcurses $(NOTCURSES_VERSION) from source."; \
-					$$SUDO apt-get install -y git cmake libavdevice-dev \
-						libdeflate-dev libgpm-dev libswscale-dev libunistring-dev; \
-					$(MAKE) --no-print-directory install-notcurses-from-source; \
-				else \
-					echo "No notcurses development package is available in configured APT repositories."; \
-					echo "Enable Ubuntu universe/Debian testing, install notcurses manually, or run with INSTALL_NOTCURSES_FROM_SOURCE=1."; \
-					exit 1; \
-				fi; \
+					libssl-dev libreadline-dev libncurses-dev; \
 				if apt-cache show valgrind >/dev/null 2>&1; then \
 					$$SUDO apt-get install -y valgrind libc6-dbg || \
 						echo "Warning: Valgrind install failed; build dependencies are installed."; \
@@ -144,51 +104,34 @@ install-deps:
 				fi; \
 			elif command -v dnf >/dev/null 2>&1; then \
 				$$SUDO dnf install -y gcc make binutils pkgconf-pkg-config \
-					openssl-devel readline-devel ncurses-devel \
-					sqlite-devel; \
-				$$SUDO dnf install -y notcurses-devel || { \
-					echo "notcurses-devel is packaged for Fedora and EPEL 8/9/10."; \
-					echo "On RHEL-compatible systems, enable EPEL/CRB or install notcurses manually."; \
-					exit 1; \
-				}; \
+					openssl-devel readline-devel ncurses-devel; \
 				$$SUDO dnf install -y valgrind || \
 					echo "Warning: Valgrind install failed; build dependencies are installed."; \
 			elif command -v yum >/dev/null 2>&1; then \
 				$$SUDO yum install -y gcc make binutils pkgconfig \
-					openssl-devel readline-devel ncurses-devel \
-					sqlite-devel; \
-				$$SUDO yum install -y notcurses-devel || { \
-					echo "notcurses-devel is packaged for EPEL 8/9/10, not all base yum repos."; \
-					echo "Enable EPEL/CRB or install notcurses manually."; \
-					exit 1; \
-				}; \
+					openssl-devel readline-devel ncurses-devel; \
 				$$SUDO yum install -y valgrind || \
 					echo "Warning: Valgrind install failed; build dependencies are installed."; \
 			elif command -v pacman >/dev/null 2>&1; then \
 				$$SUDO pacman -S --needed --noconfirm base-devel pkgconf \
-					openssl readline ncurses notcurses sqlite; \
+					openssl readline ncurses; \
 				$$SUDO pacman -S --needed --noconfirm valgrind || \
 					echo "Warning: Valgrind install failed; build dependencies are installed."; \
 			elif command -v zypper >/dev/null 2>&1; then \
 				$$SUDO zypper --non-interactive install gcc make binutils \
 					pkg-config libopenssl-devel readline-devel \
-					ncurses-devel sqlite3-devel; \
-				$$SUDO zypper --non-interactive install notcurses-devel || { \
-					echo "notcurses-devel is packaged for openSUSE Tumbleweed; some Leap repos may not have it."; \
-					echo "Enable the needed repository or install notcurses manually."; \
-					exit 1; \
-				}; \
+					ncurses-devel; \
 				$$SUDO zypper --non-interactive install valgrind || \
 					echo "Warning: Valgrind install failed; build dependencies are installed."; \
 			elif command -v apk >/dev/null 2>&1; then \
 				$$SUDO apk add build-base pkgconf openssl-dev readline-dev \
-					ncurses-dev notcurses-dev sqlite-dev; \
+					ncurses-dev; \
 				$$SUDO apk add valgrind || \
 					echo "Warning: Valgrind install failed; build dependencies are installed."; \
 			else \
 				echo "Unsupported Linux package manager."; \
-				echo "Install GCC, make, binutils, pkg-config, OpenSSL, Readline,"; \
-				echo "ncurses/notcurses, and SQLite development headers."; \
+				echo "Install GCC, make, binutils, pkg-config, OpenSSL,"; \
+				echo "Readline, and ncurses development headers."; \
 				exit 1; \
 			fi \
 			;; \
@@ -205,53 +148,13 @@ install-deps:
 				echo "Install it, then run make again."; \
 				exit 1; \
 			fi; \
-			brew install pkgconf openssl@3 readline ncurses notcurses sqlite \
+			brew install pkgconf openssl@3 readline ncurses \
 			;; \
 		*) \
 			echo "Unsupported operating system: $(UNAME_S)"; \
 			exit 1 \
 			;; \
 	esac
-
-install-notcurses-from-source:
-	@ set -eu; \
-	if [ "$(UNAME_S)" != "Linux" ]; then \
-		echo "Source fallback is only needed on Linux; use Homebrew on macOS."; \
-		exit 1; \
-	fi; \
-	for tool in git cmake; do \
-		if ! command -v $$tool >/dev/null 2>&1; then \
-			echo "Missing $$tool; install it before building notcurses from source."; \
-			exit 1; \
-		fi; \
-	done; \
-	if [ "$$(id -u)" -eq 0 ]; then \
-		SUDO=""; \
-	elif command -v sudo >/dev/null 2>&1; then \
-		SUDO="sudo"; \
-	else \
-		echo "Root access or sudo is required to install source-built notcurses."; \
-		exit 1; \
-	fi; \
-	tmp="$$(mktemp -d /tmp/notcurses-src.XXXXXX)"; \
-	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
-	jobs="$$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 2)"; \
-	git clone --depth 1 --branch "$(NOTCURSES_VERSION)" \
-		https://github.com/dankamongmen/notcurses.git "$$tmp/notcurses"; \
-	cmake -S "$$tmp/notcurses" -B "$$tmp/build" \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_INSTALL_PREFIX="$(NOTCURSES_PREFIX)" \
-		-DCMAKE_INSTALL_LIBDIR=lib \
-		-DUSE_MULTIMEDIA=ffmpeg \
-		-DUSE_DOCTEST=off \
-		-DUSE_PANDOC=off \
-		-DUSE_QRCODEGEN=off \
-		-DBUILD_TESTING=off; \
-	cmake --build "$$tmp/build" --parallel "$$jobs"; \
-	$$SUDO cmake --install "$$tmp/build"; \
-	if command -v ldconfig >/dev/null 2>&1; then \
-		$$SUDO ldconfig; \
-	fi
 
 # Compile and link one small program instead of trusting package database state.
 # This catches missing headers, libraries, and unusable pkg-config search paths.
@@ -274,19 +177,17 @@ check-deps:
 		echo "Missing tools:$$missing"; \
 		exit 1; \
 	fi; \
-	pkg-config --exists openssl readline ncursesw notcurses sqlite3 || { \
-		echo "Missing development packages: OpenSSL, Readline, ncurses/notcurses, or SQLite."; \
+	pkg-config --exists openssl readline ncursesw || { \
+		echo "Missing development packages: OpenSSL, Readline, or ncurses."; \
 		exit 1; \
 	}; \
 	printf '%s\n' \
 		'#include <openssl/evp.h>' \
 		'#include <readline/readline.h>' \
 		'#include <ncurses.h>' \
-		'#include <notcurses/notcurses.h>' \
-		'#include <sqlite3.h>' \
 		'int main(void) { return 0; }' \
 		| gcc -x c - $$(pkg-config --cflags --libs \
-			openssl readline ncursesw notcurses sqlite3) -o "$$probe"
+			openssl readline ncursesw) -o "$$probe"
 	@ if [ "$(UNAME_S)" = "Linux" ] \
 			&& [ "$(REQUIRE_VALGRIND)" != "1" ] \
 			&& ! command -v valgrind >/dev/null 2>&1; then \
@@ -303,8 +204,7 @@ deps-info:
 		echo "Environment: native"; \
 	fi
 	@ echo "Auto-install: $(AUTO_INSTALL_DEPS)"
-	@ echo "Source-build notcurses fallback: $(INSTALL_NOTCURSES_FROM_SOURCE) ($(NOTCURSES_VERSION) -> $(NOTCURSES_PREFIX))"
-	@ echo "Required: GCC, make, binutils, pkg-config, OpenSSL, Readline, ncurses/notcurses, SQLite"
+	@ echo "Required: GCC, make, binutils, pkg-config, OpenSSL, Readline, ncurses"
 	@ if [ "$(UNAME_S)" = "Darwin" ]; then \
 		echo "Valgrind: use Linux/WSL for the mandatory memory-safety run"; \
 	elif [ "$(REQUIRE_VALGRIND)" = "1" ]; then \

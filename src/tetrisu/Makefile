@@ -18,6 +18,11 @@ NAME		:= tetrisu
 CC			:= gcc
 BASE_FLAGS	:= -Wall -Wextra -Werror
 RM			:= rm -rf
+UNAME_S		:= $(shell uname -s)
+AUTO_INSTALL_DEPS ?= 1
+INSTALL_NOTCURSES_FROM_SOURCE ?= 1
+NOTCURSES_VERSION ?= v3.0.17
+NOTCURSES_PREFIX  ?= /usr/local
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -25,6 +30,16 @@ GREEN		:= \033[1;32m
 YELLOW		:= \033[1;33m
 CYAN		:= \033[1;36m
 BLUE		:= \033[1;34m
+
+# Source-built notcurses installs pkg-config metadata under /usr/local.
+export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
+
+ifeq ($(UNAME_S),Darwin)
+BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+ifneq ($(BREW_PREFIX),)
+export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
+endif
+endif
 
 ################################################################################
 #                                DIRECTORIES                                   #
@@ -37,24 +52,18 @@ NAME_PATH	:= $(BIN_DIR)/$(NAME)
 HEADER		:= tetrisu.h
 ASSET_DIR	:= $(CURDIR)/assets
 
-NOTCURSES_CFLAGS	= $(shell pkg-config --cflags notcurses 2>/dev/null)
-NOTCURSES_LIBS		= $(shell pkg-config --libs notcurses 2>/dev/null)
+PKG_CONFIG		?= pkg-config
+NOTCURSES_CFLAGS	= $(shell $(PKG_CONFIG) --cflags notcurses 2>/dev/null)
+NOTCURSES_LIBS		= $(shell $(PKG_CONFIG) --libs notcurses 2>/dev/null)
 AUDIO_DEPS		:= sdl2 SDL2_mixer
-AUDIO_AVAILABLE	:= $(shell pkg-config --exists $(AUDIO_DEPS) 2>/dev/null && echo 1 || echo 0)
+AUDIO_CFLAGS	= $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then $(PKG_CONFIG) --cflags $(AUDIO_DEPS); fi)
+AUDIO_LIBS		= $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then $(PKG_CONFIG) --libs $(AUDIO_DEPS); fi)
+AUDIO_DEFINE	= $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
-# Keep notcurses flags lazy: direct `make -C src/tetrisu` may install the
-# package through the root Makefile before compiling the first object.
-FLAGS		= $(BASE_FLAGS) -I. $(NOTCURSES_CFLAGS) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
-
-ifeq ($(AUDIO_AVAILABLE),1)
-SDL_CFLAGS	:= $(shell pkg-config --cflags $(AUDIO_DEPS))
-SDL_LIBS	:= $(shell pkg-config --libs $(AUDIO_DEPS))
-FLAGS		+= $(SDL_CFLAGS) -DTETRISU_ENABLE_AUDIO=1
-LDLIBS		= $(NOTCURSES_LIBS) $(SDL_LIBS)
-else
-FLAGS		+= -DTETRISU_ENABLE_AUDIO=0
-LDLIBS		= $(NOTCURSES_LIBS)
-endif
+# Keep pkg-config flags lazy: direct `make -C src/tetrisu` may install packages
+# before compiling the first object, so recipes must see post-install metadata.
+FLAGS		= $(BASE_FLAGS) -I. $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
+LDLIBS		= $(NOTCURSES_LIBS) $(AUDIO_LIBS)
 
 ################################################################################
 #                                  SOURCES                                     #
@@ -74,20 +83,193 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 
 all: check-dependencies $(NAME_PATH)
 
-# A standalone tetrisu build uses the same cross-platform installer as root.
-# DEPS_READY avoids repeating the check when the umbrella Makefile invoked us.
+# A standalone tetrisu build can ask root for shared deps, then this Makefile
+# owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
 		$(MAKE) --no-print-directory -C ../.. deps; \
 	fi
-	@ if ! command -v pkg-config >/dev/null 2>&1; then \
-		echo "tetrisu: missing pkg-config; run 'make -C ../.. deps'."; \
+	@ $(MAKE) --no-print-directory deps
+
+deps:
+	@ if $(MAKE) --no-print-directory check-tetrisu-deps >/dev/null 2>&1; then \
+		echo "tetrisu dependencies ready ($(UNAME_S))."; \
+	elif [ "$(AUTO_INSTALL_DEPS)" = "1" ]; then \
+		$(MAKE) --no-print-directory install-deps; \
+		$(MAKE) --no-print-directory check-tetrisu-deps; \
+	else \
+		$(MAKE) --no-print-directory check-tetrisu-deps; \
+		echo "tetrisu: missing dependencies; automatic installation is disabled."; \
 		exit 1; \
 	fi
-	@ if ! pkg-config --exists notcurses; then \
-		echo "tetrisu: missing notcurses development files."; \
-		echo "Run 'make -C ../.. deps' or install notcurses for your distro/Homebrew."; \
+
+check-tetrisu-deps:
+	@ set -eu; \
+	probe="$$(mktemp /tmp/tetrisu-deps-check.XXXXXX)"; \
+	trap 'rm -f "$$probe"' EXIT HUP INT TERM; \
+	missing=""; \
+	for tool in $(CC) $(PKG_CONFIG); do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			missing="$$missing $$tool"; \
+		fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "tetrisu: missing tools:$$missing"; \
 		exit 1; \
+	fi; \
+	if ! $(PKG_CONFIG) --exists notcurses; then \
+		echo "tetrisu: missing notcurses development files."; \
+		echo "Run 'make -C src/tetrisu deps' or install notcurses for your distro/Homebrew."; \
+		exit 1; \
+	fi; \
+	printf '%s\n' \
+		'#include <notcurses/notcurses.h>' \
+		'int main(void) { return 0; }' \
+		| $(CC) -x c - $$($(PKG_CONFIG) --cflags --libs notcurses) -o "$$probe"; \
+	if ! $(PKG_CONFIG) --exists $(AUDIO_DEPS); then \
+		echo "Warning: tetrisu audio disabled; install SDL2 and SDL2_mixer development packages for intro audio."; \
+	fi
+
+install-deps:
+	@ set -eu; \
+	case "$(UNAME_S)" in \
+		Linux) \
+			echo "Installing tetrisu render/audio dependencies for Linux..."; \
+			if [ "$$(id -u)" -eq 0 ]; then \
+				SUDO=""; \
+			elif command -v sudo >/dev/null 2>&1; then \
+				SUDO="sudo"; \
+			else \
+				echo "Root access or sudo is required to install tetrisu packages."; \
+				exit 1; \
+			fi; \
+			if command -v apt-get >/dev/null 2>&1; then \
+				$$SUDO apt-get update; \
+				$$SUDO apt-get install -y pkg-config libsdl2-dev libsdl2-mixer-dev; \
+				NOTCURSES_PKG=""; \
+				for pkg in libnotcurses-dev notcurses-dev; do \
+					if apt-cache show $$pkg >/dev/null 2>&1; then \
+						NOTCURSES_PKG="$$pkg"; \
+						break; \
+					fi; \
+				done; \
+				if [ -z "$$NOTCURSES_PKG" ] && [ -r /etc/os-release ]; then \
+					. /etc/os-release; \
+					if [ "$${ID:-}" = "ubuntu" ]; then \
+						echo "Ubuntu keeps notcurses in universe; enabling universe if needed..."; \
+						if ! command -v add-apt-repository >/dev/null 2>&1; then \
+							$$SUDO apt-get install -y software-properties-common; \
+						fi; \
+						$$SUDO add-apt-repository -y universe || true; \
+						$$SUDO apt-get update; \
+						for pkg in libnotcurses-dev notcurses-dev; do \
+							if apt-cache show $$pkg >/dev/null 2>&1; then \
+								NOTCURSES_PKG="$$pkg"; \
+								break; \
+							fi; \
+						done; \
+					fi; \
+				fi; \
+				if [ -n "$$NOTCURSES_PKG" ]; then \
+					$$SUDO apt-get install -y $$NOTCURSES_PKG; \
+				elif [ "$(INSTALL_NOTCURSES_FROM_SOURCE)" = "1" ]; then \
+					echo "No APT notcurses development package found; building notcurses $(NOTCURSES_VERSION) from source."; \
+					$$SUDO apt-get install -y git cmake libavdevice-dev \
+						libdeflate-dev libgpm-dev libswscale-dev libunistring-dev; \
+					$(MAKE) --no-print-directory install-notcurses-from-source; \
+				else \
+					echo "No notcurses development package is available in configured APT repositories."; \
+					echo "Enable Ubuntu universe/Debian testing, install notcurses manually, or run with INSTALL_NOTCURSES_FROM_SOURCE=1."; \
+					exit 1; \
+				fi; \
+			elif command -v dnf >/dev/null 2>&1; then \
+				$$SUDO dnf install -y pkgconf-pkg-config notcurses-devel \
+					SDL2-devel SDL2_mixer-devel || { \
+					echo "Enable Fedora/EPEL/CRB repos or install tetrisu render/audio packages manually."; \
+					exit 1; \
+				}; \
+			elif command -v yum >/dev/null 2>&1; then \
+				$$SUDO yum install -y pkgconfig notcurses-devel \
+					SDL2-devel SDL2_mixer-devel || { \
+					echo "Enable EPEL/CRB repos or install tetrisu render/audio packages manually."; \
+					exit 1; \
+				}; \
+			elif command -v pacman >/dev/null 2>&1; then \
+				$$SUDO pacman -S --needed --noconfirm pkgconf notcurses \
+					sdl2 sdl2_mixer; \
+			elif command -v zypper >/dev/null 2>&1; then \
+				$$SUDO zypper --non-interactive install pkg-config \
+					notcurses-devel libSDL2-devel libSDL2_mixer-devel || { \
+					echo "Enable needed openSUSE repos or install tetrisu render/audio packages manually."; \
+					exit 1; \
+				}; \
+			elif command -v apk >/dev/null 2>&1; then \
+				$$SUDO apk add pkgconf notcurses-dev sdl2-dev sdl2_mixer-dev; \
+			else \
+				echo "Unsupported Linux package manager."; \
+				echo "Install pkg-config, notcurses, SDL2, and SDL2_mixer development headers."; \
+				exit 1; \
+			fi \
+			;; \
+		Darwin) \
+			echo "Installing tetrisu render/audio dependencies for macOS..."; \
+			if ! xcrun --find cc >/dev/null 2>&1; then \
+				echo "Starting the Xcode Command Line Tools installer..."; \
+				xcode-select --install; \
+				echo "Finish that installer, then run make again."; \
+				exit 1; \
+			fi; \
+			if ! command -v brew >/dev/null 2>&1; then \
+				echo "Homebrew is required: https://brew.sh"; \
+				echo "Install it, then run make again."; \
+				exit 1; \
+			fi; \
+			brew install pkgconf notcurses sdl2 sdl2_mixer \
+			;; \
+		*) \
+			echo "Unsupported operating system: $(UNAME_S)"; \
+			exit 1 \
+			;; \
+	esac
+
+install-notcurses-from-source:
+	@ set -eu; \
+	if [ "$(UNAME_S)" != "Linux" ]; then \
+		echo "Source fallback is only needed on Linux; use Homebrew on macOS."; \
+		exit 1; \
+	fi; \
+	for tool in git cmake; do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			echo "Missing $$tool; install it before building notcurses from source."; \
+			exit 1; \
+		fi; \
+	done; \
+	if [ "$$(id -u)" -eq 0 ]; then \
+		SUDO=""; \
+	elif command -v sudo >/dev/null 2>&1; then \
+		SUDO="sudo"; \
+	else \
+		echo "Root access or sudo is required to install source-built notcurses."; \
+		exit 1; \
+	fi; \
+	tmp="$$(mktemp -d /tmp/notcurses-src.XXXXXX)"; \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	jobs="$$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 2)"; \
+	git clone --depth 1 --branch "$(NOTCURSES_VERSION)" \
+		https://github.com/dankamongmen/notcurses.git "$$tmp/notcurses"; \
+	cmake -S "$$tmp/notcurses" -B "$$tmp/build" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX="$(NOTCURSES_PREFIX)" \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DUSE_MULTIMEDIA=ffmpeg \
+		-DUSE_DOCTEST=off \
+		-DUSE_PANDOC=off \
+		-DUSE_QRCODEGEN=off \
+		-DBUILD_TESTING=off; \
+	cmake --build "$$tmp/build" --parallel "$$jobs"; \
+	$$SUDO cmake --install "$$tmp/build"; \
+	if command -v ldconfig >/dev/null 2>&1; then \
+		$$SUDO ldconfig; \
 	fi
 
 $(OBJ_DIR)/%.o: %.c $(HEADER) | check-dependencies
@@ -149,4 +331,5 @@ fclean: clean
 
 re: fclean all
 
-.PHONY:		all run test clean fclean re check-dependencies
+.PHONY:		all deps install-deps check-dependencies check-tetrisu-deps \
+			install-notcurses-from-source run test clean fclean re
