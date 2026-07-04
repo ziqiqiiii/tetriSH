@@ -110,12 +110,12 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) | check-dependencies
 	@ mkdir -p $(dir $@)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) -c $< -o $@
-	@ echo ""
 
 # --- tetrisu binary ---------------------------------------------------------
 $(NAME_PATH): $(OBJ)
 	@ mkdir -p $(BIN_DIR)
 	@ $(CC) $(FLAGS) $(OBJ) $(LDLIBS) -o $@
+	@ echo
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built ✔️"
 
 run: $(NAME_PATH)
@@ -129,7 +129,7 @@ run: $(NAME_PATH)
 # check side is a compile/link probe kept in the Makefile.
 deps:
 	@ if $(MAKE) --no-print-directory check-tetrisu-deps >/dev/null 2>&1; then \
-		echo "tetrisu dependencies ready ($(UNAME))."; \
+		echo "$(GREEN)tetrisu dependencies ready$(CLR_RMV) ($(UNAME))."; \
 	elif [ "$(AUTO_INSTALL_DEPS)" = "1" ]; then \
 		$(MAKE) --no-print-directory install-deps; \
 		$(MAKE) --no-print-directory check-tetrisu-deps; \
