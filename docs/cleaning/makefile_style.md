@@ -106,6 +106,26 @@ Never use `?=` or bare `=` for a value that could be `:=`.
   INC_DIR		:= includes
   ```
 
+- Alignment is **per block, not file-wide.** Each blank-line-separated group of
+  assignments picks one operator column and every line in that group tabs to it.
+  When a group's longest name overflows the usual column, the **whole group**
+  shifts right to a wider column of its own — never leave one operator out of
+  line with its neighbours:
+
+  ```make
+  AUTO_INSTALL_DEPS				?= 1
+  INSTALL_NOTCURSES_FROM_SOURCE	?= 1
+  NOTCURSES_VERSION				?= v3.0.17
+  NOTCURSES_PREFIX				?= /usr/local
+  ```
+
+  Use **tabs** for the padding (the file is read at a 4-wide tab stop), so a
+  name landing exactly on a tab stop still gets at least one separating tab.
+
+- When a group mixes lazy `=` (§3) with `:=`, pad the `=` lines with a **single
+  leading space** (`	 = `) so the `=` sits in the same column as the `:=` above
+  it.
+
 - Derived variables are built from their base with a substitution reference, not
   re-typed:
 
