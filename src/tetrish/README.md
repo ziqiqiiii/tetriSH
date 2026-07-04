@@ -35,20 +35,17 @@ A POSIX-like shell implemented in C. Supports interactive prompts, command histo
 
 ## Prerequisites
 
-The repository-level Makefile installs shared build dependencies: compiler
-toolchain, pkg-config, OpenSSL, Readline, and ncurses. Component-specific
-dependencies such as tetrisu's notcurses/SDL stack live in that component's
-Makefile. On Linux/WSL the root installer also tries to install Valgrind for
-memory-safety verification, but Valgrind is not needed to compile:
+The repository-level Makefile installs shared build dependencies.
 
 ```bash
 make -C ../.. deps
 ```
 
-A direct `make` in this directory invokes that target automatically. It supports
-apt, dnf/yum, pacman, zypper, and apk on Linux/WSL, and Homebrew on macOS.
-Package installation may request sudo access. Use
-`make -C ../.. deps AUTO_INSTALL_DEPS=0` when system changes are not allowed.
+
+Package installation may request sudo access. Use the following when system changes are not allowed.
+```bash
+make -C ../.. deps AUTO_INSTALL_DEPS=0
+```
 
 ---
 
