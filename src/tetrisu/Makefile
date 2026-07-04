@@ -45,6 +45,7 @@ endif
 #                                DIRECTORIES                                   #
 ################################################################################
 
+SRC_DIR		:= src
 OBJ_DIR		:= obj
 BIN_DIR		:= bin
 NAME_PATH	:= $(BIN_DIR)/$(NAME)
