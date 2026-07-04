@@ -19,9 +19,10 @@ with Doxygen-style function headers.
 9. [Error handling](#9-error-handling)
 10. [Includes](#10-includes)
 11. [Header file formatting](#11-header-file-formatting)
-12. [File naming by responsibility](#12-file-naming-by-responsibility)
-13. [Testing](#13-testing)
-14. [Compilation](#14-compilation)
+12. [Project & directory structure](#12-project--directory-structure)
+13. [File naming by responsibility](#13-file-naming-by-responsibility)
+14. [Testing](#14-testing)
+15. [Compilation](#15-compilation)
 
 ---
 
@@ -348,7 +349,132 @@ So `brain_result_t` gets one tab; shorter types (`void`, `bool`, `cell_t`,
 
 ---
 
-## 12. File naming by responsibility
+## 12. Project & directory structure
+
+Every buildable component is a **self-contained directory** — it owns its
+`Makefile`, `src/`, `tests/`, `scripts/run_tests.sh`, and generated artefacts
+build in place. Consumers only ever reach in through the component's `include`
+path and (for libraries) its `.a`. Three archetypes exist, described below.
+
+### 12.1 Library — `lib/libtetrisbrain`
+
+The canonical self-contained library. Public declarations live in a dedicated
+`include/` directory whose single header shares the library's name; every `.c`
+under `src/` includes **only** that header (see §10). Tests sit flat under
+`tests/`, one `test_<module>.c` per source module.
+
+```
+lib/libtetrisbrain/
+├── Makefile              # make -C lib/libtetrisbrain [test|clean|fclean|re]
+├── include/
+│   └── tetrisbrain.h     # public header — consumers add -I lib/libtetrisbrain/include
+├── src/                  # one .c per module, each #include "tetrisbrain.h"
+│   ├── board.c
+│   ├── pieces.c
+│   ├── gravity.c
+│   ├── lineclear.c
+│   ├── scoring.c
+│   └── abilities.c
+├── tests/                # one test_<module>.c per source module
+│   ├── test_board.c
+│   ├── test_pieces.c
+│   └── ...
+├── scripts/
+│   └── run_tests.sh
+├── obj/                  # generated objects (git-ignored)
+└── libtetrisbrain.a      # generated archive
+```
+
+- **Header placement:** its own `include/` directory, header named after the lib.
+- **`src/` is flat** — no sub-grouping; one file per module.
+- Consumers link `libtetrisbrain.a` and add `-I lib/libtetrisbrain/include`.
+
+### 12.2 Client binary — `src/tetrisu`
+
+A lean terminal binary. It has a **single header at the component root**
+(`tetrisu.h`, not inside an `include/` directory) that every `.c` in the flat
+`src/` includes. Runtime media lives under `assets/`; each responsibility gets
+its own `render_*.c` / topic file.
+
+```
+src/tetrisu/
+├── Makefile
+├── tetrisu.h             # single root header, #include "tetrisu.h" from every src/*.c
+├── src/                  # flat, one file per responsibility
+│   ├── main.c
+│   ├── app_state.c
+│   ├── audio.c
+│   ├── render_background.c
+│   ├── render_intro.c
+│   └── render_menu.c
+├── assets/               # runtime media (images, audio, video)
+├── tests/                # test_<module>.c, flat
+│   └── test_app_state.c
+└── scripts/
+    ├── install_deps.sh   # dependency bootstrap (e.g. notcurses)
+    ├── install_notcurses.sh
+    └── run_tests.sh
+```
+
+- **Header placement:** single header at the component root, named after the
+  binary — no `include/` directory for a small single-header binary.
+- **`src/` is flat**; files are named by responsibility (`render_menu.c`, …).
+- `assets/` holds non-code runtime files; `scripts/` holds dependency install +
+  test runners.
+
+### 12.3 Shell binary bundle — `src/tetrish`
+
+The largest component: a shell plus its bundled system programs and a vendored
+`libft`. Headers go in a **plural `includes/` directory** holding one header per
+domain, and `src/` is **grouped into sub-directories by domain** rather than
+flat. Tests are split by kind under `tests/`.
+
+```
+src/tetrish/
+├── Makefile
+├── includes/             # plural; one header per domain
+│   ├── minishell.h       #   src/shell/*.c  → #include "minishell.h"
+│   ├── system_program.h  #   src/system/*.c → #include "system_program.h"
+│   └── common.h          #   src/common/*.c → #include "common.h"
+├── src/                  # grouped by domain (NOT flat)
+│   ├── shell/            # 00_main.c, 01a_init.c, … numbered by pipeline stage (§13)
+│   ├── system/           # one .c per bundled binary (find.c, backup.c, …)
+│   └── common/           # one helper per file (ft_open.c, perms.c, …)
+├── libft/                # vendored library, self-contained (own Makefile/src/includes)
+├── tests/
+│   ├── unit/             # test_<module>.c
+│   ├── integration/      # test_*.sh
+│   └── unity/            # vendored Unity test framework
+├── files/                # fixtures / sample data
+├── scripts/              # run_tests.sh + gen_*_tests.sh generators
+├── obj/  bin/            # generated (git-ignored)
+├── banner.txt  .macminishellrc  README.md  CLAUDE.md
+```
+
+- **Header placement:** plural `includes/` directory, one header per domain
+  (`minishell.h`, `system_program.h`, `common.h`); each `src/` sub-dir maps to
+  exactly one header (§10).
+- **`src/` is grouped by domain** into `shell/`, `system/`, `common/`.
+- **Tests are split by kind:** `unit/` (C), `integration/` (shell), plus the
+  vendored `unity/` framework; generators live in `scripts/gen_*_tests.sh`.
+- A nested self-contained library (`libft/`) follows the §12.1 library layout in
+  miniature.
+
+### 12.4 Choosing between the archetypes
+
+| Component grows a… | Header(s) | `src/` layout | Tests |
+|---|---|---|---|
+| **Library** (`lib/libXXX`) | `include/XXX.h` | flat, one file per module | flat `tests/test_*.c` |
+| **Small binary** (`tetrisu`) | single root `XXX.h` | flat, one file per responsibility | flat `tests/test_*.c` |
+| **Large binary bundle** (`tetrish`) | plural `includes/`, one per domain | grouped sub-dirs by domain | `tests/{unit,integration,…}` |
+
+A library always uses `include/`. A binary uses a single root header while it
+stays small, and graduates to a plural `includes/` directory with domain-grouped
+`src/` sub-dirs once it spans several domains.
+
+---
+
+## 13. File naming by responsibility
 
 Files are named to make their place in the pipeline / system obvious:
 
@@ -364,7 +490,7 @@ Files are named to make their place in the pipeline / system obvious:
 
 ---
 
-## 13. Testing
+## 14. Testing
 
 Each self-contained library owns its tests under `tests/`, plus a shared
 `scripts/run_tests.sh` that runs them and formats the output. There are two
@@ -412,7 +538,7 @@ exits non-zero.
 
 ---
 
-## 14. Compilation
+## 15. Compilation
 
 Built with `-Wall -Wextra -Werror`; on Linux the build also adds
 `-fsanitize=address -g3`. Code must compile cleanly under these flags.
