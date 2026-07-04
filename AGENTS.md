@@ -16,7 +16,6 @@
 | Need Q&A prep answers, checkoff structure, or the live extension task pool | `cat docs/checkoff-prep.md` |
 | Need the full FR/NFR tables, sprint plan, or binary linkage | `cat docs/requirements.md` |
 | Need the full architecture prose (handshake steps, thread diagrams, ability flow) | `cat docs/architecture.md` |
-| Touching `tetrisu` rendering (planes, image blitting, input, the forkpty-test limitation) | `cat docs/notcurses.md` |
 
 **Do not proactively load these on every message.** Read `AGENTS.md` rules first. Open the reference docs only when the current task requires the detail inside them.
 
@@ -41,7 +40,7 @@ Both share a corestack of static libraries. Each library is **self-contained** �
 | `tetrisd` | Sanjan | Concurrent game server — the core of the system |
 | `tetrislogd` | Sanjan | Dedicated logger daemon (separate process, not thread) |
 | `tetrisctl` | Zi Qi | Admin CLI — talks to `tetrisd` via Unix socket, never via TCP |
-| `tetrisu` | Both | notcurses terminal client — renders board, sends HTTTP moves |
+| `tetrisu` | Both | ncurses terminal client — renders board, sends HTTTP moves |
 | `chatd` | Sanjan | Live chat daemon (TetriSocial) |
 | `chatctl` | Sanjan | Admin CLI for `chatd` |
 | `marketd` | Zi Qi | Points marketplace daemon (TetriSocial) |
@@ -58,7 +57,7 @@ Every library is a self-contained directory: `lib/libXXX/{Makefile, include/XXX.
 | `libtetrisbrain` | Both | **PURE LOGIC ONLY** — no I/O, no POSIX, no global state. See rule below |
 | `libcoreipc` | Sanjan | Ring buffer, mq helpers, Unix socket wrappers |
 | `libchatcore` | Sanjan | Room registry, token-bucket rate limiter, role management, event formatter |
-| `libcoredb` | Zi Qi | Append-only account DB: auth, points, inventory, theme equip, high score |
+| `libmarketcore` | Zi Qi | Points ledger, inventory, catalogue, SQLite persistence |
 
 ---
 
@@ -275,10 +274,6 @@ lib/                      ← all self-contained libraries live here
         tests/test_*.c    ← unit tests, each with its own main()
         scripts/run_tests.sh
         libtetrisbrain.a  ← generated archive
-    libcoredb/            ← append-only account/market state DB
-        Makefile          ← make -C lib/libcoredb [test|clean|fclean|re]
-        include/coredb.h  ← public DB API
-        src/ tests/       ← storage, replay, auth, hash, points, inventory tests
 include/                  ← cross-component shared headers only
     game_event.h      ← FROZEN after Week 4
     loadout_ipc.h     ← FROZEN once both sides in review
@@ -300,7 +295,7 @@ e.g.:
 [tetrisd] add garbage injection to ticker_thread via POSIX mq
 [libtetrisbrain] implement SRS rotation for all 7 tetrominoes
 [chatd] wire event_consumer_thread to game_event.h SOCK_DGRAM socket
-[libcoredb] add append-only account replay
+[marketd] add ledger replay on startup from append-only binary file
 ```
 
 The git history is part of prize evaluation. No "fix stuff", no "update", no squashed final commits.

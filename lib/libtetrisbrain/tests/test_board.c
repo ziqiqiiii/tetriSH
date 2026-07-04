@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 void test_init_empty(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   for (int r = 0; r < BOARD_HEIGHT; r++)
     for (int c = 0; c < BOARD_WIDTH; c++)
@@ -13,7 +13,7 @@ void test_init_empty(void) {
 }
 
 void test_out_of_bounds_is_solid(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
   assert(board_get(&b, -1, 0).type == CELL_FILLED);           // left wall
   assert(board_get(&b, BOARD_WIDTH, 0).type == CELL_FILLED);  // right wall
@@ -23,7 +23,7 @@ void test_out_of_bounds_is_solid(void) {
 }
 
 void test_inject_garbage_bottom_rows(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   board_inject_garbage(&b, 2, 3); // 2 garbage lines, hole at col 3
@@ -42,11 +42,11 @@ void test_inject_garbage_bottom_rows(void) {
 }
 
 void test_inject_garbage_shifts_existing_blocks(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   // place a block at the very bottom row, col 0
-  board_set(&b, 0, BOARD_HEIGHT - 1, (cell_t){CELL_FILLED, 1});
+  board_set(&b, 0, BOARD_HEIGHT - 1, (t_cell){CELL_FILLED, 1});
 
   // inject 1 garbage line
   board_inject_garbage(&b, 1, 5);
@@ -59,7 +59,7 @@ void test_inject_garbage_shifts_existing_blocks(void) {
 }
 
 void test_inject_garbage_hole_is_empty(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
 
   // inject 3 lines with hole at col 7
@@ -73,9 +73,9 @@ void test_inject_garbage_hole_is_empty(void) {
 }
 
 void test_inject_garbage_zero_lines_is_noop(void) {
-  board_t b, before;
+  t_board b, before;
   board_init(&b);
-  board_set(&b, 4, 5, (cell_t){CELL_FILLED, 2});
+  board_set(&b, 4, 5, (t_cell){CELL_FILLED, 2});
   board_copy(&before, &b);
 
   board_inject_garbage(&b, 0, 3);
@@ -89,9 +89,9 @@ void test_inject_garbage_zero_lines_is_noop(void) {
 }
 
 void test_inject_garbage_negative_lines_is_noop(void) {
-  board_t b, before;
+  t_board b, before;
   board_init(&b);
-  board_set(&b, 4, 5, (cell_t){CELL_FILLED, 2});
+  board_set(&b, 4, 5, (t_cell){CELL_FILLED, 2});
   board_copy(&before, &b);
 
   board_inject_garbage(&b, -3, 3);
@@ -105,9 +105,9 @@ void test_inject_garbage_negative_lines_is_noop(void) {
 }
 
 void test_inject_garbage_more_than_height_caps(void) {
-  board_t b;
+  t_board b;
   board_init(&b);
-  board_set(&b, 4, 5, (cell_t){CELL_FILLED, 2}); // pre-existing block
+  board_set(&b, 4, 5, (t_cell){CELL_FILLED, 2}); // pre-existing block
 
   board_inject_garbage(&b, BOARD_HEIGHT + 5, 3); // request more lines than exist
 

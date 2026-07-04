@@ -1,112 +1,103 @@
-# ifndef TETRISBRAIN_H
+#ifndef TETRISBRAIN_H
 # define TETRISBRAIN_H
 
 # include <stdbool.h>
 # include <stdint.h>
-# include <string.h>
 # include <stdlib.h>
 
-# define BOARD_WIDTH		10
-# define BOARD_HEIGHT		20
+# define BOARD_WIDTH	10
+# define BOARD_HEIGHT	20
 
-// Gravity ramp parameters (scoring.c)
-# define GRAVITY_BASE_MS	1000
-# define GRAVITY_STEP_MS	50
-# define GRAVITY_MIN_MS		100
-
-// what's in a cell
-typedef enum
+/* what's in a cell */
+typedef enum e_cell_type
 {
-  CELL_EMPTY	=	0,
-  CELL_FILLED	=	1,
-  CELL_GARBAGE	=	2, // for garbage lines (different color in tetrisu)
-}	cell_type_t;
+	CELL_EMPTY = 0,
+	CELL_FILLED = 1,
+	CELL_GARBAGE = 2
+}	t_cell_type;
 
-typedef struct
+typedef struct s_cell
 {
-  cell_type_t	type;
-  uint8_t		color; // piece color index (0-6), 0 if empty
-}	cell_t;
+	t_cell_type	type;
+	uint8_t		color;
+}	t_cell;
 
-typedef struct
+typedef struct s_board
 {
-  cell_t cells[BOARD_HEIGHT][BOARD_WIDTH];
-}	board_t;
+	t_cell	cells[BOARD_HEIGHT][BOARD_WIDTH];
+}	t_board;
 
-// 7 tetromino types
-typedef enum
+/* 7 tetromino types */
+typedef enum e_piece_type
 {
-  PIECE_I,
-  PIECE_O,
-  PIECE_T,
-  PIECE_S,
-  PIECE_Z,
-  PIECE_J,
-  PIECE_L
-}	piece_type_t;
+	PIECE_I,
+	PIECE_O,
+	PIECE_T,
+	PIECE_S,
+	PIECE_Z,
+	PIECE_J,
+	PIECE_L
+}	t_piece_type;
 
-typedef struct
+typedef struct s_piece
 {
-  piece_type_t	type;
-  int			col;      // leftmost column of bounding box
-  int			row;      // topmost row of bounding box
-  int			rotation; // 0-3
-}	piece_t;
+	t_piece_type	type;
+	int				col;
+	int				row;
+	int				rotation;
+}	t_piece;
 
-// signed (dcol, drow) offset of a cell from a piece's bounding-box origin;
-// used by the shape and wall-kick tables in pieces.c
-typedef struct
+/* return codes */
+typedef enum e_brain_result
 {
-  int8_t	dcol;
-  int8_t	drow;
-}	cell_offset_t;
+	BRAIN_OK,
+	BRAIN_BLOCKED,
+	BRAIN_LOCKED,
+	BRAIN_GAME_OVER,
+	BRAIN_CLEARED
+}	t_brain_result;
 
-// return codes
-typedef enum
-{
-  BRAIN_OK,
-  BRAIN_BLOCKED,   // move rejected (wall, floor, other piece)
-  BRAIN_LOCKED,    // piece can't fall, should be stored
-  BRAIN_GAME_OVER, // piece locked at top
-  BRAIN_CLEARED,   // lines were cleared this tick
-}	brain_result_t;
+/* BOARD */
 
-/* BOARD.C */
-void			board_init(board_t *b);
-cell_t			board_get(const board_t *b, int col, int row);
-void			board_set(board_t *b, int col, int row, cell_t cell);
+void			board_init(t_board *b);
+t_cell			board_get(const t_board *b, int col, int row);
+void			board_set(t_board *b, int col, int row, t_cell cell);
 bool			board_in_bounds(int col, int row);
-void			board_inject_garbage(board_t *b, int lines, int hole_col);
-void			board_copy(board_t *dst, const board_t *src);
+void			board_inject_garbage(t_board *b, int lines, int hole_col);
+void			board_copy(t_board *dst, const t_board *src);
 
-/* PIECES.C */
-piece_t			piece_spawn(piece_type_t type);
-bool			piece_is_valid(const board_t *b, const piece_t *p);
-brain_result_t	piece_move(const board_t *b, piece_t *p, int dcol, int drow);
-brain_result_t	piece_rotate(const board_t *b, piece_t *p, int dir); // +1 CW, -1 CCW
-void			piece_stamp(board_t *b, const piece_t *p); // lock piece into board
+/* PIECES */
 
-/* GRAVITY.C */
-brain_result_t	gravity_tick(const board_t *b, piece_t *p);
-brain_result_t	piece_soft_drop(const board_t *b, piece_t *p);
-void			piece_hard_drop(const board_t *b, piece_t *p); // moves p in place
+t_piece			piece_spawn(t_piece_type type);
+bool			piece_is_valid(const t_board *b, const t_piece *p);
+t_brain_result	piece_move(const t_board *b, t_piece *p, int dcol, int drow);
+t_brain_result	piece_rotate(const t_board *b, t_piece *p, int dir);
+void			piece_stamp(t_board *b, const t_piece *p);
 
-/* LINECLEAR.C */
-int				board_clear_lines(board_t *b); // returns lines cleared (0-4)
+/* GRAVITY */
 
-/* SCORING.C */
+t_brain_result	gravity_tick(const t_board *b, t_piece *p);
+t_brain_result	piece_soft_drop(const t_board *b, t_piece *p);
+void			piece_hard_drop(const t_board *b, t_piece *p);
+
+/* LINECLEAR */
+
+int				board_clear_lines(t_board *b);
+
+/* SCORING */
+
 int				score_on_clear(int lines_cleared, int level);
 int				level_from_lines(int total_lines);
-int				gravity_interval_ms(int level); // ms per tick
+int				gravity_interval_ms(int level);
 
-/* ABILITIES.C */
-void			board_cut_top(board_t *b, int n);
-void			board_cut_bottom(board_t *b, int n);
-void			board_apply_gravity(board_t *b);
-void			board_invert(board_t *b);
-void			board_fill_rows(board_t *b, int n, int hole_col);
-void			board_clear_cells(board_t *b, int cols[], int rows[], int count);
-void			board_delete_columns(board_t *b, int start_col, int end_col);
+/* ABILITIES */
 
-# endif
+void			board_cut_top(t_board *b, int n);
+void			board_cut_bottom(t_board *b, int n);
+void			board_apply_gravity(t_board *b);
+void			board_invert(t_board *b);
+void			board_fill_rows(t_board *b, int n, int hole_col);
+void			board_clear_cells(t_board *b, int cols[], int rows[], int count);
+void			board_delete_columns(t_board *b, int start_col, int end_col);
 
+#endif
