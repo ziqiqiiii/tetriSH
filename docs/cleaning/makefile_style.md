@@ -333,14 +333,15 @@ $(LIBFT): | check-dependencies
 
 ---
 
-## 11. Outsource installation to a bash script
+## 11. Outsource dependency logic to a bash script
 
-The Makefile **checks** dependencies but does not **install** them inline.
-Multi-branch package-manager logic, privilege escalation, and source builds do
-not belong in a recipe — a Makefile recipe is one shell line per step with
-awkward `\`-continuations and no real control flow. Move all of it into a bash
-script under the component's `scripts/` directory (§ layout matches
-`run_tests.sh`) and have the recipe just call it:
+Dependency **install** and **check** logic does not belong inline in a recipe.
+Multi-branch package-manager logic, privilege escalation, source builds, and
+compile/link probes are all real shell programs — control flow, temp files,
+traps — and a Makefile recipe is one shell line per step with awkward
+`\`-continuations and no real control flow. Move all of it into a bash script
+under the component's `scripts/` directory (§ layout matches `run_tests.sh`)
+and have the recipe just call it:
 
 ```make
 install-deps:
@@ -348,17 +349,40 @@ install-deps:
 
 install-notcurses-from-source:
 	@ bash ./scripts/install_notcurses.sh
+
+check-deps:
+	@ UNAME_S=$(UNAME_S) REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		bash ./scripts/check_deps.sh
+
+deps-info:
+	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
+		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) bash ./scripts/deps_info.sh
+
+# Orchestration also moves out; it delegates to check_deps.sh / install_deps.sh.
+deps:
+	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
+		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' bash ./scripts/deps.sh
 ```
 
 - The recipe is a **single `bash ./scripts/*.sh` line** — no `case`, no `if`,
-  no package lists in the Makefile. Pass anything variable through the
-  environment, not by templating into the script:
+  no package lists or probe here-docs in the Makefile. Pass anything variable
+  through the environment, not by templating into the script:
   `@ NOTCURSES_VERSION=$(NOTCURSES_VERSION) bash ./scripts/install_notcurses.sh`.
 - Scripts live in **`scripts/` next to the Makefile that calls them**
   (`src/tetrisu/scripts/install_deps.sh`), keeping each component self-contained.
-- The **check** side (`check-deps` — a compile/link probe, §10) may stay in the
-  Makefile; only the **install** side is outsourced. Install is where the
-  branching and privilege live.
+- **Install, check, and the orchestration between them** all move out once they
+  grow past a line or two — install is where the branching and privilege live; a
+  check that does a real compile/link probe (temp file + `trap` cleanup, §10) is
+  a program too; and the `deps` flow (probe → install on failure → print the
+  status line) is control flow that reads better in a script than in
+  backslash-continued `if`/`elif`. The orchestration script **delegates to the
+  sibling scripts directly** rather than re-entering `make`. A one-liner with no
+  temp files, loops, or branching can stay inline; anything longer moves out.
+- **Colour escapes are still owned by the Makefile** (§5). A script that prints a
+  coloured line receives the escapes through the environment
+  (`GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)'`) and emits them with `printf '%b'`, so
+  the Makefile stays the single source of the palette.
 
 **Privilege / authorization** is handled *inside the script*, once, at the top —
 never assume root and never hard-code `sudo`. Detect it: use nothing if already
