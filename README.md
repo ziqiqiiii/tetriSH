@@ -8,52 +8,126 @@ Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of 
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Run](#run)
 - [Components](#components)
 - [Libraries](#libraries)
 - [Protocol: HTTTP](#protocol-htttp)
+- [Configuration: .tetrishrc](#configuration-tetrishrc)
+- [Architecture](#architecture)
 - [Secure Session: libtetrissh](#secure-session-libtetrissh)
 - [IPC Design](#ipc-design)
 - [Concurrency Model](#concurrency-model)
 - [Battle Royale Mode](#battle-royale-mode)
-- [Configuration: .tetrishrc](#configuration-tetrishrc)
-- [File System Layout](#file-system-layout)
-- [Build Instructions](#build-instructions)
-- [Running the System](#running-the-system)
+- [Project Structure](#project-structure)
 - [Security Assumptions](#security-assumptions)
 - [Known Limitations](#known-limitations)
+- [Contribution](#contribution)
+
 
 ---
 
-## Overview
+## Prerequisites
 
-tetriSH is a single integrated project that merges:
+The umbrella Makefile checks and installs shared native build dependencies: GCC/binutils, make, pkg-config, OpenSSL, Readline, and ncurses. Supported Linux package managers are apt, dnf/yum, pacman, zypper, and apk. macOS uses Homebrew plus the Xcode Command Line Tools.
 
-- **PA1** — shell, daemon lifecycle, process management, signals, and IPC
-- **PA2** — authenticated and confidential client-server communication
+```bash
+make deps                         # check and install anything missing
+make check-deps                   # check only; never modifies the system
+make deps-info                    # show detected OS/WSL and dependency policy
+```
 
-The result is a fully terminal-based, server-authoritative Battle Royale Tetris game. All game state lives in `tetrisd`. Clients (`tetrisu`) connect over TCP, complete a secure session handshake, and communicate exclusively via HTTTP — a custom HTTP-like application protocol.
+Package installation may request sudo access. Use the following when system changes are not allowed.
+
+```bash
+make AUTO_INSTALL_DEPS=0          # check-only build for CI/managed machines
+```
+
+`src/tetrisu/Makefile` owns tetrisu-only render/audio dependencies: notcurses is required, while SDL2 and SDL2_mixer enable optional intro audio. On APT systems, Ubuntu may need its `universe` repository for `libnotcurses-dev`. If no APT notcurses development package is available, tetrisu builds notcurses from source with `INSTALL_NOTCURSES_FROM_SOURCE=1` (default). Fedora has `notcurses-devel`; RHEL-compatible systems usually need EPEL/CRB enabled. openSUSE Tumbleweed has `notcurses-devel`, while some Leap repos may not. Homebrew installs the `pkg-config` command through the `pkgconf` formula.
+
+```bash
+make -C src/tetrisu deps           # check/install tetrisu render/audio deps
+```
+
+Linux/WSL also attempts to install Valgrind for PR/checkoff memory-safety runs, but Valgrind is not required just to compile. Valgrind is not reliably supported on current macOS releases — run the mandatory memory-safety checks on Linux or WSL, and use `REQUIRE_VALGRIND=1 make check-deps` when you want the dependency check to enforce it.
 
 ---
 
-## Architecture
+## Build
 
-The system has exactly three layers above the kernel:
+Clone the repository and generate certificates:
 
-```
-+---------------------------------------------+
-|  Application: HTTTP messages                |
-|  (HyperText Tetris Transfer Protocol)       |
-+---------------------------------------------+
-|  Secure session                             |
-|  (cert auth, RSA-wrapped AES, framed)       |
-+---------------------------------------------+
-|  Transport: TCP via POSIX sockets           |
-+---------------------------------------------+
+```bash
+git clone <repo-url>
+cd tetriSH
+bash auth/generate_keys.sh
 ```
 
-TCP reliability, ordering, and congestion control are provided by the kernel. tetriSH implements the two layers above it.
+Each library is self-contained and builds and tests on its own — this is the current build path:
+
+```bash
+make -C lib/libtetrisbrain          # build lib/libtetrisbrain/libtetrisbrain.a
+make -C lib/libtetrisbrain test     # run its unit tests (formatted output)
+make -C lib/libtetrisbrain clean    # remove its objects + test binaries
+```
+
+Filter a library's test suite with `FILTER`:
+
+```bash
+make -C lib/libtetrisbrain test FILTER=abilities   # run a single suite
+```
+
+Once the binaries are added, a top-level umbrella `Makefile` builds everything from the repo root. Plain `make` runs `make deps` automatically before compiling.
+
+```bash
+make                 # build all libraries + binaries
+make clean && make   # clean build
+```
+
+To compile your own code against a library, link the archive and add its include path:
+
+```bash
+gcc my_program.c lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include -o my_program
+```
+
+WSL is detected separately for diagnostics but uses its Linux distribution's package manager. Homebrew itself must already be installed on macOS; if the Command Line Tools are absent, `make` starts Apple's installer and asks you to rerun after it finishes.
+
+---
+
+## Run
+
+**1. Copy and edit the config:**
+```bash
+cp sample.tetrishrc .tetrishrc
+# Edit listen_port, cert_path, key_path, ca_path, log_path, log_ipc
+```
+
+**2. Start the shell:**
+```bash
+./bin/tetrish
+```
+
+**3. From inside tetrish, launch the daemons:**
+```
+tetrish$ dspawn tetrislogd &
+tetrish$ dspawn tetrisd &
+```
+
+**4. Connect a client (in a separate terminal):**
+```bash
+./bin/tetrisu
+```
+
+**5. Check server status:**
+```bash
+./bin/tetrisctl status
+```
+
+**6. Graceful shutdown:**
+```bash
+./bin/tetrisctl shutdown
+```
 
 ---
 
@@ -180,6 +254,54 @@ STATUS-LINE   ::= "HTTTP/1.0" SP STATUS-CODE SP REASON-PHRASE CRLF
 
 ---
 
+## Configuration: .tetrishrc
+
+Required directives:
+
+```
+listen_port  <port>           # TCP port for tetrisd
+cert_path    <path>           # Server certificate
+key_path     <path>           # Server private key
+ca_path      <path>           # CA certificate for client verification
+log_path     <path>           # Path where tetrislogd writes log records
+log_ipc      <address>        # IPC address between tetrisd and tetrislogd
+```
+
+Optional directives (with sensible defaults if absent):
+
+```
+max_rooms              <n>
+max_players_per_room   <n>
+tick_hz                <n>
+log_level              <debug|info|warning|error>
+ctl_socket             <path>   # Control plane socket path
+prompt                 <string>
+```
+
+All paths are relative to the project root. No hard-coded paths exist in the source.
+
+---
+
+## Architecture
+
+The system has exactly three layers above the kernel:
+
+```
++---------------------------------------------+
+|  Application: HTTTP messages                |
+|  (HyperText Tetris Transfer Protocol)       |
++---------------------------------------------+
+|  Secure session                             |
+|  (cert auth, RSA-wrapped AES, framed)       |
++---------------------------------------------+
+|  Transport: TCP via POSIX sockets           |
++---------------------------------------------+
+```
+
+TCP reliability, ordering, and congestion control are provided by the kernel. tetriSH implements the two layers above it.
+
+---
+
 ## Secure Session: libtetrissh
 
 The handshake sequence before any HTTTP traffic:
@@ -254,183 +376,47 @@ When a player clears N ≥ 2 lines in a single move, N − 1 garbage rows are in
 
 ---
 
-## Configuration: .tetrishrc
+## Project Structure
 
-Required directives:
-
-```
-listen_port  <port>           # TCP port for tetrisd
-cert_path    <path>           # Server certificate
-key_path     <path>           # Server private key
-ca_path      <path>           # CA certificate for client verification
-log_path     <path>           # Path where tetrislogd writes log records
-log_ipc      <address>        # IPC address between tetrisd and tetrislogd
-```
-
-Optional directives (with sensible defaults if absent):
-
-```
-max_rooms              <n>
-max_players_per_room   <n>
-tick_hz                <n>
-log_level              <debug|info|warning|error>
-ctl_socket             <path>   # Control plane socket path
-prompt                 <string>
-```
-
-All paths are relative to the project root. No hard-coded paths exist in the source.
-
----
-
-## File System Layout
-
-Each library is a **self-contained directory** — it owns its `Makefile`,
-`src/`, `include/`, and `tests/`, and builds its archive (`libXXX.a`) in place.
-A top-level umbrella `Makefile` will be added to recurse into the libraries and
-link the archives into the binaries as those land; for now each library builds
-and is tested on its own.
+Each library is a **self-contained directory** — it owns its `Makefile`, `src/`, `include/`, and `tests/`, and builds its archive (`libXXX.a`) in place. A top-level umbrella `Makefile` will be added to recurse into the libraries and link the archives into the binaries as those land; for now each library builds and is tested on its own.
 
 ```
 project/
-    bin/
-        tetrish
-        tetrisd
-        tetrislogd
-        tetrisctl
-        tetrisu
-    lib/                           ← all self-contained libraries live here
-        libtetrisbrain/            ← self-contained library (pattern for all libs)
-            Makefile               ← make -C lib/libtetrisbrain [test|clean|fclean|re]
-            include/tetrisbrain.h  ← public header (-I lib/libtetrisbrain/include)
-            src/*.c                ← board, pieces, gravity, lineclear, scoring, abilities
-            tests/test_*.c         ← unit tests (each with its own main)
-            scripts/run_tests.sh   ← formatted test runner
-            obj/                   ← generated objects
-            libtetrisbrain.a       ← generated archive
-        libtetrissh/               ← same self-contained layout
-        libhtttp/                  ← same self-contained layout
-    auth/
-        server.crt
-        server.key
-        cacsertificate.crt
-        generate_keys.sh
-    sample.tetrishrc
-    var/
-        log/        (created at runtime)
-        run/        (sock, pid files)
-    src/
-        tetrish/
-        tetrisd/
-        tetrislogd/
-        tetrisctl/
-        tetrisu/
-    include/                   ← cross-component shared headers only
-    Makefile                   ← umbrella, recurses into each library (planned)
-    README.md
-```
-
----
-
-## Build Instructions
-
-```bash
-# Clone the repository
-git clone <repo-url>
-cd tetriSH
-
-# Generate certificates (first time only)
-bash auth/generate_keys.sh
-```
-
-The umbrella Makefile checks and installs shared native build dependencies:
-GCC/binutils, make, pkg-config, OpenSSL, Readline, and ncurses. Supported Linux
-package managers are apt, dnf/yum, pacman, zypper, and apk. macOS uses Homebrew
-plus the Xcode Command Line Tools.
-
-`src/tetrisu/Makefile` owns tetrisu-only render/audio dependencies: notcurses is
-required, while SDL2 and SDL2_mixer enable optional intro audio. On APT systems,
-Ubuntu may need its `universe` repository for `libnotcurses-dev`. If no APT
-notcurses development package is available, tetrisu can build notcurses from
-source with `INSTALL_NOTCURSES_FROM_SOURCE=1` (default). Fedora has
-`notcurses-devel`; RHEL-compatible systems usually need EPEL/CRB enabled.
-openSUSE Tumbleweed has `notcurses-devel`, while some Leap repos may not.
-Homebrew installs the `pkg-config` command through the `pkgconf` formula.
-Linux/WSL also attempts to install Valgrind for PR/checkoff memory-safety runs,
-but Valgrind is not required just to compile.
-
-```bash
-make deps                         # check and install anything missing
-make check-deps                   # check only; never modifies the system
-make -C src/tetrisu deps          # check/install tetrisu render/audio deps
-make AUTO_INSTALL_DEPS=0          # check-only build for CI/managed machines
-make deps-info                    # show detected OS/WSL and dependency policy
-```
-
-Plain `make` runs `make deps` automatically before compiling. WSL is detected
-separately for diagnostics but uses its Linux distribution's package manager.
-Package installation may request sudo access. Homebrew itself must already be
-installed on macOS; if the Command Line Tools are absent, `make` starts Apple's
-installer and asks you to rerun after it finishes.
-
-Valgrind is not reliably supported on current macOS releases. Run the mandatory
-memory-safety checks on Linux or WSL; use `REQUIRE_VALGRIND=1 make check-deps`
-when you want the dependency check to enforce it.
-
-Each library is self-contained and builds and tests on its own — this is the current build path:
-
-```bash
-make -C lib/libtetrisbrain          # build lib/libtetrisbrain/libtetrisbrain.a
-make -C lib/libtetrisbrain test     # run its unit tests (formatted output)
-make -C lib/libtetrisbrain clean    # remove its objects + test binaries
-```
-
-Once the binaries are added, a top-level umbrella `Makefile` will build everything from the repo root:
-
-```bash
-make             # build all libraries + binaries
-make clean && make   # clean build
-```
-
-To compile your own code against a library, link the archive and add its include path:
-
-```bash
-gcc my_program.c lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include -o my_program
-```
-
----
-
-## Running the System
-
-**1. Copy and edit the config:**
-```bash
-cp sample.tetrishrc .tetrishrc
-# Edit listen_port, cert_path, key_path, ca_path, log_path, log_ipc
-```
-
-**2. Start the shell:**
-```bash
-./bin/tetrish
-```
-
-**3. From inside tetrish, launch the daemons:**
-```
-tetrish$ dspawn tetrislogd &
-tetrish$ dspawn tetrisd &
-```
-
-**4. Connect a client (in a separate terminal):**
-```bash
-./bin/tetrisu
-```
-
-**5. Check server status:**
-```bash
-./bin/tetrisctl status
-```
-
-**6. Graceful shutdown:**
-```bash
-./bin/tetrisctl shutdown
+├── bin/
+│   ├── tetrish
+│   ├── tetrisd
+│   ├── tetrislogd
+│   ├── tetrisctl
+│   └── tetrisu
+├── lib/                           All self-contained libraries live here
+│   ├── libtetrisbrain/            Self-contained library (pattern for all libs)
+│   │   ├── Makefile               make -C lib/libtetrisbrain [test|clean|fclean|re]
+│   │   ├── include/tetrisbrain.h  Public header (-I lib/libtetrisbrain/include)
+│   │   ├── src/*.c                board, pieces, gravity, lineclear, scoring, abilities
+│   │   ├── tests/test_*.c         Unit tests (each with its own main)
+│   │   ├── scripts/run_tests.sh   Formatted test runner
+│   │   ├── obj/                   Generated objects
+│   │   └── libtetrisbrain.a       Generated archive
+│   ├── libtetrissh/               Same self-contained layout
+│   └── libhtttp/                  Same self-contained layout
+├── auth/
+│   ├── server.crt
+│   ├── server.key
+│   ├── cacsertificate.crt
+│   └── generate_keys.sh
+├── sample.tetrishrc
+├── var/
+│   ├── log/                       Created at runtime
+│   └── run/                       sock, pid files
+├── src/
+│   ├── tetrish/
+│   ├── tetrisd/
+│   ├── tetrislogd/
+│   ├── tetrisctl/
+│   └── tetrisu/
+├── include/                       Cross-component shared headers only
+├── Makefile                       Umbrella, recurses into each library (planned)
+└── README.md
 ```
 
 ---
@@ -457,13 +443,10 @@ tetrish$ dspawn tetrisd &
 
 ---
 
-## Authors
+## Contribution
 
-| Role | Member | Owns |
-|---|---|---|
-| Systems | [Name] | tetrish, tetrisd process model, concurrency, tetrislogd, tetrisctl, signal handling, IPC channels |
-| Networking & Security | [Name] | libtetrissh, libhtttp, secure session correctness, HTTTP parser/serialiser, threat model, request dispatch |
-| Application & Integration | [Name] | tetrisu, libtetrisbrain, room lifecycle, game loop, build system, integration tests |
+* [Zi Qi](https://github.com/ziqiqiiii)
+* [Sanjan](https://github.com/DarKSanjan)
 
 ---
 
