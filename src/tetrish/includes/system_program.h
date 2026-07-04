@@ -24,7 +24,9 @@
 # include <pthread.h>
 # include <sys/file.h>
 # include <stdarg.h>
-# include <sys/sysinfo.h>
+# ifdef __linux__
+#  include <sys/sysinfo.h>
+# endif
 
 # include "libft.h"
 # include "get_next_line.h"

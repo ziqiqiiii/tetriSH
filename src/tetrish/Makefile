@@ -82,44 +82,32 @@ SYS_BINS	:= $(SYS_SRC:$(SRC_DIR)/system/%.c=$(BIN_DIR)/%)
 #                                   BUILD                                      #
 ################################################################################
 
-all: check-readline $(NAME) system-programs
+all: check-dependencies $(NAME) system-programs
 
-# --- readline detection / auto-install --------------------------------------
-# Verify the readline header + library can be found; if not, install it using
-# the platform's package manager before the build proceeds.
-check-readline:
-ifeq ($(UNAME), Linux)
-	@ if ! printf '#include <readline/readline.h>\nint main(void){return 0;}\n' \
-		| $(CC) -xc - $(INC_RL) $(READLINE) -o /dev/null >/dev/null 2>&1; then \
-		echo "$(YELLOW)readline not found — installing $(CYAN)libreadline-dev$(CLR_RMV)..."; \
-		sudo apt-get update -qq >/dev/null \
-			&& sudo apt-get install -y -qq libreadline-dev >/dev/null; \
+# A direct `make -C src/tetrish` still gets the cross-platform dependency
+# installer. The umbrella build sets DEPS_READY=1 because it has already run it.
+check-dependencies:
+	@ if [ "$(DEPS_READY)" != "1" ]; then \
+		$(MAKE) --no-print-directory -C ../.. deps; \
 	fi
-endif
-ifeq ($(UNAME), Darwin)
-	@ if ! brew --prefix readline >/dev/null 2>&1; then \
-		echo "$(YELLOW)readline not found — installing $(CYAN)readline$(CLR_RMV) via brew..."; \
-		brew install readline >/dev/null; \
-	fi
-endif
 
 run: all
 	@ LSAN_OPTIONS=suppressions=readline.supp ./$(NAME)
 
 # --- shell object rule (ASan-instrumented, mirrors src/ tree under obj/) -----
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies
 	@ mkdir -p $(dir $@)
 	@ $(CC) $(FLAGS) $(FSAN) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 
 # --- common object rule (no ASan: linked into the plain system binaries) -----
-$(OBJ_DIR)/common/%.o: $(SRC_DIR)/common/%.c
+$(OBJ_DIR)/common/%.o: $(SRC_DIR)/common/%.c | check-dependencies
 	@ mkdir -p $(dir $@)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 
 # --- libft ------------------------------------------------------------------
-$(LIBFT):
+$(LIBFT): | check-dependencies
 	@ echo "$(GREEN)Making $(CYAN)libft$(CLR_RMV) library..."
 	@ $(MAKE) -C $(LIBFT_DIR)
 
@@ -139,7 +127,7 @@ $(NAME): $(LIBFT) $(COMMON_LIB) $(SHELL_OBJ)
 ################################################################################
 
 # Each system program is a standalone binary, linked against libcommon + libft.
-$(BIN_DIR)/%: $(SRC_DIR)/system/%.c $(COMMON_LIB) $(LIBFT)
+$(BIN_DIR)/%: $(SRC_DIR)/system/%.c $(COMMON_LIB) $(LIBFT) | check-dependencies
 	@ mkdir -p $(BIN_DIR)
 	@ $(CC) $(FLAGS) $(INC) $< $(COMMON_LIB) $(LIBFT) -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
@@ -229,6 +217,6 @@ re: fclean all
 
 .PHONY:		all run system-programs unit integration test \
 			ai-unit-tests ai-builtin-tests clean fclean re \
-			reset check-readline
+			reset check-dependencies
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

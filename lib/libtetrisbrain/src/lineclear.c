@@ -4,7 +4,7 @@
 // Compact rows from the bottom up: full rows are skipped (not copied), every
 // other row is copied down into the next free `write` slot. Whatever's left
 // above `write` after the scan gets zeroed (CELL_EMPTY).
-int board_clear_lines(board_t *b) {
+int board_clear_lines(t_board *b) {
   int cleared = 0;
   int write = BOARD_HEIGHT - 1;
 
@@ -22,12 +22,12 @@ int board_clear_lines(board_t *b) {
     }
     if (write != read)
       memcpy(&b->cells[write][0], &b->cells[read][0],
-             sizeof(cell_t) * BOARD_WIDTH);
+             sizeof(t_cell) * BOARD_WIDTH);
     write--;
   }
 
   for (int row = write; row >= 0; row--)
-    memset(&b->cells[row][0], 0, sizeof(cell_t) * BOARD_WIDTH);
+    memset(&b->cells[row][0], 0, sizeof(t_cell) * BOARD_WIDTH);
 
   return cleared;
 }

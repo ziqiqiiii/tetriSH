@@ -342,7 +342,39 @@ cd tetriSH
 bash auth/generate_keys.sh
 ```
 
-Requirements: `gcc`, `make`, `OpenSSL` (libssl + libcrypto), POSIX-compliant OS (Linux recommended).
+The umbrella Makefile checks and installs shared native build dependencies:
+GCC/binutils, make, pkg-config, OpenSSL, Readline, and ncurses. Supported Linux
+package managers are apt, dnf/yum, pacman, zypper, and apk. macOS uses Homebrew
+plus the Xcode Command Line Tools.
+
+`src/tetrisu/Makefile` owns tetrisu-only render/audio dependencies: notcurses is
+required, while SDL2 and SDL2_mixer enable optional intro audio. On APT systems,
+Ubuntu may need its `universe` repository for `libnotcurses-dev`. If no APT
+notcurses development package is available, tetrisu can build notcurses from
+source with `INSTALL_NOTCURSES_FROM_SOURCE=1` (default). Fedora has
+`notcurses-devel`; RHEL-compatible systems usually need EPEL/CRB enabled.
+openSUSE Tumbleweed has `notcurses-devel`, while some Leap repos may not.
+Homebrew installs the `pkg-config` command through the `pkgconf` formula.
+Linux/WSL also attempts to install Valgrind for PR/checkoff memory-safety runs,
+but Valgrind is not required just to compile.
+
+```bash
+make deps                         # check and install anything missing
+make check-deps                   # check only; never modifies the system
+make -C src/tetrisu deps          # check/install tetrisu render/audio deps
+make AUTO_INSTALL_DEPS=0          # check-only build for CI/managed machines
+make deps-info                    # show detected OS/WSL and dependency policy
+```
+
+Plain `make` runs `make deps` automatically before compiling. WSL is detected
+separately for diagnostics but uses its Linux distribution's package manager.
+Package installation may request sudo access. Homebrew itself must already be
+installed on macOS; if the Command Line Tools are absent, `make` starts Apple's
+installer and asks you to rerun after it finishes.
+
+Valgrind is not reliably supported on current macOS releases. Run the mandatory
+memory-safety checks on Linux or WSL; use `REQUIRE_VALGRIND=1 make check-deps`
+when you want the dependency check to enforce it.
 
 Each library is self-contained and builds and tests on its own — this is the current build path:
 
