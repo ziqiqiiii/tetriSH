@@ -170,6 +170,15 @@ Conventions:
 - **Always reset with `$(CLR_RMV)`** after a coloured span.
 - Compile rules `printf` the source file being built (`"$(YELLOW)$<$(CLR_RMV)... "`);
   completion lines `echo` a `[Success] … ✔️` message.
+- **A dependency-check status line reads `$(GREEN)… ready$(CLR_RMV) (<OS>).`** —
+  the green span covers only the "… ready" phrase, with the OS in plain parens
+  after the reset. The umbrella prints `Dependencies ready (Linux).`; a component
+  qualifies it with its own name in the same shape:
+
+  ```make
+  echo "$(GREEN)Dependencies ready$(CLR_RMV) ($(UNAME_S))."          # umbrella
+  echo "$(GREEN)tetrisu dependencies ready$(CLR_RMV) ($(UNAME))."    # component
+  ```
 
 ---
 
@@ -183,27 +192,34 @@ UNAME		:= $(shell uname)
 
 # Readline + AddressSanitizer for Linux
 ifeq ($(UNAME), Linux)
-	READLINE	:= -lreadline
-	INC_RL		:= -I/usr/include/readline
-	FSAN		:= -fsanitize=address -g3
+READLINE	:= -lreadline
+INC_RL		:= -I/usr/include/readline
+FSAN		:= -fsanitize=address -g3
 endif
 
 ifeq ($(UNAME), Darwin)
-	RL_PREFIX	 = $(shell brew --prefix readline)
-	...
+RL_PREFIX	 = $(shell brew --prefix readline)
+...
 endif
 ```
 
 - Compute `UNAME := $(shell uname)` once; branch on it with `ifeq`.
 - Each platform block sets the **same variable names** to platform-appropriate
   values, so downstream rules stay platform-agnostic.
+- **Never indent a conditional directive or its body with a tab.** `ifeq` /
+  `ifneq` / `else` / `endif` and the assignments between them all start at
+  **column 0**. A leading tab makes `make` try to read the line as a *recipe*;
+  inside a conditional this mis-tokenises and can intermittently corrupt a build
+  (e.g. an `export` or assignment silently dropped, breaking a downstream rule
+  only on some runs). The column alignment (§4) is achieved with tabs *after*
+  the variable name, not before it.
 - Platform-specific source exclusions use `filter-out`, with a comment saying
   why:
 
   ```make
   # sys.c relies on Linux-only APIs (e.g. sysinfo); skip it on macOS.
   ifeq ($(UNAME), Darwin)
-  	SYS_SRC	:= $(filter-out $(SRC_DIR)/system/sys.c, $(SYS_SRC))
+  SYS_SRC	:= $(filter-out $(SRC_DIR)/system/sys.c, $(SYS_SRC))
   endif
   ```
 
@@ -276,6 +292,17 @@ libraries and binaries:
 - `fclean` depends on `clean` and additionally `$(MAKE) fclean -C` each
   sub-library — cleanup recurses.
 - `re: fclean all` — always defined as exactly those two prerequisites.
+- **Every recursive `$(MAKE) -C` carries `--no-print-directory`** so an umbrella
+  build isn't buried in `Entering directory` / `Leaving directory` /
+  `make[1]:` noise. Define it once as a variable and reuse it on every recursion
+  (build *and* clean), not just some:
+
+  ```make
+  MAKE_FLAGS	:= --no-print-directory
+
+  libs: | deps
+  	@ for d in $(LIB_DIRS); do $(MAKE) $(MAKE_FLAGS) -C $$d || exit 1; done
+  ```
 - A target that takes an argument validates it and prints usage:
 
   ```make
