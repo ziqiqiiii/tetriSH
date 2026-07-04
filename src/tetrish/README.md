@@ -35,36 +35,16 @@ A POSIX-like shell implemented in C. Supports interactive prompts, command histo
 
 ## Prerequisites
 
-### GCC and Make
+The repository-level Makefile installs shared build dependencies.
 
-- **Linux / WSL**: `sudo apt update && sudo apt install build-essential`
-- **macOS**: `brew install gcc`
-
-### Readline
-
-`make` automatically checks for readline before building and installs it for you
-if it is missing (`libreadline-dev` via `apt` on Linux/WSL, `readline` via Homebrew
-on macOS). The Linux path uses `sudo apt-get install`, so you may be prompted for
-your password during the first build.
-
-To install it manually instead:
-
-**Linux (Debian/Ubuntu)**
 ```bash
-sudo apt install libreadline-dev
+make -C ../.. deps
 ```
 
-**macOS (Homebrew)**
-```bash
-brew install readline
-```
 
-**WSL (Windows Subsystem for Linux)**
-
-WSL runs a Linux distribution, so use the same command as Linux:
+Package installation may request sudo access. Use the following when system changes are not allowed.
 ```bash
-sudo apt update
-sudo apt install libreadline-dev
+make -C ../.. deps AUTO_INSTALL_DEPS=0
 ```
 
 ---
