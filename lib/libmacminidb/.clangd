@@ -1,0 +1,11 @@
+# clangd config for libmacminidb — mirrors the Makefile's INC (-Iinclude -Isrc)
+# so the language server resolves "internal.h"/"macminidb.h" the same way the
+# build does. Without this, clangd can't find the headers (they live in include/,
+# not beside the .c files) and floods every source/test with bogus
+# "unknown type name" / "file not found" errors. Build flags are unchanged; this
+# only teaches the editor where the headers are.
+CompileFlags:
+  Add:
+    - -Iinclude
+    - -Isrc
+  # Tests include <macminidb.h> via the same -Iinclude path above.
