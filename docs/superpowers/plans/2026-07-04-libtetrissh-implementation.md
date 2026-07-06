@@ -4,7 +4,7 @@
 
 **Goal:** Build self-contained `lib/libtetrissh` with authenticated handshake and AES-256 encrypted frame I/O.
 
-**Architecture:** `libtetrissh` is one static library with a public header, private I/O helpers, handshake code, and session frame code. PA2 staff `common.c/common.h` are vendored unchanged inside the library and used for X.509, RSA-PSS, and RSA-OAEP helpers; AES-256-GCM frames are implemented in `session.c` because PA2 common only exposes AES-128-CBC + HMAC.
+**Architecture:** `libtetrissh` is one static library with a public header, private I/O helpers, handshake code, session frame code, and PA2 `common.c/common.h` copied unchanged into normal library paths. PA2 common is used for X.509, RSA-PSS, and RSA-OAEP helpers; AES-256-GCM frames are implemented in `session.c` because PA2 common only exposes AES-128-CBC + HMAC.
 
 **Tech Stack:** C11, POSIX sockets, OpenSSL EVP/X509/RAND, pthreads for socketpair handshake tests, Make static archive.
 
@@ -25,7 +25,7 @@
 
 ## File Structure
 
-- Create `lib/libtetrissh/Makefile`: builds `libtetrissh.a`, test binaries, and vendored PA2 common object.
+- Create `lib/libtetrissh/Makefile`: builds `libtetrissh.a`, test binaries, and PA2 common object.
 - Create `lib/libtetrissh/include/tetrissh.h`: public API and `t_session` state.
 - Create `lib/libtetrissh/src/internal.h`: private constants and helper declarations.
 - Create `lib/libtetrissh/src/io.c`: exact read/write and u32 big-endian helpers.
@@ -36,13 +36,13 @@
 - Create `lib/libtetrissh/tests/test_io.c`: exact I/O tests.
 - Create `lib/libtetrissh/tests/test_session_frames.c`: AES frame tests.
 - Create `lib/libtetrissh/tests/test_handshake_socketpair.c`: client/server end-to-end handshake test.
-- Create `lib/libtetrissh/vendor/pa2_common/includes/libs/common.h`: exact copy of PA2 staff header.
-- Create `lib/libtetrissh/vendor/pa2_common/source/libs/common.c`: exact copy of PA2 staff implementation.
+- Create `lib/libtetrissh/include/libs/common.h`: exact copy of PA2 staff header.
+- Create `lib/libtetrissh/src/common.c`: exact copy of PA2 staff implementation.
 - Modify `README.md`: document final AES-256-GCM frame choice and build command.
 
 ---
 
-### Task 1: Library Skeleton And Vendored PA2 Common
+### Task 1: Library Skeleton And PA2 Common
 
 **Files:**
 - Create: `lib/libtetrissh/Makefile`
@@ -52,11 +52,11 @@
 - Create: `lib/libtetrissh/src/session.c`
 - Create: `lib/libtetrissh/src/handshake.c`
 - Create: `lib/libtetrissh/scripts/run_tests.sh`
-- Create: `lib/libtetrissh/vendor/pa2_common/includes/libs/common.h`
-- Create: `lib/libtetrissh/vendor/pa2_common/source/libs/common.c`
+- Create: `lib/libtetrissh/include/libs/common.h`
+- Create: `lib/libtetrissh/src/common.c`
 
 **Interfaces:**
-- Consumes: PA2 common API from `vendor/pa2_common/includes/libs/common.h`.
+- Consumes: PA2 common API from `include/libs/common.h`.
 - Produces: `libtetrissh.a`, public `tetrissh.h`, stubbed public functions with final signatures.
 
 - [ ] **Step 1: Add PA2 common files unchanged**
@@ -71,15 +71,15 @@ Copy exact file contents from:
 to:
 
 ```text
-lib/libtetrissh/vendor/pa2_common/includes/libs/common.h
-lib/libtetrissh/vendor/pa2_common/source/libs/common.c
+lib/libtetrissh/include/libs/common.h
+lib/libtetrissh/src/common.c
 ```
 
 Do not edit the copied content. Verify exact copy with:
 
 ```bash
-cmp "/mnt/windows_d/coding/50.005_Computer_Systems_Engineering/2026-pa2-50005-mac-mini/includes/libs/common.h" "lib/libtetrissh/vendor/pa2_common/includes/libs/common.h"
-cmp "/mnt/windows_d/coding/50.005_Computer_Systems_Engineering/2026-pa2-50005-mac-mini/source/libs/common.c" "lib/libtetrissh/vendor/pa2_common/source/libs/common.c"
+cmp "/mnt/windows_d/coding/50.005_Computer_Systems_Engineering/2026-pa2-50005-mac-mini/includes/libs/common.h" "lib/libtetrissh/include/libs/common.h"
+cmp "/mnt/windows_d/coding/50.005_Computer_Systems_Engineering/2026-pa2-50005-mac-mini/source/libs/common.c" "lib/libtetrissh/src/common.c"
 ```
 
 Expected: both commands produce no output and exit `0`.
@@ -301,19 +301,19 @@ ARFLAGS := rcs
 RM := rm -rf
 
 CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pedantic
-VENDOR_CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -O2
-INC := -Iinclude -Ivendor/pa2_common/includes
+COMMON_CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -O2
+INC := -Iinclude
 LDLIBS := -lssl -lcrypto
 
 SRC_DIR := src
 OBJ_DIR := obj
 TESTS_DIR := tests
 TEST_BIN_DIR := $(TESTS_DIR)/bin
-VENDOR_SRC := vendor/pa2_common/source/libs/common.c
-VENDOR_OBJ := $(OBJ_DIR)/vendor_common.o
+COMMON_SRC := $(SRC_DIR)/common.c
+COMMON_OBJ := $(OBJ_DIR)/common.o
 
-SRC := $(wildcard $(SRC_DIR)/*.c)
-OBJ := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o) $(VENDOR_OBJ)
+SRC := $(filter-out $(COMMON_SRC),$(wildcard $(SRC_DIR)/*.c))
+OBJ := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o) $(COMMON_OBJ)
 
 TEST_SRC := $(wildcard $(TESTS_DIR)/test_*.c)
 TEST_BINS := $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
@@ -326,9 +326,9 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c include/tetrissh.h $(SRC_DIR)/internal.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(INC) -c $< -o $@
 
-$(VENDOR_OBJ): $(VENDOR_SRC) vendor/pa2_common/includes/libs/common.h
+$(COMMON_OBJ): $(COMMON_SRC) include/libs/common.h
 	@mkdir -p $(OBJ_DIR)
-	$(CC) $(VENDOR_CFLAGS) $(INC) -c $< -o $@
+	$(CC) $(COMMON_CFLAGS) $(INC) -c $< -o $@
 
 $(NAME): $(OBJ)
 	$(AR) $(ARFLAGS) $@ $(OBJ)
@@ -1509,7 +1509,7 @@ Expected: branch pushes one commit.
 Spec coverage:
 
 - Self-contained `lib/libtetrissh`: Task 1.
-- PA2 common vendored unchanged: Task 1 Step 1.
+- PA2 common copied unchanged into normal library paths: Task 1 Step 1.
 - Public API: Task 1 Step 2.
 - Exact socket I/O: Task 2.
 - AES-256-GCM frames, 64 KiB limit, sequence AAD: Task 3.

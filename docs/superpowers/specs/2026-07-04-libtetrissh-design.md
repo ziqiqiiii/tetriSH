@@ -27,7 +27,7 @@ HTTTP message
 
 ## Chosen Approach
 
-Use a self-contained `lib/libtetrissh` directory with vendored read-only PA2 helper files under `lib/libtetrissh/vendor/pa2_common/`.
+Use a self-contained `lib/libtetrissh` directory with read-only PA2 helper files copied into normal library paths: `lib/libtetrissh/src/common.c` and `lib/libtetrissh/include/libs/common.h`.
 
 PA2 `common.c` provides certificate loading, certificate verification, RSA-PSS signing/verification, RSA-OAEP encryption/decryption, and exact socket send/read helpers. It only exposes AES-128-CBC + HMAC for symmetric encryption. CoreStack requires AES-256 frames, so `libtetrissh` will implement its own AES-256-GCM frame functions using OpenSSL EVP. This keeps the handshake aligned with PA2 helpers while matching CoreStack wording for frame encryption.
 
@@ -153,10 +153,10 @@ lib/libtetrissh/
         test_handshake_socketpair.c
     scripts/
         run_tests.sh
-    vendor/
-        pa2_common/
-            includes/libs/common.h
-            source/libs/common.c
+    include/
+        libs/common.h
+    src/
+        common.c
 ```
 
 ## Component Roles
@@ -236,7 +236,7 @@ Each increment must build or fail only on the intentionally missing next layer. 
 Planned increments:
 
 1. Design spec only.
-2. Add vendored PA2 common files and library skeleton.
+2. Add PA2 common files and library skeleton.
 3. Add exact I/O helpers and tests.
 4. Add AES-256-GCM frame send/recv and tests.
 5. Add server handshake.

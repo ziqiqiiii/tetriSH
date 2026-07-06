@@ -5,19 +5,19 @@ ARFLAGS := rcs
 RM := rm -rf
 
 CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pedantic
-VENDOR_CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -O2
-INC := -Iinclude -Ivendor/pa2_common/includes
+COMMON_CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -O2
+INC := -Iinclude
 LDLIBS := -lssl -lcrypto
 
 SRC_DIR := src
 OBJ_DIR := obj
 TESTS_DIR := tests
 TEST_BIN_DIR := $(TESTS_DIR)/bin
-VENDOR_SRC := vendor/pa2_common/source/libs/common.c
-VENDOR_OBJ := $(OBJ_DIR)/vendor_common.o
+COMMON_SRC := $(SRC_DIR)/common.c
+COMMON_OBJ := $(OBJ_DIR)/common.o
 
-SRC := $(wildcard $(SRC_DIR)/*.c)
-OBJ := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o) $(VENDOR_OBJ)
+SRC := $(filter-out $(COMMON_SRC),$(wildcard $(SRC_DIR)/*.c))
+OBJ := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o) $(COMMON_OBJ)
 
 TEST_SRC := $(wildcard $(TESTS_DIR)/test_*.c)
 TEST_BINS := $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
@@ -30,9 +30,9 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c include/tetrissh.h $(SRC_DIR)/internal.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(INC) -c $< -o $@
 
-$(VENDOR_OBJ): $(VENDOR_SRC) vendor/pa2_common/includes/libs/common.h
+$(COMMON_OBJ): $(COMMON_SRC) include/libs/common.h
 	@mkdir -p $(OBJ_DIR)
-	$(CC) $(VENDOR_CFLAGS) $(INC) -c $< -o $@
+	$(CC) $(COMMON_CFLAGS) $(INC) -c $< -o $@
 
 $(NAME): $(OBJ)
 	$(AR) $(ARFLAGS) $@ $(OBJ)
