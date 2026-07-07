@@ -18,7 +18,7 @@ BIN        := bin
 
 # Build only the components that exist yet — the project is in early dev, so
 # the daemon directories are filled in over time.
-LIB_DIRS    := $(wildcard lib/lib*)
+LIB_DIRS    := $(patsubst %/Makefile,%,$(wildcard lib/lib*/Makefile))
 DAEMON_DIRS := $(wildcard src/tetrisd src/tetrislogd src/tetrisctl \
                           src/tetrisu src/chatd src/marketd)
 

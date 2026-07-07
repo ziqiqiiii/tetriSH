@@ -15,6 +15,8 @@ static int	valid_session(const t_session *sess)
 
 static void	build_aad(uint64_t seq, unsigned char marker, unsigned char aad[9])
 {
+	/* AI-assisted: bind sequence and direction into GCM tag so replayed or
+	 * reflected ciphertext fails before plaintext is accepted. */
 	tsh_u64_be(seq, aad);
 	aad[8] = marker;
 }
