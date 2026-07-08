@@ -59,8 +59,42 @@ static void	test_handshake_and_frames(void)
 	printf("PASS test_handshake_and_frames\n");
 }
 
+static void	*server_fail_thread(void *arg)
+{
+	t_server_args	*server;
+
+	server = arg;
+	server->result = session_handshake_server(server->fd, &server->sess,
+		"tests/tmp/certs/server.crt", "tests/tmp/certs/server.key");
+	return (NULL);
+}
+
+static void	test_invalid_ca_fails_client(void)
+{
+	int				fds[2];
+	t_session		client;
+	t_server_args	server;
+	pthread_t		thread;
+
+	assert(system("sh ./scripts/generate_test_certs.sh tests/tmp/certs") == 0);
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+	memset(&client, 0, sizeof(client));
+	memset(&server, 0, sizeof(server));
+	server.fd = fds[1];
+	assert(pthread_create(&thread, NULL, server_fail_thread, &server) == 0);
+	assert(session_handshake_client(fds[0], &client,
+		"tests/tmp/certs/wrong_ca.crt") == -1);
+	shutdown(fds[0], SHUT_RDWR);
+	shutdown(fds[1], SHUT_RDWR);
+	assert(pthread_join(thread, NULL) == 0);
+	close(fds[0]);
+	close(fds[1]);
+	printf("PASS test_invalid_ca_fails_client\n");
+}
+
 int	main(void)
 {
 	test_handshake_and_frames();
+	test_invalid_ca_fails_client();
 	return (0);
 }
