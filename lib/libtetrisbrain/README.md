@@ -9,7 +9,9 @@ The pure game-logic library for tetriSH, implemented in C. Provides the board mo
 - [Features](#features)
 - [Build](#build)
 - [Using the Library](#using-the-library)
+- [Gameplay Sequence](#gameplay-sequence)
 - [Board Model](#board-model)
+- [Class Diagram](#class-diagram)
 - [API Reference](#api-reference)
 - [Result Codes](#result-codes)
 - [Design Constraints](#design-constraints)
@@ -82,12 +84,147 @@ if (gravity_tick(&board, &p) == BRAIN_LOCKED) {
 
 ---
 
+## Gameplay Sequence
+
+`tetrisd` calls `libtetrisbrain` while holding the room mutex. The server owns
+the board, active piece, score, and game lifecycle; the library only evaluates
+or transforms the values passed into each function.
+
+![libtetrisbrain gameplay sequence](assets/libtetrisbrain_gameplay_sequence.svg)
+
+The normal cycle has three stages:
+
+1. **Apply an action** — movement and rotation return `BRAIN_OK` or
+   `BRAIN_BLOCKED`; gravity and soft drop return `BRAIN_OK` or `BRAIN_LOCKED`.
+   Hard drop instead moves the piece directly to its resting position, after
+   which the server enters the locking stage.
+2. **Lock, clear, and score** — after `BRAIN_LOCKED`, the server stamps the
+   piece, clears and compacts full rows, then asks the library for the score,
+   level, and next gravity interval.
+3. **Spawn the next piece** — the library returns its fixed spawn transform.
+   `tetrisd` uses `piece_is_valid` to decide whether play continues or the
+   blocked spawn ends the game.
+
+Battle Royale abilities use a separate short path: `tetrisd` calls the
+appropriate pure board transform under the same room mutex, then broadcasts
+the resulting authoritative state. The editable diagram source is
+[`assets/libtetrisbrain-sequence.puml`](assets/libtetrisbrain-sequence.puml).
+
+---
+
 ## Board Model
 
 - The board is `BOARD_WIDTH` (`10`) columns × `BOARD_HEIGHT` (`20`) rows, indexed `board_get(b, col, row)`.
 - Coordinates are **row-down**: `row 0` is the top, `row 19` the floor. Piece shape offsets follow the same convention.
 - Out-of-bounds reads via `board_get` return `CELL_FILLED` (a solid wall), so collision checks need no per-caller range guards.
 - Cells carry a `t_cell_type` (`CELL_EMPTY`, `CELL_FILLED`, `CELL_GARBAGE`) and an 8-bit `color`; stamped pieces record their `t_piece_type` as the colour.
+
+---
+
+## Class Diagram
+
+No real classes — C structs hold data, and each `src/*.c` module is a group of free
+functions acting on a `t_board *` / `t_piece *`. The diagram below shows the data
+types, the module groupings, and which types each module reads or mutates:
+
+```mermaid
+classDiagram
+    class t_cell_type {
+        <<enum>>
+        CELL_EMPTY
+        CELL_FILLED
+        CELL_GARBAGE
+    }
+    class t_cell {
+        +t_cell_type type
+        +uint8_t color
+    }
+    class t_board {
+        +t_cell cells[20][10]
+    }
+    class t_piece_type {
+        <<enum>>
+        PIECE_I
+        PIECE_O
+        PIECE_T
+        PIECE_S
+        PIECE_Z
+        PIECE_J
+        PIECE_L
+    }
+    class t_piece {
+        +t_piece_type type
+        +int col
+        +int row
+        +int rotation
+    }
+    class t_brain_result {
+        <<enum>>
+        BRAIN_OK
+        BRAIN_BLOCKED
+        BRAIN_LOCKED
+        BRAIN_GAME_OVER
+        BRAIN_CLEARED
+    }
+
+    class Board {
+        <<module: board.c>>
+        +board_init(b)
+        +board_get(b,col,row) t_cell
+        +board_set(b,col,row,cell)
+        +board_in_bounds(col,row) bool
+        +board_inject_garbage(b,lines,hole_col)
+        +board_copy(dst,src)
+    }
+    class Pieces {
+        <<module: pieces.c>>
+        +piece_spawn(type) t_piece
+        +piece_is_valid(b,p) bool
+        +piece_move(b,p,dcol,drow) t_brain_result
+        +piece_rotate(b,p,dir) t_brain_result
+        +piece_stamp(b,p)
+    }
+    class Gravity {
+        <<module: gravity.c>>
+        +gravity_tick(b,p) t_brain_result
+        +piece_soft_drop(b,p) t_brain_result
+        +piece_hard_drop(b,p)
+    }
+    class Lineclear {
+        <<module: lineclear.c>>
+        +board_clear_lines(b) int
+    }
+    class Scoring {
+        <<module: scoring.c>>
+        +score_on_clear(lines,level) int
+        +level_from_lines(total) int
+        +gravity_interval_ms(level) int
+    }
+    class Abilities {
+        <<module: abilities.c>>
+        +board_cut_top(b,n)
+        +board_cut_bottom(b,n)
+        +board_apply_gravity(b)
+        +board_invert(b)
+        +board_fill_rows(b,n,hole_col)
+        +board_clear_cells(b,cols[],rows[],count)
+        +board_delete_columns(b,start,end)
+    }
+
+    t_board *-- t_cell
+    t_cell --> t_cell_type
+    t_piece --> t_piece_type
+    Board ..> t_board : operates on
+    Pieces ..> t_board
+    Pieces ..> t_piece
+    Pieces ..> t_brain_result
+    Gravity ..> t_board
+    Gravity ..> t_piece
+    Gravity ..> t_brain_result
+    Lineclear ..> t_board
+    Abilities ..> t_board
+    Scoring ..> t_brain_result : returns via callers
+```
 
 ---
 

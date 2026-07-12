@@ -304,7 +304,24 @@ TCP reliability, ordering, and congestion control are provided by the kernel. te
 
 ## Secure Session: libtetrissh
 
-The handshake sequence before any HTTTP traffic:
+`libtetrissh` creates a secure connection before the client sends any game
+commands. The same library runs on both sides of the connection, which keeps
+the client and server handshake behaviour consistent.
+
+![tetriSH secure-session sequence](lib/libtetrissh/assets/libtetrissh_secure_session.svg)
+
+The process has three stages:
+
+1. **Connect** — `tetrisu` opens a TCP connection to `tetrisd`, and both sides
+   start the `libtetrissh` handshake.
+2. **Verify and share a key** — the client verifies the server certificate and
+   its RSA-PSS signature over a fresh nonce. It then sends a new AES-256 session
+   key encrypted with the server's public key using RSA-OAEP.
+3. **Play securely** — every subsequent HTTTP command, response, and pushed
+   game state travels as an AES-256 encrypted frame. `tetrisd` remains
+   authoritative and the client renders the returned state.
+
+The detailed handshake sequence is:
 
 1. Client connects, sends a fresh nonce
 2. Server sends its X.509 certificate
@@ -313,6 +330,9 @@ The handshake sequence before any HTTTP traffic:
 5. Client verifies the signature using the public key from the certificate
 6. Client generates a 32-byte AES-256 session key, RSA-OAEP encrypts it with the server's public key, sends it
 7. From this point on, every frame is `[4-byte big-endian length][AES ciphertext]` carrying one HTTTP message
+
+The editable diagram source is available in
+[`lib/libtetrissh/assets/libtetrissh-sequence.puml`](lib/libtetrissh/assets/libtetrissh-sequence.puml).
 
 Frame size limit: 64 KiB. Larger HTTTP messages must be split by the application or rejected with `413 Payload Too Large`.
 

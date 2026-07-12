@@ -1,0 +1,66 @@
+@startuml libtetrissh_secure_session
+
+!theme plain
+
+skinparam backgroundColor #FFF9FC
+skinparam defaultFontName "Avenir Next"
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam roundcorner 14
+skinparam sequence {
+  ArrowColor #756A83
+  ArrowThickness 1.6
+  ParticipantBorderColor #8B7E9F
+  ParticipantBackgroundColor #FFFFFF
+  ParticipantFontColor #40364D
+  LifeLineBorderColor #C8BFD3
+  LifeLineBackgroundColor #F3EDF7
+  NoteBorderColor #9FC5A7
+  NoteBackgroundColor #E8F5E9
+  NoteFontColor #3F6848
+  DividerBackgroundColor #F0E7FA
+  DividerBorderColor #B69ACF
+  DividerFontColor #604978
+}
+
+title <size:22><b>tetriSH Secure Connection</b></size>\n<size:14>A simple view of the libtetrissh handshake</size>
+
+participant "Game Client\n(tetrisu)" as Client #DDF3F5
+participant "Client Security\n(libtetrissh)" as ClientSSH #DFF3E4
+participant "Server Security\n(libtetrissh)" as ServerSSH #E9E2F7
+participant "Game Server\n(tetrisd)" as Server #F9E2DC
+
+== 1. Connect ==
+
+Client -> Server: Open TCP connection
+Server -> ServerSSH: Start secure handshake
+Client -> ClientSSH: Start secure handshake
+
+== 2. Verify server and share a key ==
+
+ClientSSH -> ServerSSH: Fresh random nonce
+ServerSSH --> ClientSSH: Server certificate
+ServerSSH --> ClientSSH: Signed nonce (RSA-PSS)
+ClientSSH -> ClientSSH: Verify certificate and signature
+ClientSSH -> ServerSSH: Encrypted AES-256 session key (RSA-OAEP)
+ServerSSH -> ServerSSH: Decrypt and store session key
+
+note over ClientSSH, ServerSSH
+Secure session established
+end note
+
+== 3. Play over the encrypted session ==
+
+Client -> ClientSSH: HTTTP game command
+ClientSSH -> ServerSSH: AES-256 encrypted frame
+ServerSSH -> Server: Decrypted HTTTP command
+Server -> ServerSSH: HTTTP response / game state
+ServerSSH -> ClientSSH: AES-256 encrypted frame
+ClientSSH -> Client: Decrypted response / game state
+
+note over Client, Server #FFF3CD
+All HTTTP traffic is encrypted after the handshake.
+The server remains authoritative over game state.
+end note
+
+@enduml
