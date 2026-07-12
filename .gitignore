@@ -19,6 +19,8 @@
 # Build output directories
 bin/
 tests/bin/
+tests/tmp/
+**/tests/tmp/
 
 # Libraries
 *.lib

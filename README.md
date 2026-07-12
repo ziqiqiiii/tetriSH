@@ -308,32 +308,47 @@ TCP reliability, ordering, and congestion control are provided by the kernel. te
 
 ## Secure Session: libtetrissh
 
-`libtetrissh` creates a secure connection before the client sends any game
-commands. The same library runs on both sides of the connection, which keeps
-the client and server handshake behaviour consistent.
+`lib/libtetrissh` is a self-contained static library. It builds and tests with:
+
+```bash
+make -C lib/libtetrissh
+make -C lib/libtetrissh test
+```
+
+It creates a secure connection before the client sends any game commands. The
+same library runs on both sides, keeping client and server handshake behaviour
+consistent.
 
 ![tetriSH secure-session sequence](lib/libtetrissh/assets/libtetrissh_secure_session.svg)
 
 The process has three stages:
 
-1. **Connect** — `tetrisu` opens a TCP connection to `tetrisd`, and both sides
+1. **Connect:** `tetrisu` opens a TCP connection to `tetrisd`, and both sides
    start the `libtetrissh` handshake.
-2. **Verify and share a key** — the client verifies the server certificate and
+2. **Verify and share a key:** the client verifies the server certificate and
    its RSA-PSS signature over a fresh nonce. It then sends a new AES-256 session
    key encrypted with the server's public key using RSA-OAEP.
-3. **Play securely** — every subsequent HTTTP command, response, and pushed
-   game state travels as an AES-256 encrypted frame. `tetrisd` remains
+3. **Play securely:** every subsequent HTTTP command, response, and pushed game
+   state travels as an authenticated AES-256-GCM frame. `tetrisd` remains
    authoritative and the client renders the returned state.
 
 The detailed handshake sequence is:
 
-1. Client connects, sends a fresh nonce
-2. Server sends its X.509 certificate
-3. Client verifies the certificate against the bundled CA (`cacsertificate.crt`)
-4. Server signs the client nonce with its private key (RSA-PSS)
-5. Client verifies the signature using the public key from the certificate
-6. Client generates a 32-byte AES-256 session key, RSA-OAEP encrypts it with the server's public key, sends it
-7. From this point on, every frame is `[4-byte big-endian length][AES ciphertext]` carrying one HTTTP message
+1. Client sends a fresh 32-byte nonce.
+2. Server sends its PEM X.509 certificate with a 4-byte big-endian length.
+3. Server signs the client nonce with RSA-PSS/SHA-256 using its private key.
+4. Client verifies the cert against `ca_path` and verifies the nonce signature.
+5. Client generates a fresh 32-byte AES-256 key and wraps it with RSA-OAEP/SHA-256.
+6. Server unwraps the AES key with its private key.
+7. Every HTTTP message after that is sent as one AES-256-GCM frame.
+
+Encrypted frame format:
+
+```text
+frame_len[4] || nonce[12] || tag[16] || ciphertext
+```
+
+`frame_len` counts bytes after the length field. Plaintext is capped at 64 KiB. GCM authenticates a per-direction sequence number, so reordered or replayed frames fail tag verification.
 
 The editable diagram source is available in
 [`lib/libtetrissh/assets/libtetrissh-sequence.puml`](lib/libtetrissh/assets/libtetrissh-sequence.puml).
@@ -450,8 +465,8 @@ project/
 - The CA certificate (`cacsertificate.crt`) is trusted and bundled at compile time; no dynamic CA update path exists
 - The server certificate and private key are stored on the file system and paths are configured in `.tetrishrc`; access control is the operator's responsibility
 - RSA-PSS is used for the server signature over the client nonce; RSA-OAEP is used for AES key wrapping
-- Every post-handshake frame is AES-256 encrypted (CBC or GCM — [document your choice])
-- No replay protection beyond the session nonce is implemented in the baseline; per-session monotonic counters are an optional extension
+- Every post-handshake frame is AES-256-GCM encrypted with a per-frame random nonce and 16-byte tag
+- Per-direction monotonic sequence counters are authenticated as AES-GCM AAD, so replayed or reordered frames fail tag verification
 - The control plane (`tetrisctl`) is local-only (Unix domain socket / named pipe); it is not exposed over the network
 
 ---

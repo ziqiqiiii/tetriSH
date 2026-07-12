@@ -33,34 +33,34 @@ participant "Game Server\n(tetrisd)" as Server #F9E2DC
 == 1. Connect ==
 
 Client -> Server: Open TCP connection
-Server -> ServerSSH: Start secure handshake
-Client -> ClientSSH: Start secure handshake
+Server -> ServerSSH: Start server handshake
+Client -> ClientSSH: Start client handshake
 
 == 2. Verify server and share a key ==
 
-ClientSSH -> ServerSSH: Fresh random nonce
-ServerSSH --> ClientSSH: Server certificate
+ClientSSH -> ServerSSH: Fresh 32-byte nonce
+ServerSSH --> ClientSSH: X.509 certificate
 ServerSSH --> ClientSSH: Signed nonce (RSA-PSS)
 ClientSSH -> ClientSSH: Verify certificate and signature
-ClientSSH -> ServerSSH: Encrypted AES-256 session key (RSA-OAEP)
+ClientSSH -> ServerSSH: Wrapped AES-256 key (RSA-OAEP)
 ServerSSH -> ServerSSH: Decrypt and store session key
 
 note over ClientSSH, ServerSSH
 Secure session established
 end note
 
-== 3. Play over the encrypted session ==
+== 3. Exchange protected messages ==
 
-Client -> ClientSSH: HTTTP game command
-ClientSSH -> ServerSSH: AES-256 encrypted frame
+Client -> ClientSSH: Plaintext HTTTP command
+ClientSSH -> ServerSSH: AES-256-GCM authenticated frame
 ServerSSH -> Server: Decrypted HTTTP command
-Server -> ServerSSH: HTTTP response / game state
-ServerSSH -> ClientSSH: AES-256 encrypted frame
-ClientSSH -> Client: Decrypted response / game state
+Server -> ServerSSH: Plaintext response / STATE
+ServerSSH -> ClientSSH: AES-256-GCM authenticated frame
+ClientSSH -> Client: Decrypted response / STATE
 
 note over Client, Server #FFF3CD
-All HTTTP traffic is encrypted after the handshake.
-The server remains authoritative over game state.
+Every frame uses a fresh GCM nonce and authentication tag.
+Direction markers and sequence counters reject replay or reflection.
 end note
 
 @enduml
