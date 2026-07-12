@@ -1,8 +1,10 @@
 #include "tetrissh.h"
 #include <assert.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void	init_pair(t_session *client, t_session *server, int fds[2])
@@ -103,11 +105,38 @@ static void	test_replay_same_frame_fails(void)
 	printf("PASS test_replay_same_frame_fails\n");
 }
 
+/* AI-assisted: isolate default SIGPIPE handling in a child so the regression
+ * can prove session_send() reports EPIPE without killing its caller. */
+static void	test_closed_peer_returns_error_without_sigpipe(void)
+{
+	t_session	client;
+	t_session	server;
+	int			fds[2];
+	pid_t		pid;
+	int			status;
+
+	init_pair(&client, &server, fds);
+	close(fds[1]);
+	pid = fork();
+	assert(pid >= 0);
+	if (pid == 0)
+	{
+		signal(SIGPIPE, SIG_DFL);
+		_exit(session_send(&client, "x", 1) == -1 ? 0 : 1);
+	}
+	assert(waitpid(pid, &status, 0) == pid);
+	assert(WIFEXITED(status));
+	assert(WEXITSTATUS(status) == 0);
+	close(fds[0]);
+	printf("PASS test_closed_peer_returns_error_without_sigpipe\n");
+}
+
 int	main(void)
 {
 	test_client_to_server_round_trip();
 	test_server_to_client_round_trip();
 	test_oversized_plaintext_rejected();
 	test_replay_same_frame_fails();
+	test_closed_peer_returns_error_without_sigpipe();
 	return (0);
 }

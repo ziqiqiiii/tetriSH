@@ -36,7 +36,9 @@ int	tsh_write_exact(int fd, const void *buf, size_t len)
 	done = 0;
 	while (done < len)
 	{
-		n = send(fd, in + done, len - done, 0);
+		/* AI-assisted: convert closed-peer SIGPIPE into EPIPE so one broken
+		 * connection cannot terminate its daemon process. */
+		n = send(fd, in + done, len - done, MSG_NOSIGNAL);
 		if (n <= 0)
 		{
 			if (n < 0 && errno == EINTR)

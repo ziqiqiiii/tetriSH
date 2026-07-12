@@ -22,7 +22,7 @@ static int	read_file_bytes(const char *path, unsigned char **out,
 	if (fseek(fp, 0, SEEK_END) != 0)
 		return (fclose(fp), -1);
 	size = ftell(fp);
-	if (size <= 0 || size > UINT32_MAX)
+	if (size <= 0 || (unsigned long)size > TSH_MAX_CERT_LEN)
 		return (fclose(fp), -1);
 	rewind(fp);
 	*out = malloc((size_t)size);
@@ -63,6 +63,7 @@ int	session_handshake_server(int fd, t_session *sess,
 	size_t			key_len;
 	EVP_PKEY		*priv;
 	int				ok;
+	int				key_size;
 
 	cert_bytes = NULL;
 	sig = NULL;
@@ -72,15 +73,21 @@ int	session_handshake_server(int fd, t_session *sess,
 	wrapped_len = 0;
 	key_len = 0;
 	ok = -1;
-	if (sess == NULL || cert_path == NULL || key_path == NULL)
+	key_size = 0;
+	if (sess == NULL)
 		return (-1);
 	init_session(sess, fd, TETRISSH_ROLE_SERVER);
+	if (fd < 0 || cert_path == NULL || key_path == NULL)
+		goto cleanup;
 	if (tsh_read_exact(fd, client_nonce, sizeof(client_nonce)) != TSH_IO_OK)
 		goto cleanup;
 	if (read_file_bytes(cert_path, &cert_bytes, &cert_len) != 0)
 		goto cleanup;
 	priv = load_private_key(key_path);
 	if (priv == NULL)
+		goto cleanup;
+	key_size = EVP_PKEY_get_size(priv);
+	if (key_size <= 0)
 		goto cleanup;
 	sig = sign_message_pss(priv, client_nonce, sizeof(client_nonce), &sig_len);
 	if (sig == NULL || sig_len > UINT32_MAX)
@@ -91,7 +98,10 @@ int	session_handshake_server(int fd, t_session *sess,
 		|| tsh_write_u32(fd, sig_len_u32) != 0
 		|| tsh_write_exact(fd, sig, sig_len_u32) != 0)
 		goto cleanup;
-	if (tsh_read_u32(fd, &wrapped_len) != TSH_IO_OK || wrapped_len == 0)
+	/* AI-assisted: RSA blobs must match configured key size so a peer cannot
+	 * force unbounded reads or allocations with a forged length prefix. */
+	if (tsh_read_u32(fd, &wrapped_len) != TSH_IO_OK
+		|| wrapped_len != (uint32_t)key_size)
 		goto cleanup;
 	wrapped = malloc(wrapped_len);
 	if (wrapped == NULL)
@@ -132,6 +142,7 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 	X509			*cert;
 	EVP_PKEY		*pub;
 	int				ok;
+	int				key_size;
 
 	cert_bytes = NULL;
 	sig = NULL;
@@ -140,35 +151,43 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 	pub = NULL;
 	wrapped_len = 0;
 	ok = -1;
-	if (sess == NULL || ca_path == NULL)
+	key_size = 0;
+	if (sess == NULL)
 		return (-1);
 	init_session(sess, fd, TETRISSH_ROLE_CLIENT);
+	if (fd < 0 || ca_path == NULL)
+		goto cleanup;
 	if (RAND_bytes(client_nonce, sizeof(client_nonce)) != 1)
 		goto cleanup;
 	if (tsh_write_exact(fd, client_nonce, sizeof(client_nonce)) != 0)
 		goto cleanup;
-	if (tsh_read_u32(fd, &cert_len) != TSH_IO_OK || cert_len == 0)
+	if (tsh_read_u32(fd, &cert_len) != TSH_IO_OK || cert_len == 0
+		|| cert_len > TSH_MAX_CERT_LEN)
 		goto cleanup;
 	cert_bytes = malloc(cert_len);
 	if (cert_bytes == NULL)
 		goto cleanup;
 	if (tsh_read_exact(fd, cert_bytes, cert_len) != TSH_IO_OK)
 		goto cleanup;
-	if (tsh_read_u32(fd, &sig_len) != TSH_IO_OK || sig_len == 0)
+	cert = load_cert_bytes(cert_bytes, (int)cert_len);
+	if (cert == NULL || verify_server_cert(cert, ca_path) != 1)
+		goto cleanup;
+	pub = X509_get_pubkey(cert);
+	if (pub == NULL)
+		goto cleanup;
+	key_size = EVP_PKEY_get_size(pub);
+	if (key_size <= 0)
+		goto cleanup;
+	if (tsh_read_u32(fd, &sig_len) != TSH_IO_OK
+		|| sig_len != (uint32_t)key_size)
 		goto cleanup;
 	sig = malloc(sig_len);
 	if (sig == NULL)
 		goto cleanup;
 	if (tsh_read_exact(fd, sig, sig_len) != TSH_IO_OK)
 		goto cleanup;
-	cert = load_cert_bytes(cert_bytes, (int)cert_len);
-	if (cert == NULL || verify_server_cert(cert, ca_path) != 1)
-		goto cleanup;
 	if (verify_message_pss(cert, sig, sig_len,
 			client_nonce, sizeof(client_nonce)) != 1)
-		goto cleanup;
-	pub = X509_get_pubkey(cert);
-	if (pub == NULL)
 		goto cleanup;
 	if (RAND_bytes(sess->aes_key, TETRISSH_KEY_LEN) != 1)
 		goto cleanup;

@@ -20,6 +20,21 @@ static void	test_u32_round_trip(void)
 	printf("PASS test_u32_round_trip\n");
 }
 
+static void	test_u32_wire_bytes(void)
+{
+	int				fds[2];
+	unsigned char	buf[4];
+
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+	assert(tsh_write_u32(fds[0], 0x01020304u) == 0);
+	assert(tsh_read_exact(fds[1], buf, sizeof(buf)) == TSH_IO_OK);
+	assert(buf[0] == 0x01 && buf[1] == 0x02);
+	assert(buf[2] == 0x03 && buf[3] == 0x04);
+	close(fds[0]);
+	close(fds[1]);
+	printf("PASS test_u32_wire_bytes\n");
+}
+
 static void	test_exact_buffer_round_trip(void)
 {
 	int			fds[2];
@@ -50,6 +65,18 @@ static void	test_eof_before_payload_is_error(void)
 	printf("PASS test_eof_before_payload_is_error\n");
 }
 
+static void	test_clean_eof_before_payload(void)
+{
+	int		fds[2];
+	char	buf[1];
+
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+	close(fds[0]);
+	assert(tsh_read_exact(fds[1], buf, sizeof(buf)) == TSH_IO_EOF);
+	close(fds[1]);
+	printf("PASS test_clean_eof_before_payload\n");
+}
+
 static void	test_u64_big_endian(void)
 {
 	unsigned char	out[8];
@@ -69,8 +96,10 @@ static void	test_u64_big_endian(void)
 int	main(void)
 {
 	test_u32_round_trip();
+	test_u32_wire_bytes();
 	test_exact_buffer_round_trip();
 	test_eof_before_payload_is_error();
+	test_clean_eof_before_payload();
 	test_u64_big_endian();
 	return (0);
 }
