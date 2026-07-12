@@ -7,6 +7,23 @@ RSA-wrapped session-key exchange, and one-message-per-frame AES-256-GCM I/O.
 Both endpoints use this library. Linking the same implementation into clients
 and daemons prevents handshake and frame-format drift.
 
+## Secure Session Sequence
+
+![libtetrissh secure-session sequence](assets/libtetrissh_secure_session.svg)
+
+Connection has three stages:
+
+1. **Connect:** `tetrisu` opens TCP and both endpoints start their handshake
+   functions.
+2. **Authenticate and exchange a key:** client sends fresh 32-byte nonce. Server
+   returns its X.509 certificate and RSA-PSS signature over that nonce. After
+   verification, client sends fresh AES-256 key wrapped with RSA-OAEP.
+3. **Exchange protected messages:** `session_send()` and `session_recv()` use
+   AES-256-GCM frames for HTTTP commands, responses, and server-pushed `STATE`.
+
+Editable diagram source:
+[`assets/libtetrissh-sequence.puml`](assets/libtetrissh-sequence.puml).
+
 ## Security At A Glance
 
 | Property | Implementation |
