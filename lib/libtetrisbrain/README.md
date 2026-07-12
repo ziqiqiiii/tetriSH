@@ -153,6 +153,11 @@ No real classes — C structs hold data, and each `src/*.c` module is a group of
 functions acting on a `t_board *` / `t_piece *`. The diagram below shows the data
 types, the module groupings, and which types each module reads or mutates:
 
+![libtetrisbrain class diagram](../../docs/class_diagrams/img/libtetrisbrain.png)
+
+The Mermaid definition below is kept as an editable in-README representation of
+the same module and data relationships.
+
 ```mermaid
 classDiagram
     class t_cell_type {
