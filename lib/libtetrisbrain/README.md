@@ -10,6 +10,7 @@ The pure game-logic library for tetriSH, implemented in C. Provides the board mo
 - [Build](#build)
 - [Using the Library](#using-the-library)
 - [Gameplay Sequence](#gameplay-sequence)
+- [Character Ability Sequence](#character-ability-sequence)
 - [Board Model](#board-model)
 - [Class Diagram](#class-diagram)
 - [API Reference](#api-reference)
@@ -105,10 +106,35 @@ The normal cycle has three stages:
    `tetrisd` uses `piece_is_valid` to decide whether play continues or the
    blocked spawn ends the game.
 
-Battle Royale abilities use a separate short path: `tetrisd` calls the
-appropriate pure board transform under the same room mutex, then broadcasts
-the resulting authoritative state. The editable diagram source is
+Battle Royale abilities use a separate path detailed in the next section.
+The editable gameplay-diagram source is
 [`assets/libtetrisbrain-sequence.puml`](assets/libtetrisbrain-sequence.puml).
+
+---
+
+## Character Ability Sequence
+
+Character selection, levels, charges, cooldowns, and targeting belong to
+`tetrisd`. Once the server resolves an ability and locks the target room,
+`abilities.c` applies one of seven pure, in-place board transforms:
+
+![libtetrisbrain character-ability sequence](assets/libtetrisbrain_character_abilities.svg)
+
+| Character | Ability | Library call | Board effect |
+|---|---|---|---|
+| Wolfman | Cut Top | `board_cut_top(b, n)` | Discard the top `n` rows, shift the remaining stack up, and empty the bottom rows |
+| Wolfman | Level 4 Gravity | `board_apply_gravity(b)` | Drop suspended cells to the floor within each column while preserving their order |
+| Mirurun | Cut Bottom | `board_cut_bottom(b, n)` | Discard the bottom `n` rows, shift the remaining stack down, and empty the top rows |
+| Halloween | Dark | `board_invert(b)` | Turn empty cells into garbage and occupied cells into empty cells |
+| Halloween | Burn | `board_fill_rows(b, n, hole_col)` | Replace the bottom `n` rows with garbage while leaving the selected hole |
+| Halloween | Bomb | `board_clear_cells(b, cols, rows, count)` | Clear only the listed board coordinates; ignore out-of-range targets |
+| Princess | Laser | `board_delete_columns(b, start, end)` | Clear an inclusive, bounds-clamped range of columns across the board |
+
+These functions return `void`: they do not approve an ability, select its
+target, charge points, or publish an event. After the transform, `tetrisd`
+copies the authoritative state, releases the room mutex, and broadcasts the
+updated board. The editable diagram source is
+[`assets/libtetrisbrain-abilities-sequence.puml`](assets/libtetrisbrain-abilities-sequence.puml).
 
 ---
 
