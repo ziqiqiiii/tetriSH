@@ -205,7 +205,11 @@ Key API surface (exact signatures defined in `include/tetrissh.h`):
 
 ### libhtttp
 
-`libhtttp` parses incoming HTTTP messages and serialises outgoing ones. Both `tetrisd` and `tetrisu` link against it. See the [Protocol](#protocol-htttp) section for the fixed wire format.
+`libhtttp` is planned as the parser, serialiser, and method-dispatch library for
+plaintext HTTTP messages. Once implemented, `tetrisd`, `tetrisu`, `chatd`, and
+`marketd` will link against it. See the
+[`libhtttp` planned design](lib/libhtttp/README.md) for the proposed message flow
+and the [Protocol](#protocol-htttp) section for the fixed wire format.
 
 ### libtetrisbrain
 

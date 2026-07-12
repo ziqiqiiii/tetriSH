@@ -1,0 +1,85 @@
+@startuml libhtttp_planned_message_flow
+
+!theme plain
+
+skinparam backgroundColor #FFF9FC
+skinparam defaultFontName "Avenir Next"
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam roundcorner 14
+skinparam sequence {
+  ArrowColor #756A83
+  ArrowThickness 1.6
+  ParticipantBorderColor #8B7E9F
+  ParticipantBackgroundColor #FFFFFF
+  ParticipantFontColor #40364D
+  LifeLineBorderColor #C8BFD3
+  LifeLineBackgroundColor #F3EDF7
+  NoteBorderColor #9FC5A7
+  NoteBackgroundColor #E8F5E9
+  NoteFontColor #3F6848
+  DividerBackgroundColor #F0E7FA
+  DividerBorderColor #B69ACF
+  DividerFontColor #604978
+}
+
+title <size:22><b>Planned HTTTP Message Flow</b></size>\n<size:14>One-shot plaintext parsing above the secure session</size>
+
+participant "Client\n(tetrisu)" as Client #DDF3F5
+participant "Protocol\n(libhtttp client)" as ClientHTTP #DFF3E4
+participant "Secure Session\n(libtetrissh + TCP)" as Secure #FFF0C9
+participant "Server\n(tetrisd)" as Server #F9E2DC
+participant "Protocol\n(libhtttp server)" as ServerHTTP #E9E2F7
+
+note over ClientHTTP, ServerHTTP
+Planned boundary: libhtttp handles plaintext only.
+The caller owns all socket, encryption, and game-state work.
+end note
+
+== 1. Client sends a request ==
+
+Client -> ClientHTTP: Structured request
+ClientHTTP -> ClientHTTP: Add Content-Length and serialise\nHTTTP/1.0 with CRLF lines
+ClientHTTP --> Client: Plaintext byte buffer
+Client -> Secure: session_send(plaintext)
+Secure -> Secure: Frame, encrypt, transport,\ndecrypt, and de-frame
+Secure --> Server: session_recv() returns one complete message
+Server -> ServerHTTP: htttp_parse(plaintext)
+ServerHTTP --> Server: Structured message or parse error
+Server -> ServerHTTP: htttp_dispatch(message)
+ServerHTTP --> Server: Invoke registered handler
+Server -> Server: Validate and perform application action
+
+note over Server, ServerHTTP #FFF3CD
+Malformed grammar or CRLF becomes 400.
+Authentication, permissions, room state, and rate limits
+remain daemon responsibilities.
+end note
+
+== 2. Server returns a response ==
+
+Server -> ServerHTTP: Structured response
+ServerHTTP -> ServerHTTP: Add Date and Content-Length,\nthen serialise
+ServerHTTP --> Server: Plaintext byte buffer
+Server -> Secure: session_send(plaintext)
+Secure -> Secure: Encrypt, frame, transport,\ndecrypt, and de-frame
+Secure --> Client: session_recv() returns one complete message
+Client -> ClientHTTP: htttp_parse(plaintext)
+ClientHTTP --> Client: Structured response
+
+== 3. Server may push STATE at any time ==
+
+Server -> ServerHTTP: Structured STATE message
+ServerHTTP --> Server: Serialised plaintext
+Server -> Secure: session_send(plaintext)
+Secure --> Client: Complete decrypted STATE frame
+Client -> ClientHTTP: Parse STATE
+ClientHTTP --> Client: Structured authoritative state
+Client -> Client: Route to renderer
+
+note over Client, Server #FFF3CD
+STATE is unprompted and may arrive between ordinary responses,
+so the client read loop cannot assume one request means one reply.
+end note
+
+@enduml
