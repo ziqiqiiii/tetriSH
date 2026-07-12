@@ -1,8 +1,8 @@
 #include "tetrisu.h"
 
-#define MENU_FIRST_Y_RATIO	0.748
+#define MENU_FIRST_Y_RATIO	0.740
 #define MENU_STEP_Y_RATIO	0.066
-#define BUNNY_LEFT_X_RATIO	0.382
+#define BUNNY_LEFT_X_RATIO	0.395
 #define BUNNY_ROWS_RATIO	0.058
 #define BUNNY_SOURCE_PIXELS_Y	160
 #define BUNNY_SOURCE_PIXELS_X	150
@@ -23,17 +23,23 @@ static int	scale_from_bg(int origin, int size, double ratio)
 	return (origin + (int)((double)size * ratio + 0.5));
 }
 
+static int	menu_step_y(const render_ctx_t *ctx)
+{
+	int	step_y;
+
+	step_y = (int)((double)ctx->bg_rows * MENU_STEP_Y_RATIO + 0.5);
+	if (step_y < 1)
+		step_y = 1;
+	return (step_y);
+}
+
 static int	bunny_y_for_selection(const render_ctx_t *ctx,
 	const menu_selection_t *m)
 {
 	int	center_y;
-	int	step_y;
 
 	center_y = scale_from_bg(ctx->bg_row, ctx->bg_rows, MENU_FIRST_Y_RATIO);
-	step_y = (int)((double)ctx->bg_rows * MENU_STEP_Y_RATIO + 0.5);
-	if (step_y < 1)
-		step_y = 1;
-	return (center_y + (m->selected * step_y) - (ctx->bunny_rows / 2));
+	return (center_y + (m->selected * menu_step_y(ctx)) - (ctx->bunny_rows / 2));
 }
 
 static int	bunny_x(const render_ctx_t *ctx)
@@ -83,11 +89,16 @@ static void	draw_bunny_sprite(render_ctx_t *ctx)
 		return ;
 	}
 	/* AI-assisted: the background image already owns the labels; this selector
-	 * keeps PNG alpha and dense cell blitting so the bunny stays crisp. */
+	 * keeps PNG alpha and dense cell blitting so the bunny stays crisp.
+	 * NCBLIT_PIXEL gives true per-pixel colour where the terminal supports it;
+	 * NCBLIT_2x2 (quadrants) is the fallback since octant/sextant glyphs are
+	 * unreliable across terminal fonts, unlike near-universal quadrant blocks.
+	 * Caveat: pixel-protocol bitmaps aren't cleared by the normal cell-diffing
+	 * damage model, so moving this plane can leave a ghost trail behind it. */
 	memset(&vopts, 0, sizeof(vopts));
 	vopts.n = ctx->bunny_plane;
 	vopts.scaling = NCSCALE_STRETCH;
-	vopts.blitter = NCBLIT_4x2;
+	vopts.blitter = notcurses_canpixel(ctx->nc) ? NCBLIT_PIXEL : NCBLIT_2x2;
 	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	ncvisual_blit(ctx->nc, ncv, &vopts);
 	ncvisual_destroy(ncv);

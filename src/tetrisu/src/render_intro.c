@@ -74,9 +74,12 @@ int	render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
 	memset(&vopts, 0, sizeof(vopts));
 	vopts.n = plane;
 	vopts.scaling = NCSCALE_STRETCH;
-	/* A simpler blitter gives smoother terminal video than the dense bunny
-	 * sprite path; the intro is moving media, so frame rate matters more. */
-	vopts.blitter = NCBLIT_2x2;
+	/* NCBLIT_PIXEL was tried here and made playback slow-motion: every frame
+	 * becomes a full bitmap transfer instead of cheap glyph diffing, and the
+	 * terminal can't encode/send them fast enough to keep up with real time.
+	 * NCBLIT_4x2 (octants) stays glyph/cell-based like 2x2, just denser, so
+	 * it shouldn't carry that same cost. */
+	vopts.blitter = NCBLIT_4x2;
 	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	intro.ctx = ctx;
 	intro.skipped = 0;
