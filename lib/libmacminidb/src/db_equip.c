@@ -26,6 +26,7 @@
 t_db_result	db_equip_character(t_db *db, t_player_id id, t_item_id cid)
 {
 	t_player	*p;
+	t_player	tmp;
 	t_db_result	r;
 
 	if (!db)
@@ -38,8 +39,11 @@ t_db_result	db_equip_character(t_db *db, t_player_id id, t_item_id cid)
 		r = DB_NOT_OWNED;
 	else
 	{
-		p->current_equipped_character = cid;
-		r = db_persist(db, p);
+		tmp = *p;
+		tmp.current_equipped_character = cid;
+		r = db_persist(db, &tmp);
+		if (r == DB_OK)
+			*p = tmp;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
@@ -60,6 +64,7 @@ t_db_result	db_equip_character(t_db *db, t_player_id id, t_item_id cid)
 t_db_result	db_equip_theme(t_db *db, t_player_id id, t_item_id tid)
 {
 	t_player	*p;
+	t_player	tmp;
 	t_db_result	r;
 
 	if (!db)
@@ -72,8 +77,11 @@ t_db_result	db_equip_theme(t_db *db, t_player_id id, t_item_id tid)
 		r = DB_NOT_OWNED;
 	else
 	{
-		p->current_equipped_theme = tid;
-		r = db_persist(db, p);
+		tmp = *p;
+		tmp.current_equipped_character = tid;
+		r = db_persist(db, &tmp);
+		if (r == DB_OK)
+			*p = tmp;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);

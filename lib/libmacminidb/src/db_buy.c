@@ -48,8 +48,9 @@ t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
 		r = DB_FULL;
 	else
 	{
-		p->wallet_points -= c->cost_points;
 		r = grant(db, p, p->owned_characters, &p->owned_characters_count, cid);
+		if (r == DB_OK)
+			p->wallet_points -= c->cost_points;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
@@ -89,8 +90,9 @@ t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
 		r = DB_FULL;
 	else
 	{
-		p->wallet_points -= t->cost_points;
 		r = grant(db, p, p->owned_themes, &p->owned_themes_count, tid);
+		if (r == DB_OK)
+			p->wallet_points -= t->cost_points;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
