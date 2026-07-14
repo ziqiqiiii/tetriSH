@@ -19,9 +19,10 @@ with Doxygen-style function headers.
 9. [Error handling](#9-error-handling)
 10. [Includes](#10-includes)
 11. [Header file formatting](#11-header-file-formatting)
-12. [File naming by responsibility](#12-file-naming-by-responsibility)
-13. [Testing](#13-testing)
-14. [Compilation](#14-compilation)
+12. [Project & directory structure](#12-project--directory-structure)
+13. [File naming by responsibility](#13-file-naming-by-responsibility)
+14. [Testing](#14-testing)
+15. [Compilation](#15-compilation)
 
 ---
 
@@ -65,12 +66,6 @@ Each file is built around a single public/entry function, supported by file-priv
   are first called** from it.
 - `static` helpers are **forward-declared at the top of the file**, right after
   the includes, before any function body.
-- **No function exceeds 25 lines** (counting the body between the opening and
-  closing braces, excluding the signature, braces, and blank lines). Split longer
-  functions into `static` helpers.
-- **Each file holds at most 5 functions** (public + `static` helpers combined).
-  A file that needs more is doing too much — split it, using letter-suffixed
-  overflow files for the same stage (see §12).
 
 ```c
 #include "system_program.h"
@@ -268,114 +263,218 @@ and any `static` file-private helpers/data — never a macro, struct, or library
 include. A macro or type used by just one `.c` file still belongs in the header.
 
 ```c
-/* XXX.h  (directive spacing + struct layout per §11) */
+// XXX.h  (directive spacing + struct layout per §11)
 # include <string.h>
-
-# define GRAVITY_BASE_MS	1000
-
-typedef struct s_cell_offset
+# define GRAVITY_BASE_MS 1000
+typedef struct
 {
-	int8_t	dcol;
-	int8_t	drow;
-}	t_cell_offset;
+  int8_t dcol;
+  int8_t drow;
+}	cell_offset_t;
 
-/* XXX.c — the only include; memcpy, the macro, and the struct all resolve */
-/*         through the header */
-#include "tetrisbrain.h"
+// XXX.c
+#include "tetrisbrain.h"   // the only include; memcpy, the macro, and the
+                           // struct all resolve through the header
 ```
 
 ---
 
 ## 11. Header file formatting
 
-The header is where all shared declarations live (see §10), and it follows the
-conventions of `minishell.h`, distinct from the `.c` files.
+The header is where all shared declarations live (see §10), and it follows a few
+conventions of its own, distinct from the `.c` files:
 
-**The include guard's opening `#ifndef` stays flush**, and every preprocessor
-directive after it carries a **space after `#`** — `# define`, `# include`,
-`# endif`. (In `.c` files the single project include is flush: `#include
-"XXX.h"`.) `# define` **values are tab-aligned** into a single column; comments
-on a directive use C-style `/* */`, not `//`:
+**Preprocessor directives carry a space after `#`** — `# include`, `# define`,
+and the include-guard `# ifndef` / `# define` / `# endif`. (In `.c` files the
+single project include stays flush: `#include "XXX.h"`.)
+
+`# define` **values are tab-aligned** so they line up in a single column:
 
 ```c
-#ifndef MINISHELL_H
-# define MINISHELL_H
+# ifndef TETRISBRAIN_H
+# define TETRISBRAIN_H
 
-# include <stdio.h>				/* printf */
-# include <stdlib.h>			/* malloc, free, exit, getenv */
+# include <stdbool.h>
+# include <string.h>
 
-# include "libft.h"
-# include "common.h"
+# define BOARD_WIDTH		10
+# define BOARD_HEIGHT		20
 
-# define GREEN	"\033[1;32m"
-# define RESET	"\033[0m"
-
-# define EXIT_MISUSE	2		/* Misused of shell built-ins */
-# define EXIT_NO_CMD	127	/* Command not found */
+// Gravity ramp parameters (scoring.c)
+# define GRAVITY_BASE_MS	1000
+# define GRAVITY_STEP_MS	50
+# define GRAVITY_MIN_MS		100
 ```
 
-**`struct` / `enum` carry a named tag** — `e_` for enums, `s_` for structs —
-and are `typedef`'d to a `t_` name. The brace opens on a **new line**, the
-closing `}` is separated from the `t_` name by a **tab**, and members are
-**tab-indented** with their names tab-aligned into a column:
+**`struct` / `enum` / `union` open their brace on a new line**, and the closing
+`}` is separated from the type name by a **tab**. Inside, member names (and enum
+`=`/values) are **tab-aligned** into a column:
 
 ```c
-typedef enum e_token
+typedef enum
 {
-	END,
-	RDAPP,
-	HEREDOC,
-	RDIN,
-	RDOUT,
-	PIPE,
-	COMMAND,
-	NO_OF_TOKEN_TYPES
-}	t_token;
+  CELL_EMPTY	=	0,
+  CELL_FILLED	=	1,
+  CELL_GARBAGE	=	2, // for garbage lines (different color in tetrisu)
+}	cell_type_t;
 
-typedef struct s_tree
+typedef struct
 {
-	t_token			token;
-	char			*value;
-	struct s_tree	*left;
-	struct s_tree	*right;
-}	t_tree;
+  cell_type_t	type;
+  uint8_t		color; // piece color index (0-6), 0 if empty
+}	cell_t;
 ```
 
-Enum members are listed one per line and are **not** forced to carry `= value`
-unless a specific value matters.
-
-**Prototypes are grouped by their owning `.c` file**, under a banner comment of
-the form `/* NN_NAME */` (the source file's stage number + name, C-style `/* */`),
-with a blank line above and below each group. The return type and function name
-are **separated by tabs**, and every prototype across the whole header aligns to
-the same column — one tab past the **longest return type** in the header. Lines
-that run long wrap with a `\` and the continuation indented one tab past that
-column:
+**Prototypes are grouped by their owning `.c` file**, under a banner comment in
+the form `/* FILE.C */` (uppercased file name, C-style `/* */`). The return type
+and function name are **separated by tabs**, and every prototype across the whole
+header aligns to the same column — one tab past the **longest return type** in
+the header (here `brain_result_t`):
 
 ```c
-/* 04_LEXER */
+/* BOARD.C */
+void			board_init(board_t *b);
+cell_t			board_get(const board_t *b, int col, int row);
 
-t_list				*lexer(char *cmd);
-int					count_token(char *cmd);
+/* PIECES.C */
+piece_t			piece_spawn(piece_type_t type);
+brain_result_t	piece_move(const board_t *b, piece_t *p, int dcol, int drow);
 
-/* 05_PARSER */
-
-t_tree				*parser(t_list *lexer, int n_token, t_root *sh);
-t_tree				*tree_node_new(t_token type, char *value, \
-						t_tree *left, t_tree *right);
-
-/* 13_MINISHELL_UTILS */
-
-int					ft_tcsetattr(int fd, int optional_actions, \
-						struct termios *termios_p);
+/* SCORING.C */
+int				score_on_clear(int lines_cleared, int level);
 ```
 
-So shorter return types (`void`, `int`, `t_tree`) get as many tabs as needed to
-reach the same column as the widest one.
+So `brain_result_t` gets one tab; shorter types (`void`, `bool`, `cell_t`,
+`piece_t`, `int`) get as many tabs as needed to reach the same column.
 
 ---
 
-## 12. File naming by responsibility
+## 12. Project & directory structure
+
+Every buildable component is a **self-contained directory** — it owns its
+`Makefile`, `src/`, `tests/`, `scripts/run_tests.sh`, and generated artefacts
+build in place. Consumers only ever reach in through the component's `include`
+path and (for libraries) its `.a`. Three archetypes exist, described below.
+
+### 12.1 Library — `lib/libtetrisbrain`
+
+The canonical self-contained library. Public declarations live in a dedicated
+`include/` directory whose single header shares the library's name; every `.c`
+under `src/` includes **only** that header (see §10). Tests sit flat under
+`tests/`, one `test_<module>.c` per source module.
+
+```
+lib/libtetrisbrain/
+├── Makefile              # make -C lib/libtetrisbrain [test|clean|fclean|re]
+├── include/
+│   └── tetrisbrain.h     # public header — consumers add -I lib/libtetrisbrain/include
+├── src/                  # one .c per module, each #include "tetrisbrain.h"
+│   ├── board.c
+│   ├── pieces.c
+│   ├── gravity.c
+│   ├── lineclear.c
+│   ├── scoring.c
+│   └── abilities.c
+├── tests/                # one test_<module>.c per source module
+│   ├── test_board.c
+│   ├── test_pieces.c
+│   └── ...
+├── scripts/
+│   └── run_tests.sh
+├── obj/                  # generated objects (git-ignored)
+└── libtetrisbrain.a      # generated archive
+```
+
+- **Header placement:** its own `include/` directory, header named after the lib.
+- **`src/` is flat** — no sub-grouping; one file per module.
+- Consumers link `libtetrisbrain.a` and add `-I lib/libtetrisbrain/include`.
+
+### 12.2 Client binary — `src/tetrisu`
+
+A lean terminal binary. It has a **single header at the component root**
+(`tetrisu.h`, not inside an `include/` directory) that every `.c` in the flat
+`src/` includes. Runtime media lives under `assets/`; each responsibility gets
+its own `render_*.c` / topic file.
+
+```
+src/tetrisu/
+├── Makefile
+├── tetrisu.h             # single root header, #include "tetrisu.h" from every src/*.c
+├── src/                  # flat, one file per responsibility
+│   ├── main.c
+│   ├── app_state.c
+│   ├── audio.c
+│   ├── render_background.c
+│   ├── render_intro.c
+│   └── render_menu.c
+├── assets/               # runtime media (images, audio, video)
+├── tests/                # test_<module>.c, flat
+│   └── test_app_state.c
+└── scripts/
+    ├── install_deps.sh   # dependency bootstrap (e.g. notcurses)
+    ├── install_notcurses.sh
+    └── run_tests.sh
+```
+
+- **Header placement:** single header at the component root, named after the
+  binary — no `include/` directory for a small single-header binary.
+- **`src/` is flat**; files are named by responsibility (`render_menu.c`, …).
+- `assets/` holds non-code runtime files; `scripts/` holds dependency install +
+  test runners.
+
+### 12.3 Shell binary bundle — `src/tetrish`
+
+The largest component: a shell plus its bundled system programs and a vendored
+`libft`. Headers go in a **plural `includes/` directory** holding one header per
+domain, and `src/` is **grouped into sub-directories by domain** rather than
+flat. Tests are split by kind under `tests/`.
+
+```
+src/tetrish/
+├── Makefile
+├── includes/             # plural; one header per domain
+│   ├── minishell.h       #   src/shell/*.c  → #include "minishell.h"
+│   ├── system_program.h  #   src/system/*.c → #include "system_program.h"
+│   └── common.h          #   src/common/*.c → #include "common.h"
+├── src/                  # grouped by domain (NOT flat)
+│   ├── shell/            # 00_main.c, 01a_init.c, … numbered by pipeline stage (§13)
+│   ├── system/           # one .c per bundled binary (find.c, backup.c, …)
+│   └── common/           # one helper per file (ft_open.c, perms.c, …)
+├── libft/                # vendored library, self-contained (own Makefile/src/includes)
+├── tests/
+│   ├── unit/             # test_<module>.c
+│   ├── integration/      # test_*.sh
+│   └── unity/            # vendored Unity test framework
+├── files/                # fixtures / sample data
+├── scripts/              # run_tests.sh + gen_*_tests.sh generators
+├── obj/  bin/            # generated (git-ignored)
+├── banner.txt  .macminishellrc  README.md  CLAUDE.md
+```
+
+- **Header placement:** plural `includes/` directory, one header per domain
+  (`minishell.h`, `system_program.h`, `common.h`); each `src/` sub-dir maps to
+  exactly one header (§10).
+- **`src/` is grouped by domain** into `shell/`, `system/`, `common/`.
+- **Tests are split by kind:** `unit/` (C), `integration/` (shell), plus the
+  vendored `unity/` framework; generators live in `scripts/gen_*_tests.sh`.
+- A nested self-contained library (`libft/`) follows the §12.1 library layout in
+  miniature.
+
+### 12.4 Choosing between the archetypes
+
+| Component grows a… | Header(s) | `src/` layout | Tests |
+|---|---|---|---|
+| **Library** (`lib/libXXX`) | `include/XXX.h` | flat, one file per module | flat `tests/test_*.c` |
+| **Small binary** (`tetrisu`) | single root `XXX.h` | flat, one file per responsibility | flat `tests/test_*.c` |
+| **Large binary bundle** (`tetrish`) | plural `includes/`, one per domain | grouped sub-dirs by domain | `tests/{unit,integration,…}` |
+
+A library always uses `include/`. A binary uses a single root header while it
+stays small, and graduates to a plural `includes/` directory with domain-grouped
+`src/` sub-dirs once it spans several domains.
+
+---
+
+## 13. File naming by responsibility
 
 Files are named to make their place in the pipeline / system obvious:
 
@@ -391,7 +490,7 @@ Files are named to make their place in the pipeline / system obvious:
 
 ---
 
-## 13. Testing
+## 14. Testing
 
 Each self-contained library owns its tests under `tests/`, plus a shared
 `scripts/run_tests.sh` that runs them and formats the output. There are two
@@ -439,7 +538,8 @@ exits non-zero.
 
 ---
 
-## 14. Compilation
+## 15. Compilation
 
 Built with `-Wall -Wextra -Werror`; on Linux the build also adds
 `-fsanitize=address -g3`. Code must compile cleanly under these flags.
+
