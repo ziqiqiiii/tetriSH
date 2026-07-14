@@ -57,6 +57,7 @@ typedef struct s_theme
 {
 	t_item_id	theme_id;
 	char		name[DB_MAX_USERNAME];
+	int64_t		cost_points;
 	char		description[DB_THEME_DESC_LEN];
 }	t_theme;
 

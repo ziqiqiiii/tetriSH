@@ -3,8 +3,8 @@
 /*   catalogue_themes.c — parse the theme catalogue (§6)                       */
 /*                                                                            */
 /*   Reads themes.cfg line by line into the catalogue's theme table. Each row  */
-/*   is "id | name | description"; themes are cosmetic only (no gameplay), so  */
-/*   the row carries just an id, a short name, and a longer description.        */
+/*   is "id | name | cost | description"; a theme is cosmetic (no gameplay      */
+/*   effect) but has a wallet_points price, a short name, and a description.    */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -49,23 +49,24 @@ t_db_result	catalogue_parse_themes(const char *config_dir, t_catalogue *c)
 /**
  * @brief Parse one split theme row into a t_theme.
  *
- * Expects exactly three fields (id, name, description). The description may
- * itself contain no '|' (the splitter would have cut it), which suits the
+ * Expects exactly four fields (id, name, cost, description). The description
+ * may itself contain no '|' (the splitter would have cut it), which suits the
  * prose used here. Both strings are copied NUL-terminated within their bounds.
  *
  * @param f The split field pointers.
  * @param n The number of fields present.
  * @param out Destination theme row.
- * @return 0 on success, -1 if the row does not have three fields.
+ * @return 0 on success, -1 if the row does not have four fields.
  */
 static int	parse_theme_row(char **f, int n, t_theme *out)
 {
-	if (n != 3)
+	if (n != 4)
 		return (-1);
 	out->theme_id = (t_item_id)strtoul(f[0], NULL, 10);
 	strncpy(out->name, f[1], DB_MAX_USERNAME - 1);
 	out->name[DB_MAX_USERNAME - 1] = '\0';
-	strncpy(out->description, f[2], DB_THEME_DESC_LEN - 1);
+	out->cost_points = (int64_t)strtoll(f[2], NULL, 10);
+	strncpy(out->description, f[3], DB_THEME_DESC_LEN - 1);
 	out->description[DB_THEME_DESC_LEN - 1] = '\0';
 	return (0);
 }
