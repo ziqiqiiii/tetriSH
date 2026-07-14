@@ -7,22 +7,25 @@ RSA-wrapped session-key exchange, and one-message-per-frame AES-256-GCM I/O.
 Both endpoints use this library. Linking the same implementation into clients
 and daemons prevents handshake and frame-format drift.
 
-## Secure Session Sequence
+---
 
-![libtetrissh secure-session sequence](assets/libtetrissh_secure_session.svg)
+## Table of Contents
 
-Connection has three stages:
+- [Security At A Glance](#security-at-a-glance)
+- [Requirements](#requirements)
+- [Build And Link](#build-and-link)
+- [Quick Start](#quick-start)
+- [Public API](#public-api)
+- [Secure Session Sequence](#secure-session-sequence)
+- [Handshake Wire Protocol](#handshake-wire-protocol)
+- [Encrypted Frame Format](#encrypted-frame-format)
+- [Ownership, Blocking, And Concurrency](#ownership-blocking-and-concurrency)
+- [Error Handling](#error-handling)
+- [Tests](#tests)
+- [File Layout](#file-layout)
+- [Security Scope And Limitations](#security-scope-and-limitations)
 
-1. **Connect:** `tetrisu` opens TCP and both endpoints start their handshake
-   functions.
-2. **Authenticate and exchange a key:** client sends fresh 32-byte nonce. Server
-   returns its X.509 certificate and RSA-PSS signature over that nonce. After
-   verification, client sends fresh AES-256 key wrapped with RSA-OAEP.
-3. **Exchange protected messages:** `session_send()` and `session_recv()` use
-   AES-256-GCM frames for HTTTP commands, responses, and server-pushed `STATE`.
-
-Editable diagram source:
-[`assets/libtetrissh-sequence.puml`](assets/libtetrissh-sequence.puml).
+---
 
 ## Security At A Glance
 
@@ -39,9 +42,9 @@ Editable diagram source:
 | Hostile handshake lengths | Certificate capped; RSA blobs must match key size |
 | Closed-peer writes | `MSG_NOSIGNAL`, returning `-1` instead of killing process |
 
-This is a project-specific secure transport, not TLS. See
-[Security Scope And Limitations](#security-scope-and-limitations) before using it
-outside tetriSH.
+This is a project-specific secure transport, not TLS. See [Security Scope And Limitations](#security-scope-and-limitations) before using it outside tetriSH.
+
+---
 
 ## Requirements
 
@@ -60,6 +63,8 @@ Library-owned sources compile with:
 
 `src/common.c` and `include/libs/common.h` are course-provided crypto helpers and
 must not be modified.
+
+---
 
 ## Build And Link
 
@@ -93,7 +98,9 @@ Include only public header:
 #include "tetrissh.h"
 ```
 
-`src/internal.h` is private and may change without notice.
+`include/internal.h` is private and may change without notice.
+
+---
 
 ## Quick Start
 
@@ -165,6 +172,8 @@ cleanup:
 }
 ```
 
+---
+
 ## Public API
 
 Exact declarations live in `include/tetrissh.h`.
@@ -222,6 +231,27 @@ void session_close(t_session *sess);
 Wipes AES key, clears counters and establishment state, and sets `fd` to `-1`.
 It does **not** call `close(2)`. Caller owns descriptor and must close it.
 
+---
+
+## Secure Session Sequence
+
+![libtetrissh secure-session sequence](assets/libtetrissh_secure_session.svg)
+
+Connection has three stages:
+
+1. **Connect:** `tetrisu` opens TCP and both endpoints start their handshake
+   functions.
+2. **Authenticate and exchange a key:** client sends fresh 32-byte nonce. Server
+   returns its X.509 certificate and RSA-PSS signature over that nonce. After
+   verification, client sends fresh AES-256 key wrapped with RSA-OAEP.
+3. **Exchange protected messages:** `session_send()` and `session_recv()` use
+   AES-256-GCM frames for HTTTP commands, responses, and server-pushed `STATE`.
+
+Editable diagram source:
+[`assets/libtetrissh-sequence.puml`](assets/libtetrissh-sequence.puml).
+
+---
+
 ## Handshake Wire Protocol
 
 All variable-length handshake fields use unsigned 4-byte big-endian prefixes.
@@ -264,6 +294,8 @@ Server checks:
 Successful wire bytes are unchanged by these bounds. Invalid peers are rejected
 before large allocations or blocking body reads.
 
+---
+
 ## Encrypted Frame Format
 
 Every frame carries exactly one application message:
@@ -303,6 +335,8 @@ Reordered, replayed, modified, or reflected frames fail tag verification.
 Zero-length frames are accepted, but `session_recv()` returns `0` for both an
 authenticated empty frame and clean EOF. HTTTP messages are non-empty; callers
 should not send zero-length application frames.
+
+---
 
 ## Ownership, Blocking, And Concurrency
 
@@ -347,6 +381,8 @@ Same-direction operations require caller serialization.
 
 Concurrent operations on different `t_session` objects are independent.
 
+---
+
 ## Error Handling
 
 Treat any handshake or frame `-1` as connection-fatal. Stream may be partially
@@ -373,6 +409,8 @@ Do not retry failed frame on same connection. In particular:
 
 Certificate diagnostics printed during tests originate from frozen
 course-provided `common.c`.
+
+---
 
 ## Tests
 
@@ -414,6 +452,8 @@ AVX-512 `memset` inside `vgpreload_memcheck`, before library code executes.
 Rerun Valgrind on compatible checkoff host; this tooling failure is separate
 from ASan/UBSan and functional results.
 
+---
+
 ## File Layout
 
 ```text
@@ -422,12 +462,12 @@ lib/libtetrissh/
 |-- README.md
 |-- include/
 |   |-- tetrissh.h             public API
+|   |-- internal.h             private constants and declarations
 |   `-- libs/common.h          frozen course helper
 |-- src/
 |   |-- handshake.c            nonce, certificate, RSA-PSS, RSA-OAEP
 |   |-- session.c              AES-256-GCM frame send/receive
 |   |-- io.c                   exact socket I/O and endian helpers
-|   |-- internal.h             private constants and declarations
 |   `-- common.c               frozen course helper
 |-- tests/
 |   `-- test_*.c
@@ -435,6 +475,8 @@ lib/libtetrissh/
     |-- generate_test_certs.sh
     `-- run_tests.sh
 ```
+
+---
 
 ## Security Scope And Limitations
 
