@@ -81,12 +81,12 @@ Each character is worth 30 wallet_points (about 1.5 average games).
 |---|---|---|
 | Default | — | Free (starting theme) |
 | Design and AI | Free for SUTDents | — |
+| Do u wanna build a snowman? | 25 | ~1.25 games |
 | Haaland | 20 | ~1 game |
 | John Cena | 30 | ~1.5 games |
 | Claude-ing | 25 | ~1.25 games |
 | Al-Merqaedes | 35 | ~1.75 games |
 | Nuclear Gandhi | 35 | ~1.75 games |
-| We Celebrate our Differences | 30 | ~1.5 games |
 
 The "est. games" column assumes the 20,000-point (≈ 20 wallet_points) average game.
 
