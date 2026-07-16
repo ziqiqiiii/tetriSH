@@ -2,12 +2,13 @@
 
 #define MENU_FIRST_Y_RATIO	0.740
 #define MENU_STEP_Y_RATIO	0.066
-#define BUNNY_LEFT_X_RATIO	0.395
-#define BUNNY_ROWS_RATIO	0.058
+#define BUNNY_LABEL_X_RATIO	0.443
+#define BUNNY_TEXT_GAP_COLS	2
+#define BUNNY_ROWS_RATIO	0.070
 #define BUNNY_SOURCE_PIXELS_Y	160
 #define BUNNY_SOURCE_PIXELS_X	150
-#define BUNNY_MIN_ROWS		3
-#define BUNNY_MAX_ROWS		8
+#define BUNNY_MIN_ROWS		4
+#define BUNNY_MAX_ROWS		9
 
 static int	clamp_int(int value, int min, int max)
 {
@@ -37,14 +38,30 @@ static int	bunny_y_for_selection(const render_ctx_t *ctx,
 	const menu_selection_t *m)
 {
 	int	center_y;
+	int	y;
+	int	max_y;
 
 	center_y = scale_from_bg(ctx->bg_row, ctx->bg_rows, MENU_FIRST_Y_RATIO);
-	return (center_y + (m->selected * menu_step_y(ctx)) - (ctx->bunny_rows / 2));
+	y = center_y + (m->selected * menu_step_y(ctx)) - (ctx->bunny_rows / 2);
+	max_y = ctx->bg_row + ctx->bg_rows - ctx->bunny_rows;
+	if (max_y < ctx->bg_row)
+		max_y = ctx->bg_row;
+	return (clamp_int(y, ctx->bg_row, max_y));
 }
 
 static int	bunny_x(const render_ctx_t *ctx)
 {
-	return (scale_from_bg(ctx->bg_col, ctx->bg_cols, BUNNY_LEFT_X_RATIO));
+	int	label_x;
+	int	x;
+	int	max_x;
+
+	label_x = scale_from_bg(ctx->bg_col, ctx->bg_cols,
+		BUNNY_LABEL_X_RATIO);
+	x = label_x - ctx->bunny_cols - BUNNY_TEXT_GAP_COLS;
+	max_x = ctx->bg_col + ctx->bg_cols - ctx->bunny_cols;
+	if (max_x < ctx->bg_col)
+		max_x = ctx->bg_col;
+	return (clamp_int(x, ctx->bg_col, max_x));
 }
 
 static int	bunny_cols_for_rows(const render_ctx_t *ctx)
@@ -75,33 +92,99 @@ static void	set_transparent_base(struct ncplane *plane)
 	ncplane_erase(plane);
 }
 
-static void	draw_bunny_sprite(render_ctx_t *ctx)
+static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
+	int y, int x)
+{
+	ncplane_options	opts;
+	struct ncplane	*plane;
+
+	memset(&opts, 0, sizeof(opts));
+	opts.y = y;
+	opts.x = x;
+	opts.rows = ctx->bunny_rows;
+	opts.cols = ctx->bunny_cols;
+	plane = ncplane_create(ctx->std, &opts);
+	if (plane == NULL)
+		return (NULL);
+	set_transparent_base(plane);
+	ncplane_set_fg_rgb8(plane, 220, 175, 255);
+	ncplane_set_bg_alpha(plane, NCALPHA_TRANSPARENT);
+	ncplane_putstr_yx(plane, ctx->bunny_rows / 2,
+		ctx->bunny_cols > 2 ? ctx->bunny_cols - 2 : 0, ">");
+	return (plane);
+}
+
+/* AI-assisted: the homepage is a cell backdrop, so the selector can be one
+ * non-overlapping pixel plane. Moving one whole sprixel keeps its authored
+ * pixels crisp without the multi-image tearing seen in gameplay pieces. */
+static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 {
 	struct ncvisual			*ncv;
 	struct ncvisual_options	vopts;
+	struct ncplane			*plane;
+	int						target_pixels_y;
+	int						target_pixels_x;
 
 	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
 	if (ncv == NULL)
+		return (create_bunny_fallback(ctx, y, x));
+	plane = NULL;
+	target_pixels_y = ctx->bunny_rows * ctx->cell_px_y;
+	target_pixels_x = ctx->bunny_cols * ctx->cell_px_x;
+	if (notcurses_canpixel(ctx->nc)
+		&& ncvisual_resize_noninterpolative(ncv,
+			target_pixels_y, target_pixels_x) == 0)
 	{
-		ncplane_set_fg_rgb8(ctx->bunny_plane, 255, 150, 200);
-		ncplane_set_bg_alpha(ctx->bunny_plane, NCALPHA_TRANSPARENT);
-		ncplane_putstr_yx(ctx->bunny_plane, 1, 1, ">>");
-		return ;
+		memset(&vopts, 0, sizeof(vopts));
+		vopts.n = ctx->std;
+		vopts.scaling = NCSCALE_NONE;
+		vopts.y = y;
+		vopts.x = x;
+		vopts.blitter = NCBLIT_PIXEL;
+		vopts.flags = NCVISUAL_OPTION_CHILDPLANE
+			| NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
+		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
 	}
-	/* AI-assisted: the background image already owns the labels; this selector
-	 * keeps PNG alpha and dense cell blitting so the bunny stays crisp.
-	 * NCBLIT_PIXEL gives true per-pixel colour where the terminal supports it;
-	 * NCBLIT_2x2 (quadrants) is the fallback since octant/sextant glyphs are
-	 * unreliable across terminal fonts, unlike near-universal quadrant blocks.
-	 * Caveat: pixel-protocol bitmaps aren't cleared by the normal cell-diffing
-	 * damage model, so moving this plane can leave a ghost trail behind it. */
-	memset(&vopts, 0, sizeof(vopts));
-	vopts.n = ctx->bunny_plane;
-	vopts.scaling = NCSCALE_STRETCH;
-	vopts.blitter = notcurses_canpixel(ctx->nc) ? NCBLIT_PIXEL : NCBLIT_2x2;
-	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
-	ncvisual_blit(ctx->nc, ncv, &vopts);
+	if (plane != NULL)
+	{
+		ncvisual_destroy(ncv);
+		return (plane);
+	}
 	ncvisual_destroy(ncv);
+	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
+	if (ncv == NULL)
+		return (create_bunny_fallback(ctx, y, x));
+	if (ncvisual_resize_noninterpolative(ncv, ctx->bunny_rows * 4,
+			ctx->bunny_cols * 2) == 0)
+	{
+		memset(&vopts, 0, sizeof(vopts));
+		vopts.n = ctx->std;
+		vopts.scaling = NCSCALE_NONE;
+		vopts.y = y;
+		vopts.x = x;
+		vopts.blitter = NCBLIT_4x2;
+		vopts.flags = NCVISUAL_OPTION_CHILDPLANE
+			| NCVISUAL_OPTION_NOINTERPOLATE;
+		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
+	}
+	if (plane == NULL
+		&& ncvisual_resize_noninterpolative(ncv, ctx->bunny_rows * 2,
+			ctx->bunny_cols) == 0)
+	{
+		memset(&vopts, 0, sizeof(vopts));
+		vopts.n = ctx->std;
+		vopts.scaling = NCSCALE_NONE;
+		vopts.y = y;
+		vopts.x = x;
+		vopts.blitter = NCBLIT_2x1;
+		vopts.flags = NCVISUAL_OPTION_CHILDPLANE
+			| NCVISUAL_OPTION_NOINTERPOLATE;
+		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
+	}
+	ncvisual_destroy(ncv);
+	if (plane == NULL)
+		plane = create_bunny_fallback(ctx, y, x);
+	return (plane);
 }
 
 /**
@@ -115,26 +198,33 @@ static void	draw_bunny_sprite(render_ctx_t *ctx)
  */
 void	render_menu_create(render_ctx_t *ctx)
 {
-	ncplane_options	bunny_opts;
 	menu_selection_t	initial;
+	int					y;
+	int					x;
 
+	render_menu_destroy(ctx);
 	initial.selected = 0;
 	ctx->bunny_rows = clamp_int((int)((double)ctx->bg_rows * BUNNY_ROWS_RATIO
 		+ 0.5), BUNNY_MIN_ROWS, BUNNY_MAX_ROWS);
 	ctx->bunny_cols = bunny_cols_for_rows(ctx);
 	ctx->menu_row = scale_from_bg(ctx->bg_row, ctx->bg_rows,
 		MENU_FIRST_Y_RATIO);
-	ctx->menu_col = scale_from_bg(ctx->bg_col, ctx->bg_cols,
-		BUNNY_LEFT_X_RATIO);
-	memset(&bunny_opts, 0, sizeof(bunny_opts));
-	bunny_opts.y = bunny_y_for_selection(ctx, &initial);
-	bunny_opts.x = bunny_x(ctx);
-	bunny_opts.rows = ctx->bunny_rows;
-	bunny_opts.cols = ctx->bunny_cols;
-	ctx->bunny_plane = ncplane_create(ctx->std, &bunny_opts);
-	set_transparent_base(ctx->bunny_plane);
-	draw_bunny_sprite(ctx);
-	notcurses_render(ctx->nc);
+	ctx->menu_col = bunny_x(ctx);
+	y = bunny_y_for_selection(ctx, &initial);
+	x = bunny_x(ctx);
+	ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
+	if (ctx->bunny_plane != NULL)
+		ncplane_move_top(ctx->bunny_plane);
+	if (notcurses_render(ctx->nc) != 0 && ctx->bunny_plane != NULL)
+	{
+		ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = create_bunny_fallback(ctx, y, x);
+		if (ctx->bunny_plane != NULL)
+		{
+			ncplane_move_top(ctx->bunny_plane);
+			(void)notcurses_render(ctx->nc);
+		}
+	}
 }
 
 /**
@@ -145,9 +235,19 @@ void	render_menu_create(render_ctx_t *ctx)
  */
 void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 {
-	ncplane_move_yx(ctx->bunny_plane, bunny_y_for_selection(ctx, m),
-		bunny_x(ctx));
-	notcurses_render(ctx->nc);
+	if (ctx->bunny_plane == NULL)
+		return ;
+	if (ncplane_move_yx(ctx->bunny_plane, bunny_y_for_selection(ctx, m),
+			bunny_x(ctx)) != 0)
+		return ;
+	if (notcurses_render(ctx->nc) != 0)
+	{
+		ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = create_bunny_fallback(ctx,
+			bunny_y_for_selection(ctx, m), bunny_x(ctx));
+		if (ctx->bunny_plane != NULL)
+			(void)notcurses_render(ctx->nc);
+	}
 }
 
 /**
@@ -158,12 +258,47 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
  */
 void	render_menu_show_message(render_ctx_t *ctx, const char *msg)
 {
+	ncplane_options	opts;
 	unsigned	rows;
 	unsigned	cols;
+	int			x;
 
 	ncplane_dim_yx(ctx->std, &rows, &cols);
-	(void)cols;
-	ncplane_set_fg_rgb8(ctx->std, 255, 255, 255);
-	ncplane_putstr_yx(ctx->std, (int)rows - 1, 2, msg);
-	notcurses_render(ctx->nc);
+	if (ctx->menu_plane != NULL)
+	{
+		ncplane_destroy(ctx->menu_plane);
+		ctx->menu_plane = NULL;
+	}
+	if (rows == 0 || cols == 0)
+		return ;
+	memset(&opts, 0, sizeof(opts));
+	opts.y = (int)rows - 1;
+	opts.x = 0;
+	opts.rows = 1;
+	opts.cols = (int)cols;
+	ctx->menu_plane = ncplane_create(ctx->std, &opts);
+	if (ctx->menu_plane == NULL)
+		return ;
+	set_transparent_base(ctx->menu_plane);
+	ncplane_set_fg_rgb8(ctx->menu_plane, 255, 255, 255);
+	x = ((int)cols - (int)strlen(msg)) / 2;
+	if (x < 0)
+		x = 0;
+	ncplane_putstr_yx(ctx->menu_plane, 0, x, msg);
+	ncplane_move_top(ctx->menu_plane);
+	(void)notcurses_render(ctx->nc);
+}
+
+void	render_menu_destroy(render_ctx_t *ctx)
+{
+	if (ctx->bunny_plane != NULL)
+	{
+		ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = NULL;
+	}
+	if (ctx->menu_plane != NULL)
+	{
+		ncplane_destroy(ctx->menu_plane);
+		ctx->menu_plane = NULL;
+	}
 }

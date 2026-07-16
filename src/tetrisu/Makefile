@@ -16,7 +16,8 @@
 
 NAME		:= tetrisu
 CC			:= gcc
-BASE_FLAGS	:= -Wall -Wextra -Werror
+BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic \
+			   -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS				?= 1
@@ -59,6 +60,10 @@ NAME_PATH	:= $(BIN_DIR)/$(NAME)
 
 HEADER		:= tetrisu.h
 ASSET_DIR	:= $(CURDIR)/assets
+BRAIN_DIR	:= ../../lib/libtetrisbrain
+BRAIN_LIB	:= $(BRAIN_DIR)/libtetrisbrain.a
+BRAIN_INC	:= -I$(BRAIN_DIR)/include
+BRAIN_HEADER	:= $(BRAIN_DIR)/include/tetrisbrain.h
 
 # notcurses (render) is required; SDL2 + SDL2_mixer (audio) are optional and
 # compiled out when absent. These are lazily expanded (=) so the recipes see
@@ -73,7 +78,7 @@ AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
 # Header search path + generated defines shared by every target.
-INC			:= -I.
+INC			:= -I. $(BRAIN_INC)
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
 LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS)
 
@@ -95,7 +100,7 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 #                                   BUILD                                      #
 ################################################################################
 
-all: check-dependencies $(NAME_PATH)
+all: check-dependencies brain $(NAME_PATH)
 
 # A standalone tetrisu build can ask root for shared deps, then this Makefile
 # owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
@@ -106,15 +111,15 @@ check-dependencies:
 	@ $(MAKE) --no-print-directory deps
 
 # --- object rule (header stays at the tetrisu root, reached via -I.) ---------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) | check-dependencies
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) $(BRAIN_HEADER) | check-dependencies brain
 	@ mkdir -p $(dir $@)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) -c $< -o $@
 
 # --- tetrisu binary ---------------------------------------------------------
-$(NAME_PATH): $(OBJ)
+$(NAME_PATH): $(OBJ) $(BRAIN_LIB)
 	@ mkdir -p $(BIN_DIR)
-	@ $(CC) $(FLAGS) $(OBJ) $(LDLIBS) -o $@
+	@ $(CC) $(FLAGS) $(OBJ) $(BRAIN_LIB) $(LDLIBS) -o $@
 	@ echo
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built ✔️"
 
@@ -149,6 +154,9 @@ install-notcurses-from-source:
 	@ NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) \
 		bash ./scripts/install_notcurses.sh
+
+brain:
+	@ $(MAKE) --no-print-directory -C $(BRAIN_DIR)
 
 # Compile and link a tiny notcurses program instead of trusting package state;
 # this catches missing headers, libraries, and unusable pkg-config paths.
@@ -195,10 +203,10 @@ $(LOGIC_LIB): $(LOGIC_OBJ)
 	@ ar rcs $@ $(LOGIC_OBJ)
 
 # --- unit test binaries -----------------------------------------------------
-$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(HEADER)
+$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(BRAIN_LIB) $(HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
-	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) -o $@
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(BRAIN_LIB) -o $@
 	@ echo "ok"
 
 # No automated integration test: notcurses queries the terminal for
@@ -228,7 +236,7 @@ re: fclean all
 #                              PHONY && PRECIOUS                               #
 ################################################################################
 
-.PHONY:		all run deps install-deps install-notcurses-from-source \
+.PHONY:		all run deps install-deps install-notcurses-from-source brain \
 			check-dependencies check-tetrisu-deps test clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

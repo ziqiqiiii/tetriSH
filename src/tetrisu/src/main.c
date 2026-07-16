@@ -1,5 +1,16 @@
 #include "tetrisu.h"
 
+static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
+{
+	render_menu_destroy(ctx);
+	if (render_geometry_refresh(ctx, true) < 0
+		|| render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+		return (-1);
+	render_menu_create(ctx);
+	render_menu_move_bunny(ctx, menu);
+	return (0);
+}
+
 /**
  * @brief Entry point: background image, splash keywait, then the menu loop.
  *
@@ -26,6 +37,11 @@ int	main(void)
 		key = render_wait_key(&ctx);
 		if (key == (uint32_t)-1)
 			state = APP_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (reflow_home(&ctx, &menu) < 0)
+				state = APP_QUIT;
+		}
 		else if (key == NCKEY_UP || key == NCKEY_DOWN)
 		{
 			menu_move_selection(&menu, key);
@@ -35,7 +51,14 @@ int	main(void)
 		else if (key == NCKEY_ENTER || key == '\n')
 		{
 			audio_play_menu_select(&audio);
-			render_menu_show_message(&ctx, menu_stub_text(menu.selected));
+			if (menu.selected == 0)
+			{
+				if (solo_mode_run(&ctx) < 0
+					&& reflow_home(&ctx, &menu) < 0)
+					state = APP_QUIT;
+			}
+			else
+				render_menu_show_message(&ctx, menu_stub_text(menu.selected));
 		}
 		else if (key == '+' || key == '=')
 			audio_volume_up(&audio);
@@ -45,6 +68,8 @@ int	main(void)
 			state = app_handle_key(state, key);
 	}
 	audio_teardown(&audio);
+	render_menu_destroy(&ctx);
+	render_background_destroy(&ctx);
 	render_teardown(&ctx);
 	return (0);
 }

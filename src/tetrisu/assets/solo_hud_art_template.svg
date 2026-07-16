@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tetriSH Solo HUD art template
+  Master canvas: 1580 x 1185 (exactly 4:3)
+  Export at 1580 x 1185, or an exact integer multiple such as 3160 x 2370.
+  Keep every named group on its own layer when importing into an art program.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1580" height="1185" viewBox="0 0 1580 1185">
+  <defs>
+    <pattern id="board-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#58d7ff" stroke-opacity="0.28" stroke-width="2"/>
+    </pattern>
+    <linearGradient id="meter-fill" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff4f93"/>
+      <stop offset="0.55" stop-color="#b156ff"/>
+      <stop offset="1" stop-color="#55e8ff"/>
+    </linearGradient>
+    <filter id="label-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feOffset dy="2" result="offset"/>
+      <feMerge><feMergeNode in="offset"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .panel { fill: #071027; fill-opacity: .56; stroke: #f6e6ff; stroke-width: 5; }
+      .guide { fill: none; stroke: #6cf0ff; stroke-width: 3; }
+      .slot { fill: #101a39; fill-opacity: .62; stroke: #82e9ff; stroke-width: 3; }
+      .label { fill: #ffffff; font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+               font-size: 27px; font-weight: 800; letter-spacing: 1px; }
+      .small { fill: #c8f6ff; font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+               font-size: 19px; font-weight: 650; }
+      .measure { fill: #ffe377; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                 font-size: 18px; font-weight: 700; }
+      .center { text-anchor: middle; dominant-baseline: middle; }
+    </style>
+  </defs>
+
+  <!-- Optional preview layer. Replace this image with finished 4:3 background art. -->
+  <g id="reference-background">
+    <rect width="1580" height="1185" fill="#071467"/>
+    <image x="0" y="0" width="1580" height="1185"
+           xlink:href="default_background_4x3.png"
+           preserveAspectRatio="xMidYMid meet" opacity="0.34"/>
+  </g>
+
+  <!-- Anything essential should remain inside this 60 px safe area. -->
+  <g id="safe-area">
+    <rect x="60" y="40" width="1460" height="1105" rx="18"
+          fill="none" stroke="#ffe377" stroke-opacity="0.72" stroke-width="3"/>
+    <text x="1508" y="66" class="measure" text-anchor="end">SAFE AREA · 60 px</text>
+  </g>
+
+  <g id="screen-title" filter="url(#label-shadow)">
+    <text x="80" y="62" class="label">SINGLE PLAYER MODE</text>
+    <text x="80" y="90" class="small">ENDLESS · TOP OUT ENDS RUN</text>
+  </g>
+
+  <!-- Three upcoming tetrominoes, drawn as block sprites by the renderer. -->
+  <g id="next-strip">
+    <rect x="270" y="110" width="400" height="150" rx="18" class="panel"/>
+    <rect x="286" y="144" width="112" height="98" rx="10" class="slot"/>
+    <rect x="414" y="144" width="112" height="98" rx="10" class="slot"/>
+    <rect x="542" y="144" width="112" height="98" rx="10" class="slot"/>
+    <text x="470" y="130" class="label center">NEXT · 3</text>
+    <text x="342" y="193" class="small center">PIECE 1</text>
+    <text x="470" y="193" class="small center">PIECE 2</text>
+    <text x="598" y="193" class="small center">PIECE 3</text>
+  </g>
+
+  <!-- Visual-only Mirurun crystal/ability charge. Fill bottom-to-top later. -->
+  <g id="crystal-meter">
+    <rect x="190" y="290" width="54" height="800" rx="20" class="panel"/>
+    <rect x="204" y="304" width="26" height="772" rx="10"
+          fill="url(#meter-fill)" fill-opacity="0.28"/>
+    <path d="M204 376H230 M204 453H230 M204 530H230 M204 607H230
+             M204 684H230 M204 761H230 M204 838H230 M204 915H230 M204 992H230"
+          stroke="#f6e6ff" stroke-opacity="0.62" stroke-width="3"/>
+    <text x="156" y="690" class="label center" transform="rotate(-90 156 690)">MIRURUN CRYSTAL METER</text>
+    <text x="217" y="1047" class="small center">0%</text>
+  </g>
+
+  <!-- Exact 10 x 20 playfield. One art tile is 40 x 40 px. -->
+  <g id="playfield">
+    <rect x="270" y="290" width="400" height="800" rx="8" class="panel"/>
+    <rect x="270" y="290" width="400" height="800" rx="8" fill="url(#board-grid)"/>
+    <text x="470" y="670" class="label center">BOARD · 10 × 20</text>
+    <text x="470" y="710" class="small center">TRANSPARENT GLASS</text>
+    <text x="470" y="739" class="small center">BACKGROUND STAYS VISIBLE</text>
+    <text x="470" y="768" class="small center">40 px SQUARE BLOCK ART</text>
+    <text x="470" y="797" class="small center">GHOST PIECE BELOW ACTIVE PIECE</text>
+    <text x="470" y="1102" class="measure center">400 × 800 px</text>
+  </g>
+
+  <!-- Mirurun is aspect-fit and centered; never stretch the character PNG. -->
+  <g id="character-panel">
+    <rect x="790" y="100" width="620" height="420" rx="24" class="panel"/>
+    <rect x="900" y="112" width="400" height="396" rx="20" class="guide"/>
+    <circle cx="1100" cy="310" r="128" fill="#f6e6ff" fill-opacity="0.08" stroke="#ff76ba" stroke-width="4"/>
+    <text x="1100" y="280" class="label center">DEFAULT MIRURUN.PNG</text>
+    <text x="1100" y="321" class="small center">ASPECT-FIT · CENTERED</text>
+    <text x="1100" y="351" class="small center">NO CROP · NO STRETCH</text>
+    <text x="1100" y="495" class="measure center">400 × 400 PNG SAFE BOX</text>
+  </g>
+
+  <!-- Art may provide labels and panel chrome; runtime supplies numeric values. -->
+  <g id="score-panel">
+    <rect x="790" y="565" width="620" height="420" rx="24" class="panel"/>
+    <text x="1100" y="623" class="label center">SCORE PANEL</text>
+    <line x1="835" y1="651" x2="1365" y2="651" stroke="#f6e6ff" stroke-width="4"/>
+    <text x="850" y="718" class="label">SCORE</text>
+    <text x="1350" y="718" class="measure" text-anchor="end">0000000000</text>
+    <text x="850" y="790" class="label">LEVEL</text>
+    <text x="1350" y="790" class="measure" text-anchor="end">01</text>
+    <text x="850" y="862" class="label">LINES</text>
+    <text x="1350" y="862" class="measure" text-anchor="end">000</text>
+    <text x="850" y="934" class="label">COMBO</text>
+    <text x="1350" y="934" class="measure" text-anchor="end">—</text>
+    <text x="1100" y="965" class="small center">RUNTIME TEXT / DIGIT SPRITES GO HERE</text>
+  </g>
+
+  <g id="controls-strip">
+    <rect x="270" y="1110" width="1140" height="45" rx="14" fill="#071027" fill-opacity="0.7"
+          stroke="#f6e6ff" stroke-width="3"/>
+    <text x="840" y="1134" class="small center">← → MOVE · ↓ SOFT DROP · ↑ / X CW · Z CCW · SPACE HARD DROP · P PAUSE · ESC HOME</text>
+  </g>
+
+  <!-- Coordinate anchors help reproduce the layout in Figma/Photoshop/Aseprite. -->
+  <g id="measurements">
+    <text x="470" y="279" class="measure center">PLAYFIELD x=270 y=290</text>
+    <text x="1100" y="552" class="measure center">RIGHT COLUMN x=790 w=620</text>
+    <text x="790" y="1175" class="measure center">MASTER: 1580 × 1185 · 4:3 · DO NOT CROP</text>
+  </g>
+</svg>

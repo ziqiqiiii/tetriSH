@@ -1,6 +1,8 @@
 # tetrisu
 
-The terminal game client for tetriSH, implemented in C on notcurses. Renders an image-based home screen, plays a splash intro video, drives a bunny-selector main menu, and handles keyboard input — with optional SDL2_mixer music and sound effects.
+The terminal game client for tetriSH, implemented in C on notcurses. It renders
+the image-based home screen and now includes a local playable Endless Solo
+Battle while the authoritative `tetrisd` game loop is being built.
 
 ---
 
@@ -21,13 +23,35 @@ The terminal game client for tetriSH, implemented in C on notcurses. Renders an 
 
 ## Features
 
-- Image background blitted onto the notcurses standard plane, letterboxed to preserve the source aspect ratio
+- Image background rendered as a letterboxed 4 x 2 cell backdrop, with the
+  selector bunny kept on its own high-resolution pixel plane
 - Splash intro video streamed over the background, skippable with any key
 - Bunny-sprite menu selector positioned from the rendered background geometry (scales with terminal size)
-- Non-blocking keyboard input; arrow-key selection with wrap-around
+- Kernel-sleeping keyboard input through notcurses' pollable input descriptor;
+  arrow-key selection wraps around
 - Optional background music and menu SFX via SDL2_mixer, with runtime volume control
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
+- Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,
+  ghost piece, move-reset lock delay, modern scoring, and immediate top-row
+  lock-out
+- Responsive 4:3 Solo layout built from one 512 x 384 master canvas, fitted to
+  the terminal without changing the HUD aspect ratio
+- Transparent image HUD with exact `#2E222F` authored borders, 16 x 16
+  tetromino sprites, custom text/number masks, and centered Mirurun art
+- Cell-rendered scenery plus disjoint high-resolution HUD planes; an active
+  piece and its ghost each use one atomic pixel plane, so horizontal movement
+  cannot shear the four blocks apart
+- Dirty row/HUD signatures rebuild only changed content, while the compact
+  control legend uses one crisp terminal-font row
+- Responsive PTY geometry checks reflow Solo between compact and full layouts
+  without busy-waiting when a terminal does not report resize as input
+- Display-only ten-segment Mirurun crystal meter, charged by cleared lines
+- Two-frame, 200 ms sprite animation before cleared rows compact
+
+Hold is intentionally omitted from this project mode. Solo state is temporarily
+local; [the migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes
+how it becomes server-authoritative without rewriting the renderer.
 
 ---
 
@@ -104,8 +128,18 @@ make run
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
+| `Enter` on Solo Battle | Start local Endless Solo |
+| `←` / `→` | Move the active piece |
+| `↑` or `X` | Rotate clockwise |
+| `Z` | Rotate counter-clockwise |
+| `↓` | Soft drop; 1 point per descended cell |
+| `Space` | Hard drop and lock; 2 points per descended cell |
+| `P` | Pause/resume Solo |
+| `R` | Restart after top-out |
+| `Esc` or `Q` | Return from Solo to the home screen |
 
-Menu items are not wired to gameplay yet — selecting one prints a `[<item>] not wired up yet` message.
+Solo Battle opens the playable local mode. The other three menu items still
+print a `[<item>] not wired up yet` message.
 
 ---
 
@@ -113,7 +147,7 @@ Menu items are not wired to gameplay yet — selecting one prints a `[<item>] no
 
 | Item | Status |
 |---|---|
-| `Solo Battle` | Stub — prints "not wired up yet" |
+| `Solo Battle` | Playable local Endless mode; later migrated to `tetrisd` |
 | `Multiplayer Battle` | Stub — prints "not wired up yet" |
 | `Marketplace` | Stub — prints "not wired up yet" |
 | `Options` | Stub — prints "not wired up yet" |
@@ -131,6 +165,12 @@ Asset paths are compile-time macros resolved against `ASSET_DIR` (the Makefile s
 | `INTRO_VIDEO_PATH` | MP4 splash intro streamed over the background |
 | `INTRO_AUDIO_PATH` | MP3 played once alongside the intro |
 | `HOME_BGM_PATH` | Looping home-screen background music |
+| `SOLO_BACKGROUND_PATH` | Full-screen Solo Battle background |
+| `DEFAULT_HUD_PATH` | Transparent 512 x 384 Solo HUD/frame |
+| `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
+| `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
+| `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
+| `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |
 | `MENU_SELECT_SFX_PATH` | Sound on selection confirmation |
 
@@ -154,7 +194,8 @@ render_menu_create         draw the bunny selector over the background
      ▼
   input loop               render_wait_key → dispatch:
      ├── ↑/↓   menu_move_selection + render_menu_move_bunny + move SFX
-     ├── Enter menu_stub_text + render_menu_show_message + select SFX
+     ├── Enter Solo Battle -> solo_mode_run -> return to menu
+     ├── Enter other item -> menu_stub_text + render_menu_show_message
      ├── +/-   audio_volume_up / audio_volume_down
      └── q     APP_QUIT
 ```
@@ -169,6 +210,8 @@ Modules (each a `.c` under `src/`):
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
+| `solo_game.c` | Pure local session state/timing; temporary authority boundary |
+| `render_solo.c` | Cell backdrop, high-resolution HUD/sprite planes, responsive layout, poll-driven input, and animation |
 
 `app_state.c` is pure logic with no rendering or audio dependencies, so it is archived into `obj/logic.a` and linked into the unit tests without pulling in notcurses or SDL.
 
@@ -184,6 +227,8 @@ tetrisu/
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── render_intro.c         Splash video streamer
 │   ├── render_menu.c          Bunny selector + messages
+│   ├── render_solo.c          Solo composition, input loop, clear animation
+│   ├── solo_game.c            Pure local gameplay session
 │   └── audio.c                Optional SDL2_mixer audio
 ├── scripts/
 │   ├── install_deps.sh        Install render/audio packages per OS
@@ -205,4 +250,25 @@ tetrisu/
 make test
 ```
 
-Only `app_state.c` logic is unit-tested — it is the notcurses/SDL-free code, linked from `obj/logic.a`. There is no automated integration test: notcurses blocks on terminal-capability probes that a real terminal answers instantly but a scripted pty does not, so end-to-end verification is a manual `make run`.
+The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
+strict component build without allowing dependency installation with:
+
+```bash
+make clean DEPS_READY=1 AUTO_INSTALL_DEPS=0
+make all test DEPS_READY=1 AUTO_INSTALL_DEPS=0
+```
+
+For a native macOS ownership check, launch the full client through Apple
+`leaks`, exercise Solo repeatedly, then quit normally:
+
+```bash
+MallocStackLogging=1 leaks -atExit -- ./bin/tetrisu
+```
+
+The current renderer was stress-tested through 25 hard drops, five Solo
+exit/re-entry cycles, and live resize between 46 x 60 and 196 x 60 terminal
+cells. Apple `leaks` reported `0 leaks for 0 total leaked bytes`; all 13 Solo
+tests and all seven `libtetrisbrain` suites also pass under AddressSanitizer and
+UndefinedBehaviorSanitizer. A real terminal remains necessary for the final
+graphics check because notcurses performs terminal capability and pixel-
+geometry queries during startup.

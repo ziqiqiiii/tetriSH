@@ -117,6 +117,36 @@ void test_i_piece_wall_kick(void) {
   printf("PASS test_i_piece_wall_kick\n");
 }
 
+void test_rotation_reports_srs_kick_index(void) {
+  t_board b;
+  t_piece p;
+  int kick_index = -1;
+
+  board_init(&b);
+  p = (t_piece){PIECE_T, -1, 0, 1};
+  assert(piece_rotate_with_kick(&b, &p, 1, &kick_index) == BRAIN_OK);
+  assert(kick_index == 1);
+  printf("PASS test_rotation_reports_srs_kick_index\n");
+}
+
+void test_t_spin_three_corner_classification(void) {
+  t_board b;
+  t_piece p = {PIECE_T, 3, 5, 0};
+
+  board_init(&b);
+  board_set(&b, 3, 5, (t_cell){CELL_FILLED, 0});
+  board_set(&b, 5, 5, (t_cell){CELL_FILLED, 0});
+  board_set(&b, 3, 7, (t_cell){CELL_FILLED, 0});
+  assert(piece_t_spin_type(&b, &p, 0) == T_SPIN_FULL);
+  board_init(&b);
+  board_set(&b, 3, 5, (t_cell){CELL_FILLED, 0});
+  board_set(&b, 3, 7, (t_cell){CELL_FILLED, 0});
+  board_set(&b, 5, 7, (t_cell){CELL_FILLED, 0});
+  assert(piece_t_spin_type(&b, &p, 0) == T_SPIN_MINI);
+  assert(piece_t_spin_type(&b, &p, 4) == T_SPIN_FULL);
+  printf("PASS test_t_spin_three_corner_classification\n");
+}
+
 void test_rotate_blocked_returns_blocked(void) {
   t_board b;
   for (int r = 0; r < BOARD_HEIGHT; r++)
@@ -204,6 +234,8 @@ int main(void) {
   test_rotate_basic_updates_rotation();
   test_jlstz_wall_kick();
   test_i_piece_wall_kick();
+  test_rotation_reports_srs_kick_index();
+  test_t_spin_three_corner_classification();
   test_rotate_blocked_returns_blocked();
   test_o_piece_rotate_is_noop();
   test_invalid_type_rejected_safely();

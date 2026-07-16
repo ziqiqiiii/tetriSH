@@ -16,7 +16,7 @@
 
 NAME		:= libtetrisbrain.a
 CC			:= gcc
-FLAGS		:= -Wall -Wextra -Werror
+FLAGS		:= -std=c11 -Wall -Wextra -Werror -pedantic
 AR			:= ar
 ARFLAGS		:= rcs
 RM			:= rm -rf

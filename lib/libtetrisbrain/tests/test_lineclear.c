@@ -75,10 +75,27 @@ void test_two_lines_cleared(void) {
   printf("PASS test_two_lines_cleared\n");
 }
 
+void test_find_full_lines_and_empty_board(void) {
+  t_board b;
+  int rows[BRAIN_MAX_CLEAR_LINES] = {-1, -1, -1, -1};
+
+  board_init(&b);
+  assert(board_is_empty(&b));
+  fill_row(&b, 17, CELL_FILLED, 1);
+  fill_row(&b, 19, CELL_FILLED, 1);
+  assert(!board_is_empty(&b));
+  assert(board_find_full_lines(&b, rows) == 2);
+  assert(rows[0] == 19 && rows[1] == 17);
+  assert(board_clear_lines(&b) == 2);
+  assert(board_is_empty(&b));
+  printf("PASS test_find_full_lines_and_empty_board\n");
+}
+
 int main(void) {
   test_no_full_lines_returns_zero();
   test_single_full_line_cleared();
   test_partial_line_not_cleared();
   test_two_lines_cleared();
+  test_find_full_lines_and_empty_board();
   return 0;
 }
