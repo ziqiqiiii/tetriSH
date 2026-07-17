@@ -18,7 +18,7 @@ static void	reset_piece_timers(solo_game_t *game)
 }
 
 /* AI-assisted: this 20-row local board has no hidden spawn rows, so locking
- * any occupied cell into row 0 is the Solo mode's immediate top-out rule. */
+ * any occupied cell into row 0 triggers Solo mode's visible top-out phase. */
 static bool	piece_touches_top(const t_piece *piece)
 {
 	int	cols[4];
@@ -35,6 +35,13 @@ static bool	piece_touches_top(const t_piece *piece)
 		index++;
 	}
 	return (false);
+}
+
+/* Every top-out path shares one noninteractive reveal before the panel. */
+static void	begin_top_out_reveal(solo_game_t *game)
+{
+	game->top_out_elapsed_ms = 0;
+	game->phase = SOLO_TOP_OUT_REVEAL;
 }
 
 static void	spawn_queued_piece(solo_game_t *game)
@@ -54,7 +61,10 @@ static void	spawn_queued_piece(solo_game_t *game)
 	reset_piece_timers(game);
 	game->phase = SOLO_ACTIVE;
 	if (!piece_is_valid(&game->board, &game->active))
-		game->phase = SOLO_GAME_OVER;
+	{
+		/* A blocked spawn keeps the final settled board visible too. */
+		begin_top_out_reveal(game);
+	}
 }
 
 static void	remember_score_event(solo_game_t *game, int lines,
@@ -98,7 +108,7 @@ static void	lock_active_piece(solo_game_t *game)
 	piece_stamp(&game->board, &game->active);
 	if (piece_touches_top(&game->active))
 	{
-		game->phase = SOLO_GAME_OVER;
+		begin_top_out_reveal(game);
 		return ;
 	}
 	game->clear_count = board_find_full_lines(&game->board, game->clear_rows);
@@ -294,6 +304,21 @@ static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
 	return (game->clear_elapsed_ms == SOLO_CLEAR_ANIMATION_MS / 2);
 }
 
+/* AI-assisted: the final settled board stays visible for one deterministic
+ * deadline; no intermediate wake is needed because the reveal is static. */
+static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms)
+{
+	int	step;
+
+	step = min_int(*remaining_ms,
+		SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms);
+	if (step < 0)
+		step = 0;
+	game->top_out_elapsed_ms += step;
+	*remaining_ms -= step;
+	return (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS);
+}
+
 /* AI-assisted: a monotonic deadline can expire within the same integer
  * millisecond as the previous sample. Consume already-due timer boundaries
  * even when update() receives zero elapsed time, preventing a busy loop. */
@@ -301,6 +326,15 @@ static bool	process_due_event(solo_game_t *game)
 {
 	int	gravity_ms;
 
+	if (game->phase == SOLO_TOP_OUT_REVEAL)
+	{
+		if (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS)
+		{
+			game->phase = SOLO_GAME_OVER;
+			return (true);
+		}
+		return (false);
+	}
 	if (game->phase == SOLO_CLEARING)
 	{
 		if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
@@ -341,29 +375,41 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 	int		remaining_ms;
 	int		due_events;
 	bool	changed;
+	bool	started_in_reveal;
 
 	if (elapsed_ms < 0 || game->paused || game->phase == SOLO_GAME_OVER)
 		return (false);
 	remaining_ms = elapsed_ms;
 	changed = false;
+	started_in_reveal = game->phase == SOLO_TOP_OUT_REVEAL;
 	due_events = 0;
 	while (due_events < 64 && process_due_event(game))
 	{
 		changed = true;
 		due_events++;
 	}
+	/* Do not spend catch-up time on a reveal that began inside this update.
+	 * Returning now guarantees the final board reaches the terminal once. */
+	if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+		return (true);
 	while (remaining_ms > 0 && game->phase != SOLO_GAME_OVER)
 	{
-		if (game->phase == SOLO_CLEARING)
+		if (game->phase == SOLO_TOP_OUT_REVEAL)
+			changed = advance_top_out_reveal(game, &remaining_ms) || changed;
+		else if (game->phase == SOLO_CLEARING)
 			changed = advance_clearing(game, &remaining_ms) || changed;
 		else
 			changed = advance_active(game, &remaining_ms) || changed;
+		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+			return (true);
 		due_events = 0;
 		while (due_events < 64 && process_due_event(game))
 		{
 			changed = true;
 			due_events++;
 		}
+		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+			return (true);
 	}
 	return (changed);
 }
@@ -376,6 +422,13 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
 
 	if (game->paused || game->phase == SOLO_GAME_OVER)
 		return (-1);
+	if (game->phase == SOLO_TOP_OUT_REVEAL)
+	{
+		wake_ms = SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms;
+		if (wake_ms < 0)
+			return (0);
+		return (wake_ms);
+	}
 	if (game->phase == SOLO_CLEARING)
 	{
 		if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
@@ -429,6 +482,6 @@ bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
 
 void	solo_game_toggle_pause(solo_game_t *game)
 {
-	if (game->phase != SOLO_GAME_OVER)
+	if (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING)
 		game->paused = !game->paused;
 }

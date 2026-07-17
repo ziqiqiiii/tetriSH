@@ -48,6 +48,7 @@
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CLEAR_ANIMATION_MS	200
+# define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
 
@@ -98,6 +99,7 @@ typedef enum e_solo_phase
 {
 	SOLO_ACTIVE,
 	SOLO_CLEARING,
+	SOLO_TOP_OUT_REVEAL,
 	SOLO_GAME_OVER
 }	solo_phase_t;
 
@@ -131,6 +133,7 @@ typedef struct s_solo_game
 	int				gravity_elapsed_ms;
 	int				lock_elapsed_ms;
 	int				clear_elapsed_ms;
+	int				top_out_elapsed_ms;
 	int				lock_resets;
 	int				last_kick_index;
 	bool			last_action_was_rotation;
@@ -178,6 +181,7 @@ typedef struct s_solo_render
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
+	bool			piece_planes_combined;
 	bool			layout_valid;
 	bool			assets_ready;
 	bool			planes_ready;

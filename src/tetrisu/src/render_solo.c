@@ -26,6 +26,9 @@
 #define HUD_SCORE_X 272
 #define HUD_SCORE_Y 203
 #define HUD_SCORE_WIDTH 160
+#define HUD_SCORE_STAT_RIGHT_INSET 20
+#define HUD_SCORE_STAT_FIRST_Y 258
+#define HUD_SCORE_STAT_ROW_STEP 22
 #define HUD_CONTROLS_X 80
 #define HUD_CONTROLS_Y 376
 #define HUD_CONTROLS_WIDTH 352
@@ -59,14 +62,11 @@
 #define NUMBER_GLYPH_WIDTH 8
 #define NUMBER_GLYPH_HEIGHT 16
 #define NUMBER_GLYPH_COUNT 14
-#define GHOST_OUTLINE_OPACITY 255u
+#define GHOST_OUTLINE_BLEND 96u
+#define GHOST_INTERIOR_BLEND 24u
 
 #define SOLO_MAX_CATCHUP_MS 1000
 #define SOLO_RESIZE_POLL_MS 100
-
-/* notcurses 3.0.17 cell blitters discard source alpha below 192. */
-_Static_assert(GHOST_OUTLINE_OPACITY >= 192u,
-	"ghost outline must survive cell-blitter alpha quantisation");
 
 typedef struct s_pixel_asset
 {
@@ -91,6 +91,14 @@ typedef struct s_piece_geometry
 	int	min_row;
 	int	max_row;
 }	piece_geometry_t;
+
+typedef struct s_piece_bounds
+{
+	int	min_col;
+	int	max_col;
+	int	min_row;
+	int	max_row;
+}	piece_bounds_t;
 
 static const color_t	g_white = {250, 245, 250};
 static const color_t	g_pink = {255, 112, 190};
@@ -122,6 +130,30 @@ static uint32_t	make_pixel(color_t color, unsigned alpha)
 	pixel = ncpixel(color.r, color.g, color.b);
 	ncpixel_set_a(&pixel, alpha);
 	return (pixel);
+}
+
+/* AI-assisted: preblend ghost ink with the opaque playfield instead of
+ * relying on terminal image alpha, which Notcurses 3.0.17 quantises heavily. */
+static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend)
+{
+	color_t	color;
+
+	if (ncpixel_a(source) == 0)
+		return (0);
+	color.r = (g_playfield.r * (255u - blend) + g_ghost.r * blend + 127u)
+		/ 255u;
+	color.g = (g_playfield.g * (255u - blend) + g_ghost.g * blend + 127u)
+		/ 255u;
+	color.b = (g_playfield.b * (255u - blend) + g_ghost.b * blend + 127u)
+		/ 255u;
+	return (make_pixel(color, 255u));
+}
+
+static uint32_t	ghost_tile_pixel(uint32_t pixel, int x, int y)
+{
+	if (x >= 3 && x < 13 && y >= 3 && y < 13)
+		return (make_ghost_pixel(pixel, GHOST_INTERIOR_BLEND));
+	return (make_ghost_pixel(pixel, GHOST_OUTLINE_BLEND));
 }
 
 static uint32_t	with_opacity(uint32_t pixel, unsigned opacity)
@@ -531,12 +563,7 @@ static bool	load_solo_assets(solo_render_t *solo)
 			HUD_MIRURUN_SIZE, HUD_MIRURUN_SIZE, make_pixel(g_panel, 220));
 		draw_rect(solo->static_pixels, HUD_SCORE_X, HUD_SCORE_Y,
 			HUD_SCORE_WIDTH, HUD_MIRURUN_SIZE, make_pixel(g_panel, 250));
-		draw_rect(solo->static_pixels, HUD_ART_BOARD_LEFT,
-			HUD_ART_BOARD_CONTENT_TOP,
-			HUD_ART_BOARD_RIGHT - HUD_ART_BOARD_LEFT + 1,
-			HUD_ART_BOARD_BOTTOM - HUD_ART_BOARD_CONTENT_TOP
-				+ HUD_ART_BOARD_SHIFT_Y + 1,
-			make_pixel(g_panel, 255));
+		/* The PNG owns every frame pixel; code supplies only the dark interior. */
 		draw_rect(solo->static_pixels, HUD_BOARD_X, HUD_BOARD_Y,
 			HUD_NEXT_WIDTH, HUD_METER_HEIGHT, make_pixel(g_playfield, 255));
 		draw_rect(solo->static_pixels, HUD_CONTROLS_X, HUD_CONTROLS_Y,
@@ -680,6 +707,8 @@ static void	draw_numbers(uint32_t *canvas, const solo_render_t *solo,
 		if (glyph >= 0)
 		{
 			source_x = glyph * NUMBER_SLOT_WIDTH;
+			/* The authored 8px ink starts one pixel before each nominal slot
+			 * after zero; the remaining columns are inter-glyph padding. */
 			if (glyph > 0)
 				source_x--;
 			draw_mask(canvas, solo->number_pixels, solo->number_width,
@@ -746,14 +775,7 @@ static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
 					* TILE_SOURCE_STRIDE + source_y) * solo->tile_width
 				+ source_x];
 			if (outline_only)
-			{
-				pixel = make_pixel(g_ghost, ncpixel_a(pixel));
-				if (source_x >= 3 && source_x < 13
-					&& source_y >= 3 && source_y < 13)
-					pixel = with_opacity(pixel, opacity / 4u);
-				else
-					pixel = with_opacity(pixel, opacity);
-			}
+				pixel = ghost_tile_pixel(pixel, source_x, source_y);
 			else
 				pixel = with_opacity(pixel, opacity);
 			put_pixel(canvas, x + draw_x, y + draw_y, pixel);
@@ -942,41 +964,54 @@ static void	draw_stat_line(uint32_t *canvas, const solo_render_t *solo,
 	int		width;
 
 	snprintf(value_text, sizeof(value_text), "%d", value);
-	draw_text_shadowed(canvas, solo, label, HUD_SCORE_X + 10, y,
+	draw_text_shadowed(canvas, solo, label, HUD_SCORE_X + 10,
+		y + (NUMBER_GLYPH_HEIGHT - 8) / 2,
 		8, 8, 1, g_white);
-	width = text_width(value_text, NUMBER_GLYPH_WIDTH, 1) + 1;
-	draw_numbers_shadowed(canvas, solo, value_text,
-		HUD_SCORE_X + HUD_SCORE_WIDTH - 10 - width, y,
-		NUMBER_GLYPH_WIDTH, NUMBER_GLYPH_HEIGHT, 1, g_white);
+	width = text_width(value_text, NUMBER_GLYPH_WIDTH, 1);
+	draw_numbers(canvas, solo, value_text,
+		HUD_SCORE_X + HUD_SCORE_WIDTH - HUD_SCORE_STAT_RIGHT_INSET - width, y,
+		NUMBER_GLYPH_WIDTH, NUMBER_GLYPH_HEIGHT, 1, g_white, 255u);
 }
 
-static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
-	uint64_t score)
+/* AI-assisted: scale long score/award strings before centering so their
+ * shadows remain inside the independently refreshed 160px score plane. */
+static void	draw_numbers_centered_fit(uint32_t *canvas,
+	const solo_render_t *solo, const char *text, int y, color_t tint)
 {
-	char	score_text[32];
 	int		length;
 	int		glyph_width;
 	int		glyph_height;
 	int		spacing;
 	int		width;
 
-	snprintf(score_text, sizeof(score_text), "%010" PRIu64, score);
-	length = (int)strlen(score_text);
+	length = (int)strlen(text);
+	if (length == 0)
+		return ;
 	glyph_width = NUMBER_GLYPH_WIDTH;
 	glyph_height = NUMBER_GLYPH_HEIGHT;
 	spacing = 1;
-	width = text_width(score_text, glyph_width, spacing) + 1;
+	width = text_width(text, glyph_width, spacing) + 1;
 	if (width > HUD_SCORE_WIDTH - 16)
 	{
 		spacing = 0;
 		glyph_width = (HUD_SCORE_WIDTH - 16) / length;
 		glyph_height = glyph_width * NUMBER_GLYPH_HEIGHT
 			/ NUMBER_GLYPH_WIDTH;
-		width = text_width(score_text, glyph_width, spacing) + 1;
+		width = text_width(text, glyph_width, spacing) + 1;
 	}
-	draw_numbers_shadowed(canvas, solo, score_text,
-		HUD_SCORE_X + (HUD_SCORE_WIDTH - width) / 2, HUD_SCORE_Y + 23,
-		glyph_width, glyph_height, spacing, g_pink);
+	draw_numbers_shadowed(canvas, solo, text,
+		HUD_SCORE_X + (HUD_SCORE_WIDTH - width) / 2, y,
+		glyph_width, glyph_height, spacing, tint);
+}
+
+static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
+	uint64_t score)
+{
+	char	score_text[32];
+
+	snprintf(score_text, sizeof(score_text), "%010" PRIu64, score);
+	draw_numbers_centered_fit(canvas, solo, score_text, HUD_SCORE_Y + 23,
+		g_pink);
 }
 
 static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
@@ -984,7 +1019,6 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 {
 	char	points[32];
 	int		combo;
-	int		width;
 
 	draw_text_centered(canvas, solo, "SCORE",
 		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 6,
@@ -993,25 +1027,25 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 	combo = game->scoring.combo;
 	if (combo < 0)
 		combo = 0;
-	draw_stat_line(canvas, solo, "LEVEL", game->level, HUD_SCORE_Y + 53);
-	draw_stat_line(canvas, solo, "LINES", game->total_lines, HUD_SCORE_Y + 69);
-	draw_stat_line(canvas, solo, "COMBO", combo, HUD_SCORE_Y + 85);
+	draw_stat_line(canvas, solo, "LEVEL", game->level,
+		HUD_SCORE_STAT_FIRST_Y);
+	draw_stat_line(canvas, solo, "LINES", game->total_lines,
+		HUD_SCORE_STAT_FIRST_Y + HUD_SCORE_STAT_ROW_STEP);
+	draw_stat_line(canvas, solo, "COMBO", combo,
+		HUD_SCORE_STAT_FIRST_Y + 2 * HUD_SCORE_STAT_ROW_STEP);
 	if (game->scoring.back_to_back)
 		draw_text_centered(canvas, solo, "BACK-TO-BACK",
-			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 102,
+			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 118,
 			8, 8, 1, g_pink);
 	if (game->last_score.total_awarded > 0)
 	{
 		draw_text_centered(canvas, solo, clear_name(game),
-			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 115,
+			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 130,
 			8, 8, 1, g_white);
 		snprintf(points, sizeof(points), "+%" PRIu64,
 			game->last_score.total_awarded);
-		width = text_width(points, NUMBER_GLYPH_WIDTH, 1) + 1;
-		draw_numbers_shadowed(canvas, solo, points,
-			HUD_SCORE_X + (HUD_SCORE_WIDTH - width) / 2,
-			HUD_SCORE_Y + 130, NUMBER_GLYPH_WIDTH,
-			NUMBER_GLYPH_HEIGHT, 1, g_pink);
+		draw_numbers_centered_fit(canvas, solo, points, HUD_SCORE_Y + 143,
+			g_pink);
 	}
 }
 
@@ -1058,15 +1092,14 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 #define SOLO_MIRURUN_Y 32
 #define SOLO_MIRURUN_WIDTH 160
 #define SOLO_MIRURUN_HEIGHT 160
-#define SOLO_SCORE_X 272
 #define SOLO_SCORE_HEADER_Y 192
 #define SOLO_SCORE_HEADER_HEIGHT 32
 #define SOLO_SCORE_VALUE_Y 224
 #define SOLO_SCORE_VALUE_HEIGHT 32
 #define SOLO_SCORE_STATS_Y 256
-#define SOLO_SCORE_STATS_HEIGHT 48
-#define SOLO_SCORE_EVENT_Y 304
-#define SOLO_SCORE_EVENT_HEIGHT 64
+#define SOLO_SCORE_STATS_HEIGHT 64
+#define SOLO_SCORE_EVENT_Y 320
+#define SOLO_SCORE_EVENT_HEIGHT 48
 #define SOLO_CONTROLS_X 80
 #define SOLO_CONTROLS_WIDTH 352
 #define SOLO_BOARD_WIDTH 160
@@ -1080,10 +1113,23 @@ _Static_assert(HUD_BOARD_X % HUD_TILE_SIZE == 0
 	&& SOLO_METER_X % HUD_TILE_SIZE == 0
 	&& SOLO_METER_Y % HUD_TILE_SIZE == 0
 	&& SOLO_MIRURUN_X % HUD_TILE_SIZE == 0
-	&& SOLO_MIRURUN_Y % HUD_TILE_SIZE == 0
-	&& SOLO_SCORE_X % HUD_TILE_SIZE == 0
-	&& SOLO_SCORE_HEADER_Y % HUD_TILE_SIZE == 0,
+	&& SOLO_MIRURUN_Y % HUD_TILE_SIZE == 0,
 	"pixel region origins must align to the 16px HUD grid");
+/* Adjacent score planes keep each dynamic pixel in one refreshable region. */
+_Static_assert(HUD_SCORE_X % HUD_TILE_SIZE == 0
+	&& HUD_SCORE_WIDTH % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_HEADER_Y % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_HEADER_HEIGHT % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_VALUE_Y % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_VALUE_HEIGHT % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_STATS_Y % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_STATS_HEIGHT % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_EVENT_Y % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_EVENT_HEIGHT % HUD_TILE_SIZE == 0
+	&& SOLO_SCORE_HEADER_Y + SOLO_SCORE_HEADER_HEIGHT == SOLO_SCORE_VALUE_Y
+	&& SOLO_SCORE_VALUE_Y + SOLO_SCORE_VALUE_HEIGHT == SOLO_SCORE_STATS_Y
+	&& SOLO_SCORE_STATS_Y + SOLO_SCORE_STATS_HEIGHT == SOLO_SCORE_EVENT_Y,
+	"score pixel regions must be aligned and non-overlapping");
 _Static_assert(SOLO_CONTROLS_X % HUD_TILE_SIZE == 0
 	&& SOLO_CONTROLS_WIDTH % HUD_TILE_SIZE == 0,
 	"controls cell region must align horizontally to the HUD grid");
@@ -1128,6 +1174,7 @@ static void	destroy_board_tiles(solo_render_t *solo)
 	}
 	solo->active_shape_signature = UINT64_MAX;
 	solo->ghost_shape_signature = UINT64_MAX;
+	solo->piece_planes_combined = false;
 }
 
 static void	destroy_board_planes(solo_render_t *solo)
@@ -1154,6 +1201,7 @@ static void	reset_render_signatures(solo_render_t *solo)
 	solo->overlay_signature = UINT64_MAX;
 	solo->active_shape_signature = UINT64_MAX;
 	solo->ghost_shape_signature = UINT64_MAX;
+	solo->piece_planes_combined = false;
 }
 
 static void	destroy_solo_planes(solo_render_t *solo)
@@ -1592,13 +1640,7 @@ static void	copy_tile_pixels(const solo_render_t *solo, int tile_index,
 			pixel = solo->tile_pixels[(size_t)(tile_index * TILE_SOURCE_STRIDE
 					+ y) * solo->tile_width + x];
 			if (ghost)
-			{
-				pixel = make_pixel(g_ghost, ncpixel_a(pixel));
-				if (x >= 3 && x < 13 && y >= 3 && y < 13)
-					pixel = with_opacity(pixel, GHOST_OUTLINE_OPACITY / 4u);
-				else
-					pixel = with_opacity(pixel, GHOST_OUTLINE_OPACITY);
-			}
+				pixel = ghost_tile_pixel(pixel, x, y);
 			destination[(size_t)y * destination_stride + x] = pixel;
 			x++;
 		}
@@ -1742,6 +1784,141 @@ static bool	piece_rectangles_overlap(const piece_geometry_t *first,
 		&& first->max_row >= second->min_row);
 }
 
+static void	piece_pair_bounds(const piece_geometry_t *active,
+	const piece_geometry_t *ghost, piece_bounds_t *bounds)
+{
+	bounds->min_col = active->min_col;
+	if (ghost->min_col < bounds->min_col)
+		bounds->min_col = ghost->min_col;
+	bounds->max_col = active->max_col;
+	if (ghost->max_col > bounds->max_col)
+		bounds->max_col = ghost->max_col;
+	bounds->min_row = active->min_row;
+	if (ghost->min_row < bounds->min_row)
+		bounds->min_row = ghost->min_row;
+	bounds->max_row = active->max_row;
+	if (ghost->max_row > bounds->max_row)
+		bounds->max_row = ghost->max_row;
+}
+
+static uint64_t	piece_pair_signature(const piece_geometry_t *active,
+	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+	int tile_index)
+{
+	uint64_t	hash;
+	int			index;
+
+	hash = UINT64_C(1469598103934665603);
+	hash = hash_value(hash, UINT64_C(0x70616972));
+	hash = hash_value(hash, (uint64_t)tile_index);
+	index = 0;
+	while (index < 4)
+	{
+		hash = hash_value(hash,
+			(uint64_t)(active->cols[index] - bounds->min_col));
+		hash = hash_value(hash,
+			(uint64_t)(active->rows[index] - bounds->min_row));
+		index++;
+	}
+	index = 0;
+	while (index < 4)
+	{
+		hash = hash_value(hash,
+			(uint64_t)(ghost->cols[index] - bounds->min_col));
+		hash = hash_value(hash,
+			(uint64_t)(ghost->rows[index] - bounds->min_row));
+		index++;
+	}
+	return (hash);
+}
+
+/* AI-assisted: when the active and ghost rectangles overlap, compose both into
+ * one bitmap so terminal image elision cannot make the ghost flicker away. */
+static struct ncplane	*create_piece_pair_plane(render_ctx_t *ctx,
+	solo_render_t *solo, const piece_geometry_t *active,
+	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+	int tile_index)
+{
+	struct ncplane	*plane;
+	uint32_t		*pixels;
+	int				width;
+	int				height;
+	int				index;
+	size_t			pixel_bytes;
+
+	width = (bounds->max_col - bounds->min_col + 1) * TILE_SOURCE_SIZE;
+	height = (bounds->max_row - bounds->min_row + 1) * TILE_SOURCE_SIZE;
+	if (!pixel_buffer_bytes(width, height, &pixel_bytes))
+		return (NULL);
+	pixels = calloc(1, pixel_bytes);
+	if (pixels == NULL)
+		return (NULL);
+	index = 0;
+	while (index < 4)
+	{
+		copy_tile_pixels(solo, tile_index,
+			&pixels[(size_t)(ghost->rows[index] - bounds->min_row)
+				* TILE_SOURCE_SIZE * width
+				+ (ghost->cols[index] - bounds->min_col) * TILE_SOURCE_SIZE],
+			width, true);
+		index++;
+	}
+	index = 0;
+	while (index < 4)
+	{
+		copy_tile_pixels(solo, tile_index,
+			&pixels[(size_t)(active->rows[index] - bounds->min_row)
+				* TILE_SOURCE_SIZE * width
+				+ (active->cols[index] - bounds->min_col) * TILE_SOURCE_SIZE],
+			width, false);
+		index++;
+	}
+	plane = create_pixel_plane_at(ctx, solo, pixels, width, height, width,
+		HUD_BOARD_X + bounds->min_col * HUD_TILE_SIZE,
+		HUD_BOARD_Y + bounds->min_row * HUD_TILE_SIZE);
+	free(pixels);
+	return (plane);
+}
+
+static int	position_piece_pair(render_ctx_t *ctx, solo_render_t *solo,
+	struct ncplane **plane, uint64_t *cached_signature,
+	const piece_geometry_t *active, const piece_geometry_t *ghost,
+	int tile_index)
+{
+	uint64_t		signature;
+	piece_bounds_t	bounds;
+	int				y;
+	int				x;
+	int				old_y;
+	int				old_x;
+
+	piece_pair_bounds(active, ghost, &bounds);
+	if (bounds.min_col < 0 || bounds.max_col >= BOARD_WIDTH
+		|| bounds.min_row < 0 || bounds.max_row >= BOARD_HEIGHT)
+		return (-1);
+	signature = piece_pair_signature(active, ghost, &bounds, tile_index);
+	if (*plane == NULL || signature != *cached_signature)
+	{
+		destroy_plane(plane);
+		*plane = create_piece_pair_plane(ctx, solo, active, ghost, &bounds,
+			tile_index);
+		if (*plane == NULL)
+			return (-1);
+		*cached_signature = signature;
+		return (1);
+	}
+	y = solo->canvas_row + (HUD_BOARD_Y / HUD_TILE_SIZE + bounds.min_row)
+		* solo->tile_rows;
+	x = solo->canvas_col + (HUD_BOARD_X / HUD_TILE_SIZE + bounds.min_col)
+		* solo->tile_cols;
+	ncplane_yx(*plane, &old_y, &old_x);
+	if (old_y == y && old_x == x)
+		return (0);
+	if (ncplane_move_yx(*plane, y, x) != 0)
+		return (-1);
+	return (1);
+}
+
 static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
 	solo_render_t *solo, const piece_geometry_t *geometry, int tile_index,
 	bool ghost)
@@ -1817,6 +1994,7 @@ static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
 	t_piece			ghost;
 	piece_geometry_t	active_geometry;
 	piece_geometry_t	ghost_geometry;
+	bool				overlaps;
 	int				tile_index;
 	int				result;
 	int				changed;
@@ -1828,6 +2006,7 @@ static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
 		destroy_plane(&solo->ghost_plane);
 		solo->active_shape_signature = UINT64_MAX;
 		solo->ghost_shape_signature = UINT64_MAX;
+		solo->piece_planes_combined = false;
 		return (changed);
 	}
 	ghost = solo_game_ghost(game);
@@ -1835,25 +2014,38 @@ static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
 		|| !piece_geometry(&ghost, &ghost_geometry))
 		return (-1);
 	tile_index = tile_index_from_piece(game->active.type);
-	result = position_atomic_piece(ctx, solo, &solo->active_plane,
-		&solo->active_shape_signature, &active_geometry, tile_index, false);
-	if (result < 0)
-		return (-1);
-	changed = result;
-	/* Never ask the terminal to stack two bitmap rectangles. When the ghost
-	 * reaches the active piece's bounding box, the landing position is already
-	 * visually obvious and hiding it is safer than bitmap elision. */
-	if (piece_rectangles_overlap(&active_geometry, &ghost_geometry))
+	overlaps = piece_rectangles_overlap(&active_geometry, &ghost_geometry);
+	changed = 0;
+	if (overlaps)
 	{
-		if (solo->ghost_plane != NULL)
+		if (!solo->piece_planes_combined)
 		{
+			destroy_plane(&solo->active_plane);
 			destroy_plane(&solo->ghost_plane);
+			solo->active_shape_signature = UINT64_MAX;
 			solo->ghost_shape_signature = UINT64_MAX;
-			changed = 1;
+			solo->piece_planes_combined = true;
 		}
+		result = position_piece_pair(ctx, solo, &solo->active_plane,
+			&solo->active_shape_signature, &active_geometry, &ghost_geometry,
+			tile_index);
+		if (result < 0)
+			return (-1);
+		changed |= result;
 	}
 	else
 	{
+		if (solo->piece_planes_combined)
+		{
+			destroy_plane(&solo->active_plane);
+			solo->active_shape_signature = UINT64_MAX;
+			solo->piece_planes_combined = false;
+		}
+		result = position_atomic_piece(ctx, solo, &solo->active_plane,
+			&solo->active_shape_signature, &active_geometry, tile_index, false);
+		if (result < 0)
+			return (-1);
+		changed |= result;
 		result = position_atomic_piece(ctx, solo, &solo->ghost_plane,
 			&solo->ghost_shape_signature, &ghost_geometry, tile_index, true);
 		if (result < 0)
@@ -1915,7 +2107,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	if (solo->score_header_plane == NULL)
 	{
 		if (!update_pixel_region(ctx, solo, &solo->score_header_plane,
-				SOLO_SCORE_X, SOLO_SCORE_HEADER_Y,
+				HUD_SCORE_X, SOLO_SCORE_HEADER_Y,
 				HUD_SCORE_WIDTH, SOLO_SCORE_HEADER_HEIGHT))
 			return (-1);
 		changed = 1;
@@ -1923,7 +2115,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	if (game->scoring.total != solo->score_value_signature)
 	{
 		if (!update_pixel_region(ctx, solo, &solo->score_value_plane,
-				SOLO_SCORE_X, SOLO_SCORE_VALUE_Y,
+				HUD_SCORE_X, SOLO_SCORE_VALUE_Y,
 				HUD_SCORE_WIDTH, SOLO_SCORE_VALUE_HEIGHT))
 			return (-1);
 		solo->score_value_signature = game->scoring.total;
@@ -1933,7 +2125,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	if (signature != solo->score_stats_signature)
 	{
 		if (!update_pixel_region(ctx, solo, &solo->score_stats_plane,
-				SOLO_SCORE_X, SOLO_SCORE_STATS_Y,
+				HUD_SCORE_X, SOLO_SCORE_STATS_Y,
 				HUD_SCORE_WIDTH, SOLO_SCORE_STATS_HEIGHT))
 			return (-1);
 		solo->score_stats_signature = signature;
@@ -1943,7 +2135,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	if (signature != solo->score_event_signature)
 	{
 		if (!update_pixel_region(ctx, solo, &solo->score_event_plane,
-				SOLO_SCORE_X, SOLO_SCORE_EVENT_Y,
+				HUD_SCORE_X, SOLO_SCORE_EVENT_Y,
 				HUD_SCORE_WIDTH, SOLO_SCORE_EVENT_HEIGHT))
 			return (-1);
 		solo->score_event_signature = signature;
@@ -1977,8 +2169,7 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 		if (game->phase == SOLO_ACTIVE)
 		{
 			ghost = solo_game_ghost(game);
-			draw_piece(solo->frame_pixels, solo, &ghost,
-				GHOST_OUTLINE_OPACITY, true);
+			draw_piece(solo->frame_pixels, solo, &ghost, 255u, true);
 			draw_piece(solo->frame_pixels, solo, &game->active, 255u, false);
 		}
 		draw_overlays(solo->frame_pixels, solo, game);
@@ -2007,8 +2198,9 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	return (changed);
 }
 
-/* AI-assisted: static art is cell-rendered once. Each moving tetromino is one
- * atomic pixel plane, so a horizontal move cannot shear its four tiles apart. */
+/* AI-assisted: static art is cell-rendered once. Moving tetrominoes use
+ * atomic planes, merged when active/ghost bounds overlap, so tiles cannot
+ * shear. */
 static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game)
 {

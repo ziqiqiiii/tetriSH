@@ -33,15 +33,16 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
 - Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,
-  ghost piece, move-reset lock delay, modern scoring, and immediate top-row
-  lock-out
+  ghost piece, move-reset lock delay, modern scoring, and a guaranteed 350 ms
+  view of the final board before any top-out panel appears
 - Responsive 4:3 Solo layout built from one 512 x 384 master canvas, fitted to
   the terminal without changing the HUD aspect ratio
 - Transparent image HUD with exact `#2E222F` authored borders, 16 x 16
   tetromino sprites, custom text/number masks, and centered Mirurun art
-- Cell-rendered scenery plus disjoint high-resolution HUD planes; an active
-  piece and its ghost each use one atomic pixel plane, so horizontal movement
-  cannot shear the four blocks apart
+- Cell-rendered scenery plus independently refreshed high-resolution HUD
+  planes; the active piece and ghost use atomic pixel planes and merge into one
+  plane when their rectangles overlap, so movement cannot shear or flicker
+  their blocks
 - Dirty row/HUD signatures rebuild only changed content, while the compact
   control legend uses one crisp terminal-font row
 - Responsive PTY geometry checks reflow Solo between compact and full layouts
@@ -174,7 +175,10 @@ Asset paths are compile-time macros resolved against `ASSET_DIR` (the Makefile s
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |
 | `MENU_SELECT_SFX_PATH` | Sound on selection confirmation |
 
-Missing assets are non-fatal: a missing bunny sprite falls back to a text marker, and missing audio files are silently skipped.
+Missing assets are non-fatal: a missing bunny sprite falls back to a text marker,
+and missing audio files are silently skipped. The exact authored-HUD geometry,
+including the board-border export contract, is documented in
+[`assets/solo_hud_art_template.md`](assets/solo_hud_art_template.md).
 
 ---
 
@@ -265,10 +269,9 @@ For a native macOS ownership check, launch the full client through Apple
 MallocStackLogging=1 leaks -atExit -- ./bin/tetrisu
 ```
 
-The current renderer was stress-tested through 25 hard drops, five Solo
-exit/re-entry cycles, and live resize between 46 x 60 and 196 x 60 terminal
-cells. Apple `leaks` reported `0 leaks for 0 total leaked bytes`; all 13 Solo
-tests and all seven `libtetrisbrain` suites also pass under AddressSanitizer and
-UndefinedBehaviorSanitizer. A real terminal remains necessary for the final
-graphics check because notcurses performs terminal capability and pixel-
-geometry queries during startup.
+All 15 Solo state tests pass under AddressSanitizer and
+UndefinedBehaviorSanitizer; Apple `leaks` reports `0 leaks for 0 total leaked
+bytes` for that test binary, and all seven `libtetrisbrain` suites pass. The
+renderer itself still requires the interactive command above after ownership
+changes because notcurses performs terminal capability and pixel-geometry
+queries during startup.
