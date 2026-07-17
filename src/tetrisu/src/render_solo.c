@@ -859,6 +859,7 @@ static void	draw_preview_piece(uint32_t *canvas,
 	int		origin_x;
 	int		origin_y;
 	int		index;
+	int		tile_size;
 
 	piece = piece_spawn(type);
 	if (!piece_cells(&piece, cols, rows))
@@ -880,17 +881,23 @@ static void	draw_preview_piece(uint32_t *canvas,
 			max_row = rows[index];
 		index++;
 	}
+	/* Full-size tiles copy the atlas 1:1 and stay crisp; only pieces too
+	 * wide for their slot (the I piece) drop to the squeezed preview size. */
+	tile_size = TILE_SOURCE_SIZE;
+	if ((max_col - min_col + 1) * tile_size > slot_width
+		|| (max_row - min_row + 1) * tile_size > HUD_NEXT_HEIGHT)
+		tile_size = PREVIEW_TILE_SIZE;
 	origin_x = slot_x + (slot_width
-		- (max_col - min_col + 1) * PREVIEW_TILE_SIZE) / 2;
+		- (max_col - min_col + 1) * tile_size) / 2;
 	origin_y = HUD_NEXT_Y + (HUD_NEXT_HEIGHT
-		- (max_row - min_row + 1) * PREVIEW_TILE_SIZE) / 2;
+		- (max_row - min_row + 1) * tile_size) / 2;
 	index = 0;
 	while (index < 4)
 	{
 		draw_tile(canvas, solo, tile_index_from_piece(type),
-			origin_x + (cols[index] - min_col) * PREVIEW_TILE_SIZE,
-			origin_y + (rows[index] - min_row) * PREVIEW_TILE_SIZE,
-			PREVIEW_TILE_SIZE, 255, false);
+			origin_x + (cols[index] - min_col) * tile_size,
+			origin_y + (rows[index] - min_row) * tile_size,
+			tile_size, 255, false);
 		index++;
 	}
 }
@@ -2158,7 +2165,8 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	int			result;
 	int			changed;
 
-	if (game->paused || game->phase == SOLO_GAME_OVER)
+	if (solo->composite_board || game->paused
+		|| game->phase == SOLO_GAME_OVER)
 	{
 		signature = board_overlay_signature(game);
 		if (solo->board_overlay_plane != NULL
@@ -2237,6 +2245,7 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
+	solo->composite_board = !render_pixel_planes_reliable(ctx);
 	solo->assets_ready = load_solo_assets(solo);
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
@@ -2311,6 +2320,7 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
+	solo->composite_board = !render_pixel_planes_reliable(ctx);
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		set_asset_error(solo, "Terminal rejected the Solo foreground bitmap",
@@ -2403,9 +2413,9 @@ static uint32_t	new_game_seed(void)
 	return ((uint32_t)(monotonic_ms() ^ (uint64_t)getpid()));
 }
 
-static bool	handle_solo_key(solo_game_t *game, uint32_t key,
-	const ncinput *input, bool display_ready, bool *resize_pending,
-	bool *state_changed)
+static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
+	uint32_t key, const ncinput *input, bool display_ready,
+	bool *resize_pending, bool *state_changed)
 {
 	if (input->evtype == NCTYPE_RELEASE)
 		return (false);
@@ -2414,6 +2424,16 @@ static bool	handle_solo_key(solo_game_t *game, uint32_t key,
 	if (key == NCKEY_RESIZE || key == 12u)
 	{
 		*resize_pending = true;
+		return (false);
+	}
+	if (key == '+' || key == '=')
+	{
+		audio_volume_up(audio);
+		return (false);
+	}
+	if (key == '-' || key == '_')
+	{
+		audio_volume_down(audio);
 		return (false);
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
@@ -2444,7 +2464,7 @@ static int	restore_home(render_ctx_t *ctx)
 
 /* AI-assisted: temporary local authority loop. It never performs network or
  * IPC calls; migration replaces apply/update with HTTTP actions and STATE. */
-int	solo_mode_run(render_ctx_t *ctx)
+int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 {
 	solo_game_t	game;
 	solo_render_t	solo;
@@ -2503,7 +2523,7 @@ int	solo_mode_run(render_ctx_t *ctx)
 		}
 		while (key != 0)
 		{
-			if (handle_solo_key(&game, key, &input, display_ready,
+			if (handle_solo_key(&game, audio, key, &input, display_ready,
 					&resize_pending, &needs_draw))
 			{
 				leave = true;

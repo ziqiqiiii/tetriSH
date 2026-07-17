@@ -28,6 +28,9 @@ int	main(void)
 	ctx = render_init(SPLASH_ASSET_PATH);
 	audio_init(&audio);
 	render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
+	/* The intro plays at the default level; only the looping theme starts
+	 * soft. Later +/- presses adjust from wherever the user left it. */
+	audio_set_music_volume(&audio, HOME_BGM_START_VOLUME);
 	audio_play_music(&audio, HOME_BGM_PATH);
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
 	state = APP_MAIN_MENU;
@@ -53,7 +56,7 @@ int	main(void)
 			audio_play_menu_select(&audio);
 			if (menu.selected == 0)
 			{
-				if (solo_mode_run(&ctx) < 0
+				if (solo_mode_run(&ctx, &audio) < 0
 					&& reflow_home(&ctx, &menu) < 0)
 					state = APP_QUIT;
 			}

@@ -75,6 +75,15 @@ static void	fit_background_to_terminal(render_ctx_t *ctx,
 	ctx->bg_col = (std_cols - ctx->bg_cols) / 2;
 }
 
+/* Kitty and iTerm2 graphics keep z-order and wipe moved/stacked bitmaps
+ * cleanly. Sixel (and the framebuffer) cannot, so movable or overlapping
+ * pixel planes tear there; callers must flatten to one stationary bitmap
+ * or fall back to cell blitters. */
+bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
+{
+	return (notcurses_check_pixel_support(ctx->nc) >= NCPIXEL_ITERM2);
+}
+
 int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
 {
 	unsigned	rows;

@@ -36,6 +36,7 @@
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
 # define INTRO_AUDIO_PATH	ASSET_DIR "/intro.mp3"
 # define HOME_BGM_PATH		ASSET_DIR "/tetris_theme.mp3"
+# define HOME_BGM_START_VOLUME	48
 # define SOLO_BACKGROUND_PATH	ASSET_DIR "/default_theme/default_background_4x3.png"
 # define DEFAULT_HUD_PATH	ASSET_DIR "/default_theme/default_board.png"
 # define DEFAULT_TILE_PATH	ASSET_DIR "/default_theme/default_tile.png"
@@ -185,6 +186,7 @@ typedef struct s_solo_render
 	bool			layout_valid;
 	bool			assets_ready;
 	bool			planes_ready;
+	bool			composite_board;
 	char			asset_error[160];
 }	solo_render_t;
 
@@ -202,6 +204,7 @@ int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
 void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
+bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 
 /* RENDER_MENU.C */
 void			render_menu_create(render_ctx_t *ctx);
@@ -222,6 +225,7 @@ void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
 					const char *select_path);
 void			audio_play_menu_move(audio_ctx_t *audio);
 void			audio_play_menu_select(audio_ctx_t *audio);
+void			audio_set_music_volume(audio_ctx_t *audio, int volume);
 void			audio_volume_up(audio_ctx_t *audio);
 void			audio_volume_down(audio_ctx_t *audio);
 void			audio_teardown(audio_ctx_t *audio);
@@ -241,6 +245,6 @@ void			render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 					const solo_game_t *game);
 void			render_solo_resize(render_ctx_t *ctx, solo_render_t *solo);
 void			render_solo_destroy(solo_render_t *solo);
-int				solo_mode_run(render_ctx_t *ctx);
+int				solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio);
 
 # endif

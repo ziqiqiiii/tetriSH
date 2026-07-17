@@ -206,6 +206,29 @@ void	audio_play_menu_select(audio_ctx_t *audio)
 }
 
 /**
+ * @brief Sets music volume to an absolute level, clamped to the mixer range.
+ *
+ * @param audio Audio context returned by audio_init().
+ * @param volume Target volume; later +/- steps adjust from this level.
+ */
+void	audio_set_music_volume(audio_ctx_t *audio, int volume)
+{
+	if (audio == NULL)
+		return ;
+	if (volume < 0)
+		volume = 0;
+#if TETRISU_ENABLE_AUDIO
+	if (volume > MIX_MAX_VOLUME)
+		volume = MIX_MAX_VOLUME;
+	audio->music_volume = volume;
+	if (audio->enabled)
+		Mix_VolumeMusic(audio->music_volume);
+#else
+	audio->music_volume = volume;
+#endif
+}
+
+/**
  * @brief Raises music volume by one fixed step.
  *
  * @param audio Audio context returned by audio_init().

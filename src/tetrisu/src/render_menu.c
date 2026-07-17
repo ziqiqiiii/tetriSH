@@ -235,16 +235,29 @@ void	render_menu_create(render_ctx_t *ctx)
  */
 void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 {
+	int	y;
+	int	x;
+
 	if (ctx->bunny_plane == NULL)
 		return ;
-	if (ncplane_move_yx(ctx->bunny_plane, bunny_y_for_selection(ctx, m),
-			bunny_x(ctx)) != 0)
+	y = bunny_y_for_selection(ctx, m);
+	x = bunny_x(ctx);
+	/* Sixel-class terminals cannot relocate a bitmap without leaving trails,
+	 * so the sprite is rebuilt at the new spot instead of moved. */
+	if (notcurses_canpixel(ctx->nc) && !render_pixel_planes_reliable(ctx))
+	{
+		ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
+		if (ctx->bunny_plane != NULL)
+			ncplane_move_top(ctx->bunny_plane);
+	}
+	else if (ncplane_move_yx(ctx->bunny_plane, y, x) != 0)
 		return ;
 	if (notcurses_render(ctx->nc) != 0)
 	{
-		ncplane_destroy(ctx->bunny_plane);
-		ctx->bunny_plane = create_bunny_fallback(ctx,
-			bunny_y_for_selection(ctx, m), bunny_x(ctx));
+		if (ctx->bunny_plane != NULL)
+			ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = create_bunny_fallback(ctx, y, x);
 		if (ctx->bunny_plane != NULL)
 			(void)notcurses_render(ctx->nc);
 	}
