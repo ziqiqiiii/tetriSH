@@ -1,0 +1,85 @@
+@startuml libtetrisbrain_character_abilities
+
+!theme plain
+
+skinparam backgroundColor #FFF9FC
+skinparam defaultFontName "Avenir Next"
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam roundcorner 14
+skinparam sequence {
+  ArrowColor #756A83
+  ArrowThickness 1.6
+  ParticipantBorderColor #8B7E9F
+  ParticipantBackgroundColor #FFFFFF
+  ParticipantFontColor #40364D
+  LifeLineBorderColor #C8BFD3
+  LifeLineBackgroundColor #F3EDF7
+  GroupBorderColor #C8BFD3
+  GroupBackgroundColor #FFFDFE
+  GroupHeaderFontColor #604978
+  NoteBorderColor #9FC5A7
+  NoteBackgroundColor #E8F5E9
+  NoteFontColor #3F6848
+  DividerBackgroundColor #F0E7FA
+  DividerBorderColor #B69ACF
+  DividerFontColor #604978
+}
+
+title <size:22><b>libtetrisbrain Character Abilities</b></size>\n<size:14>Pure Battle Royale board transforms</size>
+
+participant "Ability Request\nor Game Event" as Input #DDF3F5
+participant "Game Server\n(tetrisd)" as Server #F9E2DC
+participant "Ability Logic\n(abilities.c)" as Brain #E9E2F7
+participant "Caller-owned\nTarget Board" as Board #DFF3E4
+
+== 1. Resolve the ability ==
+
+Input -> Server: Activate character ability
+Server -> Server: Resolve character, level, and target
+Server -> Server: Lock target room mutex
+
+note over Server, Brain
+tetrisd owns targeting, charges, cooldowns, and locking.
+libtetrisbrain only applies the selected board transform.
+end note
+
+== 2. Apply the character transform ==
+
+alt Wolfman - Cut Top
+  Server -> Brain: board_cut_top(board, n)
+  Brain -> Board: Remove top n rows, shift stack up,\nclear vacated bottom rows
+else Wolfman Level 4 - Gravity
+  Server -> Brain: board_apply_gravity(board)
+  Brain -> Board: Drop suspended cells to the bottom\nof each column
+else Mirurun - Cut Bottom
+  Server -> Brain: board_cut_bottom(board, n)
+  Brain -> Board: Remove bottom n rows, shift stack down,\nclear vacated top rows
+else Halloween - Dark
+  Server -> Brain: board_invert(board)
+  Brain -> Board: Empty becomes garbage;\nfilled or garbage becomes empty
+else Halloween - Burn
+  Server -> Brain: board_fill_rows(board, n, hole_col)
+  Brain -> Board: Overwrite bottom n rows with garbage,\nleaving the selected hole
+else Halloween - Bomb
+  Server -> Brain: board_clear_cells(board, cols, rows, count)
+  Brain -> Board: Clear only the selected cells
+else Princess - Laser
+  Server -> Brain: board_delete_columns(board, start, end)
+  Brain -> Board: Clear the inclusive column range\nacross every row
+end
+
+Brain --> Server: Transform complete
+
+note over Brain, Board #FFF3CD
+All functions mutate the caller-owned t_board in place and return void.
+Invalid sizes are ignored or clamped; out-of-range cell targets are ignored.
+end note
+
+== 3. Publish the result ==
+
+Server -> Server: Copy authoritative state for broadcast
+Server -> Server: Unlock target room mutex
+Server --> Input: Send updated STATE
+
+@enduml

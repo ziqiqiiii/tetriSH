@@ -1,0 +1,110 @@
+@startuml libtetrisbrain_gameplay_sequence
+
+!theme plain
+
+skinparam backgroundColor #FFF9FC
+skinparam defaultFontName "Avenir Next"
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam roundcorner 14
+skinparam sequence {
+  ArrowColor #756A83
+  ArrowThickness 1.6
+  ParticipantBorderColor #8B7E9F
+  ParticipantBackgroundColor #FFFFFF
+  ParticipantFontColor #40364D
+  LifeLineBorderColor #C8BFD3
+  LifeLineBackgroundColor #F3EDF7
+  GroupBorderColor #C8BFD3
+  GroupBackgroundColor #FFFDFE
+  GroupHeaderFontColor #604978
+  NoteBorderColor #9FC5A7
+  NoteBackgroundColor #E8F5E9
+  NoteFontColor #3F6848
+  DividerBackgroundColor #F0E7FA
+  DividerBorderColor #B69ACF
+  DividerFontColor #604978
+}
+
+title <size:22><b>libtetrisbrain Game Step</b></size>\n<size:14>Pure game logic called by the authoritative server</size>
+
+participant "Player or\nRoom Ticker" as Input #DDF3F5
+participant "Game Server\n(tetrisd)" as Server #F9E2DC
+participant "Pure Logic\n(libtetrisbrain)" as Brain #E9E2F7
+participant "Caller-owned\nBoard + Piece" as State #DFF3E4
+
+note over Server, State
+tetrisd owns the room mutex and all game state.
+libtetrisbrain performs no I/O and stores no state.
+end note
+
+== 1. Apply an action ==
+
+Input -> Server: MOVE / ROTATE / SOFT DROP / gravity tick
+Server -> Server: Lock room mutex
+Server -> Brain: Call movement, rotation, or drop function
+Brain -> State: Read current board and piece
+Brain -> Brain: Test candidate cells for collisions
+
+note over Brain, State #FFF3CD
+MOVE commits only a valid candidate.
+ROTATE tries SRS wall kicks.
+SOFT DROP uses gravity_tick.
+HARD DROP repeats downward movement,
+then tetrisd enters the lock phase directly.
+end note
+
+alt Piece can continue
+  Brain -> State: Update active piece
+  Brain --> Server: BRAIN_OK
+  Server -> Server: Unlock room mutex
+  Server --> Input: Broadcast authoritative STATE
+else Move or rotation is blocked
+  Brain --> Server: BRAIN_BLOCKED
+  Server -> Server: Unlock room mutex
+  Server --> Input: Keep previous STATE
+else Gravity or soft drop reports landing
+  Brain --> Server: BRAIN_LOCKED
+
+  == 2. Lock, clear, and score ==
+
+  Server -> Brain: piece_stamp(board, piece)
+  Brain -> State: Bake four piece cells into board
+  Server -> Brain: board_clear_lines(board)
+  Brain -> State: Remove full rows and compact downward
+  Brain --> Server: Lines cleared (0-4)
+  Server -> Brain: score_on_clear(lines, level)
+  Brain --> Server: NES-style points
+  Server -> Brain: level_from_lines(total)\ngravity_interval_ms(level)
+  Brain --> Server: New level and ticker interval
+
+  == 3. Spawn the next piece ==
+
+  Server -> Brain: piece_spawn(next type)
+  Brain -> State: Return fixed spawn transform
+  Server -> Brain: piece_is_valid(board, new piece)
+
+  alt Spawn position is free
+    Brain --> Server: true
+    Server -> State: Store new active piece
+    Server -> Server: Unlock room mutex
+    Server --> Input: Broadcast new STATE
+  else Spawn position overlaps the stack
+    Brain --> Server: false
+    Server -> Server: Mark game over
+    Server -> Server: Unlock room mutex
+    Server --> Input: Broadcast final STATE
+  end
+end
+
+== Optional Battle Royale transform ==
+
+Input -> Server: Ability or garbage event
+Server -> Server: Lock room mutex
+Server -> Brain: Apply pure board transform
+Brain -> State: Update caller-owned board
+Brain --> Server: Return
+Server -> Server: Unlock room mutex
+Server --> Input: Broadcast authoritative STATE
+
+@enduml

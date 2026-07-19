@@ -1,0 +1,14 @@
+# Force LF in the working tree for line-ending-sensitive files, regardless of a
+# contributor's global core.autocrlf / core.eol. Shell scripts (shebang) and
+# Makefiles break under CRLF; everything else is left to Git's defaults.
+*.sh        text eol=lf
+*.bash      text eol=lf
+Makefile    text eol=lf
+makefile    text eol=lf
+*.mk        text eol=lf
+.tetrishrc  text eol=lf
+*.tetrishrc text eol=lf
+
+# Known binary assets — never normalise these.
+*.png binary
+*.pdf binary
