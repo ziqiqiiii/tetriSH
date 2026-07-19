@@ -2,16 +2,29 @@
 # define TETRISU_H
 
 # include <assert.h>
+# include <errno.h>
+# include <inttypes.h>
+# include <poll.h>
 # include <stdint.h>
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
+# include <time.h>
 # include <unistd.h>
 # include <sys/wait.h>
 # include <sys/select.h>
 # include <sys/ioctl.h>
 # include <notcurses/notcurses.h>
 # include "tetrisbrain.h"
+
+# ifndef TETRISU_ENABLE_AUDIO
+# define TETRISU_ENABLE_AUDIO	0
+# endif
+
+# if TETRISU_ENABLE_AUDIO
+# include <SDL.h>
+# include <SDL_mixer.h>
+# endif
 
 # ifdef __APPLE__
 # include <util.h>
@@ -27,17 +40,15 @@
 # define TETRISU_BIN_PATH	"./bin/tetrisu"
 # endif
 
-# ifndef TETRISU_ENABLE_AUDIO
-# define TETRISU_ENABLE_AUDIO	0
-# endif
-
 # define SPLASH_ASSET_PATH	ASSET_DIR "/default_theme/default_homepage.png"
-# define BUNNY_ASSET_PATH	ASSET_DIR "/default_theme/default_bunny_ghost_pointer.png"
+# define BUNNY_ASSET_PATH \
+	ASSET_DIR "/default_theme/default_bunny_ghost_pointer.png"
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
 # define INTRO_AUDIO_PATH	ASSET_DIR "/intro.mp3"
 # define HOME_BGM_PATH		ASSET_DIR "/tetris_theme.mp3"
 # define HOME_BGM_START_VOLUME	48
-# define SOLO_BACKGROUND_PATH	ASSET_DIR "/default_theme/default_background_4x3.png"
+# define SOLO_BACKGROUND_PATH \
+	ASSET_DIR "/default_theme/default_background_4x3.png"
 # define DEFAULT_HUD_PATH	ASSET_DIR "/default_theme/default_board.png"
 # define DEFAULT_TILE_PATH	ASSET_DIR "/default_theme/default_tile.png"
 # define DEFAULT_MIRURUN_PATH	ASSET_DIR "/default_theme/default_mirurun.png"
@@ -53,25 +64,129 @@
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
 
+/* AUDIO.C */
+# define AUDIO_DEFAULT_VOLUME	96
+# define AUDIO_VOLUME_STEP		8
+
+/* RENDER_BACKGROUND.C */
+# define BACKGROUND_SOURCE_PIXELS_Y	1086
+# define BACKGROUND_SOURCE_PIXELS_X	1448
+
+/* RENDER_MENU.C */
+# define MENU_FIRST_Y_RATIO		0.740
+# define MENU_STEP_Y_RATIO		0.066
+# define BUNNY_LABEL_X_RATIO		0.443
+# define BUNNY_TEXT_GAP_COLS		2
+# define BUNNY_ROWS_RATIO		0.070
+# define BUNNY_SOURCE_PIXELS_Y	160
+# define BUNNY_SOURCE_PIXELS_X	150
+# define BUNNY_MIN_ROWS			4
+# define BUNNY_MAX_ROWS			9
+
+/* RENDER_SOLO.C */
+# define SOLO_CANVAS_WIDTH		512
+# define SOLO_CANVAS_HEIGHT		384
+# define SOLO_MIN_CANVAS_ROWS	24
+# define SOLO_MIN_CANVAS_COLS	64
+# define HUD_NEXT_X				80
+# define HUD_NEXT_Y				4
+# define HUD_NEXT_WIDTH			160
+# define HUD_NEXT_HEIGHT		36
+# define HUD_BOARD_X				80
+# define HUD_BOARD_Y				48
+# define HUD_TILE_SIZE			16
+# define HUD_METER_X				48
+# define HUD_METER_Y				42
+# define HUD_METER_WIDTH			16
+# define HUD_METER_HEIGHT		320
+# define HUD_MIRURUN_X			272
+# define HUD_MIRURUN_Y			33
+# define HUD_MIRURUN_SIZE		160
+# define HUD_SCORE_X				272
+# define HUD_SCORE_Y				203
+# define HUD_SCORE_WIDTH			160
+# define HUD_SCORE_STAT_RIGHT_INSET	20
+# define HUD_SCORE_STAT_FIRST_Y	258
+# define HUD_SCORE_STAT_ROW_STEP	22
+# define HUD_CONTROLS_X			80
+# define HUD_CONTROLS_Y			376
+# define HUD_CONTROLS_WIDTH		352
+# define HUD_ART_BOARD_LEFT		77
+# define HUD_ART_BOARD_TOP		40
+# define HUD_ART_BOARD_CONTENT_TOP	43
+# define HUD_ART_BOARD_RIGHT		242
+# define HUD_ART_BOARD_BOTTOM	365
+# define HUD_ART_BOARD_SHIFT_Y	(HUD_BOARD_Y - HUD_ART_BOARD_CONTENT_TOP)
+# define HUD_ART_CONTROLS_LEFT	94
+# define HUD_ART_CONTROLS_TOP	367
+# define HUD_ART_CONTROLS_RIGHT	417
+# define HUD_ART_CONTROLS_BOTTOM	383
+# define TILE_SOURCE_SIZE		16
+# define TILE_SOURCE_STRIDE		18
+# define TILE_ATLAS_COUNT		10
+# define TILE_GARBAGE			7
+# define TILE_CLEAR_FIRST		8
+# define TILE_CLEAR_SECOND		9
+# define PREVIEW_TILE_SIZE		12
+# define FONT_COLUMNS			16
+# define FONT_ROWS				6
+# define FONT_GLYPH_WIDTH		8
+# define FONT_GLYPH_HEIGHT		16
+# define FONT_INK_Y				4
+# define FONT_INK_HEIGHT			8
+# define NUMBER_SLOT_WIDTH		10
+# define NUMBER_GLYPH_WIDTH		8
+# define NUMBER_GLYPH_HEIGHT		16
+# define NUMBER_GLYPH_COUNT		14
+# define GHOST_OUTLINE_BLEND		96u
+# define GHOST_INTERIOR_BLEND	24u
+# define SOLO_MAX_CATCHUP_MS		1000
+# define SOLO_RESIZE_POLL_MS		100
+# define SOLO_NEXT_X				80
+# define SOLO_NEXT_Y				0
+# define SOLO_NEXT_WIDTH			160
+# define SOLO_NEXT_HEIGHT		48
+# define SOLO_METER_X			48
+# define SOLO_METER_Y			32
+# define SOLO_METER_WIDTH		16
+# define SOLO_METER_HEIGHT		336
+# define SOLO_MIRURUN_X			272
+# define SOLO_MIRURUN_Y			32
+# define SOLO_MIRURUN_WIDTH		160
+# define SOLO_MIRURUN_HEIGHT	160
+# define SOLO_SCORE_HEADER_Y		192
+# define SOLO_SCORE_HEADER_HEIGHT	32
+# define SOLO_SCORE_VALUE_Y		224
+# define SOLO_SCORE_VALUE_HEIGHT	32
+# define SOLO_SCORE_STATS_Y		256
+# define SOLO_SCORE_STATS_HEIGHT	64
+# define SOLO_SCORE_EVENT_Y		320
+# define SOLO_SCORE_EVENT_HEIGHT	48
+# define SOLO_CONTROLS_X			80
+# define SOLO_CONTROLS_WIDTH		352
+# define SOLO_BOARD_WIDTH		160
+# define SOLO_BOARD_HEIGHT		320
+# define SOLO_MAX_ROW_RUNS		((BOARD_WIDTH + 1) / 2)
+
 typedef enum
 {
-  APP_SPLASH,
-  APP_MAIN_MENU,
-  APP_QUIT,
+	APP_SPLASH,
+	APP_MAIN_MENU,
+	APP_QUIT,
 }	app_state_t;
 
 typedef struct
 {
-  int	selected;
+	int	selected;
 }	menu_selection_t;
 
 typedef struct
 {
-  int	enabled;
-  int	music_volume;
-  void	*music;
-  void	*menu_move_sfx;
-  void	*menu_select_sfx;
+	int		enabled;
+	int		music_volume;
+	void	*music;
+	void	*menu_move_sfx;
+	void	*menu_select_sfx;
 }	audio_ctx_t;
 
 // Bundles every notcurses handle the render layer needs across calls. The
@@ -79,22 +194,60 @@ typedef struct
 // follow the art even when notcurses scales it to different terminals.
 typedef struct
 {
-  struct notcurses	*nc;
-  struct ncplane	*std;
-  struct ncplane	*bg_plane;
-  struct ncplane	*menu_plane;
-  struct ncplane	*bunny_plane;
-  int				bg_row;
-  int				bg_col;
-  int				bg_rows;
-  int				bg_cols;
-  int				cell_px_y;
-  int				cell_px_x;
-  int				menu_row;
-  int				menu_col;
-  int				bunny_rows;
-  int				bunny_cols;
+	struct notcurses	*nc;
+	struct ncplane		*std;
+	struct ncplane		*bg_plane;
+	struct ncplane		*menu_plane;
+	struct ncplane		*bunny_plane;
+	int					bg_row;
+	int					bg_col;
+	int					bg_rows;
+	int					bg_cols;
+	int					cell_px_y;
+	int					cell_px_x;
+	int					menu_row;
+	int					menu_col;
+	int					bunny_rows;
+	int				bunny_cols;
 }	render_ctx_t;
+
+typedef struct s_intro_stream
+{
+	render_ctx_t	*ctx;
+	int				skipped;
+}	intro_stream_t;
+
+typedef struct s_pixel_asset
+{
+	uint32_t	*pixels;
+	int			width;
+	int			height;
+}	pixel_asset_t;
+
+typedef struct s_color
+{
+	unsigned	r;
+	unsigned	g;
+	unsigned	b;
+}	color_t;
+
+typedef struct s_piece_geometry
+{
+	int	cols[4];
+	int	rows[4];
+	int	min_col;
+	int	max_col;
+	int	min_row;
+	int	max_row;
+}	piece_geometry_t;
+
+typedef struct s_piece_bounds
+{
+	int	min_col;
+	int	max_col;
+	int	min_row;
+	int	max_row;
+}	piece_bounds_t;
 
 typedef enum e_solo_phase
 {
@@ -239,12 +392,26 @@ t_piece			solo_game_ghost(const solo_game_t *game);
 bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
 void			solo_game_toggle_pause(solo_game_t *game);
 
+/* RENDER_SOLO_CANVAS.C */
+bool			solo_canvas_load(solo_render_t *solo);
+int				solo_canvas_piece_tile(t_piece_type type);
+uint32_t		solo_canvas_ghost_tile_pixel(uint32_t pixel, int x, int y);
+bool			solo_canvas_buffer_bytes(int width, int height, size_t *bytes);
+void			solo_canvas_set_error(solo_render_t *solo, const char *message,
+					const char *path);
+void			solo_canvas_compose_hud(solo_render_t *solo,
+					const solo_game_t *game);
+void			solo_canvas_compose_board(solo_render_t *solo,
+					const solo_game_t *game);
+
 /* RENDER_SOLO.C */
 void			render_solo_create(render_ctx_t *ctx, solo_render_t *solo);
 void			render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 					const solo_game_t *game);
 void			render_solo_resize(render_ctx_t *ctx, solo_render_t *solo);
 void			render_solo_destroy(solo_render_t *solo);
+
+/* SOLO_MODE.C */
 int				solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio);
 
 # endif

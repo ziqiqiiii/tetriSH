@@ -20,10 +20,10 @@ BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic \
 			   -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
 
-AUTO_INSTALL_DEPS				?= 1
-INSTALL_NOTCURSES_FROM_SOURCE	?= 1
-NOTCURSES_VERSION				?= v3.0.17
-NOTCURSES_PREFIX				?= /usr/local
+AUTO_INSTALL_DEPS				:= 1
+INSTALL_NOTCURSES_FROM_SOURCE	:= 1
+NOTCURSES_VERSION				:= v3.0.17
+NOTCURSES_PREFIX				:= /usr/local
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -43,10 +43,10 @@ export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/u
 
 # Homebrew keeps each formula's pkg-config metadata under its own opt/ prefix.
 ifeq ($(UNAME), Darwin)
-	BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
-	ifneq ($(BREW_PREFIX),)
-		export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
-	endif
+BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+ifneq ($(BREW_PREFIX),)
+export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
+endif
 endif
 
 ################################################################################
@@ -69,7 +69,7 @@ BRAIN_HEADER	:= $(BRAIN_DIR)/include/tetrisbrain.h
 # compiled out when absent. These are lazily expanded (=) so the recipes see
 # post-install pkg-config metadata: a direct `make -C src/tetrisu` may install
 # the packages before compiling the first object.
-PKG_CONFIG		?= pkg-config
+PKG_CONFIG		:= pkg-config
 AUDIO_DEPS		:= sdl2 SDL2_mixer
 NOTCURSES_CFLAGS	 = $(shell $(PKG_CONFIG) --cflags notcurses 2>/dev/null)
 NOTCURSES_LIBS		 = $(shell $(PKG_CONFIG) --libs notcurses 2>/dev/null)
@@ -91,8 +91,10 @@ SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 # Logic  : pure app-state, no notcurses/SDL -> logic.a (linked into unit tests).
-# main.c and the render/audio sources pull in notcurses/SDL, so exclude them.
-LOGIC_SRC	:= $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/render_%.c $(SRC_DIR)/audio.c, $(SRC))
+# main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
+# unit-test archive keeps only state and gameplay logic.
+LOGIC_SRC	:= $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/solo_mode.c \
+				   $(SRC_DIR)/render_%.c $(SRC_DIR)/audio.c, $(SRC))
 LOGIC_OBJ	:= $(LOGIC_SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 
@@ -130,19 +132,15 @@ run: $(NAME_PATH)
 #                                DEPENDENCIES                                  #
 ################################################################################
 
-# Component-only render/audio deps. Install is outsourced to scripts/; the
-# check side is a compile/link probe kept in the Makefile.
+# Component-only render/audio dependency orchestration lives in scripts/ so
+# this Makefile remains declarative and each shell failure has one owner.
 deps:
-	@ if $(MAKE) --no-print-directory check-tetrisu-deps >/dev/null 2>&1; then \
-		echo "$(GREEN)tetrisu dependencies ready$(CLR_RMV) ($(UNAME))."; \
-	elif [ "$(AUTO_INSTALL_DEPS)" = "1" ]; then \
-		$(MAKE) --no-print-directory install-deps; \
-		$(MAKE) --no-print-directory check-tetrisu-deps; \
-	else \
-		$(MAKE) --no-print-directory check-tetrisu-deps; \
-		echo "tetrisu: missing dependencies; automatic installation is disabled."; \
-		exit 1; \
-	fi
+	@ UNAME_S=$(UNAME) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
+		INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
+		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
+		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) CC=$(CC) \
+		PKG_CONFIG=$(PKG_CONFIG) GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
+		bash ./scripts/deps.sh
 
 install-deps:
 	@ INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
@@ -158,34 +156,11 @@ install-notcurses-from-source:
 brain:
 	@ $(MAKE) --no-print-directory -C $(BRAIN_DIR)
 
-# Compile and link a tiny notcurses program instead of trusting package state;
-# this catches missing headers, libraries, and unusable pkg-config paths.
+# Compile/link probing is a shell responsibility; the script checks the actual
+# headers and libraries rather than trusting package-manager state.
 check-tetrisu-deps:
-	@ set -eu; \
-	probe="$$(mktemp /tmp/tetrisu-deps-check.XXXXXX)"; \
-	trap 'rm -f "$$probe"' EXIT HUP INT TERM; \
-	missing=""; \
-	for tool in $(CC) $(PKG_CONFIG); do \
-		if ! command -v $$tool >/dev/null 2>&1; then \
-			missing="$$missing $$tool"; \
-		fi; \
-	done; \
-	if [ -n "$$missing" ]; then \
-		echo "tetrisu: missing tools:$$missing"; \
-		exit 1; \
-	fi; \
-	if ! $(PKG_CONFIG) --exists notcurses; then \
-		echo "tetrisu: missing notcurses development files."; \
-		echo "Run 'make -C src/tetrisu deps' or install notcurses for your distro/Homebrew."; \
-		exit 1; \
-	fi; \
-	printf '%s\n' \
-		'#include <notcurses/notcurses.h>' \
-		'int main(void) { return 0; }' \
-		| $(CC) -x c - $$($(PKG_CONFIG) --cflags --libs notcurses) -o "$$probe"; \
-	if ! $(PKG_CONFIG) --exists $(AUDIO_DEPS); then \
-		echo "Warning: tetrisu audio disabled; install SDL2 and SDL2_mixer development packages for intro audio."; \
-	fi
+	@ CC=$(CC) PKG_CONFIG=$(PKG_CONFIG) AUDIO_DEPS='$(AUDIO_DEPS)' \
+		bash ./scripts/check_deps.sh
 
 ################################################################################
 #                                    TESTS                                     #

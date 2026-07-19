@@ -16,6 +16,7 @@
 #   make check-deps   verify dependencies without changing the system
 #   make run          build, then launch the shell (sources .tetrishrc)
 #   make stack        build, then launch the daemons headless (integration tests)
+#   make test         build, then run every available component test suite
 #   make clean        recurse `clean` into every component
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
@@ -23,8 +24,8 @@
 MAKE_FLAGS	:= --no-print-directory
 RM			:= rm -rf
 
-AUTO_INSTALL_DEPS	?= 1
-REQUIRE_VALGRIND	?= 0
+AUTO_INSTALL_DEPS	:= 1
+REQUIRE_VALGRIND	:= 0
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -76,6 +77,7 @@ COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/marketd/Makefile \
 							  src/marketctl/Makefile)
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
+TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu,$(DAEMON_DIRS))
 
 ################################################################################
 #                                   BUILD                                      #
@@ -114,6 +116,12 @@ stack: all bin-link
 		if [ -x $(BIN)/$$d ]; then $(BIN)/$$d & fi; \
 	done; \
 	echo "Started available daemons; inspect with 'dcheck' or tmp/daemons.reg"
+
+# --- component tests --------------------------------------------------------
+test: all
+	@ for d in $(TEST_DIRS); do \
+		$(MAKE) $(MAKE_FLAGS) -C $$d test DEPS_READY=1 || exit 1; \
+	done
 
 ################################################################################
 #                                DEPENDENCIES                                  #
@@ -180,4 +188,4 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run stack clean fclean reset re
+			bin-link run stack test clean fclean reset re

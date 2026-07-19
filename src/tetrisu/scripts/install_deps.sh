@@ -4,7 +4,7 @@
 # are the umbrella Makefile's job; this script owns only the client-only packages.
 #
 # Environment:
-#   AUTO_INSTALL_DEPS              (unused here; gating lives in the Makefile)
+#   AUTO_INSTALL_DEPS              (unused here; gating lives in deps.sh)
 #   INSTALL_NOTCURSES_FROM_SOURCE  1 to build notcurses from source when no
 #                                  distro development package is available (Linux)
 #   NOTCURSES_VERSION              git tag to build when falling back to source

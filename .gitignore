@@ -50,6 +50,9 @@ tests/tmp/
 *.su
 *.idb
 *.pdb
+vgcore.*
+core
+core.*
 
 # Kernel Module Compile Results
 *.mod*

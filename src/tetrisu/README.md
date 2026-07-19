@@ -18,6 +18,7 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
+- [Authors](#authors)
 
 ---
 
@@ -26,7 +27,8 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Image background rendered as a letterboxed 4 x 2 cell backdrop, with the
   selector bunny kept on its own high-resolution pixel plane
 - Splash intro video streamed over the background, skippable with any key
-- Bunny-sprite menu selector positioned from the rendered background geometry (scales with terminal size)
+- Bunny-sprite menu selector positioned from the rendered background geometry;
+  scales with terminal size
 - Kernel-sleeping keyboard input through notcurses' pollable input descriptor;
   arrow-key selection wraps around
 - Optional background music and menu SFX via SDL2_mixer, with runtime volume control
@@ -58,7 +60,10 @@ how it becomes server-authoritative without rewriting the renderer.
 
 ## Prerequisites
 
-notcurses (render) is **required**; SDL2 and SDL2_mixer (audio) are **optional** and compiled out when absent. This Makefile owns those component-only dependencies; shared native deps (GCC, make, pkg-config, OpenSSL, Readline, ncurses) come from the repository-level Makefile.
+notcurses (render) is **required**; SDL2 and SDL2_mixer (audio) are
+**optional** and compiled out when absent. This Makefile owns those
+component-only dependencies. The repository Makefile owns GCC, make,
+pkg-config, OpenSSL, Readline, and ncurses.
 
 ```bash
 make deps                          # check/install tetrisu render + audio deps
@@ -71,7 +76,10 @@ Package installation may request sudo access. Use the following when system chan
 make deps AUTO_INSTALL_DEPS=0      # check-only; fail instead of installing
 ```
 
-If no APT `libnotcurses-dev` is available, notcurses is built from source (`INSTALL_NOTCURSES_FROM_SOURCE=1`, the default). Ubuntu may need its `universe` repository; RHEL-compatible systems need EPEL/CRB; Fedora and openSUSE Tumbleweed ship `notcurses-devel`. Build notcurses from source explicitly with:
+If APT has no `libnotcurses-dev`, the default
+`INSTALL_NOTCURSES_FROM_SOURCE=1` builds notcurses from source. Ubuntu may need
+its `universe` repository; RHEL-compatible systems need EPEL/CRB; Fedora and
+openSUSE Tumbleweed ship `notcurses-devel`. Build it explicitly with:
 
 ```bash
 make install-notcurses-from-source NOTCURSES_VERSION=v3.0.17
@@ -87,7 +95,9 @@ Build the `bin/tetrisu` binary with `make`:
 make
 ```
 
-Plain `make` first runs the repository-level `make deps` (unless invoked with `DEPS_READY=1`), then this Makefile's own `deps`, then compiles. Compiled with `-Wall -Wextra -Werror`.
+Plain `make` first runs repository-level `make deps` unless invoked with
+`DEPS_READY=1`, then checks Tetrisu dependencies and compiles with
+`-Wall -Wextra -Werror`.
 
 Makefile targets:
 
@@ -115,7 +125,9 @@ Or build and run in one step:
 make run
 ```
 
-`tetrisu` requires a real terminal: notcurses queries it for palette, pixel geometry, and graphics-protocol support at startup. It exits with a `notcurses_core_init failed` message if `$TERM` has no usable terminfo entry.
+`tetrisu` requires a real terminal: notcurses queries palette, pixel geometry,
+and graphics-protocol support at startup. It exits with
+`notcurses_core_init failed` when `$TERM` has no usable terminfo entry.
 
 ---
 
@@ -157,7 +169,8 @@ print a `[<item>] not wired up yet` message.
 
 ## Assets
 
-Asset paths are compile-time macros resolved against `ASSET_DIR` (the Makefile sets it to `src/tetrisu/assets`). The client loads:
+Asset paths are compile-time macros resolved against `ASSET_DIR`, which the
+Makefile sets to `src/tetrisu/assets`. The client loads:
 
 | Macro | Role |
 |---|---|
@@ -184,7 +197,8 @@ including the board-border export contract, is documented in
 
 ## Architecture
 
-`main()` builds the render context, plays the intro, then loops on input dispatched to the render and audio modules:
+`main()` builds the render context, plays the intro, then dispatches input to
+the render and audio modules:
 
 ```
 render_init (background)
@@ -209,15 +223,18 @@ Modules (each a `.c` under `src/`):
 | File | Responsibility |
 |---|---|
 | `main.c` | Entry point; wires render + audio and runs the input loop |
-| `app_state.c` | Pure state/menu logic — key→state transitions, selection, item labels (no notcurses/SDL) |
+| `app_state.c` | Handle pure menu state, selection, and labels |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
-| `render_solo.c` | Cell backdrop, high-resolution HUD/sprite planes, responsive layout, poll-driven input, and animation |
+| `render_solo.c` | Own terminal planes, dirty signatures, and responsive layout |
+| `render_solo_canvas.c` | Load assets and compose pixel-perfect HUD/board canvases |
+| `solo_mode.c` | Run the poll-driven local Solo input and render loop |
 
-`app_state.c` is pure logic with no rendering or audio dependencies, so it is archived into `obj/logic.a` and linked into the unit tests without pulling in notcurses or SDL.
+`app_state.c` is pure logic with no rendering or audio dependencies. It joins
+`solo_game.c` in `obj/logic.a`, which unit tests link without notcurses or SDL.
 
 ---
 
@@ -231,12 +248,16 @@ tetrisu/
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── render_intro.c         Splash video streamer
 │   ├── render_menu.c          Bunny selector + messages
-│   ├── render_solo.c          Solo composition, input loop, clear animation
+│   ├── render_solo.c          Solo planes, layout, and dirty-region updates
+│   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition
+│   ├── solo_mode.c            Poll-driven local Solo loop
 │   ├── solo_game.c            Pure local gameplay session
 │   └── audio.c                Optional SDL2_mixer audio
 ├── scripts/
 │   ├── install_deps.sh        Install render/audio packages per OS
 │   ├── install_notcurses.sh   Build + install notcurses from source
+│   ├── check_deps.sh          Compile/link probe for render/audio deps
+│   ├── deps.sh                Check/install/re-check dependency orchestration
 │   └── run_tests.sh           Formatted unit-test runner
 ├── assets/                    Images / video / audio (ASSET_DIR)
 ├── tests/test_*.c             Unit tests (each with its own main)
@@ -269,9 +290,30 @@ For a native macOS ownership check, launch the full client through Apple
 MallocStackLogging=1 leaks -atExit -- ./bin/tetrisu
 ```
 
-All 15 Solo state tests pass under AddressSanitizer and
-UndefinedBehaviorSanitizer; Apple `leaks` reports `0 leaks for 0 total leaked
-bytes` for that test binary, and all seven `libtetrisbrain` suites pass. The
-renderer itself still requires the interactive command above after ownership
-changes because notcurses performs terminal capability and pixel-geometry
-queries during startup.
+On Linux, run the mandatory PR ownership check with Valgrind and quit the
+interactive client normally:
+
+```bash
+valgrind --leak-check=full --show-leak-kinds=all \
+  --error-exitcode=1 ./bin/tetrisu
+```
+
+The Solo suite includes a 100,000-rotation state stress case and passes under
+AddressSanitizer and UndefinedBehaviorSanitizer. A separate live WezTerm run
+with 1,200 rendered rotations reports zero failed renders, zero input errors,
+and `0 leaks for 0 total leaked bytes` through Apple `leaks`. The renderer
+requires a real terminal for ownership checks because notcurses queries pixel
+geometry and graphics-protocol capabilities during startup.
+
+---
+
+## Authors
+
+| Role | Member | Owns |
+|---|---|---|
+| Tetrisu / Tetrisd | Sanjan Krishna Sarat | Client rendering, shell, game server |
+| Tetrisu / Core libraries | Thong Zi Qi | Client integration, protocols, shared libraries |
+
+---
+
+*50.003 × 50.005 CoreStack Challenge — SUTD, Summer 2026*

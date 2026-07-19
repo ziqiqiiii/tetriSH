@@ -1,15 +1,7 @@
 #include "tetrisu.h"
 
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
-{
-	render_menu_destroy(ctx);
-	if (render_geometry_refresh(ctx, true) < 0
-		|| render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
-		return (-1);
-	render_menu_create(ctx);
-	render_menu_move_bunny(ctx, menu);
-	return (0);
-}
+// Static Functions
+static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
 
 /**
  * @brief Entry point: background image, splash keywait, then the menu loop.
@@ -74,5 +66,26 @@ int	main(void)
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
 	render_teardown(&ctx);
+	return (0);
+}
+
+/**
+ * @brief Rebuilds the home screen after terminal geometry changes.
+ *
+ * The background is regenerated before the selector so both planes use the
+ * same refreshed cell and pixel geometry.
+ *
+ * @param ctx Active render context.
+ * @param menu Current menu selection to restore.
+ * @return 0 on success, -1 when geometry or background refresh fails.
+ */
+static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
+{
+	render_menu_destroy(ctx);
+	if (render_geometry_refresh(ctx, true) < 0
+		|| render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+		return (-1);
+	render_menu_create(ctx);
+	render_menu_move_bunny(ctx, menu);
 	return (0);
 }

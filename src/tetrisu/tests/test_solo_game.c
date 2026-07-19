@@ -1,48 +1,89 @@
 #include "tetrisu.h"
-#include <assert.h>
-#include <stdio.h>
 
-static int	filled_cells(const t_board *board)
+// Static Functions
+static void	test_init_has_active_and_three_previews(void);
+static void	test_ghost_and_hard_drop(void);
+static void	test_ghost_stops_above_stack(void);
+static void	test_locking_piece_in_top_row_reveals_before_game_over(void);
+static void	test_locking_piece_below_top_row_continues(void);
+static void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(
+	void);
+static void	test_catchup_cannot_skip_new_top_out_reveal(void);
+static void	test_lock_delay_waits_half_second(void);
+static void	test_landing_starts_a_fresh_lock_delay(void);
+static void	test_next_wake_tracks_gravity_and_lock_deadlines(void);
+static void	test_zero_elapsed_consumes_due_deadlines(void);
+static void	test_grounded_piece_sleeps_until_lock_deadline(void);
+static void	test_clear_animation_wakes_at_visual_boundaries(void);
+static void	test_pause_freezes_active_and_clear_timers(void);
+static void	test_clear_animation_then_level_and_meter_update(void);
+static void	test_rotation_stress_preserves_valid_state(void);
+static int	filled_cells(const t_board *board);
+static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed);
+
+/**
+ * @brief Runs the complete local Solo state regression suite.
+ *
+ * Each test aborts on the first failed invariant and prints its PASS marker
+ *   only after success.
+ *
+ * @return 0 after every Solo regression passes.
+ */
+int	main(void)
 {
-	int	count;
-
-	count = 0;
-	for (int row = 0; row < BOARD_HEIGHT; row++)
-		for (int col = 0; col < BOARD_WIDTH; col++)
-			if (board_get(board, col, row).type != CELL_EMPTY)
-				count++;
-	return (count);
+	test_init_has_active_and_three_previews();
+	test_ghost_and_hard_drop();
+	test_ghost_stops_above_stack();
+	test_locking_piece_in_top_row_reveals_before_game_over();
+	test_locking_piece_below_top_row_continues();
+	test_blocked_spawn_with_empty_top_row_reveals_before_game_over();
+	test_catchup_cannot_skip_new_top_out_reveal();
+	test_lock_delay_waits_half_second();
+	test_landing_starts_a_fresh_lock_delay();
+	test_next_wake_tracks_gravity_and_lock_deadlines();
+	test_zero_elapsed_consumes_due_deadlines();
+	test_grounded_piece_sleeps_until_lock_deadline();
+	test_clear_animation_wakes_at_visual_boundaries();
+	test_pause_freezes_active_and_clear_timers();
+	test_clear_animation_then_level_and_meter_update();
+	test_rotation_stress_preserves_valid_state();
+	return (0);
 }
 
-static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed)
-{
-	solo_game_init(game, seed);
-	for (int col = 0; col < BOARD_WIDTH; col++)
-		board_set(&game->board, col, BOARD_HEIGHT - 1,
-			(t_cell){CELL_FILLED, PIECE_I});
-	assert(solo_game_apply_action(game, SOLO_HARD_DROP));
-	assert(game->phase == SOLO_CLEARING);
-}
-
-void	test_init_has_active_and_three_previews(void)
+/**
+ * @brief Exercises init has active and three previews.
+ *
+ * A fresh deterministic bag must provide one valid active piece and three
+ *   distinct preview entries.
+ */
+static void	test_init_has_active_and_three_previews(void)
 {
 	solo_game_t	game;
 	bool			seen[BRAIN_BAG_SIZE] = {false};
+	int				index;
 
 	solo_game_init(&game, 123u);
 	assert(game.level == 1 && game.total_lines == 0);
 	assert(game.scoring.total == 0 && game.phase == SOLO_ACTIVE);
 	assert(piece_is_valid(&game.board, &game.active));
 	seen[game.active.type] = true;
-	for (int index = 0; index < SOLO_NEXT_COUNT; index++)
+	index = 0;
+	while (index < SOLO_NEXT_COUNT)
 	{
 		assert(!seen[game.next[index]]);
 		seen[game.next[index]] = true;
+		index++;
 	}
 	printf("PASS test_init_has_active_and_three_previews\n");
 }
 
-void	test_ghost_and_hard_drop(void)
+/**
+ * @brief Exercises ghost and hard drop.
+ *
+ * Ghost distance, hard-drop score, stamping, and next spawn must agree on the
+ *   same landing.
+ */
+static void	test_ghost_and_hard_drop(void)
 {
 	solo_game_t	game;
 	t_piece		before;
@@ -61,7 +102,13 @@ void	test_ghost_and_hard_drop(void)
 	printf("PASS test_ghost_and_hard_drop\n");
 }
 
-void	test_ghost_stops_above_stack(void)
+/**
+ * @brief Exercises ghost stops above stack.
+ *
+ * A settled obstruction must bound the ghost without mutating the active spawn
+ *   position.
+ */
+static void	test_ghost_stops_above_stack(void)
 {
 	solo_game_t	game;
 	t_piece		ghost;
@@ -78,7 +125,13 @@ void	test_ghost_stops_above_stack(void)
 	printf("PASS test_ghost_stops_above_stack\n");
 }
 
-void	test_locking_piece_in_top_row_reveals_before_game_over(void)
+/**
+ * @brief Exercises locking piece in top row reveals before game over.
+ *
+ * A visible row-zero lock must stamp first, reveal for the full deadline, then
+ *   enter game over.
+ */
+static void	test_locking_piece_in_top_row_reveals_before_game_over(void)
 {
 	solo_game_t	game;
 
@@ -109,7 +162,12 @@ void	test_locking_piece_in_top_row_reveals_before_game_over(void)
 	printf("PASS test_locking_piece_in_top_row_reveals_before_game_over\n");
 }
 
-void	test_locking_piece_below_top_row_continues(void)
+/**
+ * @brief Exercises locking piece below top row continues.
+ *
+ * A lock starting below row zero must continue the endless session.
+ */
+static void	test_locking_piece_below_top_row_continues(void)
 {
 	solo_game_t	game;
 
@@ -125,9 +183,17 @@ void	test_locking_piece_below_top_row_continues(void)
 	printf("PASS test_locking_piece_below_top_row_continues\n");
 }
 
-void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(void)
+/**
+ * @brief Exercises blocked spawn with empty top row reveals before game over.
+ *
+ * Spawn collision must reveal the final board even when visible row zero is
+ *   empty.
+ */
+static void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(
+	void)
 {
 	solo_game_t	game;
+	int				col;
 
 	solo_game_init(&game, 460u);
 	game.active = piece_spawn(PIECE_O);
@@ -137,8 +203,12 @@ void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(void)
 	board_set(&game.board, 4, 1, (t_cell){CELL_GARBAGE, 0});
 	assert(piece_drop_distance(&game.board, &game.active) == 0);
 	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
-	for (int col = 0; col < BOARD_WIDTH; col++)
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
 		assert(board_get(&game.board, col, 0).type == CELL_EMPTY);
+		col++;
+	}
 	assert(filled_cells(&game.board) == 5);
 	assert(!piece_is_valid(&game.board, &game.active));
 	assert(game.phase == SOLO_TOP_OUT_REVEAL);
@@ -148,10 +218,17 @@ void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(void)
 	assert(filled_cells(&game.board) == 5);
 	assert(solo_game_update(&game, 1));
 	assert(game.phase == SOLO_GAME_OVER);
-	printf("PASS test_blocked_spawn_with_empty_top_row_reveals_before_game_over\n");
+	printf("PASS test_blocked_spawn_with_empty_top_row_reveals_"
+		"before_game_over\n");
 }
 
-void	test_catchup_cannot_skip_new_top_out_reveal(void)
+/**
+ * @brief Exercises catchup cannot skip new top out reveal.
+ *
+ * Large or already-due timer updates must never consume a reveal created
+ *   inside the same update.
+ */
+static void	test_catchup_cannot_skip_new_top_out_reveal(void)
 {
 	solo_game_t	game;
 
@@ -181,7 +258,13 @@ void	test_catchup_cannot_skip_new_top_out_reveal(void)
 	printf("PASS test_catchup_cannot_skip_new_top_out_reveal\n");
 }
 
-void	test_lock_delay_waits_half_second(void)
+/**
+ * @brief Exercises lock delay waits half second.
+ *
+ * A grounded piece must remain movable until the full Guideline lock delay
+ *   expires.
+ */
+static void	test_lock_delay_waits_half_second(void)
 {
 	solo_game_t	game;
 
@@ -194,7 +277,13 @@ void	test_lock_delay_waits_half_second(void)
 	printf("PASS test_lock_delay_waits_half_second\n");
 }
 
-void	test_landing_starts_a_fresh_lock_delay(void)
+/**
+ * @brief Exercises landing starts a fresh lock delay.
+ *
+ * Gravity time accumulated before landing must not be charged to grounded lock
+ *   time.
+ */
+static void	test_landing_starts_a_fresh_lock_delay(void)
 {
 	solo_game_t	game;
 	int				gravity_ms;
@@ -218,7 +307,13 @@ void	test_landing_starts_a_fresh_lock_delay(void)
 	printf("PASS test_landing_starts_a_fresh_lock_delay\n");
 }
 
-void	test_next_wake_tracks_gravity_and_lock_deadlines(void)
+/**
+ * @brief Exercises next wake tracks gravity and lock deadlines.
+ *
+ * Wake calculations must follow the active gravity and grounded lock
+ *   boundaries exactly.
+ */
+static void	test_next_wake_tracks_gravity_and_lock_deadlines(void)
 {
 	solo_game_t	game;
 	int				gravity_ms;
@@ -235,7 +330,13 @@ void	test_next_wake_tracks_gravity_and_lock_deadlines(void)
 	printf("PASS test_next_wake_tracks_gravity_and_lock_deadlines\n");
 }
 
-void	test_zero_elapsed_consumes_due_deadlines(void)
+/**
+ * @brief Exercises zero elapsed consumes due deadlines.
+ *
+ * Already-due gravity, lock, clear, and reveal events must progress without
+ *   elapsed time.
+ */
+static void	test_zero_elapsed_consumes_due_deadlines(void)
 {
 	solo_game_t	game;
 	int				gravity_ms;
@@ -272,7 +373,13 @@ void	test_zero_elapsed_consumes_due_deadlines(void)
 	printf("PASS test_zero_elapsed_consumes_due_deadlines\n");
 }
 
-void	test_grounded_piece_sleeps_until_lock_deadline(void)
+/**
+ * @brief Exercises grounded piece sleeps until lock deadline.
+ *
+ * High-level gravity must not cause polling while a grounded piece waits for
+ *   lock.
+ */
+static void	test_grounded_piece_sleeps_until_lock_deadline(void)
 {
 	solo_game_t	game;
 
@@ -289,7 +396,13 @@ void	test_grounded_piece_sleeps_until_lock_deadline(void)
 	printf("PASS test_grounded_piece_sleeps_until_lock_deadline\n");
 }
 
-void	test_clear_animation_wakes_at_visual_boundaries(void)
+/**
+ * @brief Exercises clear animation wakes at visual boundaries.
+ *
+ * The line-clear timer must wake at its sprite midpoint and compaction
+ *   endpoint.
+ */
+static void	test_clear_animation_wakes_at_visual_boundaries(void)
 {
 	solo_game_t	game;
 	int				halfway;
@@ -313,7 +426,13 @@ void	test_clear_animation_wakes_at_visual_boundaries(void)
 	printf("PASS test_clear_animation_wakes_at_visual_boundaries\n");
 }
 
-void	test_pause_freezes_active_and_clear_timers(void)
+/**
+ * @brief Exercises pause freezes active and clear timers.
+ *
+ * Pause must preserve gravity, lock, piece position, and clear-animation
+ *   elapsed time.
+ */
+static void	test_pause_freezes_active_and_clear_timers(void)
 {
 	solo_game_t	active;
 	solo_game_t	clearing;
@@ -346,16 +465,27 @@ void	test_pause_freezes_active_and_clear_timers(void)
 	printf("PASS test_pause_freezes_active_and_clear_timers\n");
 }
 
-void	test_clear_animation_then_level_and_meter_update(void)
+/**
+ * @brief Exercises clear animation then level and meter update.
+ *
+ * Completing the tenth line must advance level and fill one crystal segment
+ *   after animation.
+ */
+static void	test_clear_animation_then_level_and_meter_update(void)
 {
 	solo_game_t	game;
+	int				col;
 
 	solo_game_init(&game, 321u);
 	game.total_lines = 9;
 	game.level = 1;
-	for (int col = 0; col < BOARD_WIDTH; col++)
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
 		board_set(&game.board, col, BOARD_HEIGHT - 1,
 			(t_cell){CELL_FILLED, PIECE_I});
+		col++;
+	}
 	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
 	assert(game.phase == SOLO_CLEARING);
 	assert(solo_game_row_is_clearing(&game, BOARD_HEIGHT - 1));
@@ -368,22 +498,85 @@ void	test_clear_animation_then_level_and_meter_update(void)
 	printf("PASS test_clear_animation_then_level_and_meter_update\n");
 }
 
-int	main(void)
+/**
+ * @brief Exercises rotation stress preserves valid state.
+ *
+ * One hundred thousand alternating rotations must preserve a valid empty-board
+ *   piece without locking or corruption.
+ */
+static void	test_rotation_stress_preserves_valid_state(void)
 {
-	test_init_has_active_and_three_previews();
-	test_ghost_and_hard_drop();
-	test_ghost_stops_above_stack();
-	test_locking_piece_in_top_row_reveals_before_game_over();
-	test_locking_piece_below_top_row_continues();
-	test_blocked_spawn_with_empty_top_row_reveals_before_game_over();
-	test_catchup_cannot_skip_new_top_out_reveal();
-	test_lock_delay_waits_half_second();
-	test_landing_starts_a_fresh_lock_delay();
-	test_next_wake_tracks_gravity_and_lock_deadlines();
-	test_zero_elapsed_consumes_due_deadlines();
-	test_grounded_piece_sleeps_until_lock_deadline();
-	test_clear_animation_wakes_at_visual_boundaries();
-	test_pause_freezes_active_and_clear_timers();
-	test_clear_animation_then_level_and_meter_update();
-	return (0);
+	solo_game_t	game;
+	int				index;
+
+	solo_game_init(&game, 798u);
+	game.active = piece_spawn(PIECE_T);
+	index = 0;
+	while (index < 100000)
+	{
+		if (index % 2 == 0)
+			assert(solo_game_apply_action(&game, SOLO_ROTATE_CW));
+		else
+			assert(solo_game_apply_action(&game, SOLO_ROTATE_CCW));
+		assert(piece_is_valid(&game.board, &game.active));
+		assert(filled_cells(&game.board) == 0);
+		index++;
+	}
+	printf("PASS test_rotation_stress_preserves_valid_state\n");
+}
+
+/**
+ * @brief Counts non-empty cells in a board snapshot.
+ *
+ * Tests use this helper to distinguish active-piece movement from committed
+ *   settled state.
+ *
+ * @param board Pointer to the board to inspect.
+ * @return Number of filled or garbage cells.
+ */
+static int	filled_cells(const t_board *board)
+{
+	int	count;
+	int	row;
+	int	col;
+
+	count = 0;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (board_get(board, col, row).type != CELL_EMPTY)
+				count++;
+			col++;
+		}
+		row++;
+	}
+	return (count);
+}
+
+/**
+ * @brief Places a game directly into a deterministic one-line clear phase.
+ *
+ * The helper fills the bottom row and hard-drops the active piece so timing
+ *   tests share one consistent animation setup.
+ *
+ * @param game Pointer to the Solo state to prepare.
+ * @param seed Deterministic seven-bag seed.
+ */
+static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed)
+{
+	int	col;
+
+	solo_game_init(game, seed);
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		board_set(&game->board, col, BOARD_HEIGHT - 1,
+			(t_cell){CELL_FILLED, PIECE_I});
+		col++;
+	}
+	assert(solo_game_apply_action(game, SOLO_HARD_DROP));
+	assert(game->phase == SOLO_CLEARING);
 }

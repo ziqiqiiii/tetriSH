@@ -1,44 +1,12 @@
 #include "tetrisu.h"
 
 #if TETRISU_ENABLE_AUDIO
-# include <SDL.h>
-# include <SDL_mixer.h>
-#endif
 
-#define AUDIO_DEFAULT_VOLUME	96
-#define AUDIO_VOLUME_STEP	8
-
-#if TETRISU_ENABLE_AUDIO
-
-static void	log_mix_error(const char *context)
-{
-	fprintf(stderr, "tetrisu: audio %s: %s\n", context, Mix_GetError());
-}
-
-static void	free_music(audio_ctx_t *audio)
-{
-	if (audio->music != NULL)
-	{
-		Mix_HaltMusic();
-		Mix_FreeMusic((Mix_Music *)audio->music);
-		audio->music = NULL;
-	}
-}
-
-static void	free_chunk(void **chunk)
-{
-	if (*chunk != NULL)
-	{
-		Mix_FreeChunk((Mix_Chunk *)*chunk);
-		*chunk = NULL;
-	}
-}
-
-static void	play_chunk(void *chunk)
-{
-	if (chunk != NULL)
-		Mix_PlayChannel(-1, (Mix_Chunk *)chunk, 0);
-}
+// Static Functions
+static void	log_mix_error(const char *context);
+static void	free_music(audio_ctx_t *audio);
+static void	free_chunk(void **chunk);
+static void	play_chunk(void *chunk);
 
 #endif
 
@@ -284,3 +252,57 @@ void	audio_teardown(audio_ctx_t *audio)
 #endif
 	memset(audio, 0, sizeof(*audio));
 }
+
+#if TETRISU_ENABLE_AUDIO
+
+/**
+ * @brief Reports an SDL_mixer failure with operation context.
+ *
+ * @param context Short description of the failed audio operation.
+ */
+static void	log_mix_error(const char *context)
+{
+	fprintf(stderr, "tetrisu: audio %s: %s\n", context, Mix_GetError());
+}
+
+/**
+ * @brief Stops and releases the currently owned music stream.
+ *
+ * @param audio Audio context whose music pointer is cleared.
+ */
+static void	free_music(audio_ctx_t *audio)
+{
+	if (audio->music != NULL)
+	{
+		Mix_HaltMusic();
+		Mix_FreeMusic((Mix_Music *)audio->music);
+		audio->music = NULL;
+	}
+}
+
+/**
+ * @brief Releases one optional menu sound effect.
+ *
+ * @param chunk Address of the owned chunk pointer to clear.
+ */
+static void	free_chunk(void **chunk)
+{
+	if (*chunk != NULL)
+	{
+		Mix_FreeChunk((Mix_Chunk *)*chunk);
+		*chunk = NULL;
+	}
+}
+
+/**
+ * @brief Plays one menu sound without blocking the input loop.
+ *
+ * @param chunk Optional SDL_mixer chunk to play once.
+ */
+static void	play_chunk(void *chunk)
+{
+	if (chunk != NULL)
+		Mix_PlayChannel(-1, (Mix_Chunk *)chunk, 0);
+}
+
+#endif

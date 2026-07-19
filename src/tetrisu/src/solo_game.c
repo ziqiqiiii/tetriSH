@@ -1,128 +1,33 @@
 #include "tetrisu.h"
 
-static bool	piece_is_grounded(const solo_game_t *game)
-{
-	t_piece	probe;
-
-	probe = game->active;
-	return (piece_move(&game->board, &probe, 0, 1) == BRAIN_BLOCKED);
-}
-
-static void	reset_piece_timers(solo_game_t *game)
-{
-	game->gravity_elapsed_ms = 0;
-	game->lock_elapsed_ms = 0;
-	game->lock_resets = 0;
-	game->last_kick_index = -1;
-	game->last_action_was_rotation = false;
-}
-
-/* AI-assisted: this 20-row local board has no hidden spawn rows, so locking
- * any occupied cell into row 0 triggers Solo mode's visible top-out phase. */
-static bool	piece_touches_top(const t_piece *piece)
-{
-	int	cols[4];
-	int	rows[4];
-	int	index;
-
-	if (!piece_cells(piece, cols, rows))
-		return (false);
-	index = 0;
-	while (index < 4)
-	{
-		if (rows[index] == 0)
-			return (true);
-		index++;
-	}
-	return (false);
-}
-
-/* Every top-out path shares one noninteractive reveal before the panel. */
-static void	begin_top_out_reveal(solo_game_t *game)
-{
-	game->top_out_elapsed_ms = 0;
-	game->phase = SOLO_TOP_OUT_REVEAL;
-}
-
-static void	spawn_queued_piece(solo_game_t *game)
-{
-	t_piece_type	type;
-	int				index;
-
-	type = game->next[0];
-	index = 0;
-	while (index < SOLO_NEXT_COUNT - 1)
-	{
-		game->next[index] = game->next[index + 1];
-		index++;
-	}
-	game->next[SOLO_NEXT_COUNT - 1] = piece_bag_next(&game->bag);
-	game->active = piece_spawn(type);
-	reset_piece_timers(game);
-	game->phase = SOLO_ACTIVE;
-	if (!piece_is_valid(&game->board, &game->active))
-	{
-		/* A blocked spawn keeps the final settled board visible too. */
-		begin_top_out_reveal(game);
-	}
-}
-
+// Static Functions
+static void	reset_piece_timers(solo_game_t *game);
+static bool	apply_shift(solo_game_t *game, int direction);
+static bool	piece_is_grounded(const solo_game_t *game);
+static void	reset_lock_after_move(solo_game_t *game, bool was_grounded);
+static bool	apply_rotation(solo_game_t *game, int direction);
+static void	lock_active_piece(solo_game_t *game);
+static bool	piece_touches_top(const t_piece *piece);
+static void	begin_top_out_reveal(solo_game_t *game);
 static void	remember_score_event(solo_game_t *game, int lines,
-	t_spin_type spin, bool perfect_clear)
-{
-	game->last_score = score_apply_clear(&game->scoring, lines, game->level,
-		spin, perfect_clear);
-	game->last_lines = lines;
-	game->last_spin = spin;
-	game->last_perfect_clear = perfect_clear;
-}
+	t_spin_type spin, bool perfect_clear);
+static void	spawn_queued_piece(solo_game_t *game);
+static bool	process_due_event(solo_game_t *game);
+static void	finish_line_clear(solo_game_t *game);
+static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms);
+static int	min_int(int left, int right);
+static bool	advance_clearing(solo_game_t *game, int *remaining_ms);
+static bool	advance_active(solo_game_t *game, int *remaining_ms);
 
-static void	finish_line_clear(solo_game_t *game)
-{
-	bool	perfect_clear;
-
-	board_clear_lines(&game->board);
-	perfect_clear = board_is_empty(&game->board);
-	remember_score_event(game, game->clear_count, game->pending_spin,
-		perfect_clear);
-	game->total_lines += game->clear_count;
-	game->level = level_from_lines(game->total_lines);
-	game->crystal_charge += game->clear_count;
-	if (game->crystal_charge > SOLO_CRYSTAL_CAPACITY)
-		game->crystal_charge = SOLO_CRYSTAL_CAPACITY;
-	game->clear_count = 0;
-	game->clear_elapsed_ms = 0;
-	spawn_queued_piece(game);
-}
-
-/* AI-assisted: locks, classifies, and stages the clear without sleeping;
- * render_solo flashes the saved rows while update() advances the 200 ms phase. */
-static void	lock_active_piece(solo_game_t *game)
-{
-	t_spin_type	spin;
-
-	spin = T_SPIN_NONE;
-	if (game->last_action_was_rotation)
-		spin = piece_t_spin_type(&game->board, &game->active,
-			game->last_kick_index);
-	piece_stamp(&game->board, &game->active);
-	if (piece_touches_top(&game->active))
-	{
-		begin_top_out_reveal(game);
-		return ;
-	}
-	game->clear_count = board_find_full_lines(&game->board, game->clear_rows);
-	if (game->clear_count > 0)
-	{
-		game->pending_spin = spin;
-		game->clear_elapsed_ms = 0;
-		game->phase = SOLO_CLEARING;
-		return ;
-	}
-	remember_score_event(game, 0, spin, false);
-	spawn_queued_piece(game);
-}
-
+/**
+ * @brief Initializes a new endless Solo game.
+ *
+ * The board, seven-bag, score state, timers, active piece, and three-piece
+ *   preview are reset together.
+ *
+ * @param game Pointer to the Solo state to initialize.
+ * @param seed Deterministic seed for the seven-bag generator.
+ */
 void	solo_game_init(solo_game_t *game, uint32_t seed)
 {
 	int	index;
@@ -143,42 +48,16 @@ void	solo_game_init(solo_game_t *game, uint32_t seed)
 	game->phase = SOLO_ACTIVE;
 }
 
-static void	reset_lock_after_move(solo_game_t *game, bool was_grounded)
-{
-	if (was_grounded && game->lock_resets < SOLO_LOCK_RESET_LIMIT)
-	{
-		game->lock_elapsed_ms = 0;
-		game->lock_resets++;
-	}
-}
-
-static bool	apply_shift(solo_game_t *game, int direction)
-{
-	bool	was_grounded;
-
-	was_grounded = piece_is_grounded(game);
-	if (piece_move(&game->board, &game->active, direction, 0) != BRAIN_OK)
-		return (false);
-	reset_lock_after_move(game, was_grounded);
-	game->last_action_was_rotation = false;
-	return (true);
-}
-
-static bool	apply_rotation(solo_game_t *game, int direction)
-{
-	bool	was_grounded;
-	int		kick_index;
-
-	was_grounded = piece_is_grounded(game);
-	if (piece_rotate_with_kick(&game->board, &game->active, direction,
-			&kick_index) != BRAIN_OK)
-		return (false);
-	reset_lock_after_move(game, was_grounded);
-	game->last_action_was_rotation = true;
-	game->last_kick_index = kick_index;
-	return (true);
-}
-
+/**
+ * @brief Applies one player action to the active piece.
+ *
+ * Actions are ignored while paused or outside the active phase; hard drop
+ *   locks immediately and awards drop points.
+ *
+ * @param game Pointer to the Solo state.
+ * @param action Requested movement, rotation, or drop.
+ * @return true when the action changed game state, otherwise false.
+ */
 bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 {
 	int	distance;
@@ -213,6 +92,507 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 	return (true);
 }
 
+/**
+ * @brief Advances Solo timers by a bounded elapsed interval.
+ *
+ * Due gravity, lock, clear, and top-out boundaries are consumed without
+ *   skipping the visible top-out reveal.
+ *
+ * @param game Pointer to the Solo state.
+ * @param elapsed_ms Elapsed monotonic time in milliseconds.
+ * @return true when visible game state changed, otherwise false.
+ */
+bool	solo_game_update(solo_game_t *game, int elapsed_ms)
+{
+	int		remaining_ms;
+	int		due_events;
+	bool	changed;
+	bool	started_in_reveal;
+
+	if (elapsed_ms < 0 || game->paused || game->phase == SOLO_GAME_OVER)
+		return (false);
+	remaining_ms = elapsed_ms;
+	changed = false;
+	started_in_reveal = game->phase == SOLO_TOP_OUT_REVEAL;
+	due_events = 0;
+	while (due_events < 64 && process_due_event(game))
+	{
+		changed = true;
+		due_events++;
+	}
+	/* Do not spend catch-up time on a reveal that began inside this update.
+	 * Returning now guarantees the final board reaches the terminal once. */
+	if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+		return (true);
+	while (remaining_ms > 0 && game->phase != SOLO_GAME_OVER)
+	{
+		if (game->phase == SOLO_TOP_OUT_REVEAL)
+			changed = advance_top_out_reveal(game, &remaining_ms) || changed;
+		else if (game->phase == SOLO_CLEARING)
+			changed = advance_clearing(game, &remaining_ms) || changed;
+		else
+			changed = advance_active(game, &remaining_ms) || changed;
+		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+			return (true);
+		due_events = 0;
+		while (due_events < 64 && process_due_event(game))
+		{
+			changed = true;
+			due_events++;
+		}
+		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
+			return (true);
+	}
+	return (changed);
+}
+
+/**
+ * @brief Calculates the next state-timer deadline.
+ *
+ * The renderer can sleep until this value instead of polling gravity or lock
+ *   state continuously.
+ *
+ * @param game Pointer to the Solo state.
+ * @return Milliseconds until the next deadline, 0 when due, or -1 when no
+ *   timer is active.
+ */
+int	solo_game_next_wake_ms(const solo_game_t *game)
+{
+	int	gravity_ms;
+	int	wake_ms;
+	int	lock_ms;
+
+	if (game->paused || game->phase == SOLO_GAME_OVER)
+		return (-1);
+	if (game->phase == SOLO_TOP_OUT_REVEAL)
+	{
+		wake_ms = SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms;
+		if (wake_ms < 0)
+			return (0);
+		return (wake_ms);
+	}
+	if (game->phase == SOLO_CLEARING)
+	{
+		if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
+			return (SOLO_CLEAR_ANIMATION_MS / 2 - game->clear_elapsed_ms);
+		return (SOLO_CLEAR_ANIMATION_MS - game->clear_elapsed_ms);
+	}
+	if (piece_is_grounded(game))
+	{
+		lock_ms = SOLO_LOCK_DELAY_MS - game->lock_elapsed_ms;
+		if (lock_ms < 0)
+			return (0);
+		return (lock_ms);
+	}
+	gravity_ms = gravity_interval_ms(game->level);
+	if (gravity_ms == 0)
+		return (0);
+	wake_ms = INT32_MAX;
+	if (gravity_ms > 0)
+		wake_ms = gravity_ms - game->gravity_elapsed_ms;
+	if (wake_ms == INT32_MAX)
+		return (-1);
+	if (wake_ms < 0)
+		return (0);
+	return (wake_ms);
+}
+
+/**
+ * @brief Calculates the active piece's landing projection.
+ *
+ * The returned copy is translated by the current unobstructed hard-drop
+ *   distance.
+ *
+ * @param game Pointer to the Solo state.
+ * @return Ghost piece positioned at its landing row.
+ */
+t_piece	solo_game_ghost(const solo_game_t *game)
+{
+	t_piece	ghost;
+
+	ghost = game->active;
+	ghost.row += piece_drop_distance(&game->board, &ghost);
+	return (ghost);
+}
+
+/**
+ * @brief Checks whether a row participates in the current clear animation.
+ *
+ * Rows are reported only during the clearing phase and are matched against the
+ *   saved clear list.
+ *
+ * @param game Pointer to the Solo state.
+ * @param row Board row to query.
+ * @return true when the row is clearing, otherwise false.
+ */
+bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
+{
+	int	index;
+
+	if (game->phase != SOLO_CLEARING)
+		return (false);
+	index = 0;
+	while (index < game->clear_count)
+	{
+		if (game->clear_rows[index] == row)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Toggles pause during playable animation phases.
+ *
+ * Top-out reveal and game-over phases cannot be paused.
+ *
+ * @param game Pointer to the Solo state.
+ */
+void	solo_game_toggle_pause(solo_game_t *game)
+{
+	if (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING)
+		game->paused = !game->paused;
+}
+
+/**
+ * @brief Resets per-piece gravity and lock bookkeeping.
+ *
+ * Every newly spawned piece receives fresh gravity, lock-delay, kick, and
+ *   action state.
+ *
+ * @param game Pointer to the Solo state.
+ */
+static void	reset_piece_timers(solo_game_t *game)
+{
+	game->gravity_elapsed_ms = 0;
+	game->lock_elapsed_ms = 0;
+	game->lock_resets = 0;
+	game->last_kick_index = -1;
+	game->last_action_was_rotation = false;
+}
+
+/**
+ * @brief Moves the active piece horizontally.
+ *
+ * A successful shift updates lock-delay bookkeeping and clears rotation
+ *   provenance.
+ *
+ * @param game Pointer to the Solo state.
+ * @param direction Horizontal delta, normally -1 or 1.
+ * @return true when the piece moved, otherwise false.
+ */
+static bool	apply_shift(solo_game_t *game, int direction)
+{
+	bool	was_grounded;
+
+	was_grounded = piece_is_grounded(game);
+	if (piece_move(&game->board, &game->active, direction, 0) != BRAIN_OK)
+		return (false);
+	reset_lock_after_move(game, was_grounded);
+	game->last_action_was_rotation = false;
+	return (true);
+}
+
+/**
+ * @brief Checks whether the active piece can descend one row.
+ *
+ * A copied piece is probed so the live state remains unchanged.
+ *
+ * @param game Pointer to the Solo state.
+ * @return true when downward movement is blocked, otherwise false.
+ */
+static bool	piece_is_grounded(const solo_game_t *game)
+{
+	t_piece	probe;
+
+	probe = game->active;
+	return (piece_move(&game->board, &probe, 0, 1) == BRAIN_BLOCKED);
+}
+
+/**
+ * @brief Applies the Guideline lock-delay reset limit.
+ *
+ * A successful grounded move refreshes lock delay only while reset capacity
+ *   remains.
+ *
+ * @param game Pointer to the Solo state.
+ * @param was_grounded Whether the piece was grounded before the action.
+ */
+static void	reset_lock_after_move(solo_game_t *game, bool was_grounded)
+{
+	if (was_grounded && game->lock_resets < SOLO_LOCK_RESET_LIMIT)
+	{
+		game->lock_elapsed_ms = 0;
+		game->lock_resets++;
+	}
+}
+
+/**
+ * @brief Rotates the active piece with SRS wall kicks.
+ *
+ * The accepted kick index is preserved for later T-spin classification.
+ *
+ * @param game Pointer to the Solo state.
+ * @param direction Rotation direction, normally -1 or 1.
+ * @return true when a kick candidate succeeded, otherwise false.
+ */
+static bool	apply_rotation(solo_game_t *game, int direction)
+{
+	bool	was_grounded;
+	int		kick_index;
+
+	was_grounded = piece_is_grounded(game);
+	if (piece_rotate_with_kick(&game->board, &game->active, direction,
+			&kick_index) != BRAIN_OK)
+		return (false);
+	reset_lock_after_move(game, was_grounded);
+	game->last_action_was_rotation = true;
+	game->last_kick_index = kick_index;
+	return (true);
+}
+
+/**
+ * @brief Locks the active piece and chooses its next phase.
+ *
+ * T-spin classification happens before stamping; top-out, clear animation, and
+ *   normal spawn paths then diverge without sleeping.
+ *
+ * @param game Pointer to the Solo state.
+ */
+static void	lock_active_piece(solo_game_t *game)
+{
+	t_spin_type	spin;
+
+	spin = T_SPIN_NONE;
+	if (game->last_action_was_rotation)
+		spin = piece_t_spin_type(&game->board, &game->active,
+			game->last_kick_index);
+	piece_stamp(&game->board, &game->active);
+	if (piece_touches_top(&game->active))
+	{
+		begin_top_out_reveal(game);
+		return ;
+	}
+	game->clear_count = board_find_full_lines(&game->board, game->clear_rows);
+	if (game->clear_count > 0)
+	{
+		game->pending_spin = spin;
+		game->clear_elapsed_ms = 0;
+		game->phase = SOLO_CLEARING;
+		return ;
+	}
+	remember_score_event(game, 0, spin, false);
+	spawn_queued_piece(game);
+}
+
+/**
+ * @brief Checks whether a locked piece occupies the visible top row.
+ *
+ * The local board has no hidden spawn rows, so row zero is the visible top-out
+ *   boundary.
+ *
+ * @param piece Pointer to the locked piece.
+ * @return true when any occupied cell is in row zero, otherwise false.
+ */
+static bool	piece_touches_top(const t_piece *piece)
+{
+	int	cols[4];
+	int	rows[4];
+	int	index;
+
+	if (!piece_cells(piece, cols, rows))
+		return (false);
+	index = 0;
+	while (index < 4)
+	{
+		if (rows[index] == 0)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Starts the noninteractive top-out reveal phase.
+ *
+ * The reveal timer is reset so the final settled board is presented before the
+ *   game-over panel.
+ *
+ * @param game Pointer to the Solo state.
+ */
+static void	begin_top_out_reveal(solo_game_t *game)
+{
+	game->top_out_elapsed_ms = 0;
+	game->phase = SOLO_TOP_OUT_REVEAL;
+}
+
+/**
+ * @brief Applies and records the latest scoring event.
+ *
+ * The stored clear, spin, and perfect-clear values drive both persistent
+ *   scoring and the HUD award label.
+ *
+ * @param game Pointer to the Solo state.
+ * @param lines Number of lines cleared.
+ * @param spin Classified T-spin type.
+ * @param perfect_clear Whether no settled cells remain.
+ */
+static void	remember_score_event(solo_game_t *game, int lines,
+	t_spin_type spin, bool perfect_clear)
+{
+	game->last_score = score_apply_clear(&game->scoring, lines, game->level,
+		spin, perfect_clear);
+	game->last_lines = lines;
+	game->last_spin = spin;
+	game->last_perfect_clear = perfect_clear;
+}
+
+/**
+ * @brief Promotes the preview head and appends one bag piece.
+ *
+ * A blocked spawn enters the same visible top-out reveal used by a top-row
+ *   lock.
+ *
+ * @param game Pointer to the Solo state.
+ */
+static void	spawn_queued_piece(solo_game_t *game)
+{
+	t_piece_type	type;
+	int				index;
+
+	type = game->next[0];
+	index = 0;
+	while (index < SOLO_NEXT_COUNT - 1)
+	{
+		game->next[index] = game->next[index + 1];
+		index++;
+	}
+	game->next[SOLO_NEXT_COUNT - 1] = piece_bag_next(&game->bag);
+	game->active = piece_spawn(type);
+	reset_piece_timers(game);
+	game->phase = SOLO_ACTIVE;
+	if (!piece_is_valid(&game->board, &game->active))
+	{
+		/* A blocked spawn keeps the final settled board visible too. */
+		begin_top_out_reveal(game);
+	}
+}
+
+/**
+ * @brief Processes one timer boundary that is already due.
+ *
+ * Zero-elapsed updates can still drain due boundaries, preventing a busy loop
+ *   around equal millisecond samples.
+ *
+ * @param game Pointer to the Solo state.
+ * @return true when one due event was processed, otherwise false.
+ */
+static bool	process_due_event(solo_game_t *game)
+{
+	int	gravity_ms;
+
+	if (game->phase == SOLO_TOP_OUT_REVEAL)
+	{
+		if (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS)
+		{
+			game->phase = SOLO_GAME_OVER;
+			return (true);
+		}
+		return (false);
+	}
+	if (game->phase == SOLO_CLEARING)
+	{
+		if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
+		{
+			finish_line_clear(game);
+			return (true);
+		}
+		return (false);
+	}
+	if (game->phase != SOLO_ACTIVE)
+		return (false);
+	if (piece_is_grounded(game)
+		&& game->lock_elapsed_ms >= SOLO_LOCK_DELAY_MS)
+	{
+		lock_active_piece(game);
+		return (true);
+	}
+	if (piece_is_grounded(game))
+		return (false);
+	gravity_ms = gravity_interval_ms(game->level);
+	if (gravity_ms == 0)
+	{
+		piece_hard_drop(&game->board, &game->active);
+		return (true);
+	}
+	if (gravity_ms > 0 && game->gravity_elapsed_ms >= gravity_ms)
+	{
+		game->gravity_elapsed_ms -= gravity_ms;
+		if (gravity_tick(&game->board, &game->active) == BRAIN_OK)
+			game->lock_elapsed_ms = 0;
+		return (true);
+	}
+	return (false);
+}
+
+/**
+ * @brief Commits a completed line-clear animation.
+ *
+ * Rows collapse, score and level advance, crystal charge fills, and the next
+ *   piece spawns.
+ *
+ * @param game Pointer to the Solo state.
+ */
+static void	finish_line_clear(solo_game_t *game)
+{
+	bool	perfect_clear;
+
+	board_clear_lines(&game->board);
+	perfect_clear = board_is_empty(&game->board);
+	remember_score_event(game, game->clear_count, game->pending_spin,
+		perfect_clear);
+	game->total_lines += game->clear_count;
+	game->level = level_from_lines(game->total_lines);
+	game->crystal_charge += game->clear_count;
+	if (game->crystal_charge > SOLO_CRYSTAL_CAPACITY)
+		game->crystal_charge = SOLO_CRYSTAL_CAPACITY;
+	game->clear_count = 0;
+	game->clear_elapsed_ms = 0;
+	spawn_queued_piece(game);
+}
+
+/**
+ * @brief Consumes time in the final-board reveal phase.
+ *
+ * The static reveal has one deterministic deadline before the game-over
+ *   overlay appears.
+ *
+ * @param game Pointer to the Solo state.
+ * @param remaining_ms In/out unconsumed elapsed milliseconds.
+ * @return true when the reveal deadline is reached, otherwise false.
+ */
+static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms)
+{
+	int	step;
+
+	step = min_int(*remaining_ms,
+		SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms);
+	if (step < 0)
+		step = 0;
+	game->top_out_elapsed_ms += step;
+	*remaining_ms -= step;
+	return (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS);
+}
+
+/**
+ * @brief Returns the smaller of two integers.
+ *
+ * This local helper keeps timer-boundary calculations explicit.
+ *
+ * @param left First value.
+ * @param right Second value.
+ * @return The smaller input value.
+ */
 static int	min_int(int left, int right)
 {
 	if (left < right)
@@ -220,9 +600,47 @@ static int	min_int(int left, int right)
 	return (right);
 }
 
-/* AI-assisted: advances to one timer boundary at a time. Time spent falling
- * is never charged to lock delay, so a piece that lands on this update still
- * receives the full Guideline lock window. */
+/**
+ * @brief Consumes time until the next clear-animation boundary.
+ *
+ * The midpoint swaps animation tiles and the endpoint collapses rows and
+ *   spawns.
+ *
+ * @param game Pointer to the Solo state.
+ * @param remaining_ms In/out unconsumed elapsed milliseconds.
+ * @return true when a visual boundary was reached, otherwise false.
+ */
+static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
+{
+	int	target;
+	int	step;
+
+	target = SOLO_CLEAR_ANIMATION_MS;
+	if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
+		target = SOLO_CLEAR_ANIMATION_MS / 2;
+	step = min_int(*remaining_ms, target - game->clear_elapsed_ms);
+	if (step < 0)
+		step = 0;
+	game->clear_elapsed_ms += step;
+	*remaining_ms -= step;
+	if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
+	{
+		finish_line_clear(game);
+		return (true);
+	}
+	return (game->clear_elapsed_ms == SOLO_CLEAR_ANIMATION_MS / 2);
+}
+
+/**
+ * @brief Consumes elapsed time while gameplay is active.
+ *
+ * Time advances to one gravity or lock boundary at a time so newly landed
+ *   pieces receive the full lock delay.
+ *
+ * @param game Pointer to the Solo state.
+ * @param remaining_ms In/out unconsumed elapsed milliseconds.
+ * @return true when visible state changed, otherwise false.
+ */
 static bool	advance_active(solo_game_t *game, int *remaining_ms)
 {
 	int	gravity_ms;
@@ -281,207 +699,4 @@ static bool	advance_active(solo_game_t *game, int *remaining_ms)
 			break ;
 	}
 	return (changed);
-}
-
-static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
-{
-	int	target;
-	int	step;
-
-	target = SOLO_CLEAR_ANIMATION_MS;
-	if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
-		target = SOLO_CLEAR_ANIMATION_MS / 2;
-	step = min_int(*remaining_ms, target - game->clear_elapsed_ms);
-	if (step < 0)
-		step = 0;
-	game->clear_elapsed_ms += step;
-	*remaining_ms -= step;
-	if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
-	{
-		finish_line_clear(game);
-		return (true);
-	}
-	return (game->clear_elapsed_ms == SOLO_CLEAR_ANIMATION_MS / 2);
-}
-
-/* AI-assisted: the final settled board stays visible for one deterministic
- * deadline; no intermediate wake is needed because the reveal is static. */
-static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms)
-{
-	int	step;
-
-	step = min_int(*remaining_ms,
-		SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms);
-	if (step < 0)
-		step = 0;
-	game->top_out_elapsed_ms += step;
-	*remaining_ms -= step;
-	return (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS);
-}
-
-/* AI-assisted: a monotonic deadline can expire within the same integer
- * millisecond as the previous sample. Consume already-due timer boundaries
- * even when update() receives zero elapsed time, preventing a busy loop. */
-static bool	process_due_event(solo_game_t *game)
-{
-	int	gravity_ms;
-
-	if (game->phase == SOLO_TOP_OUT_REVEAL)
-	{
-		if (game->top_out_elapsed_ms >= SOLO_TOP_OUT_REVEAL_MS)
-		{
-			game->phase = SOLO_GAME_OVER;
-			return (true);
-		}
-		return (false);
-	}
-	if (game->phase == SOLO_CLEARING)
-	{
-		if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
-		{
-			finish_line_clear(game);
-			return (true);
-		}
-		return (false);
-	}
-	if (game->phase != SOLO_ACTIVE)
-		return (false);
-	if (piece_is_grounded(game)
-		&& game->lock_elapsed_ms >= SOLO_LOCK_DELAY_MS)
-	{
-		lock_active_piece(game);
-		return (true);
-	}
-	if (piece_is_grounded(game))
-		return (false);
-	gravity_ms = gravity_interval_ms(game->level);
-	if (gravity_ms == 0)
-	{
-		piece_hard_drop(&game->board, &game->active);
-		return (true);
-	}
-	if (gravity_ms > 0 && game->gravity_elapsed_ms >= gravity_ms)
-	{
-		game->gravity_elapsed_ms -= gravity_ms;
-		if (gravity_tick(&game->board, &game->active) == BRAIN_OK)
-			game->lock_elapsed_ms = 0;
-		return (true);
-	}
-	return (false);
-}
-
-bool	solo_game_update(solo_game_t *game, int elapsed_ms)
-{
-	int		remaining_ms;
-	int		due_events;
-	bool	changed;
-	bool	started_in_reveal;
-
-	if (elapsed_ms < 0 || game->paused || game->phase == SOLO_GAME_OVER)
-		return (false);
-	remaining_ms = elapsed_ms;
-	changed = false;
-	started_in_reveal = game->phase == SOLO_TOP_OUT_REVEAL;
-	due_events = 0;
-	while (due_events < 64 && process_due_event(game))
-	{
-		changed = true;
-		due_events++;
-	}
-	/* Do not spend catch-up time on a reveal that began inside this update.
-	 * Returning now guarantees the final board reaches the terminal once. */
-	if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
-		return (true);
-	while (remaining_ms > 0 && game->phase != SOLO_GAME_OVER)
-	{
-		if (game->phase == SOLO_TOP_OUT_REVEAL)
-			changed = advance_top_out_reveal(game, &remaining_ms) || changed;
-		else if (game->phase == SOLO_CLEARING)
-			changed = advance_clearing(game, &remaining_ms) || changed;
-		else
-			changed = advance_active(game, &remaining_ms) || changed;
-		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
-			return (true);
-		due_events = 0;
-		while (due_events < 64 && process_due_event(game))
-		{
-			changed = true;
-			due_events++;
-		}
-		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
-			return (true);
-	}
-	return (changed);
-}
-
-int	solo_game_next_wake_ms(const solo_game_t *game)
-{
-	int	gravity_ms;
-	int	wake_ms;
-	int	lock_ms;
-
-	if (game->paused || game->phase == SOLO_GAME_OVER)
-		return (-1);
-	if (game->phase == SOLO_TOP_OUT_REVEAL)
-	{
-		wake_ms = SOLO_TOP_OUT_REVEAL_MS - game->top_out_elapsed_ms;
-		if (wake_ms < 0)
-			return (0);
-		return (wake_ms);
-	}
-	if (game->phase == SOLO_CLEARING)
-	{
-		if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
-			return (SOLO_CLEAR_ANIMATION_MS / 2 - game->clear_elapsed_ms);
-		return (SOLO_CLEAR_ANIMATION_MS - game->clear_elapsed_ms);
-	}
-	if (piece_is_grounded(game))
-	{
-		lock_ms = SOLO_LOCK_DELAY_MS - game->lock_elapsed_ms;
-		if (lock_ms < 0)
-			return (0);
-		return (lock_ms);
-	}
-	gravity_ms = gravity_interval_ms(game->level);
-	if (gravity_ms == 0)
-		return (0);
-	wake_ms = INT32_MAX;
-	if (gravity_ms > 0)
-		wake_ms = gravity_ms - game->gravity_elapsed_ms;
-	if (wake_ms == INT32_MAX)
-		return (-1);
-	if (wake_ms < 0)
-		return (0);
-	return (wake_ms);
-}
-
-t_piece	solo_game_ghost(const solo_game_t *game)
-{
-	t_piece	ghost;
-
-	ghost = game->active;
-	ghost.row += piece_drop_distance(&game->board, &ghost);
-	return (ghost);
-}
-
-bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
-{
-	int	index;
-
-	if (game->phase != SOLO_CLEARING)
-		return (false);
-	index = 0;
-	while (index < game->clear_count)
-	{
-		if (game->clear_rows[index] == row)
-			return (true);
-		index++;
-	}
-	return (false);
-}
-
-void	solo_game_toggle_pause(solo_game_t *game)
-{
-	if (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING)
-		game->paused = !game->paused;
 }
