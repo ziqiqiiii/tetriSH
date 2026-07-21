@@ -68,16 +68,28 @@
 Two distinct state systems back these use cases, and their status/result codes must not be conflated:
 
 - **Persisted state — `libmacminidb`.** Only **player, character, and theme** documents are durable.
-  - *Covers:* signup, login, buy, equip, post-game record, profile, leaderboard.
-  - These use cases call the DB, which returns a `t_db_result` (`DB_OK`, `DB_EXISTS`, `DB_BAD_CREDS`, `DB_INSUFFICIENT`, `DB_NOT_OWNED`, `DB_NOT_FOUND`, …). The server translates that result into an HTTTP status.
+  - *Covers:*
+    - signup
+    - login
+    - buy
+    - equip
+    - post-game record
+    - profile
+    - leaderboard.
+  - These use cases call the DB, which returns a `t_db_result` 
+    - `DB_OK`
+    - `DB_EXISTS`
+    - `DB_BAD_CREDS`
+    - `DB_INSUFFICIENT`
+    - `DB_NOT_OWNED`
+    - `DB_NOT_FOUND`
+  - The server translates that result into an HTTTP status.
 - **Runtime state — tetrisd / chatd (in memory).** Rooms, the lobby directory, slot occupancy, ready/started status, live boards, and chat are **never persisted**.
-  - Their `200 / 201 / 403 / 409` codes are HTTTP protocol-level responses from the game/chat server, not `t_db_result` codes.
-  - If the server restarts, this state is gone by design.
 
 | Group | Use cases | Backing store |
 |---|---|---|
-| **Persisted (DB)** | • UC-01, UC-02<br>• UC-15, UC-16, UC-17<br>• UC-18, UC-19<br>• UC-20, UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
-| **Runtime only** | • UC-03, UC-04, UC-05, UC-06<br>• UC-07, UC-08, UC-08b<br>• UC-09, UC-13<br>• the live-play loop of UC-10/11/12 | tetrisd / chatd memory |
+| **Persisted (DB)** | • UC-01 <br>• UC-02<br>• UC-15 <br>• UC-16 <br>• UC-17<br>• UC-18 <br>• UC-19<br>• UC-20 <br>• UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
+| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08b<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd / chatd memory |
 
 ---
 
@@ -90,8 +102,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 - **HTTTP → chatd**
     - chatd links the same `libhtttp`, so `CHAT` / `ABILITY` use the same wire format and status codes.
 - **marketd IPC**
-    - the tetrisu↔marketd **Unix `SOCK_STREAM`, length-prefixed** request/response channel (store browse, buy, equip, profile, leaderboard). 
-    - Not HTTTP; the DB result still maps to the same status numbers for consistency.
+    - Unix `SOCK_STREAM`, length-prefixed request/response (store browse, buy, equip, profile, leaderboard). Not HTTTP, but maps to the same status numbers.
+- **tetrisctl → HTTTP → tetrisd (control socket)**
+    - `tetrisctl`'s admin channel: same wire format, over a local-only Unix control socket instead of the public TCP port.
 
 | UC | Request (wire) | Transport | Success | Error statuses |
 |---|---|---|---|---|
@@ -120,6 +133,12 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-20 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
 | UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` on cooldown |
 | UC-21 View Leaderboard | `LEADERBOARD` (top-N) | marketd IPC | `200` (top entries) | `500` |
+| UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
+| UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `202` (shutdown initiated) | `500` |
+| UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
+| UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (control) | `200` (room list) | `500` |
+| UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (control) | `200` (player list) | `500` |
+| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | `500` (logger unreachable) |
 
 ---
 
