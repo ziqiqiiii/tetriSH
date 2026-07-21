@@ -25,6 +25,7 @@ TEST_BINS		:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
 TEST_RUNNER		:= ./scripts/run_tests.sh
 TEST_LDFLAGS_message	:= -Wl,--wrap=malloc -Wl,--wrap=realloc
 TEST_LDFLAGS_parser	:= -Wl,--wrap=malloc -Wl,--wrap=realloc
+TEST_LDFLAGS_serialiser	:= -Wl,--wrap=malloc
 
 all: $(NAME)
 
