@@ -34,9 +34,15 @@
 - [Profile, Settings & Leaderboard](#profile-settings--leaderboard)
   - [UC-19 — View Settings / Profile](#uc-19--view-settings--profile)
   - [UC-21 — View Leaderboard](#uc-21--view-leaderboard)
+- [Administration — `tetrisctl` Control Plane](#administration--tetrisctl-control-plane)
+  - [UC-22 — Query Server Status](#uc-22--query-server-status)
+  - [UC-23 — Graceful Shutdown](#uc-23--graceful-shutdown)
+  - [UC-24 — Kick Player](#uc-24--kick-player)
+  - [UC-25 — List Rooms](#uc-25--list-rooms)
+  - [UC-26 — List Players](#uc-26--list-players)
+  - [UC-27 — Query Dropped Logs](#uc-27--query-dropped-logs)
 - [Summary of Relationships](#summary-of-relationships)
 - [DB Mapping Summary (`libmacminidb`)](#db-mapping-summary-libmacminidb)
-- [Open Questions to Resolve (design notes)](#open-questions-to-resolve-design-notes)
 
 ---
 
@@ -47,10 +53,12 @@
 | **Guest** | An unauthenticated user. Can only register or log in. |
 | **Player** | An authenticated user. Primary actor for all gameplay, marketplace, settings, and lobby use cases. |
 | **Room Owner** | A specialization of Player who created a room; gains room-control use cases (Start Game). |
+| **Administrator** | An operator with filesystem access to `tetrisd`'s control socket. Primary actor for all `tetrisctl` control-plane use cases (server status, shutdown, kick, list rooms/players, dropped-log queries). |
 | **Game Server (tetrisd)** | Supporting actor. Server-authoritative game loop; validates moves, pushes board STATE. Holds all room/lobby/live-game state in memory. |
 | **Market Daemon (marketd)** | Supporting actor. Mediates purchases and equips; calls the persistence layer for wallet/inventory changes. |
 | **Chat Daemon (chatd)** | Supporting actor. Owns room chat and system narration (runtime only, never persisted). |
-| **Persistence — libmacminidb (NoSQLite)** | Supporting component embedded in the server. In-memory player index backed by an append-only Last-Writer-Wins log. **Persists only player, character, and theme state.** Returns `t_db_result` codes the server maps to HTTTP status. |
+| **Logger Daemon (tetrislogd)** | Supporting actor. Separate logger process; receives log records over IPC and survives `tetrisd` restarts; tracks dropped-record counts under IPC pressure. |
+| **DB** | Custom DB |
 
 
 ## Persistence vs Runtime
@@ -85,30 +93,30 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 | UC | Request (wire) | Transport | Success | Error statuses |
 |---|---|---|---|---|
-| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → account svc | `201` | `409` taken · `400` malformed · `500` |
-| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → account svc | `200` (+`Player-Id`) | `401` bad creds/unknown · `400` · `500` |
+| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → account svc | `201` | • `409` taken<br>• `400` malformed<br>• `500` |
+| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → account svc | `200` (+`Player-Id`) | • `401` bad creds/unknown<br>• `400`<br>• `500` |
 | UC-02a Connect | crypto handshake (nonce → cert → RSA-OAEP AES key) | `libtetrissh` session | session up | handshake fail → connection dropped |
 | UC-03 Browse Rooms | `LIST /rooms` | HTTTP → tetrisd | `200` (room list) | `500` |
 | UC-03a Refresh | `LIST /rooms` | HTTTP → tetrisd | `200` | `500` |
-| UC-04 Create Room | `JOIN /room/<id>` body `Mode:` (new id) | HTTTP → tetrisd | `201` (owner) | `400` bad mode · `409` id exists · `500` |
-| UC-05 Join from List | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | `404` no room · `409` full · `409` in-game |
-| UC-06 Join by ID | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | `404` no room · `409` full* · `409` in-game* |
+| UC-04 Create Room | `JOIN /room/<id>` body `Mode:` (new id) | HTTTP → tetrisd | `201` (owner) | • `400` bad mode<br>• `409` id exists<br>• `500` |
+| UC-05 Join from List | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | • `404` no room<br>• `409` full<br>• `409` in-game |
+| UC-06 Join by ID | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | • `404` no room<br>• `409` full*<br>• `409` in-game* |
 | UC-07 Leave Room | `LEAVE /room/<id>` | HTTTP → tetrisd | `200` | `404` not in room |
-| UC-08 Start Game | `START /room/<id>` (owner) | HTTTP → tetrisd | `200` | `403` not owner · `409` too few/started |
+| UC-08 Start Game | `START /room/<id>` (owner) | HTTTP → tetrisd | `200` | • `403` not owner<br>• `409` too few/started |
 | UC-08b Non-owner Start | `START /room/<id>` (non-owner) | HTTTP → tetrisd | — | `403` not owner |
-| UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → chatd | `200` | `429` rate-limited · `403` muted · `404` |
+| UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → chatd | `200` | • `429` rate-limited<br>• `403` muted<br>• `404` |
 | UC-10 Single Player | play via UC-13; server `db_record_game` on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-11 Double | UC-13 inputs + UC-20 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-12 Battle Royale | UC-13 inputs + UC-20 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
-| UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | `409` INVALID_MOVE (+authoritative pos) · `400` bad body |
+| UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
-| UC-14 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient · `409` inventory full · `404` no item |
-| UC-15 Buy Theme | `BUY theme <tid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient · `409` inventory full · `404` no item |
+| UC-14 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
+| UC-15 Buy Theme | `BUY theme <tid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-16 Deduct Points | — internal to `db_buy_*` | — | — | — |
-| UC-17 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned · `404` |
-| UC-18 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned · `404` |
+| UC-17 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned • `404` |
+| UC-18 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned • `404` |
 | UC-19 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
-| UC-20 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned · `409` on cooldown |
+| UC-20 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` on cooldown |
 | UC-21 View Leaderboard | `LEADERBOARD` (top-N) | marketd IPC | `200` (top entries) | `500` |
 
 ---
@@ -125,7 +133,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | The Sign Up page is displayed. The Guest is not authenticated. |
 | **Postconditions (success)** | A new account exists with the chosen username; the Guest is routed back to the Login page. |
 | **Trigger** | Guest presses **SIGN UP** on the Login page (or is on the Sign Up page). |
-| **DB Mapping** | `db_signup(username, password_hashed, salt, &id)` → `DB_OK`=`201 Created`, `DB_EXISTS`=`409 Conflict` (username taken). Server hashes the password with a per-user salt **before** the call; the DB stores only the hash + salt. |
+| **DB Mapping** | `db_signup(username, password_hashed, salt, &id)` →<br>• `DB_OK`=`201 Created`<br>• `DB_EXISTS`=`409 Conflict` (username taken)<br>Server hashes the password with a per-user salt **before** the call; the DB stores only the hash + salt. |
 
 **Main Success Scenario**
 1. Guest enters a username.
@@ -158,7 +166,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | The Login page is displayed. A valid account exists. |
 | **Postconditions (success)** | An authenticated session is established; the Home page is displayed as a Player. |
 | **Trigger** | Guest presses **LOGIN**. |
-| **DB Mapping** | `db_login(username, password_hashed, &player)` → `DB_OK`=`200 OK`, `DB_BAD_CREDS`=`401 Unauthorized`, `DB_NOT_FOUND`=`401` (do not reveal whether the username exists). Server hashes the entered password with the account's stored salt **before** the call; the DB compares hashes only. |
+| **DB Mapping** | `db_login(username, password_hashed, &player)` →<br>• `DB_OK`=`200 OK`<br>• `DB_BAD_CREDS`=`401 Unauthorized`<br>• `DB_NOT_FOUND`=`401` (do not reveal whether the username exists)<br>Server hashes the entered password with the account's stored salt **before** the call; the DB compares hashes only. |
 
 **Main Success Scenario**
 1. Guest enters username.
@@ -580,7 +588,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | Player is in the Marketplace (Characters tab). (Affordability and ownership are **not** preconditions — `db_buy_character` enforces them atomically and reports the outcome.) |
 | **Postconditions (success)** | On `DB_OK`: character added to `owned_characters`, wallet debited by `cost_points`, change persisted (LWW log append). On `DB_EXISTS`: no change (already owned). |
 | **Trigger** | Player presses **BUY** on a selected character. |
-| **DB Mapping** | `db_buy_character(id, cid)` → `DB_OK`=`200 OK` (bought), `DB_EXISTS`=`200 OK` (already owned, no-op), `DB_INSUFFICIENT`=`403 Forbidden`, `DB_NOT_FOUND`=`404`, `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`). All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
+| **DB Mapping** | `db_buy_character(id, cid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`)<br>All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
 
 **Main Success Scenario**
 1. Player selects **Characters** and highlights a character (e.g. Princess, Halloween, Wolf-man, Mirurun).
@@ -612,7 +620,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | Player is in the Marketplace (Themes tab). (Affordability and ownership are **not** preconditions — `db_buy_theme` enforces them atomically and reports the outcome.) |
 | **Postconditions (success)** | On `DB_OK`: theme added to `owned_themes`, wallet debited by `cost_points`, change persisted (LWW log append). On `DB_EXISTS`: no change (already owned). |
 | **Trigger** | Player presses **BUY** on a selected theme. |
-| **DB Mapping** | `db_buy_theme(id, tid)` → `DB_OK`=`200 OK` (bought), `DB_EXISTS`=`200 OK` (already owned, no-op), `DB_INSUFFICIENT`=`403 Forbidden`, `DB_NOT_FOUND`=`404`, `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`). All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
+| **DB Mapping** | `db_buy_theme(id, tid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`)<br>All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
 
 **Main Success Scenario**
 1. Player selects **Themes** and highlights a theme (e.g. Default, Design and AI, Do u wanna build a snowman, Haaland, John Cena, Claude-ing).
@@ -669,7 +677,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | Player owns the character. |
 | **Postconditions (success)** | `current_equipped_character` is updated and persisted; it appears in Settings and single-player HUD. |
 | **Trigger** | Player presses **Set as Default Character** (Marketplace) or **Change Default Character** (Settings). |
-| **DB Mapping** | `db_equip_character(id, cid)` → `DB_OK`=`200 OK`, `DB_NOT_OWNED`=`403 Forbidden`. |
+| **DB Mapping** | `db_equip_character(id, cid)` →<br>• `DB_OK`=`200 OK`<br>• `DB_NOT_OWNED`=`403 Forbidden` |
 
 **Main Success Scenario**
 1. Player selects an owned character.
@@ -694,7 +702,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Preconditions** | Player owns the theme. |
 | **Postconditions (success)** | `current_equipped_theme` is updated and persisted; the board and UI adopt its color scheme at game start. |
 | **Trigger** | Player presses **Set as Default Theme** (Marketplace) or **Change Default Theme** (Settings). |
-| **DB Mapping** | `db_equip_theme(id, tid)` → `DB_OK`=`200 OK`, `DB_NOT_OWNED`=`403 Forbidden`. |
+| **DB Mapping** | `db_equip_theme(id, tid)` →<br>• `DB_OK`=`200 OK`<br>• `DB_NOT_OWNED`=`403 Forbidden` |
 
 **Main Success Scenario**
 1. Player selects an owned theme.
@@ -760,6 +768,286 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 ---
 
+## Administration — `tetrisctl` Control Plane
+
+**Transport**
+
+- Unix domain socket, path from `.tetrishrc` — local-only, not the public TCP game port.
+- Served by `tetrisd`'s dedicated `ctl_listener_thread`, separate from the public TCP accept loop, so admin control stays responsive even if the game port is flooded (e.g. `tetrisctl shutdown` still works under load).
+- Client is `tetrisctl`, a separate binary from the player-facing game client.
+- AuthZ is by filesystem permissions on the socket, not `Player-Id`/session-based.
+- Every admin action is timestamped and forwarded to `tetrislogd`.
+
+**Wire format**
+
+- Fixed to HTTTP — same protocol as the public game traffic, not a bespoke admin format.
+- Same `libhtttp` parses/serializes both `tetrisctl` requests and `tetrisd` responses.
+- Same HTTTP status code set, no separate admin-specific codes.
+
+---
+
+### UC-22 — Query Server Status
+
+| Field | Content |
+|---|---|
+| **ID** | UC-22 |
+| **Primary Actor** | Administrator |
+| **Goal** | Retrieve a health/status snapshot of the running daemon. |
+| **Preconditions** | `tetrisd` is running; the control socket exists and the operator can reach it. |
+| **Postconditions (success)** | A status snapshot (uptime, room count, player/connection count, tick rate, health) is returned to the operator; the query is logged. No server state changes. |
+| **Trigger** | Operator runs `tetrisctl status`. |
+| **Request** | `STATUS /admin HTTTP/1.0` over the control socket (control IPC, local). |
+| **Return** | • `200 OK` + status body<br>• `500` internal error |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl status`.
+2. `tetrisctl` connects to the control socket and sends `STATUS /admin`.
+3. `ctl_listener_thread` gathers a snapshot (uptime, rooms, players/connections, tick rate) and replies `200 OK` with the body.
+4. `tetrisctl` prints the snapshot and exits; the action is logged.
+
+**Extensions / Alternate Flows**
+- **2a. Control socket missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach control plane" and exits non-zero (no `tetrisd` response).
+
+**Related Use Cases** — none.
+
+**Example**
+
+```
+GET /admin/status HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:14:02 GMT
+Content-Type: application/json
+Content-Length: 97
+
+{"uptime_s":8412,"rooms":3,"players":7,"tcp_listener":"up","logd":"connected","pid":4123}
+```
+
+---
+
+### UC-23 — Graceful Shutdown
+
+| Field | Content |
+|---|---|
+| **ID** | UC-23 |
+| **Primary Actor** | Administrator |
+| **Goal** | Stop `tetrisd` cleanly without data loss, even under load. |
+| **Preconditions** | `tetrisd` is running. |
+| **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the control socket, and exits. |
+| **Trigger** | Operator runs `tetrisctl shutdown`. |
+| **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). |
+| **Return** | • `202 Accepted` (shutdown initiated) then the daemon exits<br>• `500` |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl shutdown` (works even while the public TCP port is flooded, because the control listener is a separate thread).
+2. `tetrisctl` sends `SHUTDOWN /admin`; `tetrisd` replies `202 Accepted`.
+3. `tetrisd` stops accepting new TCP connections and stops room tickers.
+4. In-flight rooms are ended/notified; pending log records are shipped to `tetrislogd`.
+5. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
+6. `tetrisd` frees resources, closes the control socket, and exits.
+
+**Extensions / Alternate Flows**
+- **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
+
+**Related Use Cases** — none.
+
+**Example**
+
+```
+SHUTDOWN /admin HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:15:44 GMT
+Content-Type: application/json
+Content-Length: 24
+
+{"shutting_down":true}
+```
+
+---
+
+### UC-24 — Kick Player 
+
+| Field | Content |
+|---|---|
+| **ID** | UC-24  |
+| **Primary Actor** | Administrator |
+| **Goal** | Forcibly disconnect a player and update their room. |
+| **Preconditions** | `tetrisd` is running; target player is connected. |
+| **Postconditions (success)** | The player's session is closed, their slot in any room is freed (ownership transfers per UC-07 if they owned the room), the room update is broadcast, and the action is logged. |
+| **Trigger** | Operator runs `tetrisctl kick <player>`. |
+| **Request** | `KICK /admin/player/<pid> HTTTP/1.0` over the control socket. |
+| **Return** | • `200 OK` (kicked)<br>• `404` no such connected player<br>• `400` bad argument |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl kick <player>`.
+2. `tetrisd` locates the player's session, closes it, frees their room slot, and (if they were Room Owner) transfers ownership to the next player in slot order and broadcasts the room update (reuses UC-07 alt-flow 3a).
+3. `tetrisd` replies `200 OK`; the action is logged.
+
+**Extensions / Alternate Flows**
+- **2a. Player not found / already gone (`404`):** No change; operator informed.
+
+**Related Use Cases** — reuses UC-07 ownership-transfer/broadcast behaviour.
+
+**Example**
+
+```
+KICK /admin/player/p17 HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+Content-Type: application/tetris-command
+Content-Length: 19
+
+{"reason":"admin"}
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:17:02 GMT
+Content-Length: 0
+```
+
+---
+
+### UC-25 — List Rooms 
+
+| Field | Content |
+|---|---|
+| **ID** | UC-25  |
+| **Primary Actor** | Administrator |
+| **Goal** | Get a live snapshot of all rooms on the running daemon. |
+| **Preconditions** | `tetrisd` is running. |
+| **Postconditions (success)** | The current room directory is returned (id, mode, players, state, owner); no state changes; the query is logged. |
+| **Trigger** | Operator runs `tetrisctl rooms`. |
+| **Request** | `ROOMS /admin HTTTP/1.0` over the control socket. |
+| **Return** | • `200 OK` + room list<br>• `500` |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl rooms`.
+2. `tetrisd` reads its in-memory room directory (under the room-directory lock) — the same runtime data the lobby shows (UC-03), but retrieved via the control plane.
+3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
+
+**Extensions / Alternate Flows**
+- **2a. No open rooms:** `200 OK` with an empty list.
+
+**Related Use Cases** — same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
+
+**Example**
+
+```
+GET /admin/rooms HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:16:10 GMT
+Content-Type: application/json
+Content-Length: 113
+
+{"rooms":[{"id":"main","players":4,"state":"RUNNING","tick":48124},{"id":"lobby2","players":1,"state":"WAITING"}]}
+```
+
+---
+
+### UC-26 — List Players 
+
+| Field | Content |
+|---|---|
+| **ID** | UC-26  |
+| **Primary Actor** | Administrator |
+| **Goal** | List the currently connected players / sessions. |
+| **Preconditions** | `tetrisd` is running. |
+| **Postconditions (success)** | Connected players are returned (player id, username, current room, session/connection info); no state changes; the query is logged. |
+| **Trigger** | Operator runs `tetrisctl players`. |
+| **Request** | `PLAYERS /admin HTTTP/1.0` over the control socket. |
+| **Return** | • `200 OK` + player list<br>• `500` |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl players`.
+2. `tetrisd` reads its connection/session table (under the appropriate lock) and assembles the connected-player list.
+3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
+
+**Extensions / Alternate Flows**
+- **2a. No one connected:** `200 OK` with an empty list.
+
+**Related Use Cases** — provides the `<player>` targets for UC-24 Kick Player.
+
+**Example**
+
+```
+GET /admin/players HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:16:31 GMT
+Content-Type: application/json
+Content-Length: 104
+
+{"players":[{"id":"p17","user":"alice","room":"main","score":9100},{"id":"p18","user":"bob","room":"main"}]}
+```
+
+---
+
+### UC-27 — Query Dropped Logs 
+
+| Field | Content |
+|---|---|
+| **ID** | UC-27  |
+| **Primary Actor** | Administrator |
+| **Secondary Actor** | Logger Daemon (`tetrislogd`) |
+| **Goal** | Read the dropped-records counter — how many log records were lost when the log IPC channel was saturated. |
+| **Preconditions** | `tetrisd` is running; `tetrislogd` is reachable over the log IPC channel. |
+| **Postconditions (success)** | The dropped-records count is returned to the operator; no state changes; the query is logged. |
+| **Trigger** | Operator runs `tetrisctl dropped-logs`. |
+| **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
+| **Return** | • `200 OK` + count<br>• `500` (logger unreachable) |
+
+**Main Success Scenario**
+1. Operator runs `tetrisctl dropped-logs`.
+2. `tetrisd` receives `DROPPED-LOGS /admin` and queries `tetrislogd` over the log IPC channel for its dropped-records counter (optionally adding `tetrisd`'s own local-side drop count if it buffers internally).
+3. `tetrislogd` returns the counter; `tetrisd` replies `200 OK` with the total.
+4. `tetrisctl` prints the count; the query is logged.
+
+**Extensions / Alternate Flows**
+- **2a. `tetrisd` tracks local drops only (logger query optional):** Return the local-side counter and label it as such.
+
+**Exceptions**
+- **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
+
+**Related Use Cases** — targets `tetrislogd`, not tetrisd game state or the DB.
+
+**Example**
+
+```
+GET /admin/logs/dropped HTTTP/1.0
+Host: tetrish.local
+Client: tetrisctl
+```
+
+```
+HTTTP/1.0 200 OK
+Date: Tue, 21 Jul 2026 09:19:05 GMT
+Content-Type: application/json
+Content-Length: 44
+
+{"logd_dropped":152,"tetrisd_local_dropped":8}
+```
+
+---
+
 ## Summary of Relationships
 
 | Base Use Case | Relationship | Target |
@@ -773,6 +1061,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-14 Buy Character | `«include»` | UC-16 Deduct Wallet Points |
 | UC-15 Buy Theme | `«include»` | UC-16 Deduct Wallet Points |
 | UC-19 View Settings | navigates to | UC-17 / UC-18 |
+| UC-24 Kick Player | reuses | UC-07 Leave Room (ownership-transfer/broadcast behaviour) |
+| UC-25 List Rooms | same underlying data as | UC-03 Browse Open Rooms (runtime, not DB) |
+| UC-26 List Players | provides targets for | UC-24 Kick Player |
 
 ## DB Mapping Summary (`libmacminidb`)
 
@@ -780,16 +1071,16 @@ Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTT
 
 | Use case | DB call(s) | Result → HTTTP |
 |---|---|---|
-| UC-01 Register | `db_signup` | `DB_OK`→201 · `DB_EXISTS`→409 |
-| UC-02 Log In | `db_login` | `DB_OK`→200 · `DB_BAD_CREDS`/`DB_NOT_FOUND`→401 |
+| UC-01 Register | `db_signup` | • `DB_OK`→201<br>• `DB_EXISTS`→409 |
+| UC-02 Log In | `db_login` | • `DB_OK`→200<br>• `DB_BAD_CREDS`/`DB_NOT_FOUND`→401 |
 | UC-14 Buy Character | `db_buy_character` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
 | UC-15 Buy Theme | `db_buy_theme` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
 | UC-16 Deduct Points | *internal to* `db_buy_*` (atomic, write lock) | — |
-| UC-17 Set Default Character | `db_equip_character` | `DB_OK`→200 · `DB_NOT_OWNED`→403 |
-| UC-18 Set Default Theme | `db_equip_theme` | `DB_OK`→200 · `DB_NOT_OWNED`→403 |
+| UC-17 Set Default Character | `db_equip_character` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
+| UC-18 Set Default Theme | `db_equip_theme` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
 | UC-10/11/12 Play (post-game) | `db_record_game` once per participant **at game-over** (all three modes; **not** called on mid-game quit) | credits points, updates score, increments `games_played` (and `games_won` on a win) |
 | UC-19 View Settings | `db_get_player` + `db_rank` (+ catalogue lookups) | 200 |
-| UC-20 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | valid→effect · `DB_NOT_OWNED`→403 |
+| UC-20 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_NOT_OWNED`→403 |
 | UC-21 View Leaderboard | `db_leaderboard` | 200 |
 
 **Status-code conventions used above**
