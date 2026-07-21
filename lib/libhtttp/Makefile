@@ -23,6 +23,7 @@ TEST_BIN_DIR	:= $(TESTS_DIR)/bin
 TEST_SRC		:= $(wildcard $(TESTS_DIR)/test_*.c)
 TEST_BINS		:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
 TEST_RUNNER		:= ./scripts/run_tests.sh
+TEST_LDFLAGS_message	:= -Wl,--wrap=malloc -Wl,--wrap=realloc
 
 all: $(NAME)
 
@@ -36,7 +37,7 @@ $(NAME): $(OBJ)
 
 $(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(NAME)
 	@ mkdir -p $(TEST_BIN_DIR)
-	@ $(CC) $(FLAGS) $(INC) $< $(NAME) -o $@
+	@ $(CC) $(FLAGS) $(INC) $< $(NAME) $(TEST_LDFLAGS_$*) -o $@
 
 test: $(NAME) $(TEST_BINS)
 	@ bash $(TEST_RUNNER) unit $(TEST_BINS)
