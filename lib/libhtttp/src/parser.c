@@ -13,6 +13,9 @@ static t_htttp_result	parse_request_line(const unsigned char *line,
 static t_htttp_result	parse_headers(const unsigned char *data,
 						size_t data_len, size_t *cursor,
 						t_htttp_message *message);
+static t_htttp_result	parse_body(const unsigned char *data, size_t data_len,
+						size_t body_start, t_htttp_message *message);
+static t_htttp_result	parse_content_length(const char *text, size_t *out);
 static t_htttp_result	parse_header_line(const unsigned char *line,
 						size_t line_len, t_htttp_message *message);
 static int			valid_method(const unsigned char *text, size_t len);
@@ -47,8 +50,8 @@ t_htttp_result	htttp_parse(const unsigned char *data, size_t data_len,
 	result = parse_start_line(line, line_len, &message);
 	if (result == HTTTP_OK)
 		result = parse_headers(data, data_len, &cursor, &message);
-	if (result == HTTTP_OK && cursor != data_len)
-		result = HTTTP_ERR_INVALID_CONTENT_LENGTH;
+	if (result == HTTTP_OK)
+		result = parse_body(data, data_len, cursor, &message);
 	if (result != HTTTP_OK)
 	{
 		htttp_message_free(&message);
@@ -212,6 +215,58 @@ static t_htttp_result	parse_headers(const unsigned char *data,
 		if (result != HTTTP_OK)
 			return (result);
 	}
+}
+
+static t_htttp_result	parse_body(const unsigned char *data, size_t data_len,
+		size_t body_start, t_htttp_message *message)
+{
+	const char		*length_text;
+	t_htttp_result	result;
+	size_t			content_length;
+	size_t			remaining;
+
+	remaining = data_len - body_start;
+	length_text = htttp_message_get_header(message, "Content-Length");
+	if (length_text == NULL)
+	{
+		if (remaining == 0u)
+			return (HTTTP_OK);
+		return (HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	}
+	result = parse_content_length(length_text, &content_length);
+	if (result != HTTTP_OK)
+		return (result);
+	if (content_length != remaining)
+		return (HTTTP_ERR_LENGTH_MISMATCH);
+	if (content_length == 0u)
+		return (HTTTP_OK);
+	return (htttp_message_set_body(message, data + body_start, content_length));
+}
+
+static t_htttp_result	parse_content_length(const char *text, size_t *out)
+{
+	size_t	value;
+	size_t	i;
+	size_t	digit;
+
+	if (text[0] == '\0')
+		return (HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	value = 0u;
+	i = 0u;
+	while (text[i] != '\0')
+	{
+		if (text[i] < '0' || text[i] > '9')
+			return (HTTTP_ERR_INVALID_CONTENT_LENGTH);
+		digit = (size_t)(text[i] - '0');
+		/* Reject before multiply/add so attacker-controlled decimal text cannot
+		 * wrap into a smaller allocation or body-length comparison. */
+		if (value > (SIZE_MAX - digit) / 10u)
+			return (HTTTP_ERR_INVALID_CONTENT_LENGTH);
+		value = value * 10u + digit;
+		i++;
+	}
+	*out = value;
+	return (HTTTP_OK);
 }
 
 static t_htttp_result	parse_header_line(const unsigned char *line,

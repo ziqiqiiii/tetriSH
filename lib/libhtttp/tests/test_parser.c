@@ -294,6 +294,128 @@ static void	test_header_count_boundary(void)
 	printf("PASS test_header_count_boundary\n");
 }
 
+static void	test_parse_text_and_binary_bodies(void)
+{
+	static const unsigned char	binary_body[] = {'A', '\0', '\r', '\n', 'B'};
+	static const char			binary_prefix[] =
+		"STATE /room/a HTTTP/1.0\r\nContent-Length: 5\r\n\r\n";
+	t_htttp_message				message;
+	unsigned char				*data;
+	size_t					prefix_len;
+
+	htttp_message_init(&message);
+	assert(parse_text("MOVE /room/a/player/p17 HTTTP/1.0\r\n"
+			"content-length: \t4 \t\r\n\r\nLEFT", &message) == HTTTP_OK);
+	assert(message.body_len == 4u);
+	assert(memcmp(message.body, "LEFT", 4u) == 0);
+	htttp_message_free(&message);
+	assert(parse_text("HTTTP/1.0 409 Conflict\r\n"
+			"Content-Length: 3\r\n\r\nbad", &message) == HTTTP_OK);
+	assert(message.type == HTTTP_MESSAGE_RESPONSE);
+	assert(message.body_len == 3u);
+	assert(memcmp(message.body, "bad", 3u) == 0);
+	htttp_message_free(&message);
+	prefix_len = strlen(binary_prefix);
+	data = malloc(prefix_len + sizeof(binary_body));
+	assert(data != NULL);
+	memcpy(data, binary_prefix, prefix_len);
+	memcpy(data + prefix_len, binary_body, sizeof(binary_body));
+	assert(htttp_parse(data, prefix_len + sizeof(binary_body), &message)
+		== HTTTP_OK);
+	memset(data + prefix_len, 'X', sizeof(binary_body));
+	assert(message.body_len == sizeof(binary_body));
+	assert(memcmp(message.body, binary_body, sizeof(binary_body)) == 0);
+	htttp_message_free(&message);
+	free(data);
+	printf("PASS test_parse_text_and_binary_bodies\n");
+}
+
+static void	test_empty_body_content_length(void)
+{
+	t_htttp_message	message;
+
+	htttp_message_init(&message);
+	assert(parse_text("JOIN /room/a HTTTP/1.0\r\n"
+			"Content-Length: 0\r\n\r\n", &message) == HTTTP_OK);
+	assert(message.body == NULL);
+	assert(message.body_len == 0u);
+	htttp_message_free(&message);
+	assert(parse_text("JOIN /room/a HTTTP/1.0\r\n"
+			"Content-Length: 000\r\n\r\n", &message) == HTTTP_OK);
+	assert(message.body == NULL);
+	assert(message.body_len == 0u);
+	htttp_message_free(&message);
+	printf("PASS test_empty_body_content_length\n");
+}
+
+static void	test_reject_invalid_content_length(void)
+{
+	char	overflow_message[256];
+	int	written;
+
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n\r\nLEFT",
+		HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: +4\r\n\r\nLEFT", HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: -1\r\n\r\nX", HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 4x\r\n\r\nLEFT", HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 4 0\r\n\r\nLEFT", HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length:\r\n\r\n", HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	written = snprintf(overflow_message, sizeof(overflow_message),
+			"MOVE /room/a HTTTP/1.0\r\nContent-Length: %zu0\r\n\r\n",
+			SIZE_MAX);
+	assert(written > 0 && (size_t)written < sizeof(overflow_message));
+	assert_text_error(overflow_message, HTTTP_ERR_INVALID_CONTENT_LENGTH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 1\r\ncontent-length: 1\r\n\r\nX",
+		HTTTP_ERR_DUPLICATE_HEADER);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 65537\r\n\r\n", HTTTP_ERR_LENGTH_MISMATCH);
+	printf("PASS test_reject_invalid_content_length\n");
+}
+
+static void	test_reject_body_length_mismatch(void)
+{
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 5\r\n\r\nLEFT", HTTTP_ERR_LENGTH_MISMATCH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 3\r\n\r\nLEFT", HTTTP_ERR_LENGTH_MISMATCH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 1\r\n\r\n", HTTTP_ERR_LENGTH_MISMATCH);
+	assert_text_error("MOVE /room/a HTTTP/1.0\r\n"
+		"Content-Length: 0\r\n\r\nX", HTTTP_ERR_LENGTH_MISMATCH);
+	printf("PASS test_reject_body_length_mismatch\n");
+}
+
+static void	test_complete_message_size_boundary(void)
+{
+	static const char	prefix[] =
+		"STATE /room/a HTTTP/1.0\r\nContent-Length: 65486\r\n\r\n";
+	t_htttp_message		message;
+	unsigned char		*data;
+
+	assert(strlen(prefix) == 50u);
+	data = malloc(HTTTP_MAX_MESSAGE_SIZE + 1u);
+	assert(data != NULL);
+	memcpy(data, prefix, strlen(prefix));
+	memset(data + strlen(prefix), 'S', 65487u);
+	htttp_message_init(&message);
+	assert(htttp_parse(data, HTTTP_MAX_MESSAGE_SIZE, &message) == HTTTP_OK);
+	assert(message.body_len == 65486u);
+	assert(message.body[0] == 'S');
+	assert(message.body[65485u] == 'S');
+	htttp_message_free(&message);
+	assert(htttp_parse(data, HTTTP_MAX_MESSAGE_SIZE + 1u, &message)
+		== HTTTP_ERR_TOO_LARGE);
+	assert_message_empty(&message);
+	free(data);
+	printf("PASS test_complete_message_size_boundary\n");
+}
+
 static void	test_parser_allocation_failures_are_atomic(void)
 {
 	static const unsigned char	no_headers[] =
@@ -302,6 +424,8 @@ static void	test_parser_allocation_failures_are_atomic(void)
 		"JOIN /room/a HTTTP/1.0\r\nX-One: value\r\n\r\n";
 	static const unsigned char	two_headers[] =
 		"JOIN /room/a HTTTP/1.0\r\nX-One: value\r\nX-Two: value\r\n\r\n";
+	static const unsigned char	body[] =
+		"MOVE /room/a HTTTP/1.0\r\nContent-Length: 3\r\n\r\nABC";
 	t_htttp_message				message;
 
 	htttp_message_init(&message);
@@ -315,6 +439,10 @@ static void	test_parser_allocation_failures_are_atomic(void)
 	assert_message_empty(&message);
 	fail_realloc_after(1u);
 	assert(htttp_parse(two_headers, sizeof(two_headers) - 1u, &message)
+		== HTTTP_ERR_NO_MEMORY);
+	assert_message_empty(&message);
+	fail_malloc_after(6u);
+	assert(htttp_parse(body, sizeof(body) - 1u, &message)
 		== HTTTP_ERR_NO_MEMORY);
 	assert_message_empty(&message);
 	htttp_message_free(&message);
@@ -355,6 +483,11 @@ int	main(void)
 	test_reject_malformed_status_lines();
 	test_reject_malformed_headers();
 	test_header_count_boundary();
+	test_parse_text_and_binary_bodies();
+	test_empty_body_content_length();
+	test_reject_invalid_content_length();
+	test_reject_body_length_mismatch();
+	test_complete_message_size_boundary();
 	test_parser_allocation_failures_are_atomic();
 	test_parser_api_and_atomic_output();
 	return (0);
