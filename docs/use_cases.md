@@ -24,15 +24,17 @@
   - [UC-11 — Play Double (2-Player) Game](#uc-11--play-double-2-player-game)
   - [UC-12 — Play Battle Royale Game](#uc-12--play-battle-royale-game)
   - [UC-13 — Control Falling Piece](#uc-13--control-falling-piece-included-by-uc-101112)
-  - [UC-20 — Activate Gaiden Ability](#uc-20--activate-gaiden-ability-extends-uc-11uc-12)
+  - [UC-14 — Activate Gaiden Ability](#uc-14--activate-gaiden-ability-extends-uc-11uc-12)
 - [Marketplace](#marketplace)
-  - [UC-14 — Buy Character](#uc-14--buy-character)
-  - [UC-15 — Buy Theme](#uc-15--buy-theme)
-  - [UC-16 — Deduct Wallet Points](#uc-16--deduct-wallet-points-included-by-uc-14uc-15)
-  - [UC-17 — Set Default Character](#uc-17--set-default-character)
-  - [UC-18 — Set Default Theme](#uc-18--set-default-theme)
+  - [UC-15 — Buy Character](#uc-15--buy-character)
+  - [UC-15a — Determine Character Button State](#uc-15a--determine-character-button-state-included-by-uc-15)
+  - [UC-16 — Buy Theme](#uc-16--buy-theme)
+  - [UC-16a — Determine Theme Button State](#uc-16a--determine-theme-button-state-included-by-uc-16)
+  - [UC-17 — Deduct Wallet Points](#uc-17--deduct-wallet-points-included-by-uc-15uc-16)
+  - [UC-18 — Set Default Character](#uc-18--set-default-character)
+  - [UC-19 — Set Default Theme](#uc-19--set-default-theme)
 - [Profile, Settings & Leaderboard](#profile-settings--leaderboard)
-  - [UC-19 — View Settings / Profile](#uc-19--view-settings--profile)
+  - [UC-20 — View Settings / Profile](#uc-20--view-settings--profile)
   - [UC-21 — View Leaderboard](#uc-21--view-leaderboard)
 - [Administration — `tetrisctl` Control Plane](#administration--tetrisctl-control-plane)
   - [UC-22 — Query Server Status](#uc-22--query-server-status)
@@ -74,7 +76,7 @@ Two distinct state systems back these use cases, and their status/result codes m
 
 | Group | Use cases | Backing store |
 |---|---|---|
-| **Persisted (DB)** | • UC-01, UC-02<br>• UC-14, UC-15, UC-16<br>• UC-17, UC-18<br>• UC-19, UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-20 reads catalogue/ownership | `libmacminidb` |
+| **Persisted (DB)** | • UC-01, UC-02<br>• UC-15, UC-16, UC-17<br>• UC-18, UC-19<br>• UC-20, UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
 | **Runtime only** | • UC-03, UC-04, UC-05, UC-06<br>• UC-07, UC-08, UC-08b<br>• UC-09, UC-13<br>• the live-play loop of UC-10/11/12 | tetrisd / chatd memory |
 
 ---
@@ -110,13 +112,13 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-12 Battle Royale | UC-13 inputs + UC-20 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
-| UC-14 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
-| UC-15 Buy Theme | `BUY theme <tid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
-| UC-16 Deduct Points | — internal to `db_buy_*` | — | — | — |
-| UC-17 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned • `404` |
-| UC-18 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned • `404` |
-| UC-19 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
-| UC-20 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` on cooldown |
+| UC-15 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
+| UC-16 Buy Theme | `BUY theme <tid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
+| UC-17 Deduct Points | — internal to `db_buy_*` | — | — | — |
+| UC-18 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned • `404` |
+| UC-19 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned • `404` |
+| UC-20 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
+| UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` on cooldown |
 | UC-21 View Leaderboard | `LEADERBOARD` (top-N) | marketd IPC | `200` (top entries) | `500` |
 
 ---
@@ -152,7 +154,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** System shows a connection error; account is not created.
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 ---
 
@@ -184,7 +187,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server ID unreachable / wrong (404 / timeout):** System shows a connection error; no session is opened.
 
-**Related Use Cases** — `«include»` UC-02a Connect to Server.
+**Related Use Cases**
+- `«include»` UC-02a Connect to Server.
 
 ---
 
@@ -215,7 +219,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** System shows a stale-list warning or connection error.
 
-**Related Use Cases** — `«include»` UC-03a Refresh Room List; leads to UC-04, UC-05, UC-06.
+**Related Use Cases**
+- `«include»` UC-03a Refresh Room List.
+- Leads to UC-04, UC-05, UC-06.
 
 ---
 
@@ -245,7 +251,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server rejects creation (500 / capacity):** System shows an error; return to Lobby.
 
-**Related Use Cases** — `«include»` UC-04a Select Game Mode; leads to UC-08 Start Game, UC-07 Leave Room.
+**Related Use Cases**
+- `«include»` UC-04a Select Game Mode.
+- Leads to UC-08 Start Game, UC-07 Leave Room.
 
 ---
 
@@ -275,7 +283,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** System shows a connection error; Player stays in Lobby.
 
-**Related Use Cases** — analogous to UC-06 Join Room by Room ID.
+**Related Use Cases**
+- Analogous to UC-06 Join Room by Room ID.
 
 ---
 
@@ -305,7 +314,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** Connection error; Player stays in Lobby.
 
-**Related Use Cases** — analogous to UC-05.
+**Related Use Cases**
+- Analogous to UC-05.
 
 ---
 
@@ -333,7 +343,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** System still returns Player to Lobby locally; session reconciles on reconnect.
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 ---
 
@@ -363,7 +374,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. A player disconnects during start:** Server aborts start; room returns to WAITING.
 
-**Related Use Cases** — precedes UC-11 / UC-12; alternate actor path UC-08b.
+**Related Use Cases**
+- Precedes UC-11 / UC-12.
+- Alternate actor path UC-08b.
 
 ---
 
@@ -392,7 +405,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server unreachable:** Client shows a connection error; no start occurs.
 
-**Related Use Cases** — alternate actor path of UC-08 Start Game (same trigger, non-owner actor).
+**Related Use Cases**
+- Alternate actor path of UC-08 Start Game (same trigger, non-owner actor).
 
 ---
 
@@ -421,7 +435,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. chatd unavailable:** Chat is unavailable; gameplay is unaffected (social layer is decoupled from the game loop).
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 ---
 
@@ -435,9 +450,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player |
 | **Goal** | Play a solo Tetris game to earn points and score. |
 | **Preconditions** | Player is authenticated; a default character and theme are set. |
-| **Postconditions (success)** | Final score is recorded; points earned are credited to the wallet; leaderboard is updated if a personal best is beaten. |
+| **Postconditions (success)** | • Final score is recorded. <br>• points earned are credited to the wallet. <br>•  leaderboard is updated if a personal best is beaten. |
 | **Trigger** | Player selects **Single Player** on the Home page. |
-| **DB Mapping** | Live play is **runtime only** (tetrisd memory, no DB). Only the post-game step persists: `db_record_game(id, score_delta, points_delta, won)`. |
+| **DB Mapping** | Only the post-game step persists: `db_record_game(id, score_delta, points_delta, won)`. |
 
 **Main Success Scenario**
 1. System starts a single-player session and renders the board, the piece queue (next pieces), the hold column, the Player's default character portrait, and the live score.
@@ -445,7 +460,12 @@ Every use case's wire request and the status codes it can return. Three transpor
 3. Player controls pieces (`MOVE` left/right, `ROTATE` cw/ccw, `DROP` soft/hard) — `«include»` **UC-13 Control Falling Piece**.
 4. System clears completed lines and updates the score.
 5. Loop steps 2–4 until the board tops out (game over).
-6. System shows the final score, then makes the **one** persisted call of this use case: `db_record_game(id, score_delta, points_delta, won=false)`, which updates `leaderboard_score`, credits `wallet_points`, and increments `games_played` (the only write that touches the skip list). Leaderboard reflects the new score immediately.
+6. System shows the final score, then makes the **one** persisted call of this use case (this specific user): 
+    - `db_record_game(id, score_delta, points_delta, won=false)`, which updates 
+      - `leaderboard_score`
+      - credits `wallet_points`
+      - increments `games_played`
+    - Leaderboard reflects the new score immediately.
 
 **Extensions / Alternate Flows**
 - **3a. Invalid move (collision, `409` runtime):** Server rejects; board keeps the authoritative position.
@@ -454,7 +474,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Exceptions**
 - **E1. Server disconnect:** Game pauses/ends; session state reconciled on reconnect.
 
-**Related Use Cases** — `«include»` UC-13 Control Falling Piece.
+**Related Use Cases**
+- `«include»` UC-13 Control Falling Piece.
 
 ---
 
@@ -466,25 +487,34 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player (×2) |
 | **Goal** | Compete head-to-head against one opponent. |
 | **Preconditions** | A Double room with 2 players has been started (UC-08). |
-| **Postconditions (success)** | Winner/loser determined; points credited; leaderboard updated. |
+| **Postconditions (success)** | • Winner/loser determined.  <br>• points credited. <br>• leaderboard updated. |
 | **Trigger** | The room's Start Game (UC-08) completes for a Double room. |
-| **DB Mapping** | Live play is runtime only (tetrisd memory). Post-game, **each** player is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` for the winner, `false` for the loser. |
+| **DB Mapping** | Post-game, **each** player is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` for the winner, `false` for the loser. |
 
 **Main Success Scenario**
-1. System renders the split screen: own **Board** with piece queue and hold column on the left, **Opponent Board** on the right, and both usernames with live point totals below.
+1. System renders the split screen: 
+    - own **Board** with piece queue and hold column on the left
+    - **Opponent Board** on the right
+    - both usernames with live point totals below.
 2. Both Players control their pieces concurrently (`MOVE`/`ROTATE`/`DROP`).
 3. Server pushes each Player's `STATE` and the opponent's board updates in real time.
 4. Line clears update each Player's score; garbage/abilities may be applied per rules.
 5. Game ends when one Player tops out or a win condition is met; the match **reaches game-over**, so System calls `db_record_game(...)` once per player (winner `won=true`, loser `won=false`), crediting points and updating the leaderboard.
 
 **Extensions / Alternate Flows**
-- **2a. A Player activates an equipped ability:** → UC-20 Activate Gaiden Ability (`«extend»`).
-- **5a. A Player quits/disconnects mid-game:** The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default; because that is a completed result for them, `db_record_game` **is** called for the winner.
+- **2a. A Player activates an equipped ability:** → UC-14 Activate Gaiden Ability (`«extend»`).
+- **5a. A Player quits/disconnects mid-game:** 
+    - Server sets the game to end.
+    - If the departing Player owns the room, ownership is transferred to the remaining Player (per UC-07 alt-flow 3a).
+    - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default; because that is a completed result for them, `db_record_game` **is** called for the winner.
 
 **Exceptions**
 - **E1. Server disconnect (whole match aborted):** No game-over is reached, so `db_record_game` is called for **no one**; handled per reconnection policy.
 
-**Related Use Cases** — `«include»` UC-13; `«extend»` UC-20.
+**Related Use Cases**
+- `«include»` UC-13.
+- `«extend»` UC-20.
+- `«reuses»` UC-07 Leave Room (ownership-transfer behaviour).
 
 ---
 
@@ -496,9 +526,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player (4–99) |
 | **Goal** | Compete against many players; survive as garbage is traded across boards. |
 | **Preconditions** | A Battle Royale room with ≥ 4 players has been started (UC-08). |
-| **Postconditions (success)** | Ranking/last-standing determined; points credited; leaderboard updated. |
+| **Postconditions (success)** | • Ranking/last-standing determined <br>• points credited  <br>• leaderboard updated. |
 | **Trigger** | The room's Start Game (UC-08) completes for a Battle Royale room. |
-| **DB Mapping** | Live play (boards, garbage IPC across rooms) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player. |
+| **DB Mapping** | Live play (boards, garbage IPC across rooms) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player, `won=false` for the remaining players. |
 
 **Main Success Scenario**
 1. System renders own **Board** (center) with piece queue, hold column, and live **Scores**, surrounded by grids showing other players' boards.
@@ -509,14 +539,22 @@ Every use case's wire request and the status codes it can return. Three transpor
 6. At game-over, System records the final ranking and calls `db_record_game(...)` once per **participant who was still in the game at game-over** (last-standing `won=true`, others `won=false`), crediting points (line clears / KOs / win) and updating the leaderboard.
 
 **Extensions / Alternate Flows**
-- **2a. Player activates an equipped ability:** → UC-20 Activate Gaiden Ability (`«extend»`).
-- **5a. Player is KO'd:** Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
-- **5b. Player quits/disconnects mid-game:** The quitter is **not recorded** (`db_record_game` is not called for them). Remaining players play on; each is recorded normally at game-over.
+- **2a. Player activates an equipped ability:**
+    - UC-14 Activate Gaiden Ability (`«extend»`).
+- **5a. Player is KO'd:**
+    - Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
+- **5b. Player quits/disconnects mid-game:** 
+    - Server ends the game.
+    - If the departing Player owns the room, ownership is transferred to the next player in slot order and the remaining players are notified (per UC-07 alt-flow 3a).
+    - The quitter is **not recorded** (`db_record_game` is not called for them). Remaining players play on; each is recorded normally at game-over.
 
 **Exceptions**
 - **E1. Server disconnect (whole match aborted):** No game-over reached → `db_record_game` called for no one.
 
-**Related Use Cases** — `«include»` UC-13; `«extend»` UC-20.
+**Related Use Cases**
+- `«include»` UC-13.
+- `«extend»` UC-20.
+- `«reuses»` UC-07 Leave Room (ownership-transfer behaviour).
 
 ---
 
@@ -537,27 +575,30 @@ Every use case's wire request and the status codes it can return. Three transpor
 3. Server applies the move and pushes updated `STATE`.
 
 **Extensions / Alternate Flows**
-- **2a. Illegal move (collision):** Server responds `409 INVALID_MOVE` with the authoritative position; client corrects to it.
+- **2a. Illegal move (collision):** 
+  - Server responds `409 INVALID_MOVE` with the authoritative position
+  - client corrects to it.
 
-**Related Use Cases** — included by UC-10, UC-11, UC-12.
+**Related Use Cases**
+- Included by UC-10, UC-11, UC-12.
 
 ---
 
-### UC-20 — Activate Gaiden Ability *(extends UC-11/UC-12)*
+### UC-14 — Activate Gaiden Ability *(extends UC-11/UC-12)*
 
 | Field | Content |
 |---|---|
-| **ID** | UC-20 |
+| **ID** | UC-14 |
 | **Primary Actor** | Player |
 | **Goal** | Trigger an equipped ability (Garbage Surge, Shield, Freeze) during a multiplayer match. |
-| **Preconditions** | Player owns and has equipped the ability before the game started; Player has enough points if the ability is consumable. |
+| **Preconditions** | • Player owns and has equipped the ability before the game started. <br>• Player has enough points if the ability is consumable. |
 | **Postconditions (success)** | The ability's server-enforced effect is applied; chatd narrates the event. |
 | **Trigger** | Player presses the ability's key during an eligible match. |
-| **DB Mapping** | Read-only checks: `db_player_owns_character(id, cid)` (does the player own the character granting this ability) + `db_get_character(cid)` to read the `abilities` bitfield. The **effect itself is runtime** (room state), not persisted. |
+| **DB Mapping** | Read-only checks: <br><br>• `db_player_owns_character(id, cid)` (does the player own the character granting this ability) <br>• `db_get_character(cid)` to read the `abilities` bitfield. <br><br> The **effect itself is runtime** (room state), not persisted. |
 
 **Main Success Scenario**
 1. Player triggers the equipped ability.
-2. Client sends the ability request (HTTTP `ABILITY`) to the Game Server.
+2. Client sends the ability request (HTTTP `ABILITY`) to the Game Server (tetrisd).
 3. Server validates ownership via `db_player_owns_character` and checks the `abilities` bitfield from `db_get_character` (read lock).
 4. Server enforces the effect in room state:
    - **Garbage Surge** — +3 garbage lines to the target.
@@ -569,109 +610,191 @@ Every use case's wire request and the status codes it can return. Three transpor
 - **3a. Character/ability not owned (`db_player_owns_character` false / `DB_NOT_OWNED` → 403):** Request rejected; no effect.
 - **3b. Insufficient points (if consumable, `DB_INSUFFICIENT` → 403):** Rejected with a notice.
 
-**Exceptions**
-- **E1. chatd down:** Effect still applies; narration is silently dropped.
-
-**Related Use Cases** — `«extend»` UC-11, UC-12.
+**Related Use Cases**
+- `«extend»` UC-11, UC-12.
 
 ---
 
 ## Marketplace
 
-### UC-14 — Buy Character
-
-| Field | Content |
-|---|---|
-| **ID** | UC-14 |
-| **Primary Actor** | Player |
-| **Goal** | Purchase a character (and its abilities) using wallet points. |
-| **Preconditions** | Player is in the Marketplace (Characters tab). (Affordability and ownership are **not** preconditions — `db_buy_character` enforces them atomically and reports the outcome.) |
-| **Postconditions (success)** | On `DB_OK`: character added to `owned_characters`, wallet debited by `cost_points`, change persisted (LWW log append). On `DB_EXISTS`: no change (already owned). |
-| **Trigger** | Player presses **BUY** on a selected character. |
-| **DB Mapping** | `db_buy_character(id, cid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`)<br>All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
-
-**Main Success Scenario**
-1. Player selects **Characters** and highlights a character (e.g. Princess, Halloween, Wolf-man, Mirurun).
-2. System shows the preview, abilities (Ability 1, Ability 2), and — driven by `db_player_owns_character(id, cid)` read on selection — enables **BUY** / disables **Set as Default** (or the reverse if already owned). *(This read drives button state only; it is not the correctness guard.)*
-3. Player presses **BUY**.
-4. Server calls `db_buy_character(id, cid)`. Under the write lock it checks existence, ownership, balance, and the inventory cap, then debits `cost_points` and adds the character in one atomic write (`«include»` **UC-16 Deduct Wallet Points**).
-5. On `DB_OK`, System confirms the purchase, flips the cached ownership state to owned, disables **BUY**, enables **Set as Default**; the character becomes available to equip (UC-17).
-
-**Extensions / Alternate Flows**
-- **4a. Already owned (`DB_EXISTS` → 200, no-op):** No debit, no change; the desired end state (owned) already holds. Client leaves **BUY** disabled and **Set as Default** enabled. This is the server-side backstop for a stray BUY that slipped past the disabled button.
-- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):** Refused, wallet unchanged; System shows the shortfall. Response body reason `insufficient_points` distinguishes this from other 403s.
-- **4c. Inventory full (`DB_FULL` → 409):** `owned_characters_count` is at `DB_MAX_OWNED`; purchase refused, wallet unchanged.
-- **4d. Unknown character (`DB_NOT_FOUND` → 404):** Refused.
-
-**Exceptions**
-- **E1. DB I/O error (`DB_IO_ERROR` → 500):** Purchase fails; wallet unchanged.
-
-**Related Use Cases** — `«include»` UC-16 Deduct Wallet Points; enables UC-17 Set Default Character.
-
----
-
-### UC-15 — Buy Theme
+### UC-15 — Buy Character
 
 | Field | Content |
 |---|---|
 | **ID** | UC-15 |
 | **Primary Actor** | Player |
-| **Goal** | Purchase a theme (color scheme + character nickname/profile picture set) using wallet points. |
-| **Preconditions** | Player is in the Marketplace (Themes tab). (Affordability and ownership are **not** preconditions — `db_buy_theme` enforces them atomically and reports the outcome.) |
-| **Postconditions (success)** | On `DB_OK`: theme added to `owned_themes`, wallet debited by `cost_points`, change persisted (LWW log append). On `DB_EXISTS`: no change (already owned). |
-| **Trigger** | Player presses **BUY** on a selected theme. |
-| **DB Mapping** | `db_buy_theme(id, tid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`)<br>All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
+| **Goal** | Purchase a character (and its abilities) using wallet points. |
+| **Preconditions** | Player is in the Marketplace (Characters tab). (Affordability and ownership are **not** preconditions — `db_buy_character` enforces them atomically and reports the outcome.) |
+| **Postconditions (success)** | • On `DB_OK`: character added to `owned_characters`, wallet debited by `cost_points`, change persisted (LWW log append). <br>• On `DB_EXISTS`: no change (already owned). |
+| **Trigger** | Player presses **BUY** on a selected character. |
+| **DB Mapping** | `db_buy_character(id, cid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`)<br>All checks + debit + grant run **inside the DB write lock** — check-and-act is one atom. |
 
 **Main Success Scenario**
-1. Player selects **Themes** and highlights a theme (e.g. Default, Design and AI, Do u wanna build a snowman, Haaland, John Cena, Claude-ing).
-2. System shows the theme's color scheme and character nickname/profile-picture details, and — driven by `db_player_owns_theme(id, tid)` read on selection — enables **BUY** / disables **Set as Default** (or the reverse if owned). *(Read drives button state only; not the correctness guard.)*
+1. Player selects **Characters tab** and a specific character (e.g. Princess, Halloween, Wolf-man, or Mirurun).
+2. System shows the preview and abilities (Ability 1, Ability 2, etc), and determines **BUY** / **Set as Default** button state (`«include»` **UC-14a Determine Character Button State**).
 3. Player presses **BUY**.
-4. Server calls `db_buy_theme(id, tid)`. Under the write lock it checks existence, ownership, balance, and the inventory cap, then debits and grants atomically (`«include»` **UC-16**).
-5. On `DB_OK`, System confirms; flips the cached ownership state, disables **BUY**, enables **Set as Default**; theme becomes available to equip (UC-18).
+4. Server calls `db_buy_character(id, cid)`. (`«include»` **UC-16 Deduct Wallet Points**).
+5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-14a Determine Character Button State**).
 
 **Extensions / Alternate Flows**
-- **4a. Already owned (`DB_EXISTS` → 200, no-op):** No debit, no change; client leaves **BUY** disabled and **Set as Default** enabled. Server-side backstop for a stray BUY.
-- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):** Refused, wallet unchanged; shortfall shown. Body reason `insufficient_points`.
-- **4c. Inventory full (`DB_FULL` → 409):** `owned_themes_count` at `DB_MAX_OWNED`; refused, wallet unchanged.
-- **4d. Unknown theme (`DB_NOT_FOUND` → 404):** Refused.
+- **4a. Already owned (`DB_EXISTS` → 200, no-op):** 
+  - No debit, no change.
+- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):** 
+  - Refused, wallet unchanged.
+  - Display error message at tetrisu: `Error: Insufficient points`.
+- **4c. Inventory full (`DB_FULL` → 409)** (It won't really trigger this) **:**
+  - `owned_characters_count` is at `DB_MAX_OWNED`; purchase refused, wallet unchanged.
+  - Display error message at tetrisu: `Error: Inventory full`.
+- **4d. Unknown character (`DB_NOT_FOUND` → 404)** (It won't really trigger this) **:**
+  - Refused.
+  - Display error message at tetrisu: `Error: No such character`.
 
 **Exceptions**
-- **E1. DB I/O error (`DB_IO_ERROR` → 500):** Purchase fails; wallet unchanged.
+- **E1. DB I/O error (`DB_IO_ERROR` → 500):**
+  - Purchase fails; wallet unchanged.
 
-**Related Use Cases** — `«include»` UC-16; enables UC-18 Set Default Theme.
+**Related Use Cases**
+- `«include»` UC-15a Determine Character Button State.
+- `«include»` UC-17 Deduct Wallet Points.
+- Enables UC-18 Set Default Character.
 
 ---
 
-### UC-16 — Deduct Wallet Points *(included by UC-14/UC-15)*
+### UC-15a — Determine Character Button State *(included by UC-15)*
+
+| Field | Content |
+|---|---|
+| **ID** | UC-15a |
+| **Primary Actor** | Player |
+| **Goal** | Reflect the Player's current ownership of the selected character in the **BUY** / **Set as Default** button state. |
+| **Preconditions** | Player has selected a character in the Marketplace (Characters tab). |
+| **Postconditions (success)** | **BUY** is enabled and **Set as Default** disabled if not owned, or the reverse if owned; no persisted state changes. |
+| **Trigger** | Player selects/highlights a character. |
+| **DB Mapping** | `db_player_owns_character(id, cid)` — read-lock read.|
+
+**Main Success Scenario**
+1. Player selects/highlights a character.
+2. System calls `db_player_owns_character(id, cid)`.
+3. If not owned: System enables **BUY**, disables **Set as Default**.
+4. If owned: System disables **BUY**, enables **Set as Default**.
+
+**Extensions / Alternate Flows**
+- **2a. Read fails (`DB_IO_ERROR`):** System defaults both buttons to disabled and shows a transient error; Player may reselect to retry.
+
+**Related Use Cases**
+- Included by UC-15 Buy Character (step 2).
+- Same pattern as UC-16a for themes.
+
+---
+
+### UC-16 — Buy Theme
 
 | Field | Content |
 |---|---|
 | **ID** | UC-16 |
+| **Primary Actor** | Player |
+| **Goal** | Purchase a theme (color scheme + character nickname/profile picture set) using wallet points. |
+| **Preconditions** | Player is in the Marketplace (Themes tab). (Affordability and ownership are **not** preconditions — `db_buy_theme` enforces them atomically and reports the outcome.) |
+| **Postconditions (success)** | On `DB_OK`: theme added to `owned_themes`, wallet debited by `cost_points`, change persisted (LWW log append). On `DB_EXISTS`: no change (already owned). |
+| **Trigger** | Player presses **BUY** on a selected theme. |
+| **DB Mapping** | `db_buy_theme(id, tid)` →<br>• `DB_OK`=`200 OK` (bought)<br>• `DB_EXISTS`=`200 OK` (already owned, no-op)<br>• `DB_INSUFFICIENT`=`403 Forbidden`<br>• `DB_NOT_FOUND`=`404`<br>• `DB_FULL`=`409 Conflict` (inventory at `DB_MAX_OWNED`) |
+
+**Main Success Scenario**
+1. Player selects **Themes tab** and a specific theme (e.g. Default, Design and AI, Do u wanna build a snowman, Haaland, John Cena, Claude-ing).
+2. System shows the theme's color scheme and character nickname/profile-picture details, and determines **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Theme Button State**).
+3. Player presses **BUY**.
+4. Server calls `db_buy_theme(id, tid)` (`«include»` **UC-16**).
+5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Theme Button State**).
+
+
+**Extensions / Alternate Flows**
+- **4a. Already owned (`DB_EXISTS` → 200, no-op):**
+  - No debit, no change;
+- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):**
+  - Refused, wallet unchanged.
+  - Display error message at tetrisu: `Error: Insufficient points`.
+- **4c. Inventory full (`DB_FULL` → 409)** (It won't really trigger this) **:**
+  - `owned_themes_count` is at `DB_MAX_OWNED`
+  - purchase refused, wallet unchanged.
+  - Display error message at tetrisu: `Error: Inventory full`.
+- **4d. Unknown theme (`DB_NOT_FOUND` → 404)** (It won't really trigger this) **:**
+  - Refused.
+  - Display error message at tetrisu: `Error: No such theme`.
+
+**Exceptions**
+- **E1. DB I/O error (`DB_IO_ERROR` → 500):**
+  - Purchase fails; wallet unchanged.
+
+**Related Use Cases**
+- `«include»` UC-16a Determine Theme Button State.
+- `«include»` UC-17.
+- Enables UC-19 Set Default Theme.
+
+---
+
+### UC-16a — Determine Theme Button State *(included by UC-16)*
+
+| Field | Content |
+|---|---|
+| **ID** | UC-16a |
+| **Primary Actor** | Player |
+| **Goal** | Reflect the Player's current ownership of the selected theme in the **BUY** / **Set as Default** button state. |
+| **Preconditions** | Player has selected a theme in the Marketplace (Themes tab). |
+| **Postconditions (success)** | **BUY** is enabled and **Set as Default** disabled if not owned, or the reverse if owned; no persisted state changes. |
+| **Trigger** | Player selects/highlights a theme. |
+| **DB Mapping** | `db_player_owns_theme(id, tid)` — read-lock read. |
+
+**Main Success Scenario**
+1. Player selects/highlights a theme.
+2. System calls `db_player_owns_theme(id, tid)`.
+3. If not owned: System enables **BUY**, disables **Set as Default**.
+4. If owned: System disables **BUY**, enables **Set as Default**.
+
+**Extensions / Alternate Flows**
+- **2a. Read fails (`DB_IO_ERROR`):** System defaults both buttons to disabled and shows a transient error; Player may reselect to retry.
+
+**Related Use Cases**
+- Included by UC-16 Buy Theme (step 2).
+- Same pattern as UC-15a for characters.
+
+---
+
+### UC-17 — Deduct Wallet Points *(included by UC-15/UC-16)*
+
+| Field | Content |
+|---|---|
+| **ID** | UC-17 |
 | **Primary Actor** | Player (initiator); `libmacminidb` (executor) |
 | **Goal** | Atomically debit the points for a purchase and add the item, in a single durable write. |
 | **Preconditions** | A purchase is in progress; balance ≥ `cost_points`. |
-| **Postconditions (success)** | Wallet is reduced by `cost_points` and the item added to the owned set — as one whole-record write, appended to the append-only log (LWW) and flushed within ≤ 1 s. |
+| **Postconditions (success)** | Wallet is reduced by `cost_points` and the item added to the owned set, as one whole-record write, appended to the append-only log (LWW) and flushed within ≤ 1 s. |
 | **Trigger** | `db_buy_character` / `db_buy_theme` reaches its payment step. |
-| **DB Mapping** | Not a standalone endpoint — it is the internal effect of `db_buy_*`. Executes under the DB **write lock**; the log append is a page-cache write only (no `fdatasync` under the lock). |
+| **DB Mapping** | it is the internal effect of `db_buy_*`. Executes under the DB **write lock**. |
 
 **Main Success Scenario**
 1. `db_buy_*` takes the DB write lock.
-2. It checks, in order: player & item exist (`DB_NOT_FOUND`), not already owned (`DB_EXISTS`), `wallet_points ≥ cost_points` (`DB_INSUFFICIENT`), inventory below cap (`DB_FULL`).
-3. All checks pass → it debits the wallet **and** adds the item to `owned_characters` / `owned_themes` on the same player record.
+2. It checks, in order:
+    - player & item exist (`DB_NOT_FOUND`)
+    - not already owned (`DB_EXISTS`)
+    - `wallet_points ≥ cost_points` (`DB_INSUFFICIENT`)
+    - inventory below cap (`DB_FULL`).
+3. All checks pass
+    - it debits the wallet **and** adds the item to `owned_characters` / `owned_themes` on the same player record.
 4. It appends the whole updated record to the log and releases the lock (`DB_OK`).
 
 **Extensions / Alternate Flows**
 - **2a. A precheck fails:** Returns the corresponding result (`DB_NOT_FOUND` / `DB_EXISTS` / `DB_INSUFFICIENT` / `DB_FULL`) with **no** change to wallet or inventory.
 
-**Related Use Cases** — included by UC-14, UC-15.
+**Related Use Cases**
+- Included by UC-15, UC-16.
 
 ---
 
-### UC-17 — Set Default Character
+### UC-18 — Set Default Character
 
 | Field | Content |
 |---|---|
-| **ID** | UC-17 |
+| **ID** | UC-18 |
 | **Primary Actor** | Player |
 | **Goal** | Choose which owned character is used by default in games and as profile picture. |
 | **Preconditions** | Player owns the character. |
@@ -682,21 +805,24 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Main Success Scenario**
 1. Player selects an owned character.
 2. Player presses **Set as Default Character** / **Change Default Character**.
-3. Server calls `db_equip_character(id, cid)`; on `DB_OK` the default is updated.
+3. Server calls `db_equip_character(id, cid)`
+    - on `DB_OK` the default is updated.
 4. System reflects the change in Settings (Default Character, profile picture) and in-game.
 
 **Extensions / Alternate Flows**
-- **3a. Character not owned (`DB_NOT_OWNED` → 403):** Rejected; Player must Buy (UC-14) first.
+- **3a. Character not owned (`DB_NOT_OWNED` → 403):**
+  - Rejected; Player must Buy (UC-14) first.
 
-**Related Use Cases** — reachable from Marketplace and Settings (same use case, two entry points).
+**Related Use Cases**
+- Reachable from Marketplace and Settings (same use case, two entry points).
 
 ---
 
-### UC-18 — Set Default Theme
+### UC-19 — Set Default Theme
 
 | Field | Content |
 |---|---|
-| **ID** | UC-18 |
+| **ID** | UC-19 |
 | **Primary Actor** | Player |
 | **Goal** | Choose which owned theme is applied by default. |
 | **Preconditions** | Player owns the theme. |
@@ -707,40 +833,79 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Main Success Scenario**
 1. Player selects an owned theme.
 2. Player presses **Set as Default Theme** / **Change Default Theme**.
-3. Server calls `db_equip_theme(id, tid)`; on `DB_OK` the current theme is updated.
+3. Server calls `db_equip_theme(id, tid)`
+   - on `DB_OK` the current theme is updated.
 4. System reflects the change in Settings (Current Theme) and loads it on the next game start.
 
 **Extensions / Alternate Flows**
-- **3a. Theme not owned (`DB_NOT_OWNED` → 403):** Rejected; Player must Buy (UC-15) first.
+- **3a. Theme not owned (`DB_NOT_OWNED` → 403):**
+  - Rejected; Player must Buy (UC-16) first.
 
-**Related Use Cases** — reachable from Marketplace and Settings.
+**Related Use Cases**
+- Reachable from Marketplace and Settings.
 
 ---
 
-## Profile, Settings & Leaderboard
-
-### UC-19 — View Settings / Profile
+### UC-19 — Set Default Theme
 
 | Field | Content |
 |---|---|
 | **ID** | UC-19 |
 | **Primary Actor** | Player |
+| **Goal** | Choose which owned theme is applied by default. |
+| **Preconditions** | Player owns the theme. |
+| **Postconditions (success)** | `current_equipped_theme` is updated and persisted; the board and UI adopt its color scheme at game start. |
+| **Trigger** | Player presses **Set as Default Theme** (Marketplace) or **Change Default Theme** (Settings). |
+| **DB Mapping** | `db_equip_theme(id, tid)` →<br>• `DB_OK`=`200 OK`<br>• `DB_NOT_OWNED`=`403 Forbidden` |
+
+**Main Success Scenario**
+1. Player selects an owned theme.
+2. Player presses **Set as Default Theme** / **Change Default Theme**.
+3. Server calls `db_equip_theme(id, tid)`
+   - on `DB_OK` the current theme is updated.
+4. System reflects the change in Settings (Current Theme) and loads it on the next game start.
+
+**Extensions / Alternate Flows**
+- **3a. Theme not owned (`DB_NOT_OWNED` → 403):**
+  - Rejected; Player must Buy (UC-15) first.
+
+**Related Use Cases**
+- Reachable from Marketplace and Settings.
+
+---
+
+## Profile, Settings & Leaderboard
+
+### UC-20 — View Settings / Profile
+
+| Field | Content |
+|---|---|
+| **ID** | UC-20 |
+| **Primary Actor** | Player |
 | **Goal** | Review account and profile information in one place. |
 | **Preconditions** | Player is authenticated. |
 | **Postconditions (success)** | System displays username, profile picture, default character, owned character list, current theme, owned theme list, wallet points, leaderboard score, and leaderboard ranking. |
 | **Trigger** | Player selects **Setting** on the Home page. |
-| **DB Mapping** | `db_get_player(id, &player)` (profile, wallet, equipped, owned lists) + `db_rank(id, &rank)` (1-based rank). Catalogue names resolved via `db_get_character` / `db_get_theme`. All read-lock reads. |
+| **DB Mapping** | `db_get_player(id, &player)` (profile, wallet, equipped, owned lists) + `db_rank(id, &rank)` (1-based rank). |
 
 **Main Success Scenario**
 1. Player opens Settings.
-2. Server reads the profile with `db_get_player(id, ...)` and the rank with `db_rank(id, ...)` (single read lock each); catalogue lookups resolve owned/equipped ids to names.
-3. System displays: Username, profile picture of current default character, Default Character (+ Change), Character List (with current default marked), Current Theme (+ Change), Theme List (with current marked), Wallet Points, Leaderboard Scores, Leaderboard Ranking.
+2. Server reads the profile with `db_get_player(id, ...)` and the rank with `db_rank(id, ...)`.
+3. System displays: 
+    - Username
+    - profile picture of current default character, - Default Character (+ Change btn)
+    - Character List (with current default marked), - Current Theme (+ Change btn)
+    - Theme List (with current marked)
+    - Wallet Points
+    - Leaderboard Scores
+    - Leaderboard Ranking.
 
 **Extensions / Alternate Flows**
 - **3a. Player presses Change Default Character:** → UC-17.
 - **3b. Player presses Change Default Theme:** → UC-18.
 
-**Related Use Cases** — leads to UC-17, UC-18.
+**Related Use Cases**
+- Leads to UC-17, UC-18.
 
 ---
 
@@ -764,7 +929,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Extensions / Alternate Flows**
 - **2a. Ranking unavailable:** System shows a "temporarily unavailable" message.
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 ---
 
@@ -808,7 +974,8 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Extensions / Alternate Flows**
 - **2a. Control socket missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach control plane" and exits non-zero (no `tetrisd` response).
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 **Example**
 
@@ -853,7 +1020,8 @@ Content-Length: 97
 **Extensions / Alternate Flows**
 - **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
 
-**Related Use Cases** — none.
+**Related Use Cases**
+- None.
 
 **Example**
 
@@ -895,7 +1063,8 @@ Content-Length: 24
 **Extensions / Alternate Flows**
 - **2a. Player not found / already gone (`404`):** No change; operator informed.
 
-**Related Use Cases** — reuses UC-07 ownership-transfer/broadcast behaviour.
+**Related Use Cases**
+- Reuses UC-07 ownership-transfer/broadcast behaviour.
 
 **Example**
 
@@ -938,7 +1107,8 @@ Content-Length: 0
 **Extensions / Alternate Flows**
 - **2a. No open rooms:** `200 OK` with an empty list.
 
-**Related Use Cases** — same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
+**Related Use Cases**
+- Same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
 
 **Example**
 
@@ -980,7 +1150,8 @@ Content-Length: 113
 **Extensions / Alternate Flows**
 - **2a. No one connected:** `200 OK` with an empty list.
 
-**Related Use Cases** — provides the `<player>` targets for UC-24 Kick Player.
+**Related Use Cases**
+- Provides the `<player>` targets for UC-24 Kick Player.
 
 **Example**
 
@@ -1027,7 +1198,8 @@ Content-Length: 104
 **Exceptions**
 - **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
 
-**Related Use Cases** — targets `tetrislogd`, not tetrisd game state or the DB.
+**Related Use Cases**
+- Targets `tetrislogd`, not tetrisd game state or the DB.
 
 **Example**
 
@@ -1057,10 +1229,12 @@ Content-Length: 44
 | UC-04 Create Room | `«include»` | UC-04a Select Game Mode |
 | UC-08 Start Game | alternate actor path | UC-08b Attempt to Start as Non-Owner |
 | UC-10/11/12 Play Game | `«include»` | UC-13 Control Falling Piece |
-| UC-11/12 Play Multiplayer | `«extend»` | UC-20 Activate Gaiden Ability |
-| UC-14 Buy Character | `«include»` | UC-16 Deduct Wallet Points |
-| UC-15 Buy Theme | `«include»` | UC-16 Deduct Wallet Points |
-| UC-19 View Settings | navigates to | UC-17 / UC-18 |
+| UC-11/12 Play Multiplayer | `«extend»` | UC-14 Activate Gaiden Ability |
+| UC-15 Buy Character | `«include»` | UC-15a Determine Character Button State |
+| UC-15 Buy Character | `«include»` | UC-17 Deduct Wallet Points |
+| UC-16 Buy Theme | `«include»` | UC-16a Determine Theme Button State |
+| UC-16 Buy Theme | `«include»` | UC-17 Deduct Wallet Points |
+| UC-20 View Settings | navigates to | UC-18 / UC-19 |
 | UC-24 Kick Player | reuses | UC-07 Leave Room (ownership-transfer/broadcast behaviour) |
 | UC-25 List Rooms | same underlying data as | UC-03 Browse Open Rooms (runtime, not DB) |
 | UC-26 List Players | provides targets for | UC-24 Kick Player |
@@ -1073,14 +1247,16 @@ Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTT
 |---|---|---|
 | UC-01 Register | `db_signup` | • `DB_OK`→201<br>• `DB_EXISTS`→409 |
 | UC-02 Log In | `db_login` | • `DB_OK`→200<br>• `DB_BAD_CREDS`/`DB_NOT_FOUND`→401 |
-| UC-14 Buy Character | `db_buy_character` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
-| UC-15 Buy Theme | `db_buy_theme` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
-| UC-16 Deduct Points | *internal to* `db_buy_*` (atomic, write lock) | — |
-| UC-17 Set Default Character | `db_equip_character` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
-| UC-18 Set Default Theme | `db_equip_theme` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
+| UC-15 Buy Character | `db_buy_character` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
+| UC-15a Determine Character Button State | `db_player_owns_character` (read) | button state only, not an HTTTP endpoint |
+| UC-16 Buy Theme | `db_buy_theme` (all checks in-lock) | • `DB_OK`→200<br>• `DB_EXISTS`→200 (no-op)<br>• `DB_INSUFFICIENT`→403<br>• `DB_FULL`→409<br>• `DB_NOT_FOUND`→404 |
+| UC-16a Determine Theme Button State | `db_player_owns_theme` (read) | button state only, not an HTTTP endpoint |
+| UC-17 Deduct Points | *internal to* `db_buy_*` (atomic, write lock) | — |
+| UC-18 Set Default Character | `db_equip_character` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
+| UC-19 Set Default Theme | `db_equip_theme` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
 | UC-10/11/12 Play (post-game) | `db_record_game` once per participant **at game-over** (all three modes; **not** called on mid-game quit) | credits points, updates score, increments `games_played` (and `games_won` on a win) |
-| UC-19 View Settings | `db_get_player` + `db_rank` (+ catalogue lookups) | 200 |
-| UC-20 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_NOT_OWNED`→403 |
+| UC-20 View Settings | `db_get_player` + `db_rank` (+ catalogue lookups) | 200 |
+| UC-14 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_NOT_OWNED`→403 |
 | UC-21 View Leaderboard | `db_leaderboard` | 200 |
 
 **Status-code conventions used above**
