@@ -57,9 +57,7 @@
 | **Player** | An authenticated user. Primary actor for all gameplay, marketplace, settings, and lobby use cases. |
 | **Room Owner** | A specialization of Player who created a room; gains room-control use cases (Start Game). |
 | **Administrator** | An operator with filesystem access to `tetrisd`'s control socket. Primary actor for all `tetrisctl` control-plane use cases (server status, shutdown, kick, list rooms/players, dropped-log queries). |
-| **Game Server (tetrisd)** | Supporting actor. Server-authoritative game loop; validates moves, pushes board STATE. Holds all room/lobby/live-game state in memory. |
-| **Market Daemon (marketd)** | Supporting actor. Mediates purchases and equips; calls the persistence layer for wallet/inventory changes. |
-| **Chat Daemon (chatd)** | Supporting actor. Owns room chat and system narration (runtime only, never persisted). |
+| **Game Server (tetrisd)** | Supporting actor. Server-authoritative game loop; validates moves, pushes board STATE. Holds all room/lobby/live-game state in memory. Also mediates purchases and equips (calling the persistence layer for wallet/inventory changes) and owns room chat and system narration. |
 | **Logger Daemon (tetrislogd)** | Supporting actor. Separate logger process; receives log records over IPC and survives `tetrisd` restarts; tracks dropped-record counts under IPC pressure. |
 | **DB** | Custom DB |
 
@@ -85,25 +83,21 @@ Two distinct state systems back these use cases, and their status/result codes m
     - `DB_NOT_OWNED`
     - `DB_NOT_FOUND`
   - The server translates that result into an HTTTP status.
-- **Runtime state — tetrisd / chatd (in memory).** Rooms, the lobby directory, slot occupancy, ready/started status, live boards, and chat are **never persisted**.
+- **Runtime state — tetrisd (in memory).** Rooms, the lobby directory, slot occupancy, ready/started status, live boards, and chat are **never persisted**.
 
 | Group | Use cases | Backing store |
 |---|---|---|
 | **Persisted (DB)** | • UC-01 <br>• UC-02<br>• UC-15 <br>• UC-16 <br>• UC-17<br>• UC-18 <br>• UC-19<br>• UC-20 <br>• UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
-| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd / chatd memory |
+| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd memory |
 
 ---
 
 ## Request & Return Status (per use case)
 
-Every use case's wire request and the status codes it can return. Three transports are in play; the **Transport** column says which:
+Every use case's wire request and the status codes it can return. Two transports are in play; the **Transport** column says which:
 
 - **HTTTP → tetrisd** 
-    - the fixed game protocol (`METHOD PATH HTTTP/1.0`) over the authenticated TCP session.
-- **HTTTP → chatd**
-    - chatd links the same `libhtttp`, so `CHAT` / `ABILITY` use the same wire format and status codes.
-- **marketd IPC**
-    - Unix `SOCK_STREAM`, length-prefixed request/response (store browse, buy, equip, profile, leaderboard). Not HTTTP, but maps to the same status numbers.
+    - the fixed game protocol (`METHOD PATH HTTTP/1.0`) over the authenticated TCP session. `tetrisd` serves every client-facing method — gameplay, chat, abilities, and the marketplace/profile/leaderboard calls — over this one session.
 - **tetrisctl → HTTTP → tetrisd (control socket)**
     - `tetrisctl`'s admin channel: same wire format, over a local-only Unix control socket instead of the public TCP port.
 
@@ -120,20 +114,20 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-07 Leave Room | `LEAVE /room/<id>` | HTTTP → tetrisd | `200` | `404` not in room |
 | UC-08 Start Game | `START /room/<id>` (owner) | HTTTP → tetrisd | `200` | • `403` not owner<br>• `409` too few/started |
 | UC-08a Non-owner Start | `START /room/<id>` (non-owner) | HTTTP → tetrisd | — | `403` not owner |
-| UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → chatd | `200` | • `429` rate-limited<br>• `403` muted<br>• `404` |
+| UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → tetrisd | `200` | • `429` rate-limited<br>• `403` muted<br>• `404` |
 | UC-10 Single Player | play via UC-13; server `db_record_game` on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-11 Double | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
-| UC-15 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
-| UC-16 Buy Theme | `BUY theme <tid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
+| UC-15 Buy Character | `BUY /store/character/<cid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
+| UC-16 Buy Theme | `BUY /store/theme/<tid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-17 Deduct Points | — internal to `db_buy_*` | — | — | — |
-| UC-18 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned • `404` |
-| UC-19 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned • `404` |
-| UC-20 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
-| UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
-| UC-21 View Leaderboard | `LEADERBOARD` (top-N) | marketd IPC | `200` (top entries) | `500` |
+| UC-18 Set Default Character | `EQUIP /player/<pid>/character/<cid>` | HTTTP → tetrisd | `200` | `403` not owned • `404` |
+| UC-19 Set Default Theme | `EQUIP /player/<pid>/theme/<tid>` | HTTTP → tetrisd | `200` | `403` not owned • `404` |
+| UC-20 View Settings | `PROFILE /player/<pid>` (+ rank) | HTTTP → tetrisd | `200` (player doc + rank) | `500` |
+| UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
+| UC-21 View Leaderboard | `LEADERBOARD /leaderboard` (top-N) | HTTTP → tetrisd | `200` (top entries) | `500` |
 | UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
 | UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `202` (shutdown initiated) | `500` |
 | UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
@@ -390,7 +384,7 @@ stateDiagram-v2
    - since `number_of_players (1) < min_to_start`, the room stays `WAITING`;
    - returns `201 Created`.
 6. System closes the modal and shows the Waiting Room with the Player in slot 1 (Owner); STATE message `WAITING FOR OPPONENT`.
-7. chatd narrates: `PLAYER <name> joined the room <id>` / `PLAYER <name> set as owner`.
+7. Server narrates to the room: `PLAYER <name> joined the room <id>` / `PLAYER <name> set as owner`.
 
 **Extensions / Alternate Flows**
 - **2a. No mode selected:** Default (Double) is used.
@@ -429,7 +423,7 @@ stateDiagram-v2
    - if `number_of_players >= min_to_start` (all occupied slots `READY`)
       - room `WAITING → READY`
       - STATE message → `READY TO START, OWNER CAN START ANYTIME`.
-5. System displays the Waiting Room; Player's name appears in the next free slot with status "ready". chatd narrates: `PLAYER <name> joined the room <id>`.
+5. System displays the Waiting Room; Player's name appears in the next free slot with status "ready". Server narrates to the room: `PLAYER <name> joined the room <id>`.
 
 **Extensions / Alternate Flows**
 - **4a. Room is full (409):** System shows "room full"; return to Lobby (UC-03). (No slot enters `JOINING`.)
@@ -499,7 +493,7 @@ stateDiagram-v2
    - if `number_of_players < min_to_start`
       - room → `WAITING`
       - STATE message → `WAITING FOR OPPONENT`.
-4. System returns the Player to the Lobby. chatd narrates: `PLAYER <name> left the room <id>`.
+4. System returns the Player to the Lobby. Server narrates to the room: `PLAYER <name> left the room <id>`.
 
 **Extensions / Alternate Flows**
 - **3a. Leaving Player is the Owner and others remain:** 
@@ -532,7 +526,7 @@ stateDiagram-v2
     - that player's role → `OWNER`
     - the successor is moved into the vacated lower slot.
 2. Server broadcasts the room update (new owner) to all remaining members.
-3. chatd narrates: `PLAYER <name> set as the owner`.
+3. Server narrates to the room: `PLAYER <name> set as the owner`.
 4. Server frees the old Owner's slot:
     - slot `LEAVING → WAITING`, data cleared
     - `number_of_players -= 1`.
@@ -626,8 +620,8 @@ stateDiagram-v2
 **Main Success Scenario**
 1. Player presses `[C]` Chat.
 2. Player types a message and submits it.
-3. Client sends a `CHAT` message to the Chat Daemon (chatd) over the authenticated session.
-4. chatd applies the per-session rate limit (token bucket) and broadcasts the message to the room.
+3. Client sends a `CHAT` message to the Game Server (tetrisd) over the authenticated session.
+4. Server applies the per-session rate limit (token bucket) and broadcasts the message to the room.
 5. All members (including sender) see the message; system events may also be narrated (e.g. joins, KOs).
 
 **Extensions / Alternate Flows**
@@ -635,7 +629,7 @@ stateDiagram-v2
 - **4b. Player is muted (admin action):** Message is suppressed.
 
 **Exceptions**
-- **E1. chatd unavailable:** Chat is unavailable; gameplay is unaffected (social layer is decoupled from the game loop).
+- **E1. Chat handling fails server-side:** The message is dropped and the sender is notified; gameplay is unaffected (chat delivery is best-effort and never blocks the game loop).
 
 **Related Use Cases**
 - None.
@@ -795,7 +789,7 @@ stateDiagram-v2
 | **Primary Actor** | Player |
 | **Goal** | Trigger one of the four Gaiden ability levels granted by the Player's equipped character during a multiplayer match. |
 | **Preconditions** | • Player owns and has equipped the character before the game started. <br>• Player has enough ability charge from cleared lines to activate the requested ability level. |
-| **Postconditions (success)** | The ability's server-enforced effect is applied; chatd narrates the event. |
+| **Postconditions (success)** | The ability's server-enforced effect is applied; the Server narrates the event to the room. |
 | **Trigger** | Player presses the ability's key during an eligible match. |
 | **DB Mapping** | Read-only checks: <br><br>• `db_player_owns_character(id, cid)` (does the player own the character granting this ability) <br>• `db_get_character(cid)` to read the `abilities` bitfield. <br><br> The **effect itself is runtime** (room state), not persisted. |
 
@@ -804,7 +798,7 @@ stateDiagram-v2
 2. Client sends the ability request (HTTTP `ABILITY`) to the Game Server (tetrisd).
 3. Server validates ownership via `db_player_owns_character` and checks the `abilities` bitfield from `db_get_character` (read lock).
 4. Server verifies the Player has enough line-clear charge, deducts the requested ability's cost, then enforces the corresponding effect from the ability catalogue below in room state.
-5. Server emits an `ABILITY_USED` event; chatd narrates it to the room.
+5. Server emits an `ABILITY_USED` event; the Server narrates it to the room.
 
 **Supported Character Abilities**
 
@@ -1445,7 +1439,7 @@ The four selected characters retain their complete, four-level ability sets from
 
 ## DB Mapping Summary (`libmacminidb`)
 
-Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTTP` translation. Use cases not listed here are **runtime only** (tetrisd / chatd) and never touch the DB.
+Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTTP` translation. Use cases not listed here are **runtime only** (tetrisd) and never touch the DB.
 
 | Use case | DB call(s) | Result → HTTTP |
 |---|---|---|

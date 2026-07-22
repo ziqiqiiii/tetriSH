@@ -8,10 +8,9 @@
 # tmp/daemons.reg, then execs <program>. Inspect running daemons with `dcheck`.
 #
 # Daemon launch order: the logger first (so it captures everything), then the
-# game server, then the optional social layer (the game runs without it).
+# game server. tetrisd also serves room chat and the marketplace, so there is
+# no separate social-layer daemon to launch.
 #
 # These daemons are not built yet — uncomment each line as its binary lands:
 # dspawn tetrislogd
 # dspawn tetrisd
-# dspawn marketd
-# dspawn chatd

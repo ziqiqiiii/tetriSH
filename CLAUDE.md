@@ -19,7 +19,7 @@ Implementation status:
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
 | `lib/libcoreipc` | planning only — README is the agreed scope, no code |
 | `lib/libhtttp` | planning only — README is a design proposal, no code |
-| `tetrisd`, `tetrislogd`, `tetrisctl`, `chatd`, `marketd` | not started — no `src/` directories yet |
+| `tetrisd`, `tetrislogd`, `tetrisctl` | not started — no `src/` directories yet |
 
 ## Build & Test
 
@@ -81,11 +81,14 @@ TCP (POSIX sockets)
 - `tetrislogd` — separate logger process; receives log records over IPC; survives `tetrisd` restarts
 - `tetrisctl` — admin CLI; talks to `tetrisd` over a local-only control-plane IPC channel (not the public TCP port)
 - `tetrisu` — terminal client; renders board, handles input + network simultaneously
-- `chatd` / `marketd` — optional social layer; the game runs without them
+
+Room chat, narration, and the marketplace (buy/equip/profile/leaderboard) are
+served by `tetrisd` itself over the same authenticated session — there are no
+separate social-layer daemons.
 
 Daemons are launched from inside the shell via `dspawn` (see `.tetrishrc`), never
 from the root Makefile. `.tetrishrc` keeps the launch lines commented out until
-each binary lands; launch order is logger → game server → social layer.
+each binary lands; launch order is logger → game server.
 
 **Libraries (statically linked):** each is a self-contained directory with its
 own `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libXXX.a`.

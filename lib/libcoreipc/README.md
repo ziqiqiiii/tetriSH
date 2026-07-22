@@ -6,8 +6,8 @@
 
 `libcoreipc` is the corestack IPC library: thin wrappers around the three IPC
 mechanisms every tetriSH daemon uses. It has **no internal dependencies** and
-is built first; `libtetrissh` and `libchatcore` consume it, and it is linked
-into `tetrisd`, `tetrisu`, `chatd` and `marketd`.
+is built first; `libtetrissh` consumes it, and it is linked into `tetrisd`,
+`tetrislogd`, `tetrisctl` and `tetrisu`.
 
 Sources of truth: `docs/corestack.md` §8, `docs/requirements.md` (NFR-CO4/CO5,
 sprint table S1), `docs/checkoff-prep.md` (ring buffer question),

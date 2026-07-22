@@ -125,7 +125,7 @@ tetrish$ dspawn tetrislogd
 tetrish$ dspawn tetrisd
 ```
 
-`dspawn` daemonises the program, registers it in `tmp/daemons.reg`, then execs it. Uncomment the matching lines in `.tetrishrc` to start them automatically. Launch order is logger first, then game server, then the optional social layer.
+`dspawn` daemonises the program, registers it in `tmp/daemons.reg`, then execs it. Uncomment the matching lines in `.tetrishrc` to start them automatically. Launch order is logger first, then game server.
 
 **3. Inspect and stop running daemons:**
 ```
@@ -313,9 +313,7 @@ Its role at startup is to launch the daemons, in dependency order:
 
 ```
 dspawn tetrislogd             # logger first, so it captures everything
-dspawn tetrisd                # game server
-dspawn marketd                # optional social layer
-dspawn chatd                  # optional social layer
+dspawn tetrisd                # game server (also serves chat and the store)
 ```
 
 Daemon configuration directives are **[document: not yet parsed — the rc file currently executes shell commands only]**. The planned directives are:
@@ -525,7 +523,7 @@ MacMini_tetriSH/
 └── README.md
 ```
 
-`src/tetrisd/`, `src/tetrislogd/`, `src/tetrisctl/`, `src/chatd/`, and `src/marketd/` will follow the same pattern as they land; the umbrella `Makefile` already looks for them.
+`src/tetrisd/`, `src/tetrislogd/`, and `src/tetrisctl/` will follow the same pattern as they land; the umbrella `Makefile` already looks for them.
 
 ---
 
