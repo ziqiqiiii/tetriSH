@@ -15,47 +15,53 @@ void	test_loads_full_roster(void)
 
 	c = catalogue_load(CFG_DIR);
 	assert(c != NULL);
-	assert(c->char_count == 10);
-	assert(c->theme_count == 10);
+	assert(c->char_count == 4);
+	assert(c->theme_count == 8);
 	catalogue_free(c);
 	printf("PASS test_loads_full_roster\n");
 }
 
-// Halloween is the free starter (id 1, cost 0) and offers all four ability
-// levels (bitfield 0xF), matching characters.cfg.
+// Halloween is id 1 and, like every character, costs a flat 10 points and
+// offers all four ability levels (bitfield 0xF), matching characters.cfg.
 void	test_character_lookup(void)
 {
 	t_catalogue			*c;
 	const t_character	*halloween;
-	const t_character	*grand;
+	const t_character	*wolfman;
 
 	c = catalogue_load(CFG_DIR);
 	assert(c != NULL);
 	halloween = catalogue_character(c, 1);
 	assert(halloween != NULL);
 	assert(strcmp(halloween->name, "Halloween") == 0);
-	assert(halloween->cost_points == 0);
+	assert(halloween->cost_points == 10);
 	assert(halloween->abilities == 0xF);
-	grand = catalogue_character(c, 10);
-	assert(grand != NULL && strcmp(grand->name, "Grand Princess") == 0);
+	wolfman = catalogue_character(c, 4);
+	assert(wolfman != NULL && strcmp(wolfman->name, "Wolf-man") == 0);
+	assert(wolfman->cost_points == 10);
 	assert(catalogue_character(c, 999) == NULL);
 	catalogue_free(c);
 	printf("PASS test_character_lookup\n");
 }
 
-// Themes carry an id, a short name, and a longer description.
+// Themes carry an id, a short name, a wallet-points cost, and a description.
+// id 1 (Default) is the free starting theme; paid themes carry a positive cost.
 void	test_theme_lookup(void)
 {
 	t_catalogue		*c;
-	const t_theme	*classic;
+	const t_theme	*def;
+	const t_theme	*cena;
 
 	c = catalogue_load(CFG_DIR);
 	assert(c != NULL);
-	classic = catalogue_theme(c, 1);
-	assert(classic != NULL);
-	assert(strcmp(classic->name, "Classic") == 0);
-	assert(strlen(classic->description) > 0);
-	assert(catalogue_theme(c, 7) != NULL);
+	def = catalogue_theme(c, 1);
+	assert(def != NULL);
+	assert(strcmp(def->name, "Default") == 0);
+	assert(def->cost_points == 0);
+	assert(strlen(def->description) > 0);
+	cena = catalogue_theme(c, 5);
+	assert(cena != NULL && strcmp(cena->name, "John Cena") == 0);
+	assert(cena->cost_points == 30);
 	assert(catalogue_theme(c, 999) == NULL);
 	catalogue_free(c);
 	printf("PASS test_theme_lookup\n");

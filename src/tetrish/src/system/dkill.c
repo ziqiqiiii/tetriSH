@@ -67,8 +67,6 @@ static void add_to_graveyard(const char *project_root, DaemonInfo rip)
 		fclose(fp);
 	}
 
-	printf("adding to graveyard\n");
-
 	if (count == 0)
 			snprintf(modified_name, sizeof(modified_name), "%s", rip.name);
 	else
@@ -111,10 +109,10 @@ static int load_active_daemons(const char *reg_path, DaemonInfo *daemons)
 			int		pid;
 			char	proc_path[128];
 
-			if (sscanf(line, "%63s %d %127[^\n]", name, &pid, timestamp) != 3) {
-				ft_putstr_fd(line, 1);
+			/* Skip malformed entries silently so they cannot corrupt the
+			 * table layout. */
+			if (sscanf(line, "%63s %d %127[^\n]", name, &pid, timestamp) != 3)
 				continue;
-			}
 
 			snprintf(proc_path, sizeof(proc_path), "/proc/%d", pid);
 			// check all the pids just in case
@@ -131,21 +129,34 @@ static int load_active_daemons(const char *reg_path, DaemonInfo *daemons)
 }
 
 /**
- * @brief Print a numbered list of the active daemons.
+ * @brief Print a numbered table of the active daemons.
+ *
+ * Shares dcheck's column layout, prefixed with an index column so each row
+ * can be selected at the prompt. Every listed daemon is live by definition,
+ * so all rows render as "up".
  *
  * @param daemons Array of active daemons.
  * @param count Number of entries in the daemons array.
  */
 static void print_active_daemons(DaemonInfo *daemons, int count)
 {
-	printf("Active daemons: \n");
+	char	index[8];
+	int		width;
+
+	/* Name column is sized to the longest entry so the pid column starts at
+	 * the same offset on every row. */
+	width = daemon_name_width(daemons[0].name, count, sizeof(DaemonInfo));
+
+	daemon_table_header("#   ", width);
+	printf("\n");
 
 	for (int i = 0; i < count; ++i)
 	{
-		printf("    %2d) %-12s PID: %-6d Started %s\n", i + 1,
-				daemons[i].name, daemons[i].pid, daemons[i].timestamp);
+		snprintf(index, sizeof(index), "%2d) ", i + 1);
+		daemon_table_row(index, width, daemons[i].name, daemons[i].pid, 1,
+			daemons[i].timestamp);
 	}
-
+	printf("\n");
 }
 
 /**
@@ -161,12 +172,14 @@ static void kill_one(const char *project_root, DaemonInfo daemon)
 {
 	if (kill(daemon.pid, SIGTERM) == 0)
 	{
-		printf("Killed %-12s (PID %d)\n", daemon.name, daemon.pid);
+		printf("  %skilled%s %-14s %s%d%s\n", CL_RED, CL_RESET, daemon.name,
+			CL_BLUE, daemon.pid, CL_RESET);
 		add_to_graveyard(project_root, daemon);
 	}
 	else
 	{
-		perror("kill");
+		fprintf(stderr, "  %sfailed%s %-14s %s%d%s: %s\n", CL_RED, CL_RESET,
+			daemon.name, CL_BLUE, daemon.pid, CL_RESET, strerror(errno));
 	}
 }
 
@@ -210,16 +223,20 @@ static void dkill(const char *project_root)
 	strncat(reg_path, "/tmp/daemons.reg", sizeof(reg_path) - strlen(reg_path) - 1);
 
 	count = load_active_daemons(reg_path, daemons);
+	printf("\n");
 	if (count == 0) {
-			printf("No active daemons found\n");
+			printf("  %sno active daemons%s\n\n", CL_DIM, CL_RESET);
 			return;
 	}
 
 	print_active_daemons(daemons, count);
-	printf("Enter number to kill [1-%d], 0 to cancel, or 'a' to kill all daemons: ", count);
+	printf("  %sselect%s %s[1-%d]%s  %s0%s cancel  %sa%s all: ",
+		CL_BOLD, CL_RESET, CL_DIM, count, CL_RESET,
+		CL_DIM, CL_RESET, CL_DIM, CL_RESET);
 
 	if (!fgets(input, sizeof(input), stdin))
 			input[0] = '0';
+	printf("\n");
 	if (tolower(input[0]) == 'a') {
 			kill_all(project_root, reg_path, daemons, count);
 	} else {
@@ -227,6 +244,7 @@ static void dkill(const char *project_root)
 			if (idx >= 0 && idx < count)
 					kill_one(project_root, daemons[idx]);
 			else
-					printf("Invalid input \n");
+					printf("  %scancelled%s\n", CL_DIM, CL_RESET);
 	}
+	printf("\n");
 }

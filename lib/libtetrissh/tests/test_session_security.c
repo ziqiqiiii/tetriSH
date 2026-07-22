@@ -1,4 +1,4 @@
-#include "../src/internal.h"
+#include "internal.h"
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>

@@ -51,7 +51,7 @@ use it to sanity-check the wallet pricing below.
 | Best | ~100,000 – 200,000 |
 | Elite | ≳ 200,000 |
 
-For all the pricing math below, we assume the **average score is 20,000 points per game** (Middle of Average Tier).
+For all the pricing math below, we assume the everyone is around beginner level (and also not much game can be play), so **average score is 5,000 points per game** (Middle of Beginner Tier).
 
 ---
 
@@ -61,7 +61,7 @@ For all the pricing math below, we assume the **average score is 20,000 points p
 wallet_points = Sum of points earned per game / 1000
 ```
 
-At an average game of 20,000 points, that's about **20 wallet_points per game**.
+At an average game of 5,000 points, that's about **5 wallet_points per game**.
 
 ---
 
@@ -73,7 +73,7 @@ Each item costs a flat number of `wallet_points`.
 
 **Characters:**
 
-Each character is worth 30 wallet_points (about 1.5 average games).
+Each character is worth 10 wallet_points (about 0.5 average games).
 
 **Themes:**
 
@@ -81,12 +81,12 @@ Each character is worth 30 wallet_points (about 1.5 average games).
 |---|---|---|
 | Default | — | Free (starting theme) |
 | Design and AI | Free for SUTDents | — |
-| Haaland | 20 | ~1 game |
-| John Cena | 30 | ~1.5 games |
-| Claude-ing | 25 | ~1.25 games |
-| Al-Merqaedes | 35 | ~1.75 games |
-| Nuclear Gandhi | 35 | ~1.75 games |
-| We Celebrate our Differences | 30 | ~1.5 games |
+| Do u wanna build a snowman? | 5 | ~1 games |
+| Haaland | 8 | ~1.6 game |
+| John Cena | 10 | ~2 games |
+| Claude-ing | 7 | ~1.4 games |
+| Al-Merqaedes | 15 | ~3 games |
+| Nuclear Gandhi | 15 | ~3 games |
 
 The "est. games" column assumes the 20,000-point (≈ 20 wallet_points) average game.
 
@@ -94,7 +94,7 @@ The "est. games" column assumes the 20,000-point (≈ 20 wallet_points) average 
 
 | Reason | Rationale |
 |---|---|
-| **1–2 games per unlock** | Players unlock something after a couple of games. |
+| **1–3 games per unlock** | Players unlock something after a couple of games. |
 | **Flat pricing** | No scaling or discounts keeps the store simple. |
 | **Free tiers** | Everyone has a different theme choice with zero games played. |
 
@@ -105,4 +105,4 @@ Here's what we're planning around:
 - **~300 people.** We're assuming 170 students (CSD cohort size)  for demo day, and to be safe we decided to double it, so ~300.
 - **A short window.** The demo is probably only going to last a few hours (maybe 2–3 h, or even 1 h). In that time, not many games can be played.
 
-Since not much can be played, we decided to reduce the price for the characters and themes so players can actually afford them. The goal is that an average player can unlock their first item in roughly 1 ~ 2 games.
+Since not much can be played, we decided to reduce the price for the characters and themes so players can actually afford them. The goal is that an average player can unlock their first item in roughly 1 ~ 3 games.

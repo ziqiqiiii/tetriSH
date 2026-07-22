@@ -1,53 +1,25 @@
 #include "internal.h"
-#include "libs/common.h"
-#include <openssl/crypto.h>
-#include <openssl/rand.h>
-#include <openssl/x509.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
+// Static Functions
 static int	read_file_bytes(const char *path, unsigned char **out,
-		uint32_t *len)
-{
-	FILE	*fp;
-	long	size;
+				uint32_t *len);
+static void	init_session(t_session *sess, int fd, t_tetrissh_role role);
 
-	if (path == NULL || out == NULL || len == NULL)
-		return (-1);
-	fp = fopen(path, "rb");
-	if (fp == NULL)
-		return (-1);
-	if (fseek(fp, 0, SEEK_END) != 0)
-		return (fclose(fp), -1);
-	size = ftell(fp);
-	if (size <= 0 || (unsigned long)size > TSH_MAX_CERT_LEN)
-		return (fclose(fp), -1);
-	rewind(fp);
-	*out = malloc((size_t)size);
-	if (*out == NULL)
-		return (fclose(fp), -1);
-	if (fread(*out, 1, (size_t)size, fp) != (size_t)size)
-	{
-		free(*out);
-		*out = NULL;
-		return (fclose(fp), -1);
-	}
-	*len = (uint32_t)size;
-	return (fclose(fp), 0);
-}
-
-static void	init_session(t_session *sess, int fd, t_tetrissh_role role)
-{
-	memset(sess, 0, sizeof(*sess));
-	sess->fd = fd;
-	sess->role = role;
-}
-
-/* AI-assisted: one cleanup path frees OpenSSL/malloc state and wipes nonce/key
- * bytes so partial handshakes fail closed without leaking secrets. */
-
+/**
+ * @brief Runs the server side of the secure-session handshake.
+ *
+ * Reads the client nonce, sends the certificate and an RSA-PSS signature over
+ * that nonce, then receives and unwraps the RSA-OAEP session key. RSA blob
+ * lengths must match the configured key size so a peer cannot force unbounded
+ * reads. Any failure runs one cleanup path that frees state, wipes secrets,
+ * and resets the session so partial handshakes fail closed.
+ *
+ * @param fd The connected socket descriptor.
+ * @param sess Session to populate; wiped and reset on failure.
+ * @param cert_path Path to the server certificate (PEM).
+ * @param key_path Path to the server private key.
+ * @return 0 on success, -1 on failure.
+ */
 int	session_handshake_server(int fd, t_session *sess,
 		const char *cert_path, const char *key_path)
 {
@@ -86,7 +58,7 @@ int	session_handshake_server(int fd, t_session *sess,
 	priv = load_private_key(key_path);
 	if (priv == NULL)
 		goto cleanup;
-	key_size = EVP_PKEY_get_size(priv);
+	key_size = EVP_PKEY_size(priv);
 	if (key_size <= 0)
 		goto cleanup;
 	sig = sign_message_pss(priv, client_nonce, sizeof(client_nonce), &sig_len);
@@ -98,8 +70,6 @@ int	session_handshake_server(int fd, t_session *sess,
 		|| tsh_write_u32(fd, sig_len_u32) != 0
 		|| tsh_write_exact(fd, sig, sig_len_u32) != 0)
 		goto cleanup;
-	/* AI-assisted: RSA blobs must match configured key size so a peer cannot
-	 * force unbounded reads or allocations with a forged length prefix. */
 	if (tsh_read_u32(fd, &wrapped_len) != TSH_IO_OK
 		|| wrapped_len != (uint32_t)key_size)
 		goto cleanup;
@@ -114,22 +84,37 @@ int	session_handshake_server(int fd, t_session *sess,
 	memcpy(sess->aes_key, key_plain, TETRISSH_KEY_LEN);
 	sess->established = 1;
 	ok = 0;
-cleanup:
-	EVP_PKEY_free(priv);
-	free(cert_bytes);
-	free(sig);
-	if (wrapped != NULL)
-		OPENSSL_cleanse(wrapped, wrapped_len);
-	free(wrapped);
-	if (key_plain != NULL)
-		OPENSSL_cleanse(key_plain, key_len);
-	free(key_plain);
-	OPENSSL_cleanse(client_nonce, sizeof(client_nonce));
-	if (ok != 0)
-		session_close(sess);
-	return (ok);
+
+	cleanup:
+		EVP_PKEY_free(priv);
+		free(cert_bytes);
+		free(sig);
+		if (wrapped != NULL)
+			OPENSSL_cleanse(wrapped, wrapped_len);
+		free(wrapped);
+		if (key_plain != NULL)
+			OPENSSL_cleanse(key_plain, key_len);
+		free(key_plain);
+		OPENSSL_cleanse(client_nonce, sizeof(client_nonce));
+		if (ok != 0)
+			session_close(sess);
+		return (ok);
 }
 
+/**
+ * @brief Runs the client side of the secure-session handshake.
+ *
+ * Sends a fresh nonce, receives and verifies the server certificate chain and
+ * its RSA-PSS signature over that nonce, then wraps a fresh AES key with
+ * RSA-OAEP and sends it. Signature and wrapped-key lengths must equal the
+ * certified key operation size. Any failure runs one cleanup path that frees
+ * state, wipes secrets, and resets the session.
+ *
+ * @param fd The connected socket descriptor.
+ * @param sess Session to populate; wiped and reset on failure.
+ * @param ca_path Path to the CA used to verify the server certificate.
+ * @return 0 on success, -1 on failure.
+ */
 int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 {
 	unsigned char	client_nonce[TSH_NONCE_LEN];
@@ -175,7 +160,7 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 	pub = X509_get_pubkey(cert);
 	if (pub == NULL)
 		goto cleanup;
-	key_size = EVP_PKEY_get_size(pub);
+	key_size = EVP_PKEY_size(pub);
 	if (key_size <= 0)
 		goto cleanup;
 	if (tsh_read_u32(fd, &sig_len) != TSH_IO_OK
@@ -192,7 +177,7 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 	if (RAND_bytes(sess->aes_key, TETRISSH_KEY_LEN) != 1)
 		goto cleanup;
 	wrapped = rsa_encrypt_block(pub, sess->aes_key, TETRISSH_KEY_LEN,
-		&wrapped_len, 1);
+			&wrapped_len, 1);
 	if (wrapped == NULL || wrapped_len > UINT32_MAX)
 		goto cleanup;
 	if (tsh_write_u32(fd, (uint32_t)wrapped_len) != 0
@@ -200,16 +185,74 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 		goto cleanup;
 	sess->established = 1;
 	ok = 0;
-cleanup:
-	EVP_PKEY_free(pub);
-	X509_free(cert);
-	free(cert_bytes);
-	free(sig);
-	if (wrapped != NULL)
-		OPENSSL_cleanse(wrapped, wrapped_len);
-	free(wrapped);
-	OPENSSL_cleanse(client_nonce, sizeof(client_nonce));
-	if (ok != 0)
-		session_close(sess);
-	return (ok);
+
+	cleanup:
+		EVP_PKEY_free(pub);
+		X509_free(cert);
+		free(cert_bytes);
+		free(sig);
+		if (wrapped != NULL)
+			OPENSSL_cleanse(wrapped, wrapped_len);
+		free(wrapped);
+		OPENSSL_cleanse(client_nonce, sizeof(client_nonce));
+		if (ok != 0)
+			session_close(sess);
+		return (ok);
+}
+
+/**
+ * @brief Reads an entire file into a freshly allocated buffer.
+ *
+ * Rejects empty files and files larger than TSH_MAX_CERT_LEN before allocating,
+ * so a hostile certificate path cannot force an unbounded allocation. On
+ * success *out owns memory the caller must free.
+ *
+ * @param path Path to the file to read.
+ * @param out Out-parameter receiving the allocated buffer.
+ * @param len Out-parameter receiving the byte count.
+ * @return 0 on success, -1 on a null argument, open, size, allocation, or read
+ *         failure.
+ */
+static int	read_file_bytes(const char *path, unsigned char **out,
+		uint32_t *len)
+{
+	FILE	*fp;
+	long	size;
+
+	if (path == NULL || out == NULL || len == NULL)
+		return (-1);
+	fp = fopen(path, "rb");
+	if (fp == NULL)
+		return (-1);
+	if (fseek(fp, 0, SEEK_END) != 0)
+		return (fclose(fp), -1);
+	size = ftell(fp);
+	if (size <= 0 || (unsigned long)size > TSH_MAX_CERT_LEN)
+		return (fclose(fp), -1);
+	rewind(fp);
+	*out = malloc((size_t)size);
+	if (*out == NULL)
+		return (fclose(fp), -1);
+	if (fread(*out, 1, (size_t)size, fp) != (size_t)size)
+	{
+		free(*out);
+		*out = NULL;
+		return (fclose(fp), -1);
+	}
+	*len = (uint32_t)size;
+	return (fclose(fp), 0);
+}
+
+/**
+ * @brief Zeroes a session and stamps its descriptor and role.
+ *
+ * @param sess The session to initialise.
+ * @param fd The connected socket descriptor.
+ * @param role The local endpoint role.
+ */
+static void	init_session(t_session *sess, int fd, t_tetrissh_role role)
+{
+	memset(sess, 0, sizeof(*sess));
+	sess->fd = fd;
+	sess->role = role;
 }

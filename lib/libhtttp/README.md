@@ -40,7 +40,7 @@ The editable diagram source is
   headers split on their first colon, and body length must match
   `Content-Length`.
 - **Extensible dispatch:** methods map to registered handler functions, keeping
-  application rules in `tetrisd`, `tetrisu`, `chatd`, or `marketd`.
+  application rules in `tetrisd` or `tetrisu`.
 
 ## Planned Error Ownership
 

@@ -2,10 +2,10 @@
 /*                                                                            */
 /*   db_buy.c — purchase a character or theme (§3 write, write lock)           */
 /*                                                                            */
-/*   Characters cost wallet_points (from the catalogue); themes are free       */
-/*   (the theme schema carries no price). Both reject an unknown item, an       */
-/*   already-owned item, or a full owned list, then append the id to the owned */
-/*   list and persist. Run under the write lock with a page-cache log append.  */
+/*   Characters and themes both cost wallet_points (from the catalogue). Both   */
+/*   reject an unknown item, an already-owned item, an unaffordable price, or   */
+/*   a full owned list, then deduct the cost, append the id to the owned list,  */
+/*   and persist. Run under the write lock with a page-cache log append.        */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -48,24 +48,26 @@ t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
 		r = DB_FULL;
 	else
 	{
-		p->wallet_points -= c->cost_points;
 		r = grant(db, p, p->owned_characters, &p->owned_characters_count, cid);
+		if (r == DB_OK)
+			p->wallet_points -= c->cost_points;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
 }
 
 /**
- * @brief Buy (claim) a theme; themes carry no price, so this is free.
+ * @brief Buy a theme, charging its catalogue cost to the wallet.
  *
- * Fails if the player or theme id is unknown (DB_NOT_FOUND) or the theme is
- * already owned (DB_EXISTS). On success the id is added to the owned list and
- * the player is persisted.
+ * Fails if the player or theme id is unknown (DB_NOT_FOUND), the theme is
+ * already owned (DB_EXISTS), or the wallet cannot cover the cost
+ * (DB_INSUFFICIENT). On success the cost is deducted, the id is added to the
+ * owned list, and the player is persisted.
  *
  * @param db The handle.
- * @param id The claiming player's id.
- * @param tid The theme id to claim.
- * @return DB_OK or one of DB_INVALID/DB_NOT_FOUND/DB_EXISTS/DB_FULL.
+ * @param id The buying player's id.
+ * @param tid The theme id to purchase.
+ * @return DB_OK or one of DB_INVALID/DB_NOT_FOUND/DB_EXISTS/DB_INSUFFICIENT/DB_FULL.
  */
 t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
 {
@@ -82,8 +84,16 @@ t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
 		r = DB_NOT_FOUND;
 	else if (owned_has(p->owned_themes, p->owned_themes_count, tid))
 		r = DB_EXISTS;
+	else if (p->wallet_points < t->cost_points)
+		r = DB_INSUFFICIENT;
+	else if (p->owned_themes_count >= DB_MAX_OWNED)
+		r = DB_FULL;
 	else
+	{
 		r = grant(db, p, p->owned_themes, &p->owned_themes_count, tid);
+		if (r == DB_OK)
+			p->wallet_points -= t->cost_points;
+	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
 }
