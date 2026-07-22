@@ -14,6 +14,8 @@ static void	remember_score_event(solo_game_t *game, int lines,
 static void	spawn_queued_piece(solo_game_t *game);
 static bool	process_due_event(solo_game_t *game);
 static void	finish_line_clear(solo_game_t *game);
+static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms);
+static int	gameplay_next_wake_ms(const solo_game_t *game);
 static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms);
 static int	min_int(int left, int right);
 static bool	advance_clearing(solo_game_t *game, int *remaining_ms);
@@ -109,10 +111,12 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 	bool	changed;
 	bool	started_in_reveal;
 
-	if (elapsed_ms < 0 || game->paused || game->phase == SOLO_GAME_OVER)
+	if (elapsed_ms < 0 || game->paused)
 		return (false);
 	remaining_ms = elapsed_ms;
-	changed = false;
+	changed = advance_ability_feedback(game, elapsed_ms);
+	if (game->phase == SOLO_GAME_OVER)
+		return (changed);
 	started_in_reveal = game->phase == SOLO_TOP_OUT_REVEAL;
 	due_events = 0;
 	while (due_events < 64 && process_due_event(game))
@@ -158,11 +162,39 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
  */
 int	solo_game_next_wake_ms(const solo_game_t *game)
 {
+	int	feedback_ms;
+	int	wake_ms;
+
+	if (game->paused)
+		return (-1);
+	wake_ms = gameplay_next_wake_ms(game);
+	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
+		return (wake_ms);
+	feedback_ms = SOLO_ABILITY_FEEDBACK_MS
+		- game->ability_feedback_elapsed_ms;
+	if (feedback_ms < 0)
+		feedback_ms = 0;
+	if (wake_ms < 0 || feedback_ms < wake_ms)
+		return (feedback_ms);
+	return (wake_ms);
+}
+
+/**
+ * @brief Calculates only the gravity, lock, clear, or top-out deadline.
+ *
+ * Keeping this separate lets short ability feedback share the same sleeping
+ * input loop without changing gameplay timer semantics.
+ *
+ * @param game Pointer to the current Solo state.
+ * @return Milliseconds until the next gameplay deadline, or -1 when idle.
+ */
+static int	gameplay_next_wake_ms(const solo_game_t *game)
+{
 	int	gravity_ms;
 	int	wake_ms;
 	int	lock_ms;
 
-	if (game->paused || game->phase == SOLO_GAME_OVER)
+	if (game->phase == SOLO_GAME_OVER)
 		return (-1);
 	if (game->phase == SOLO_TOP_OUT_REVEAL)
 	{
@@ -546,6 +578,7 @@ static bool	process_due_event(solo_game_t *game)
 static void	finish_line_clear(solo_game_t *game)
 {
 	bool	perfect_clear;
+	int		crystals_earned;
 
 	board_clear_lines(&game->board);
 	perfect_clear = board_is_empty(&game->board);
@@ -553,12 +586,45 @@ static void	finish_line_clear(solo_game_t *game)
 		perfect_clear);
 	game->total_lines += game->clear_count;
 	game->level = level_from_lines(game->total_lines);
-	game->crystal_charge += game->clear_count;
-	if (game->crystal_charge > SOLO_CRYSTAL_CAPACITY)
+	game->crystal_line_progress += game->clear_count;
+	crystals_earned = game->crystal_line_progress
+		/ SOLO_CRYSTAL_LINES_PER_CHARGE;
+	game->crystal_line_progress %= SOLO_CRYSTAL_LINES_PER_CHARGE;
+	game->crystal_charge += crystals_earned;
+	if (game->crystal_charge >= SOLO_CRYSTAL_CAPACITY)
+	{
 		game->crystal_charge = SOLO_CRYSTAL_CAPACITY;
+		game->crystal_line_progress = 0;
+	}
 	game->clear_count = 0;
 	game->clear_elapsed_ms = 0;
 	spawn_queued_piece(game);
+}
+
+/**
+ * @brief Expires one ability response without requesting animation frames.
+ *
+ * Feedback is static for its lifetime, so only the expiry boundary dirties the
+ * HUD. Gameplay and feedback consume the same elapsed wall-clock interval.
+ *
+ * @param game Pointer to the Solo state.
+ * @param elapsed_ms Elapsed monotonic milliseconds.
+ * @return true when visible feedback expired, otherwise false.
+ */
+static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms)
+{
+	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
+		return (false);
+	if (elapsed_ms < SOLO_ABILITY_FEEDBACK_MS
+		- game->ability_feedback_elapsed_ms)
+	{
+		game->ability_feedback_elapsed_ms += elapsed_ms;
+		return (false);
+	}
+	game->ability_feedback_elapsed_ms = 0;
+	game->ability_result = SOLO_ABILITY_RESULT_NONE;
+	game->last_ability = SOLO_ABILITY_NONE;
+	return (true);
 }
 
 /**

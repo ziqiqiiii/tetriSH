@@ -56,7 +56,8 @@ held by `solo_game_t`:
 - score, combo, back-to-back state, total lines, and level;
 - gravity, lock-delay, lock-reset, and clear-animation timing;
 - clear-row mask/sequence number;
-- display-only Mirurun crystal charge;
+- Mirurun crystal charge, partial two-line progress, ability costs, and
+  activation feedback;
 - paused, clearing, and top-out state.
 
 Do not send the bag contents or RNG state to the client. The next-three queue is
@@ -72,6 +73,7 @@ The gameplay snapshot needs only renderable values:
 - next three piece types;
 - score, lines, level, combo, and back-to-back flag;
 - crystal charge from 0 to 10;
+- last accepted/rejected ability activation for short client feedback;
 - phase (`active`, `clearing`, `paused`, `top-out`);
 - clearing row indices and remaining animation time;
 - last scoring result for Single/Double/Tetris/T-Spin/Perfect Clear text.
@@ -107,10 +109,15 @@ use `MSG_DONTWAIT` and drop on a full or missing destination.
 4. Map validated HTTTP actions to the same pure movement/rotation/drop calls.
 5. Snapshot under the room mutex and broadcast after unlocking.
 6. Add a `tetrisu` network/view-model module; make `render_solo.c` consume it.
-7. Remove all calls from `tetrisu` input to `solo_game_apply_action()` and all
-   local gravity updates. Keep the local implementation only as an explicitly
-   selected offline test mode, or delete it.
-8. Publish final score/points from `tetrisd` to `marketd` using the required
+7. Route `1`-`4` and meter clicks through an HTTTP `ABILITY` request. Validate
+   charge, equipped character, target, and phase inside `tetrisd/ability.c`;
+   then apply Mirurun through the pure `board_cut_bottom()` transform while
+   holding `room->mutex`. Never trust or deduct the client-side charge value.
+8. Remove all calls from `tetrisu` input to `solo_game_apply_action()` and
+   `solo_game_activate_ability()`, plus all local gravity updates. Keep the
+   local implementation only as an explicitly selected offline test mode, or
+   delete it.
+9. Publish final score/points from `tetrisd` to `marketd` using the required
    non-blocking event channel.
 
 ## Acceptance checks
@@ -122,4 +129,5 @@ use `MSG_DONTWAIT` and drop on a full or missing destination.
 - Replayed/out-of-order snapshots are ignored by sequence number.
 - Disconnect/reconnect never reconstructs authority from client state.
 - The existing Solo renderer still shows next-three, ghost, score, level,
-  crystal meter, two-frame clear animation, pause, restart, and top-out.
+  interactive crystal meter, ability feedback, two-frame clear animation,
+  pause, restart, and top-out.

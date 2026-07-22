@@ -468,8 +468,8 @@ static void	test_pause_freezes_active_and_clear_timers(void)
 /**
  * @brief Exercises clear animation then level and meter update.
  *
- * Completing the tenth line must advance level and fill one crystal segment
- *   after animation.
+ * Completing the tenth line must advance level while two cumulative cleared
+ * lines are required for one crystal segment.
  */
 static void	test_clear_animation_then_level_and_meter_update(void)
 {
@@ -494,7 +494,19 @@ static void	test_clear_animation_then_level_and_meter_update(void)
 	solo_game_update(&game, 1);
 	assert(game.phase == SOLO_ACTIVE);
 	assert(game.total_lines == 10 && game.level == 2);
-	assert(game.crystal_charge == 1);
+	assert(game.crystal_charge == 0 && game.crystal_line_progress == 1);
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		board_set(&game.board, col, BOARD_HEIGHT - 1,
+			(t_cell){CELL_FILLED, PIECE_I});
+		col++;
+	}
+	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
+	assert(game.phase == SOLO_CLEARING);
+	assert(solo_game_update(&game, SOLO_CLEAR_ANIMATION_MS));
+	assert(game.total_lines == 11 && game.level == 2);
+	assert(game.crystal_charge == 1 && game.crystal_line_progress == 0);
 	printf("PASS test_clear_animation_then_level_and_meter_update\n");
 }
 

@@ -59,6 +59,9 @@
 # define MENU_ITEM_COUNT	4
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
+# define SOLO_CRYSTAL_LINES_PER_CHARGE	2
+# define SOLO_ABILITY_COUNT	4
+# define SOLO_ABILITY_FEEDBACK_MS	1000
 # define SOLO_CLEAR_ANIMATION_MS	200
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
@@ -142,13 +145,15 @@
 # define GHOST_INTERIOR_BLEND	24u
 # define SOLO_MAX_CATCHUP_MS		1000
 # define SOLO_RESIZE_POLL_MS		100
+# define SOLO_RENDER_INTERVAL_MS	33
+# define SOLO_INPUT_BATCH_MAX		64
 # define SOLO_NEXT_X				80
 # define SOLO_NEXT_Y				0
 # define SOLO_NEXT_WIDTH			160
 # define SOLO_NEXT_HEIGHT		48
-# define SOLO_METER_X			48
+# define SOLO_METER_X			32
 # define SOLO_METER_Y			32
-# define SOLO_METER_WIDTH		16
+# define SOLO_METER_WIDTH		48
 # define SOLO_METER_HEIGHT		336
 # define SOLO_MIRURUN_X			272
 # define SOLO_MIRURUN_Y			32
@@ -167,6 +172,9 @@
 # define SOLO_BOARD_WIDTH		160
 # define SOLO_BOARD_HEIGHT		320
 # define SOLO_MAX_ROW_RUNS		((BOARD_WIDTH + 1) / 2)
+# define SOLO_ABILITY_CIRCLE_RADIUS	12
+# define SOLO_ABILITY_HITBOX_HALF_WIDTH	20
+# define SOLO_ABILITY_HITBOX_HALF_HEIGHT	20
 
 typedef enum
 {
@@ -267,6 +275,25 @@ typedef enum e_solo_action
 	SOLO_HARD_DROP
 }	solo_action_t;
 
+typedef enum e_solo_ability
+{
+	SOLO_ABILITY_NONE,
+	SOLO_ABILITY_MIRURUN,
+	SOLO_ABILITY_INVERSION,
+	SOLO_ABILITY_PENTARIS,
+	SOLO_ABILITY_SIRTET
+}	solo_ability_t;
+
+typedef enum e_solo_ability_result
+{
+	SOLO_ABILITY_RESULT_NONE,
+	SOLO_ABILITY_RESULT_ACTIVATED,
+	SOLO_ABILITY_RESULT_NO_CHARGE,
+	SOLO_ABILITY_RESULT_UNAVAILABLE,
+	SOLO_ABILITY_RESULT_BLOCKED,
+	SOLO_ABILITY_RESULT_INVALID
+}	solo_ability_result_t;
+
 typedef struct s_solo_game
 {
 	t_board			board;
@@ -284,6 +311,10 @@ typedef struct s_solo_game
 	int				total_lines;
 	int				level;
 	int				crystal_charge;
+	int				crystal_line_progress;
+	solo_ability_t	last_ability;
+	solo_ability_result_t	ability_result;
+	int				ability_feedback_elapsed_ms;
 	int				gravity_elapsed_ms;
 	int				lock_elapsed_ms;
 	int				clear_elapsed_ms;
@@ -335,11 +366,14 @@ typedef struct s_solo_render
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
+	solo_ability_t	hovered_ability;
 	bool			piece_planes_combined;
 	bool			layout_valid;
 	bool			assets_ready;
 	bool			planes_ready;
 	bool			composite_board;
+	bool			cell_board;
+	bool			board_plane_cells;
 	char			asset_error[160];
 }	solo_render_t;
 
@@ -391,6 +425,18 @@ int				solo_game_next_wake_ms(const solo_game_t *game);
 t_piece			solo_game_ghost(const solo_game_t *game);
 bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
 void			solo_game_toggle_pause(solo_game_t *game);
+
+/* SOLO_ABILITIES.C — temporary local ability authority for Solo testing */
+int				solo_ability_cost(solo_ability_t ability);
+const char		*solo_ability_name(solo_ability_t ability);
+const char		*solo_ability_description(solo_ability_t ability);
+int				solo_ability_center_y(solo_ability_t ability);
+solo_ability_t	solo_ability_at_canvas(int x, int y);
+bool				solo_mouse_canvas_position(const render_ctx_t *ctx,
+					const solo_render_t *solo, const ncinput *input,
+					int *canvas_x, int *canvas_y);
+solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
+					solo_ability_t ability);
 
 /* RENDER_SOLO_CANVAS.C */
 bool			solo_canvas_load(solo_render_t *solo);

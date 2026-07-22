@@ -41,15 +41,22 @@ Battle while the authoritative `tetrisd` game loop is being built.
   the terminal without changing the HUD aspect ratio
 - Transparent image HUD with exact `#2E222F` authored borders, 16 x 16
   tetromino sprites, custom text/number masks, and centered Mirurun art
-- Cell-rendered scenery plus independently refreshed high-resolution HUD
-  planes; the active piece and ghost use atomic pixel planes and merge into one
-  plane when their rectangles overlap, so movement cannot shear or flicker
-  their blocks
+- Low-resolution scenery plus independently refreshed high-resolution HUD
+  planes; native Kitty/iTerm2/WezTerm backends use atomic pixel-piece planes
+  with the exact authored tile sprites, while backends without reliable image
+  movement use a true-colour quadrant-cell fallback
+- Bounded input batches and a 30 FPS presentation ceiling coalesce rapid
+  movement and rotation without delaying gameplay state or flooding the PTY
 - Dirty row/HUD signatures rebuild only changed content, while the compact
   control legend uses one crisp terminal-font row
 - Responsive PTY geometry checks reflow Solo between compact and full layouts
   without busy-waiting when a terminal does not report resize as input
-- Display-only ten-segment Mirurun crystal meter, charged by cleared lines
+- Interactive ten-segment Mirurun crystal meter that gains one charge per two
+  cleared lines, exposes evenly spaced `2 / 4 / 6 / 8` ability thresholds, and
+  supports hover descriptions, mouse clicks, and `1`-`4` hotkeys
+- Local Mirurun level-one activation removes the bottom four settled rows;
+  opponent-targeted levels two-four currently spend charge and show a clearly
+  labelled Solo test effect without mutating the board
 - Two-frame, 200 ms sprite animation before cleared rows compact
 
 Hold is intentionally omitted from this project mode. Solo state is temporarily
@@ -147,6 +154,11 @@ and graphics-protocol support at startup. It exits with
 | `Z` | Rotate counter-clockwise |
 | `↓` | Soft drop; 1 point per descended cell |
 | `Space` | Hard drop and lock; 2 points per descended cell |
+| `1` | Mirurun (2 charge): remove the bottom four settled rows |
+| `2` | Inversion (4 charge): visual-only Solo test activation |
+| `3` | Pentaris (6 charge): visual-only Solo test activation |
+| `4` | Sirtet (8 charge): visual-only Solo test activation |
+| Mouse hover/click | Show an ability description / activate its meter circle |
 | `P` | Pause/resume Solo |
 | `R` | Restart after top-out |
 | `Esc` or `Q` | Return from Solo to the home screen |
@@ -229,6 +241,7 @@ Modules (each a `.c` under `src/`):
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
+| `solo_abilities.c` | Mirurun metadata, charge spending, board transform, and mouse geometry |
 | `render_solo.c` | Own terminal planes, dirty signatures, and responsive layout |
 | `render_solo_canvas.c` | Load assets and compose pixel-perfect HUD/board canvases |
 | `solo_mode.c` | Run the poll-driven local Solo input and render loop |
@@ -299,9 +312,10 @@ valgrind --leak-check=full --show-leak-kinds=all \
 ```
 
 The Solo suite includes a 100,000-rotation state stress case and passes under
-AddressSanitizer and UndefinedBehaviorSanitizer. A separate live WezTerm run
-with 1,200 rendered rotations reports zero failed renders, zero input errors,
-and `0 leaks for 0 total leaked bytes` through Apple `leaks`. The renderer
+AddressSanitizer and UndefinedBehaviorSanitizer. The live WezTerm regression
+also drives a 10,000-rotation burst followed by sustained paced movement and
+rotation. Process memory remains bounded, the terminal queue drains normally,
+and Apple `leaks` reports `0 leaks for 0 total leaked bytes`. The renderer
 requires a real terminal for ownership checks because notcurses queries pixel
 geometry and graphics-protocol capabilities during startup.
 

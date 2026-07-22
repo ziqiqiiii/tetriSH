@@ -36,9 +36,18 @@ static void	draw_preview_piece(uint32_t *canvas,
 	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_width);
 static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
 	int tile_index, int x, int y, int size, unsigned opacity, bool outline_only);
-static void	draw_crystal_meter(uint32_t *canvas, const solo_game_t *game);
+static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
+	const solo_game_t *game);
+static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
+	const solo_game_t *game, solo_ability_t ability);
+static void	draw_filled_circle(uint32_t *canvas, int center_x, int center_y,
+	int radius, uint32_t pixel);
+static void	draw_circle_ring(uint32_t *canvas, int center_x, int center_y,
+	int radius, int thickness, uint32_t pixel);
 static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game);
+static bool	draw_ability_message(uint32_t *canvas,
+	const solo_render_t *solo, const solo_game_t *game);
 static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
@@ -337,7 +346,7 @@ void	solo_canvas_compose_hud(solo_render_t *solo,
 		(size_t)SOLO_CANVAS_WIDTH * SOLO_CANVAS_HEIGHT
 		* sizeof(*solo->frame_pixels));
 	draw_next_queue(solo->frame_pixels, solo, game);
-	draw_crystal_meter(solo->frame_pixels, game);
+	draw_crystal_meter(solo->frame_pixels, solo, game);
 	draw_score_panel(solo->frame_pixels, solo, game);
 }
 
@@ -946,19 +955,22 @@ static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
 }
 
 /**
- * @brief Draws the inactive Mirurun crystal charge meter.
+ * @brief Draws the Mirurun charge meter and four interactive thresholds.
  *
- * Ten segments reflect accumulated cleared lines but have no gameplay ability
- *   behavior yet.
+ * Ten segments show stored charge. Costs 2, 4, 6, and 8 position the numbered
+ * ability circles at equal intervals from bottom to top.
  *
  * @param canvas Pointer to the destination RGBA canvas.
+ * @param solo Pointer to the renderer containing hover state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_crystal_meter(uint32_t *canvas, const solo_game_t *game)
+static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
+	const solo_game_t *game)
 {
-	int	segment;
-	int	segment_height;
-	int	y;
+	solo_ability_t	ability;
+	int				segment;
+	int				segment_height;
+	int				y;
 
 	draw_rect(canvas, HUD_METER_X, HUD_METER_Y, HUD_METER_WIDTH,
 		HUD_METER_HEIGHT, make_pixel(g_dark, 115));
@@ -975,6 +987,121 @@ static void	draw_crystal_meter(uint32_t *canvas, const solo_game_t *game)
 			draw_rect(canvas, HUD_METER_X, y, HUD_METER_WIDTH,
 				segment_height - 2, make_pixel(g_purple, 65));
 		segment++;
+	}
+	ability = SOLO_ABILITY_MIRURUN;
+	while (ability <= SOLO_ABILITY_SIRTET)
+	{
+		draw_ability_marker(canvas, solo, game, ability);
+		ability++;
+	}
+}
+
+/**
+ * @brief Draws one numbered ability circle with affordability and hover state.
+ *
+ * @param canvas Pointer to the destination RGBA canvas.
+ * @param solo Pointer to the renderer containing hover state.
+ * @param game Pointer to the current Solo state.
+ * @param ability Ability represented by this marker.
+ */
+static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
+	const solo_game_t *game, solo_ability_t ability)
+{
+	char		number[2];
+	color_t	ring;
+	color_t	digit;
+	int			center_x;
+	int			center_y;
+	bool		affordable;
+	bool		feedback;
+
+	center_x = HUD_METER_X + HUD_METER_WIDTH / 2;
+	center_y = solo_ability_center_y(ability);
+	affordable = game->crystal_charge >= solo_ability_cost(ability);
+	feedback = game->last_ability == ability
+		&& game->ability_result != SOLO_ABILITY_RESULT_NONE;
+	ring = g_purple;
+	digit = g_purple;
+	if (affordable)
+	{
+		ring = g_pink;
+		digit = g_white;
+	}
+	if (solo->hovered_ability == ability || feedback)
+	{
+		ring = g_white;
+		digit = g_white;
+	}
+	draw_filled_circle(canvas, center_x, center_y,
+		SOLO_ABILITY_CIRCLE_RADIUS - 2, make_pixel(g_dark, 245));
+	draw_circle_ring(canvas, center_x, center_y,
+		SOLO_ABILITY_CIRCLE_RADIUS, 2, make_pixel(ring, 255));
+	number[0] = (char)('0' + ability);
+	number[1] = '\0';
+	draw_numbers(canvas, solo, number, center_x - 3, center_y - 6,
+		6, 12, 0, digit, 255);
+}
+
+/**
+ * @brief Fills a pixel circle without interpolation.
+ *
+ * @param canvas Pointer to the destination RGBA canvas.
+ * @param center_x Circle centre x coordinate.
+ * @param center_y Circle centre y coordinate.
+ * @param radius Circle radius in pixels.
+ * @param pixel Fill pixel.
+ */
+static void	draw_filled_circle(uint32_t *canvas, int center_x, int center_y,
+	int radius, uint32_t pixel)
+{
+	int	x;
+	int	y;
+
+	y = -radius;
+	while (y <= radius)
+	{
+		x = -radius;
+		while (x <= radius)
+		{
+			if (x * x + y * y <= radius * radius)
+				put_pixel(canvas, center_x + x, center_y + y, pixel);
+			x++;
+		}
+		y++;
+	}
+}
+
+/**
+ * @brief Draws a fixed-thickness pixel circle outline.
+ *
+ * @param canvas Pointer to the destination RGBA canvas.
+ * @param center_x Circle centre x coordinate.
+ * @param center_y Circle centre y coordinate.
+ * @param radius Outer circle radius.
+ * @param thickness Ring thickness in pixels.
+ * @param pixel Outline pixel.
+ */
+static void	draw_circle_ring(uint32_t *canvas, int center_x, int center_y,
+	int radius, int thickness, uint32_t pixel)
+{
+	int	inner;
+	int	distance;
+	int	x;
+	int	y;
+
+	inner = radius - thickness;
+	y = -radius;
+	while (y <= radius)
+	{
+		x = -radius;
+		while (x <= radius)
+		{
+			distance = x * x + y * y;
+			if (distance <= radius * radius && distance >= inner * inner)
+				put_pixel(canvas, center_x + x, center_y + y, pixel);
+			x++;
+		}
+		y++;
 	}
 }
 
@@ -1007,6 +1134,8 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 		HUD_SCORE_STAT_FIRST_Y + HUD_SCORE_STAT_ROW_STEP);
 	draw_stat_line(canvas, solo, "COMBO", combo,
 		HUD_SCORE_STAT_FIRST_Y + 2 * HUD_SCORE_STAT_ROW_STEP);
+	if (draw_ability_message(canvas, solo, game))
+		return ;
 	if (game->scoring.back_to_back)
 		draw_text_centered(canvas, solo, "BACK-TO-BACK",
 			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 118,
@@ -1021,6 +1150,82 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 		draw_numbers_centered_fit(canvas, solo, points, HUD_SCORE_Y + 143,
 			g_pink);
 	}
+}
+
+/**
+ * @brief Draws hover help or bounded activation feedback in the event panel.
+ *
+ * Activation feedback takes priority for one second; afterward the current
+ * hovered marker supplies its name, cost, description, and keyboard hint.
+ *
+ * @param canvas Pointer to the destination RGBA canvas.
+ * @param solo Pointer to the renderer containing hover state.
+ * @param game Pointer to the current Solo state.
+ * @return true when ability content replaced ordinary score-event content.
+ */
+static bool	draw_ability_message(uint32_t *canvas,
+	const solo_render_t *solo, const solo_game_t *game)
+{
+	solo_ability_t	ability;
+	char				title[48];
+	char				detail[48];
+	char				hint[48];
+	int				cost;
+
+	ability = solo->hovered_ability;
+	if (game->ability_result != SOLO_ABILITY_RESULT_NONE)
+		ability = game->last_ability;
+	if (ability == SOLO_ABILITY_NONE)
+		return (false);
+	cost = solo_ability_cost(ability);
+	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
+	{
+		snprintf(title, sizeof(title), "%s [%d] COST %d",
+			solo_ability_name(ability), ability, cost);
+		snprintf(detail, sizeof(detail), "%s",
+			solo_ability_description(ability));
+		snprintf(hint, sizeof(hint), "CLICK OR PRESS %d", ability);
+	}
+	else if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+	{
+		snprintf(title, sizeof(title), "%s ACTIVATED",
+			solo_ability_name(ability));
+		if (ability == SOLO_ABILITY_MIRURUN)
+			snprintf(detail, sizeof(detail), "BOTTOM 4 ROWS REMOVED");
+		else
+			snprintf(detail, sizeof(detail), "SOLO TEST - NO TARGET");
+		snprintf(hint, sizeof(hint), "-%d CRYSTALS", cost);
+	}
+	else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
+	{
+		snprintf(title, sizeof(title), "%s NOT READY",
+			solo_ability_name(ability));
+		snprintf(detail, sizeof(detail), "NEED %d CRYSTALS", cost);
+		snprintf(hint, sizeof(hint), "CLEAR 2 LINES = 1");
+	}
+	else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
+	{
+		snprintf(title, sizeof(title), "MIRURUN BLOCKED");
+		snprintf(detail, sizeof(detail), "ACTIVE PIECE COLLISION");
+		snprintf(hint, sizeof(hint), "TRY AGAIN AFTER LOCK");
+	}
+	else
+	{
+		snprintf(title, sizeof(title), "%s UNAVAILABLE",
+			solo_ability_name(ability));
+		snprintf(detail, sizeof(detail), "WAIT FOR ACTIVE PLAY");
+		snprintf(hint, sizeof(hint), "CHARGE NOT SPENT");
+	}
+	draw_text_centered(canvas, solo, title,
+		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 119,
+		5, 6, 1, g_pink);
+	draw_text_centered(canvas, solo, detail,
+		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 133,
+		5, 6, 1, g_white);
+	draw_text_centered(canvas, solo, hint,
+		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 147,
+		5, 6, 1, g_purple);
+	return (true);
 }
 
 /**

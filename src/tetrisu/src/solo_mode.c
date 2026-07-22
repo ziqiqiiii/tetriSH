@@ -4,13 +4,19 @@
 static int	restore_home(render_ctx_t *ctx);
 static uint32_t	new_game_seed(void);
 static uint64_t	monotonic_ms(void);
+static int	milliseconds_until_render(uint64_t now_ms,
+	uint64_t last_render_ms);
 static bool	solo_display_ready(const solo_render_t *solo);
 static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
 	ncinput *input, int *input_errno);
 static bool	terminal_geometry_changed(const render_ctx_t *ctx);
 static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
-	uint32_t key, const ncinput *input, bool display_ready,
+	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
+	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed);
+static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
+	solo_game_t *game, uint32_t key, const ncinput *input,
+	bool display_ready, bool resize_pending, bool *state_changed);
 static bool	dispatch_game_key(solo_game_t *game, uint32_t key);
 
 /**
@@ -32,14 +38,21 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	uint32_t		key;
 	uint64_t		previous_ms;
 	uint64_t		now_ms;
+	uint64_t		last_render_ms;
 	int				elapsed_ms;
 	int				input_errno;
+	int				input_batch;
 	int				wake_ms;
 	int				wait_ms;
+	int				render_wait_ms;
 	bool			leave;
 	bool			resize_pending;
 	bool			display_ready;
 	bool			needs_draw;
+	bool			render_pending;
+	bool			input_backlog;
+	bool			force_render;
+	bool			mouse_enabled;
 
 	render_menu_destroy(ctx);
 	render_background_destroy(ctx);
@@ -52,7 +65,12 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	solo_game_init(&game, new_game_seed());
 	render_solo_create(ctx, &solo);
 	render_solo_draw(ctx, &solo, &game);
+	mouse_enabled = notcurses_mice_enable(ctx->nc,
+		NCMICE_MOVE_EVENT | NCMICE_BUTTON_EVENT) == 0;
 	previous_ms = monotonic_ms();
+	last_render_ms = previous_ms;
+	render_pending = false;
+	input_backlog = false;
 	leave = false;
 	while (!leave)
 	{
@@ -61,7 +79,21 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		wait_ms = wake_ms;
 		if (wait_ms < 0 || wait_ms > SOLO_RESIZE_POLL_MS)
 			wait_ms = SOLO_RESIZE_POLL_MS;
-		key = wait_solo_input(ctx, wait_ms, &input, &input_errno);
+		if (render_pending)
+		{
+			render_wait_ms = milliseconds_until_render(monotonic_ms(),
+					last_render_ms);
+			if (render_wait_ms < wait_ms)
+				wait_ms = render_wait_ms;
+		}
+		if (input_backlog)
+		{
+			errno = 0;
+			key = notcurses_get_nblock(ctx->nc, &input);
+			input_errno = errno;
+		}
+		else
+			key = wait_solo_input(ctx, wait_ms, &input, &input_errno);
 		now_ms = monotonic_ms();
 		if (now_ms < previous_ms)
 			elapsed_ms = 0;
@@ -71,6 +103,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 			elapsed_ms = (int)(now_ms - previous_ms);
 		previous_ms = now_ms;
 		needs_draw = false;
+		force_render = false;
 		if (display_ready)
 			needs_draw = solo_game_update(&game, elapsed_ms);
 		resize_pending = terminal_geometry_changed(ctx);
@@ -81,12 +114,21 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 			else
 				break ;
 		}
+		input_backlog = false;
+		input_batch = 0;
 		while (key != 0)
 		{
-			if (handle_solo_key(&game, audio, key, &input, display_ready,
+			if (handle_solo_key(&game, audio, ctx, &solo, key, &input,
+					display_ready,
 					&resize_pending, &needs_draw))
 			{
 				leave = true;
+				break ;
+			}
+			input_batch++;
+			if (input_batch >= SOLO_INPUT_BATCH_MAX)
+			{
+				input_backlog = true;
 				break ;
 			}
 			errno = 0;
@@ -104,13 +146,23 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		{
 			render_solo_resize(ctx, &solo);
 			needs_draw = true;
+			force_render = true;
 			/* Reflow is an explicit pause; protocol negotiation time must not
 			 * be charged to gameplay gravity. */
 			previous_ms = monotonic_ms();
 		}
-		if (needs_draw)
+		render_pending = render_pending || needs_draw;
+		now_ms = monotonic_ms();
+		if (render_pending && (force_render
+				|| milliseconds_until_render(now_ms, last_render_ms) == 0))
+		{
 			render_solo_draw(ctx, &solo, &game);
+			last_render_ms = monotonic_ms();
+			render_pending = false;
+		}
 	}
+	if (mouse_enabled)
+		(void)notcurses_mice_disable(ctx->nc);
 	render_solo_destroy(&solo);
 	return (restore_home(ctx));
 }
@@ -151,6 +203,30 @@ static uint64_t	monotonic_ms(void)
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return ((uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+}
+
+/**
+ * @brief Returns the remaining delay in the bounded Solo presentation rate.
+ *
+ * AI-assisted: gameplay and input remain immediate, while coalescing visual
+ * updates prevents pixel-protocol frames from outrunning the terminal parser.
+ * Clock rollback is treated as immediately due rather than underflowing.
+ *
+ * @param now_ms Current monotonic time.
+ * @param last_render_ms Time of the previous terminal presentation.
+ * @return Milliseconds until another frame may be presented.
+ */
+static int	milliseconds_until_render(uint64_t now_ms,
+	uint64_t last_render_ms)
+{
+	uint64_t	elapsed_ms;
+
+	if (now_ms < last_render_ms)
+		return (0);
+	elapsed_ms = now_ms - last_render_ms;
+	if (elapsed_ms >= SOLO_RENDER_INTERVAL_MS)
+		return (0);
+	return (SOLO_RENDER_INTERVAL_MS - (int)elapsed_ms);
 }
 
 /**
@@ -235,6 +311,8 @@ static bool	terminal_geometry_changed(const render_ctx_t *ctx)
  *
  * @param game Pointer to the local Solo state.
  * @param audio Pointer to the audio context.
+ * @param ctx Active render context used for mouse coordinate conversion.
+ * @param solo Solo renderer containing layout and hover state.
  * @param key Notcurses key code or Unicode code point.
  * @param input Pointer to the input metadata.
  * @param display_ready Whether gameplay rendering is currently available.
@@ -243,9 +321,13 @@ static bool	terminal_geometry_changed(const render_ctx_t *ctx)
  * @return true when the Solo loop should return to the home screen.
  */
 static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
-	uint32_t key, const ncinput *input, bool display_ready,
+	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
+	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed)
 {
+	if (nckey_mouse_p(key))
+		return (handle_solo_mouse(ctx, solo, game, key, input,
+				display_ready, *resize_pending, state_changed));
 	if (input->evtype == NCTYPE_RELEASE)
 		return (false);
 	if (key == NCKEY_ESC || key == NCKEY_EOF || key == 'q' || key == 'Q')
@@ -283,6 +365,51 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 }
 
 /**
+ * @brief Handles hover and primary-button activation over the ability meter.
+ *
+ * AI-assisted: absolute terminal coordinates are transformed through the
+ * current fitted canvas before hit-testing, so resizes and differing cell
+ * pixel sizes cannot desynchronize the visible circle and click target.
+ *
+ * @param ctx Active render context.
+ * @param solo Solo renderer containing fitted canvas geometry.
+ * @param game Local Solo state receiving an activation.
+ * @param key Notcurses mouse event identifier.
+ * @param input Mouse coordinates and event type.
+ * @param display_ready Whether the Solo bitmap is currently usable.
+ * @param resize_pending Whether a geometry reflow is pending.
+ * @param state_changed In/out redraw request flag.
+ * @return false; mouse input never exits Solo mode.
+ */
+static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
+	solo_game_t *game, uint32_t key, const ncinput *input,
+	bool display_ready, bool resize_pending, bool *state_changed)
+{
+	solo_ability_result_t	result;
+	solo_ability_t			ability;
+	int						canvas_x;
+	int						canvas_y;
+
+	ability = SOLO_ABILITY_NONE;
+	if (display_ready && !resize_pending
+		&& solo_mouse_canvas_position(ctx, solo, input, &canvas_x, &canvas_y))
+		ability = solo_ability_at_canvas(canvas_x, canvas_y);
+	if (ability != solo->hovered_ability)
+	{
+		solo->hovered_ability = ability;
+		*state_changed = true;
+	}
+	if (key != NCKEY_BUTTON1 || ability == SOLO_ABILITY_NONE
+		|| (input->evtype != NCTYPE_PRESS
+			&& input->evtype != NCTYPE_UNKNOWN))
+		return (false);
+	result = solo_game_activate_ability(game, ability);
+	if (result != SOLO_ABILITY_RESULT_INVALID)
+		*state_changed = true;
+	return (false);
+}
+
+/**
  * @brief Maps a gameplay key to one local game action.
  *
  * @param game Pointer to the local Solo state.
@@ -291,6 +418,14 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
  */
 static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
 {
+	solo_ability_result_t	result;
+
+	if (key >= '1' && key <= '4')
+	{
+		result = solo_game_activate_ability(game,
+			(solo_ability_t)(SOLO_ABILITY_MIRURUN + key - '1'));
+		return (result != SOLO_ABILITY_RESULT_INVALID);
+	}
 	if (key == NCKEY_LEFT)
 		return (solo_game_apply_action(game, SOLO_MOVE_LEFT));
 	else if (key == NCKEY_RIGHT)

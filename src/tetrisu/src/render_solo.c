@@ -35,6 +35,7 @@ _Static_assert(SOLO_CONTROLS_X % HUD_TILE_SIZE == 0
 static void	reset_render_signatures(solo_render_t *solo);
 static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
+static bool	composite_board_required(const render_ctx_t *ctx);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
 static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
@@ -52,14 +53,26 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
 static uint64_t	next_frame_signature(const solo_game_t *game);
 static uint64_t	hash_value(uint64_t hash, uint64_t value);
+static uint64_t	meter_frame_signature(const solo_render_t *solo,
+	const solo_game_t *game);
 static uint64_t	score_stats_signature(const solo_game_t *game);
-static uint64_t	score_event_signature(const solo_game_t *game);
+static uint64_t	score_event_signature(const solo_render_t *solo,
+	const solo_game_t *game);
 static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height);
+static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+	struct ncplane **plane, int source_x, int source_y, int source_width,
+	int source_height, const char *region_name);
 static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo);
 static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
+static bool	update_composite_board(render_ctx_t *ctx,
+	solo_render_t *solo, bool use_cells);
+static color_t	sample_board_pixel(const solo_render_t *solo, int x, int y);
+static int	color_distance(color_t first, color_t second);
+static bool	put_quadrant_cell(struct ncplane *plane, int y, int x,
+	const color_t samples[4]);
 static uint64_t	board_overlay_signature(const solo_game_t *game);
 static uint64_t	settled_row_signature(const solo_game_t *game, int row);
 static int	board_tile_index(const solo_game_t *game, int col, int row);
@@ -100,6 +113,9 @@ static uint64_t	piece_shape_signature(const piece_geometry_t *geometry,
 static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
 	solo_render_t *solo, const piece_geometry_t *geometry, int tile_index,
 	bool ghost);
+static void	compose_atomic_piece_pixels(uint32_t *pixels,
+	const solo_render_t *solo, const piece_geometry_t *geometry,
+	int tile_index, bool ghost);
 static void	destroy_solo_planes(solo_render_t *solo);
 static void	destroy_board_planes(solo_render_t *solo);
 
@@ -124,8 +140,9 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
-	solo->composite_board = !render_pixel_planes_reliable(ctx);
 	solo->assets_ready = solo_canvas_load(solo);
+	solo->composite_board = composite_board_required(ctx);
+	solo->cell_board = solo->composite_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
@@ -170,14 +187,24 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 	}
 	result = update_foreground_regions(ctx, solo, game);
 	if (result < 0)
+	{
+		if (result == -2 && solo->asset_error[0] == '\0')
+			solo_canvas_set_error(solo,
+				"Notcurses rejected a Solo HUD image", NULL);
+		else if (result != -2)
+			solo_canvas_set_error(solo,
+				"Notcurses rejected the Solo board cells", NULL);
 		goto render_failure;
+	}
 	changed |= result;
 	if (changed > 0 && notcurses_render(ctx->nc) != 0)
+	{
+		solo_canvas_set_error(solo,
+			"Notcurses could not present the Solo frame", NULL);
 		goto render_failure;
+	}
 	return ;
 render_failure:
-	solo_canvas_set_error(solo, "Notcurses could not present the Solo frame",
-		NULL);
 	destroy_solo_planes(solo);
 	set_standard_backdrop(ctx);
 	if (draw_status_message(ctx, solo, solo->asset_error))
@@ -228,7 +255,8 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
-	solo->composite_board = !render_pixel_planes_reliable(ctx);
+	solo->composite_board = composite_board_required(ctx);
+	solo->cell_board = solo->composite_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
@@ -263,6 +291,21 @@ static void	reset_render_signatures(solo_render_t *solo)
 	solo->active_shape_signature = UINT64_MAX;
 	solo->ghost_shape_signature = UINT64_MAX;
 	solo->piece_planes_combined = false;
+}
+
+/**
+ * @brief Selects the cell-composited path for unsafe movable-image backends.
+ *
+ * AI-assisted: terminals without reliable movable pixel planes use one
+ * cell-composited board. Native Kitty/iTerm2/WezTerm backends retain the exact
+ * authored tile sprites; the Solo loop bounds their presentation rate.
+ *
+ * @param ctx Active render context.
+ * @return true when Solo should refresh one stationary board plane.
+ */
+static bool	composite_board_required(const render_ctx_t *ctx)
+{
+	return (!render_pixel_planes_reliable(ctx));
 }
 
 /**
@@ -593,10 +636,10 @@ static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 
 	changed = update_hud_regions(ctx, solo, game);
 	if (changed < 0)
-		return (-1);
+		return (-2);
 	result = update_board_region(ctx, solo, game);
 	if (result < 0)
-		return (-1);
+		return (-3);
 	return (changed | result);
 }
 
@@ -615,16 +658,18 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game)
 {
 	uint64_t	next_signature;
+	uint64_t	meter_signature;
 	uint64_t	stats_signature;
 	uint64_t	event_signature;
 	int			changed;
 	bool		hud_dirty;
 
 	next_signature = next_frame_signature(game);
+	meter_signature = meter_frame_signature(solo, game);
 	stats_signature = score_stats_signature(game);
-	event_signature = score_event_signature(game);
+	event_signature = score_event_signature(solo, game);
 	hud_dirty = next_signature != solo->next_signature
-		|| (uint64_t)game->crystal_charge != solo->meter_signature
+		|| meter_signature != solo->meter_signature
 		|| solo->mirurun_plane == NULL || solo->score_header_plane == NULL
 		|| game->scoring.total != solo->score_value_signature
 		|| stats_signature != solo->score_stats_signature
@@ -634,60 +679,61 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	changed = 0;
 	if (next_signature != solo->next_signature)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->next_plane,
-				SOLO_NEXT_X, SOLO_NEXT_Y, SOLO_NEXT_WIDTH, SOLO_NEXT_HEIGHT))
+		if (!update_hud_pixel_region(ctx, solo, &solo->next_plane,
+				SOLO_NEXT_X, SOLO_NEXT_Y, SOLO_NEXT_WIDTH, SOLO_NEXT_HEIGHT,
+				"next queue"))
 			return (-1);
 		solo->next_signature = next_signature;
 		changed = 1;
 	}
-	if ((uint64_t)game->crystal_charge != solo->meter_signature)
+	if (meter_signature != solo->meter_signature)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->meter_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->meter_plane,
 				SOLO_METER_X, SOLO_METER_Y,
-				SOLO_METER_WIDTH, SOLO_METER_HEIGHT))
+				SOLO_METER_WIDTH, SOLO_METER_HEIGHT, "ability meter"))
 			return (-1);
-		solo->meter_signature = (uint64_t)game->crystal_charge;
+		solo->meter_signature = meter_signature;
 		changed = 1;
 	}
 	if (solo->mirurun_plane == NULL)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->mirurun_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->mirurun_plane,
 				SOLO_MIRURUN_X, SOLO_MIRURUN_Y,
-				SOLO_MIRURUN_WIDTH, SOLO_MIRURUN_HEIGHT))
+				SOLO_MIRURUN_WIDTH, SOLO_MIRURUN_HEIGHT, "Mirurun portrait"))
 			return (-1);
 		changed = 1;
 	}
 	if (solo->score_header_plane == NULL)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->score_header_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->score_header_plane,
 				HUD_SCORE_X, SOLO_SCORE_HEADER_Y,
-				HUD_SCORE_WIDTH, SOLO_SCORE_HEADER_HEIGHT))
+				HUD_SCORE_WIDTH, SOLO_SCORE_HEADER_HEIGHT, "score header"))
 			return (-1);
 		changed = 1;
 	}
 	if (game->scoring.total != solo->score_value_signature)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->score_value_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->score_value_plane,
 				HUD_SCORE_X, SOLO_SCORE_VALUE_Y,
-				HUD_SCORE_WIDTH, SOLO_SCORE_VALUE_HEIGHT))
+				HUD_SCORE_WIDTH, SOLO_SCORE_VALUE_HEIGHT, "score value"))
 			return (-1);
 		solo->score_value_signature = game->scoring.total;
 		changed = 1;
 	}
 	if (stats_signature != solo->score_stats_signature)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->score_stats_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->score_stats_plane,
 				HUD_SCORE_X, SOLO_SCORE_STATS_Y,
-				HUD_SCORE_WIDTH, SOLO_SCORE_STATS_HEIGHT))
+				HUD_SCORE_WIDTH, SOLO_SCORE_STATS_HEIGHT, "score statistics"))
 			return (-1);
 		solo->score_stats_signature = stats_signature;
 		changed = 1;
 	}
 	if (event_signature != solo->score_event_signature)
 	{
-		if (!update_pixel_region(ctx, solo, &solo->score_event_plane,
+		if (!update_hud_pixel_region(ctx, solo, &solo->score_event_plane,
 				HUD_SCORE_X, SOLO_SCORE_EVENT_Y,
-				HUD_SCORE_WIDTH, SOLO_SCORE_EVENT_HEIGHT))
+				HUD_SCORE_WIDTH, SOLO_SCORE_EVENT_HEIGHT, "score event"))
 			return (-1);
 		solo->score_event_signature = event_signature;
 		changed = 1;
@@ -695,7 +741,11 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	if (solo->controls_plane == NULL)
 	{
 		if (!create_controls_plane(ctx, solo))
+		{
+			solo_canvas_set_error(solo,
+				"Solo controls do not fit this terminal width", NULL);
 			return (-1);
+		}
 		changed = 1;
 	}
 	return (changed);
@@ -749,6 +799,26 @@ static uint64_t	hash_value(uint64_t hash, uint64_t value)
 }
 
 /**
+ * @brief Hashes charge and interactive marker state for the meter plane.
+ *
+ * @param solo Pointer to the Solo renderer containing hover state.
+ * @param game Pointer to the current Solo game state.
+ * @return Signature for the complete interactive ability meter.
+ */
+static uint64_t	meter_frame_signature(const solo_render_t *solo,
+	const solo_game_t *game)
+{
+	uint64_t	hash;
+
+	hash = UINT64_C(1469598103934665603);
+	hash = hash_value(hash, (uint64_t)game->crystal_charge);
+	hash = hash_value(hash, (uint64_t)solo->hovered_ability);
+	hash = hash_value(hash, (uint64_t)game->last_ability);
+	hash = hash_value(hash, (uint64_t)game->ability_result);
+	return (hash);
+}
+
+/**
  * @brief Hashes level, lines, and combo HUD values.
  *
  * Packing the small integer fields avoids redrawing unchanged score
@@ -777,7 +847,8 @@ static uint64_t	score_stats_signature(const solo_game_t *game)
  * @param game Pointer to the current Solo game state.
  * @return Signature for the last scoring event.
  */
-static uint64_t	score_event_signature(const solo_game_t *game)
+static uint64_t	score_event_signature(const solo_render_t *solo,
+	const solo_game_t *game)
 {
 	uint64_t	hash;
 
@@ -787,6 +858,9 @@ static uint64_t	score_event_signature(const solo_game_t *game)
 	hash = hash_value(hash, (uint64_t)game->last_spin);
 	hash = hash_value(hash, game->last_perfect_clear);
 	hash = hash_value(hash, game->last_score.total_awarded);
+	hash = hash_value(hash, (uint64_t)solo->hovered_ability);
+	hash = hash_value(hash, (uint64_t)game->last_ability);
+	hash = hash_value(hash, (uint64_t)game->ability_result);
 	return (hash);
 }
 
@@ -849,6 +923,27 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 }
 
 /**
+ * @brief Refreshes a named HUD bitmap and records actionable fallback text.
+ *
+ * Keeping the failed region name lets users distinguish an asset-size/backend
+ * limit from a board or terminal-presentation failure.
+ */
+static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+	struct ncplane **plane, int source_x, int source_y, int source_width,
+	int source_height, const char *region_name)
+{
+	char	message[120];
+
+	if (update_pixel_region(ctx, solo, plane, source_x, source_y,
+			source_width, source_height))
+		return (true);
+	snprintf(message, sizeof(message),
+		"Notcurses rejected the Solo %s image", region_name);
+	solo_canvas_set_error(solo, message, NULL);
+	return (false);
+}
+
+/**
  * @brief Creates the compact terminal-font controls strip.
  *
  * Controls are cell text rather than a scaled mask so they remain readable at
@@ -879,11 +974,16 @@ static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
 	ncplane_set_bg_alpha(solo->controls_plane, NCALPHA_TRANSPARENT);
 	ncplane_dim_yx(solo->controls_plane, &rows, &cols);
 	(void)rows;
-	text = "ARROWS MOVE | UP/X CW | Z CCW | SPACE DROP | P PAUSE | ESC HOME";
+	text = "ARROWS MOVE | UP/X CW | Z CCW | SPACE DROP | 1-4 ABILITY | "
+		"P PAUSE | ESC HOME";
 	if (cols < strlen(text))
-		text = "ARROWS MOVE | X CW | SPACE DROP | P PAUSE | ESC HOME";
+		text = "ARROWS MOVE | X CW | SPACE DROP | 1-4 ABILITY | ESC HOME";
 	if (cols < strlen(text))
-		text = "ARROWS MOVE | SPACE DROP | ESC HOME";
+		text = "ARROWS MOVE | SPACE DROP | 1-4 ABILITY | ESC HOME";
+	if (cols < strlen(text))
+		text = "ARROWS | X/Z ROT | SPACE | 1-4 | ESC";
+	if (cols < strlen(text))
+		text = "ARROWS X/Z SPACE 1-4 ESC";
 	if (ncplane_putstr_aligned(solo->controls_plane, 0,
 			NCALIGN_CENTER, text) < 0)
 	{
@@ -899,7 +999,7 @@ static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
  * @brief Refreshes the capability-specific board representation.
  *
  * Reliable terminals update row and piece planes; composited terminals redraw
- *   one opaque board bitmap.
+ *   one opaque board surface.
  *
  * @param ctx Pointer to the active render context.
  * @param solo Pointer to the Solo render state.
@@ -910,6 +1010,7 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game)
 {
 	uint64_t	signature;
+	bool		use_cells;
 	int			result;
 	int			changed;
 
@@ -922,9 +1023,10 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 			return (0);
 		destroy_board_tiles(solo);
 		solo_canvas_compose_board(solo, game);
-		if (!update_pixel_region(ctx, solo, &solo->board_overlay_plane,
-				HUD_BOARD_X, HUD_BOARD_Y,
-				SOLO_BOARD_WIDTH, SOLO_BOARD_HEIGHT))
+		/* AI-assisted: fallback terminals keep active frames in cells, but
+		 * spend one pixel image on the final board once animation stops. */
+		use_cells = solo->cell_board && game->phase != SOLO_GAME_OVER;
+		if (!update_composite_board(ctx, solo, use_cells))
 			return (-1);
 		solo->overlay_signature = signature;
 		return (1);
@@ -945,6 +1047,206 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 		return (-1);
 	changed |= result;
 	return (changed);
+}
+
+/**
+ * @brief Refreshes the board with cells or a final-state pixel image.
+ *
+ * AI-assisted: true-colour quadrant glyphs encode four samples per terminal
+ * cell. Reusing this plane lets Notcurses diff rotations down to changed cells
+ * on pixel backends that cannot move image planes reliably. The final board
+ * uses one pixel blit because it no longer animates.
+ *
+ * @param ctx Active render context.
+ * @param solo Solo renderer with a freshly composed board pixel buffer.
+ * @return true when the board cells were accepted.
+ */
+static bool	update_composite_board(render_ctx_t *ctx, solo_render_t *solo,
+	bool use_cells)
+{
+	color_t	samples[4];
+	int	y;
+	int	x;
+	int	rows;
+	int	cols;
+	int	source_x_start;
+	int	source_x_end;
+	int	source_y_start;
+	int	source_y_end;
+
+	y = solo->canvas_row + HUD_BOARD_Y / HUD_TILE_SIZE * solo->tile_rows;
+	x = solo->canvas_col + HUD_BOARD_X / HUD_TILE_SIZE * solo->tile_cols;
+	rows = SOLO_BOARD_HEIGHT / HUD_TILE_SIZE * solo->tile_rows;
+	cols = SOLO_BOARD_WIDTH / HUD_TILE_SIZE * solo->tile_cols;
+	if (solo->board_overlay_plane != NULL
+		&& solo->board_plane_cells != use_cells)
+		destroy_plane(&solo->board_overlay_plane);
+	if (solo->board_overlay_plane == NULL)
+	{
+		solo->board_overlay_plane = create_plane(ctx, y, x, rows, cols);
+		if (solo->board_overlay_plane == NULL)
+			return (false);
+		solo->board_plane_cells = use_cells;
+	}
+	else
+		ncplane_erase(solo->board_overlay_plane);
+	if (!use_cells)
+	{
+		if (!blit_surface(ctx, solo->board_overlay_plane,
+				&solo->frame_pixels[(size_t)HUD_BOARD_Y * SOLO_CANVAS_WIDTH
+					+ HUD_BOARD_X], SOLO_BOARD_WIDTH, SOLO_BOARD_HEIGHT,
+				SOLO_CANVAS_WIDTH, NCBLIT_PIXEL))
+			return (false);
+	}
+	else
+	{
+		y = 0;
+		while (y < rows)
+		{
+			source_y_start = y * SOLO_BOARD_HEIGHT / rows;
+			source_y_end = (y + 1) * SOLO_BOARD_HEIGHT / rows;
+			x = 0;
+			while (x < cols)
+			{
+				source_x_start = x * SOLO_BOARD_WIDTH / cols;
+				source_x_end = (x + 1) * SOLO_BOARD_WIDTH / cols;
+				samples[0] = sample_board_pixel(solo,
+					source_x_start, source_y_start);
+				samples[1] = sample_board_pixel(solo,
+					source_x_end - 1, source_y_start);
+				samples[2] = sample_board_pixel(solo,
+					source_x_start, source_y_end - 1);
+				samples[3] = sample_board_pixel(solo,
+					source_x_end - 1, source_y_end - 1);
+				if (!put_quadrant_cell(solo->board_overlay_plane,
+						y, x, samples))
+					return (false);
+				x++;
+			}
+			y++;
+		}
+	}
+	ncplane_move_top(solo->board_overlay_plane);
+	return (true);
+}
+
+/**
+ * @brief Reads one authored board pixel as an RGB colour.
+ *
+ * Coordinates are clamped because terminal-to-source division can produce an
+ * empty final interval at extreme geometries.
+ */
+static color_t	sample_board_pixel(const solo_render_t *solo, int x, int y)
+{
+	color_t	color;
+	uint32_t	pixel;
+
+	if (x < 0)
+		x = 0;
+	if (y < 0)
+		y = 0;
+	if (x >= SOLO_BOARD_WIDTH)
+		x = SOLO_BOARD_WIDTH - 1;
+	if (y >= SOLO_BOARD_HEIGHT)
+		y = SOLO_BOARD_HEIGHT - 1;
+	pixel = solo->frame_pixels[(size_t)(HUD_BOARD_Y + y)
+			* SOLO_CANVAS_WIDTH + HUD_BOARD_X + x];
+	color.r = ncpixel_r(pixel);
+	color.g = ncpixel_g(pixel);
+	color.b = ncpixel_b(pixel);
+	return (color);
+}
+
+/**
+ * @brief Returns squared RGB distance without floating-point work.
+ */
+static int	color_distance(color_t first, color_t second)
+{
+	int	red;
+	int	green;
+	int	blue;
+
+	red = (int)first.r - (int)second.r;
+	green = (int)first.g - (int)second.g;
+	blue = (int)first.b - (int)second.b;
+	return (red * red + green * green + blue * blue);
+}
+
+/**
+ * @brief Encodes four board samples in one true-colour quadrant cell.
+ *
+ * AI-assisted: the farthest sample pair seeds a two-colour cluster. The
+ * resulting quadrant glyph doubles horizontal board detail without creating
+ * a terminal image placement, preserving bounded memory on fallback backends.
+ */
+static bool	put_quadrant_cell(struct ncplane *plane, int y, int x,
+	const color_t samples[4])
+{
+	static const char	*glyphs[16] = {
+		" ", "▗", "▖", "▄", "▝", "▐", "▞", "▟",
+		"▘", "▚", "▌", "▙", "▀", "▜", "▛", " "
+	};
+	color_t			centres[2];
+	int				sums[2][3];
+	int				counts[2];
+	int				farthest;
+	int				distance;
+	int				first;
+	int				second;
+	int				cluster;
+	int				mask;
+	int				i;
+	int				j;
+
+	farthest = -1;
+	first = 0;
+	second = 0;
+	i = 0;
+	while (i < 4)
+	{
+		j = i + 1;
+		while (j < 4)
+		{
+			distance = color_distance(samples[i], samples[j]);
+			if (distance > farthest)
+			{
+				farthest = distance;
+				first = i;
+				second = j;
+			}
+			j++;
+		}
+		i++;
+	}
+	if (farthest == 0)
+	{
+		(void)ncplane_set_bg_rgb8(plane,
+			samples[0].r, samples[0].g, samples[0].b);
+		return (ncplane_putegc_yx(plane, y, x, " ", NULL) >= 0);
+	}
+	centres[0] = samples[first];
+	centres[1] = samples[second];
+	memset(sums, 0, sizeof(sums));
+	memset(counts, 0, sizeof(counts));
+	mask = 0;
+	i = 0;
+	while (i < 4)
+	{
+		cluster = color_distance(samples[i], centres[1])
+			< color_distance(samples[i], centres[0]);
+		counts[cluster]++;
+		sums[cluster][0] += samples[i].r;
+		sums[cluster][1] += samples[i].g;
+		sums[cluster][2] += samples[i].b;
+		if (cluster == 1)
+			mask |= 1 << (3 - i);
+		i++;
+	}
+	(void)ncplane_set_bg_rgb8(plane, sums[0][0] / counts[0],
+		sums[0][1] / counts[0], sums[0][2] / counts[0]);
+	(void)ncplane_set_fg_rgb8(plane, sums[1][0] / counts[1],
+		sums[1][1] / counts[1], sums[1][2] / counts[1]);
+	return (ncplane_putegc_yx(plane, y, x, glyphs[mask], NULL) >= 0);
 }
 
 /**
@@ -1348,7 +1650,6 @@ static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
 		ncplane_move_top(solo->active_plane);
 	return (changed);
 }
-
 /**
  * @brief Extracts occupied cells and bounds from one tetromino.
  *
@@ -1610,6 +1911,7 @@ static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
 	int			x;
 	int			old_y;
 	int			old_x;
+	bool		rebuilt;
 
 	if (geometry->min_col < 0 || geometry->max_col >= BOARD_WIDTH
 		|| geometry->min_row < 0 || geometry->max_row >= BOARD_HEIGHT)
@@ -1620,6 +1922,7 @@ static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
 		*cached_signature = UINT64_MAX;
 		return (1);
 	}
+	rebuilt = false;
 	signature = piece_shape_signature(geometry, tile_index, ghost);
 	if (*plane == NULL || signature != *cached_signature)
 	{
@@ -1629,7 +1932,7 @@ static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
 		if (*plane == NULL)
 			return (-1);
 		*cached_signature = signature;
-		return (1);
+		rebuilt = true;
 	}
 	y = solo->canvas_row + (HUD_BOARD_Y / HUD_TILE_SIZE
 		+ geometry->min_row) * solo->tile_rows;
@@ -1637,7 +1940,7 @@ static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
 		+ geometry->min_col) * solo->tile_cols;
 	ncplane_yx(*plane, &old_y, &old_x);
 	if (old_y == y && old_x == x)
-		return (0);
+		return (rebuilt);
 	if (ncplane_move_yx(*plane, y, x) != 0)
 		return (-1);
 	return (1);
@@ -1694,7 +1997,31 @@ static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
 	uint32_t	pixels[4 * 4 * TILE_SOURCE_SIZE * TILE_SOURCE_SIZE];
 	int			width;
 	int			height;
-	int			index;
+
+	width = (geometry->max_col - geometry->min_col + 1) * TILE_SOURCE_SIZE;
+	height = (geometry->max_row - geometry->min_row + 1) * TILE_SOURCE_SIZE;
+	compose_atomic_piece_pixels(pixels, solo, geometry, tile_index, ghost);
+	return (create_pixel_plane_at(ctx, solo, pixels, width, height, width,
+			HUD_BOARD_X + geometry->min_col * HUD_TILE_SIZE,
+			HUD_BOARD_Y + geometry->min_row * HUD_TILE_SIZE));
+}
+
+/**
+ * @brief Composes one normalized tetromino into its exact transparent bounds.
+ *
+ * @param pixels Destination buffer containing 4x4 authored tiles.
+ * @param solo Solo renderer and tile atlas.
+ * @param geometry Current occupied-cell geometry.
+ * @param tile_index Tile-atlas entry.
+ * @param ghost Whether to draw landing-projection shading.
+ */
+static void	compose_atomic_piece_pixels(uint32_t *pixels,
+	const solo_render_t *solo, const piece_geometry_t *geometry,
+	int tile_index, bool ghost)
+{
+	int	index;
+	int	width;
+	int	height;
 
 	width = (geometry->max_col - geometry->min_col + 1) * TILE_SOURCE_SIZE;
 	height = (geometry->max_row - geometry->min_row + 1) * TILE_SOURCE_SIZE;
@@ -1709,9 +2036,6 @@ static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
 				* TILE_SOURCE_SIZE], width, ghost);
 		index++;
 	}
-	return (create_pixel_plane_at(ctx, solo, pixels, width, height, width,
-			HUD_BOARD_X + geometry->min_col * HUD_TILE_SIZE,
-			HUD_BOARD_Y + geometry->min_row * HUD_TILE_SIZE));
 }
 
 /**
@@ -1749,5 +2073,6 @@ static void	destroy_solo_planes(solo_render_t *solo)
 static void	destroy_board_planes(solo_render_t *solo)
 {
 	destroy_plane(&solo->board_overlay_plane);
+	solo->board_plane_cells = false;
 	destroy_board_tiles(solo);
 }
