@@ -70,11 +70,7 @@ LIB_DIRS			:= $(patsubst %/,%,$(dir $(LIB_MAKEFILES)))
 COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrislogd/Makefile \
 							  src/tetrisctl/Makefile \
-							  src/tetrisu/Makefile \
-							  src/chatd/Makefile \
-							  src/chatctl/Makefile \
-							  src/marketd/Makefile \
-							  src/marketctl/Makefile)
+							  src/tetrisu/Makefile)
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
 
 ################################################################################
@@ -110,7 +106,7 @@ run: all bin-link
 # Headless stack for integration tests (no interactive shell). Launches only
 # the daemons that have been built.
 stack: all bin-link
-	@ for d in tetrislogd tetrisd marketd chatd; do \
+	@ for d in tetrislogd tetrisd; do \
 		if [ -x $(BIN)/$$d ]; then $(BIN)/$$d & fi; \
 	done; \
 	echo "Started available daemons; inspect with 'dcheck' or tmp/daemons.reg"

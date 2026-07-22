@@ -49,7 +49,7 @@ void	test_buy_and_equip(void)
 
 	db = fresh_db();
 	assert(db_signup(db, "zoe", "h", "s", &id) == DB_OK);
-	// Character 2 (Mirurun) costs 30; fresh wallet is 0.
+	// Character 2 (Mirurun) costs 10; fresh wallet is 0.
 	assert(db_buy_character(db, id, 2) == DB_INSUFFICIENT);
 	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
 	assert(db_buy_character(db, id, 2) == DB_OK);
@@ -108,7 +108,7 @@ void	test_durability_roundtrip(void)
 	assert(db_open(DATA_DIR, CFG_DIR, &db) == DB_OK);
 	assert(db_get_player(db, id, &out) == DB_OK);
 	assert(out.leaderboard_score == 250);
-	assert(out.wallet_points == 1000 - 30);
+	assert(out.wallet_points == 1000 - 10);
 	assert(out.current_equipped_character == 2);
 	assert(db_player_owns_character(db, id, 2) == true);
 	assert(db_rank(db, id, &rank) == DB_OK && rank == 1);

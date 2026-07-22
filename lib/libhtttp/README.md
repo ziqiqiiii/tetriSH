@@ -45,6 +45,20 @@ the public include directory:
 cc ... -I lib/libhtttp/include lib/libhtttp/libhtttp.a
 ```
 
+- **Plaintext only:** `libhtttp` parses and serialises bytes above the secure
+  session. It has no socket or cryptographic code and no inter-library link
+  dependency.
+- **One-shot parser:** the normal caller supplies one complete decrypted frame.
+  A proposed `HTTTP_INCOMPLETE` result remains useful as a defensive response
+  when the caller passes a truncated buffer.
+- **Caller-owned messages:** parsed structures and body storage belong to the
+  caller; the library retains no state between calls.
+- **Strict grammar:** the version literal is `HTTTP/1.0`, line endings are CRLF,
+  headers split on their first colon, and body length must match
+  `Content-Length`.
+- **Extensible dispatch:** methods map to registered handler functions, keeping
+  application rules in `tetrisd` or `tetrisu`.
+
 The library and tests compile as C11 with `-Wall -Wextra -Werror -pedantic`.
 The test runner treats both nonzero exits and emitted `FAIL` records as suite
 failures. `memcheck` treats every Valgrind leak kind as an error.

@@ -2,6 +2,7 @@
 
 static void	dcheck(const char *project_root);
 static void	dcheck_graveyard(const char *project_root);
+static int	load_daemons(const char *reg_path, DaemonInfo *daemons);
 
 /**
  * @brief Entry point for the dcheck daemon status utility.
@@ -32,6 +33,50 @@ int main(int argc, char **argv)
 }
 
 /**
+ * @brief Read every well-formed entry from a daemon registry file.
+ *
+ * Malformed lines are skipped silently so they cannot disturb the table
+ * layout. Liveness is not consulted here; callers decide what to do with
+ * each entry.
+ *
+ * @param reg_path Path to the registry file to read.
+ * @param daemons Out-array filled with the entries found (up to MAX_DAEMONS).
+ * @return Number of entries loaded.
+ */
+static int load_daemons(const char *reg_path, DaemonInfo *daemons)
+{
+	FILE	*fd;
+	char	line[1024];
+	int		count;
+
+	count = 0;
+	fd = ft_fopen(reg_path, "r");
+	if (!fd)
+		return (0);
+
+	while (fgets(line, sizeof(line), fd) && count < MAX_DAEMONS)
+	{
+		char	name[64];
+		char	timestamp[128];
+		int		pid;
+
+		if (sscanf(line, "%63s %d %127[^\n]", name, &pid, timestamp) != 3)
+			continue;
+
+		strncpy(daemons[count].name, name, sizeof(daemons[count].name) - 1);
+		daemons[count].name[sizeof(daemons[count].name) - 1] = '\0';
+		daemons[count].pid = pid;
+		strncpy(daemons[count].timestamp, timestamp,
+			sizeof(daemons[count].timestamp) - 1);
+		daemons[count].timestamp[sizeof(daemons[count].timestamp) - 1] = '\0';
+		++count;
+	}
+	fclose(fd);
+
+	return (count);
+}
+
+/**
  * @brief Print the registered daemons and which are still alive.
  *
  * Reads "<project_root>/tmp/daemons.reg", and for each entry checks whether
@@ -42,47 +87,39 @@ int main(int argc, char **argv)
  */
 static void dcheck(const char *project_root)
 {
-	char	reg_path[PATH_MAX];
-	char	line[1024];
-	char	name[128];
-	char	ts[128];
-	char	proc_path[128];
-	int		pid;
-	int		check;
-	int		count;
-	FILE	*fd;
+	char		reg_path[PATH_MAX];
+	char		proc_path[128];
+	DaemonInfo	daemons[MAX_DAEMONS];
+	int			count;
+	int			active;
+	int			width;
 
-	count = 0;
 	strncpy(reg_path, project_root, sizeof(reg_path) - 1);
 	strncat(reg_path, "/tmp/daemons.reg", sizeof(reg_path) - strlen(reg_path) - 1);
 
-	// check for daemons created with the same name and add a number to differentiate it
-	fd = ft_fopen(reg_path, "r");
+	count = load_daemons(reg_path, daemons);
+	/* Names are measured before anything prints so the pid column starts at
+	 * the same offset on every row, however long the longest name is. */
+	width = daemon_name_width(daemons[0].name, count, sizeof(DaemonInfo));
 
-	printf("------------------------------------------\n");
-	printf("Registered Daemons (%s)\n", "tmp/daemons.reg");
-	printf("------------------------------------------\n");
+	daemon_table_header("", width);
+	printf("\n");
 
-	while (fgets(line, sizeof(line), fd))
+	active = 0;
+	for (int i = 0; i < count; ++i)
 	{
-		if (sscanf(line, "%s %d %[^\n]", name, &pid, ts) != 3)
-			continue;
+		int	alive;
 
-		snprintf(proc_path, sizeof(proc_path), "/proc/%d", pid);
-		check = (access(proc_path, F_OK) == 0);
+		snprintf(proc_path, sizeof(proc_path), "/proc/%d", daemons[i].pid);
+		alive = (access(proc_path, F_OK) == 0);
+		if (alive)
+			++active;
 
-		if (check)
-			++count;
-
-		printf("[%c] %-12s \tPID: %-6d %s%s\n", check ? '1' : '-', name,
-		       pid, check ? "Started: " : "(inactive)",
-		       check ? ts : "");
+		daemon_table_row("", width, daemons[i].name, daemons[i].pid, alive,
+			daemons[i].timestamp);
 	}
 
-	printf("------------------------------------------\n");
-	printf("Active daemons: %d\n", count);
-
-	fclose(fd);
+	printf("\n  %sactive: %d%s\n", CL_DIM, active, CL_RESET);
 }
 
 /**
@@ -95,36 +132,24 @@ static void dcheck(const char *project_root)
  */
 static void dcheck_graveyard(const char *project_root)
 {
-	char	reg_path[PATH_MAX];
-	char	line[1024];
-	char	name[128];
-	char	ts[128];
-	int		pid;
-	int		count;
-	FILE	*fd;
+	char		reg_path[PATH_MAX];
+	DaemonInfo	daemons[MAX_DAEMONS];
+	int			count;
+	int			width;
 
-	count = 0;
 	strncpy(reg_path, project_root, sizeof(reg_path) - 1);
 	strncat(reg_path, "/tmp/cematary.reg", sizeof(reg_path) - strlen(reg_path) - 1);
 
-	// check for daemons created with the same name and add a number to differentiate it
-	fd = ft_fopen(reg_path, "r");
+	count = load_daemons(reg_path, daemons);
+	width = daemon_name_width(daemons[0].name, count, sizeof(DaemonInfo));
 
-	printf("\n------------------------------------------\n");
-	printf("Daemon Cematary (%s)\n", "tmp/cematary.reg");
-	printf("------------------------------------------\n");
+	printf("\n  %s%sgraveyard%s\n\n", CL_BOLD, CL_DIM, CL_RESET);
+	daemon_table_header("", width);
+	printf("\n");
 
-	while (fgets(line, sizeof(line), fd))
-	{
-		if (sscanf(line, "%s %d %[^\n]", name, &pid, ts) != 3)
-			continue;
+	for (int i = 0; i < count; ++i)
+		daemon_table_row("", width, daemons[i].name, daemons[i].pid, 0,
+			daemons[i].timestamp);
 
-		printf("[%c] %-12s \tPID: %-6d %s%s\n", '-', name, pid, "(inactive)", "");
-
-		++count;
-	}
-	printf("------------------------------------------\n");
-	printf("Daemons burried: %d\n\n", count);
-
-	fclose(fd);
+	printf("\n  %sburied: %d%s\n\n", CL_DIM, count, CL_RESET);
 }

@@ -160,3 +160,5 @@ The remaining three (B+ tree, AVL tree, skip list) have effectively the same tim
 
 **Read and Write Locks**
 - Read and Write Lock in DBMS — https://medium.com/@ansari.rizwan3459/read-and-write-lock-in-dbms-1637671cf7b4
+- Multithreaded Programming with pthreads (UCSB CS140), pp. 99–103 — https://sites.cs.ucsb.edu/~tyang/class/140s14/slides/Chapt4-pthreads.pdf
+- Oracle — Using Read-Write Locks (Multithreaded Programming Guide) — https://docs.oracle.com/cd/E19455-01/806-5257/6je9h032u/index.html

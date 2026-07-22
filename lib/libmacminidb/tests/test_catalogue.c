@@ -21,7 +21,7 @@ void	test_loads_full_roster(void)
 	printf("PASS test_loads_full_roster\n");
 }
 
-// Halloween is id 1 and, like every character, costs a flat 30 points and
+// Halloween is id 1 and, like every character, costs a flat 10 points and
 // offers all four ability levels (bitfield 0xF), matching characters.cfg.
 void	test_character_lookup(void)
 {
@@ -34,11 +34,11 @@ void	test_character_lookup(void)
 	halloween = catalogue_character(c, 1);
 	assert(halloween != NULL);
 	assert(strcmp(halloween->name, "Halloween") == 0);
-	assert(halloween->cost_points == 30);
+	assert(halloween->cost_points == 10);
 	assert(halloween->abilities == 0xF);
 	wolfman = catalogue_character(c, 4);
 	assert(wolfman != NULL && strcmp(wolfman->name, "Wolf-man") == 0);
-	assert(wolfman->cost_points == 30);
+	assert(wolfman->cost_points == 10);
 	assert(catalogue_character(c, 999) == NULL);
 	catalogue_free(c);
 	printf("PASS test_character_lookup\n");
