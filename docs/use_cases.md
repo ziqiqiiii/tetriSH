@@ -132,7 +132,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-18 Set Default Character | `EQUIP character <cid>` | marketd IPC | `200` | `403` not owned • `404` |
 | UC-19 Set Default Theme | `EQUIP theme <tid>` | marketd IPC | `200` | `403` not owned • `404` |
 | UC-20 View Settings | `PROFILE` (+ rank) | marketd IPC | `200` (player doc + rank) | `500` |
-| UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` on cooldown |
+| UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → chatd/tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
 | UC-21 View Leaderboard | `LEADERBOARD` (top-N) | marketd IPC | `200` (top entries) | `500` |
 | UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
 | UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `202` (shutdown initiated) | `500` |
@@ -793,8 +793,8 @@ stateDiagram-v2
 |---|---|
 | **ID** | UC-14 |
 | **Primary Actor** | Player |
-| **Goal** | Trigger an equipped ability (Garbage Surge, Shield, Freeze) during a multiplayer match. |
-| **Preconditions** | • Player owns and has equipped the ability before the game started. <br>• Player has enough points if the ability is consumable. |
+| **Goal** | Trigger one of the four Gaiden ability levels granted by the Player's equipped character during a multiplayer match. |
+| **Preconditions** | • Player owns and has equipped the character before the game started. <br>• Player has enough ability charge from cleared lines to activate the requested ability level. |
 | **Postconditions (success)** | The ability's server-enforced effect is applied; chatd narrates the event. |
 | **Trigger** | Player presses the ability's key during an eligible match. |
 | **DB Mapping** | Read-only checks: <br><br>• `db_player_owns_character(id, cid)` (does the player own the character granting this ability) <br>• `db_get_character(cid)` to read the `abilities` bitfield. <br><br> The **effect itself is runtime** (room state), not persisted. |
@@ -803,15 +803,42 @@ stateDiagram-v2
 1. Player triggers the equipped ability.
 2. Client sends the ability request (HTTTP `ABILITY`) to the Game Server (tetrisd).
 3. Server validates ownership via `db_player_owns_character` and checks the `abilities` bitfield from `db_get_character` (read lock).
-4. Server enforces the effect in room state:
-   - **Garbage Surge** — +3 garbage lines to the target.
-   - **Shield** — ignore incoming garbage for N ticks.
-   - **Freeze** — target's moves dropped for ~2 seconds.
+4. Server verifies the Player has enough line-clear charge, deducts the requested ability's cost, then enforces the corresponding effect from the ability catalogue below in room state.
 5. Server emits an `ABILITY_USED` event; chatd narrates it to the room.
+
+**Supported Character Abilities**
+
+The four selected characters retain their complete, four-level ability sets from [Tetris Battle Gaiden](https://tetris.wiki/Tetris_Battle_Gaiden), adapted to tetriSH's line-clear meter. Every two cleared lines grant one charge. Ability levels cost 2, 4, 6, and 8 charge respectively.
+
+| Ability level | Charge cost | Total lines cleared to earn that charge |
+|---:|---:|---:|
+| 1 | 2 | 4 |
+| 2 | 4 | 8 |
+| 3 | 6 | 12 |
+| 4 | 8 | 16 |
+
+| Character | Level | Ability | Server-enforced effect |
+|---|---:|---|---|
+| Halloween | 1 | Fry | Fill the bottom three rows with blocks. When the next piece locks, those rows clear and are sent to the opponent. |
+| Halloween | 2 | Dark | Black out the opponent's field except for a small visible area below the active piece. |
+| Halloween | 3 | Vampire | Transfer the opponent's stored ability charge to the Player. |
+| Halloween | 4 | Bomb | Destroy randomly selected blocks on the opponent's field. |
+| Mirurun | 1 | Mirurun | Remove the bottom four rows from the Player's field without sending them to the opponent. |
+| Mirurun | 2 | Inversion | Reverse the opponent's controls for their next three pieces. |
+| Mirurun | 3 | Pentaris | Send five garbage lines to the opponent. |
+| Mirurun | 4 | Sirtet | Invert every occupied row on the opponent's field: empty cells become blocks and filled cells become empty cells. |
+| Princess | 1 | Sol | Clear three adjacent columns from the Player's field with a steerable beam that fires automatically after three seconds. |
+| Princess | 2 | Mirror | Steal the next ability activated by the opponent. |
+| Princess | 3 | Paralysis | Prevent the opponent from rotating their next three pieces. |
+| Princess | 4 | Copy | Replace the Player's field with a copy of the opponent's field. |
+| Wolf-man | 1 | Cut | Clear the top four rows from the Player's field. |
+| Wolf-man | 2 | Nue | Prevent the opponent from fast-dropping their next four pieces. |
+| Wolf-man | 3 | Pals | For a limited time, incoming ordinary garbage lowers the Player's stack instead of raising it; garbage created by abilities is excluded. |
+| Wolf-man | 4 | Thwack | For the Player's next four pieces, blocks above a cleared line fall, allowing incomplete lower lines to clear in the same sequence. |
 
 **Extensions / Alternate Flows**
 - **3a. Character/ability not owned (`db_player_owns_character` false / `DB_NOT_OWNED` → 403):** Request rejected; no effect.
-- **3b. Insufficient points (if consumable, `DB_INSUFFICIENT` → 403):** Rejected with a notice.
+- **4a. Insufficient line-clear charge (`409`):** Request rejected; no charge is consumed and no effect is applied.
 
 **Related Use Cases**
 - `«extend»` UC-11, UC-12.
