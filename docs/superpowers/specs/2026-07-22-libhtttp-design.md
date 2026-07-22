@@ -304,8 +304,9 @@ typedef struct
 
 typedef struct
 {
-	const char	*method;
-	int			(*handler)(const t_htttp_message *message, void *context);
+	const char		*method;
+	unsigned int	validation_flags;
+	int				(*handler)(const t_htttp_message *message, void *context);
 }	t_htttp_route;
 
 void			htttp_message_init(t_htttp_message *message);
@@ -392,19 +393,23 @@ Dispatch is stateless. Caller supplies an immutable route array:
 
 ```c
 static const t_htttp_route routes[] = {
-	{"JOIN", handle_join},
-	{"MOVE", handle_move},
-	{"STATE", handle_state}
+	{"JOIN", 0u, handle_join},
+	{"MOVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, handle_move},
+	{"STATE", 0u, handle_state}
 };
 ```
 
-`htttp_dispatch()` accepts request-form messages only, compares method text
-exactly, invokes one handler with caller context, and copies the handler's
-integer result to `handler_result`. It does not parse paths, construct statuses,
-or retain routes.
+`htttp_dispatch()` accepts request-form messages only, applies base validation,
+compares method text exactly, then applies the matching route's validation flags
+before invoking its handler. This makes required `Player-Id` presence part of
+route policy instead of an easy-to-forget caller step. The daemon must still
+compare that value with connection-bound player state because `libtetrissh`
+authenticates server and frame bytes, not client identity. Dispatch copies the
+handler's integer result to `handler_result`; it does not parse paths, construct
+statuses, or retain routes.
 
-Adding `PAUSE` requires a handler and route entry only. Parser and serialiser do
-not change.
+Adding `PAUSE` requires a handler and route entry with explicit validation
+flags. Parser and serialiser do not change.
 
 ## Threading, Mutexes, And IPC
 
@@ -531,4 +536,8 @@ Commit: SHA and pushed branch
 
 `lib/libhtttp/include/htttp.h` defines public protocol types and dispatch
 interfaces used by multiple binaries. Both Sanjan and Zi Qi must review it
-before merge. No repository-level duplicate `include/htttp.h` will be created.
+before merge. Adding `validation_flags` to `t_htttp_route` changes its source
+initializer shape and binary layout. Every consumer must update route entries
+and perform a clean rebuild; old and new objects must not be linked together.
+No daemon consumer exists yet, so no compatibility shim is needed. No
+repository-level duplicate `include/htttp.h` will be created.

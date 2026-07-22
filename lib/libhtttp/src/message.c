@@ -2,6 +2,8 @@
 
 static int			message_is_empty(const t_htttp_message *message);
 static t_htttp_result	copy_owned_text(const char *text, char **out);
+static t_htttp_result	copy_normalized_header_value(const char *value,
+						char **out);
 static unsigned char	ascii_lower(unsigned char c);
 static int			ascii_case_equal(const char *left, const char *right);
 
@@ -99,7 +101,7 @@ t_htttp_result	htttp_message_set_header(t_htttp_message *message,
 			&& ascii_case_equal(message->headers[i].name, name))
 		{
 			value_copy = NULL;
-			result = copy_owned_text(value, &value_copy);
+			result = copy_normalized_header_value(value, &value_copy);
 			if (result != HTTTP_OK)
 				return (result);
 			free(message->headers[i].value);
@@ -117,7 +119,7 @@ t_htttp_result	htttp_message_set_header(t_htttp_message *message,
 	result = copy_owned_text(name, &name_copy);
 	if (result != HTTTP_OK)
 		return (result);
-	result = copy_owned_text(value, &value_copy);
+	result = copy_normalized_header_value(value, &value_copy);
 	if (result != HTTTP_OK)
 	{
 		free(name_copy);
@@ -144,6 +146,7 @@ const char	*htttp_message_get_header(const t_htttp_message *message,
 	size_t	i;
 
 	if (message == NULL || name == NULL
+		|| message->header_count > HTTTP_MAX_HEADERS
 		|| (message->header_count > 0u && message->headers == NULL))
 		return (NULL);
 	i = 0;
@@ -263,6 +266,32 @@ static t_htttp_result	copy_owned_text(const char *text, char **out)
 	if (copy == NULL)
 		return (HTTTP_ERR_NO_MEMORY);
 	memcpy(copy, text, len + 1u);
+	*out = copy;
+	return (HTTTP_OK);
+}
+
+static t_htttp_result	copy_normalized_header_value(const char *value,
+		char **out)
+{
+	char	*copy;
+	size_t	start;
+	size_t	end;
+
+	end = strlen(value);
+	if (end > HTTTP_MAX_MESSAGE_SIZE)
+		return (HTTTP_ERR_TOO_LARGE);
+	start = 0u;
+	while (start < end && (value[start] == ' ' || value[start] == '\t'))
+		start++;
+	while (end > start && (value[end - 1u] == ' ' || value[end - 1u] == '\t'))
+		end--;
+	/* AI-assisted: normalize only edge SP/HTAB while taking ownership; embedded
+	 * whitespace remains wire-significant and allocation failure stays atomic. */
+	copy = malloc(end - start + 1u);
+	if (copy == NULL)
+		return (HTTTP_ERR_NO_MEMORY);
+	memcpy(copy, value + start, end - start);
+	copy[end - start] = '\0';
 	*out = copy;
 	return (HTTTP_OK);
 }

@@ -65,6 +65,9 @@ static void	test_response_requires_date(void)
 		"Thu, 01 Foo 1970 00:00:00 GMT",
 		"Thu, 00 Jan 1970 00:00:00 GMT",
 		"Thu, 32 Jan 1970 00:00:00 GMT",
+		"Mon, 31 Feb 2025 00:00:00 GMT",
+		"Sat, 29 Feb 2025 00:00:00 GMT",
+		"Fri, 01 Jan 1970 00:00:00 GMT",
 		"Thu, 01 Jan 1899 00:00:00 GMT",
 		"Thu, 01 Jan 1970 24:00:00 GMT",
 		"Thu, 01 Jan 1970 00:60:00 GMT",
@@ -97,6 +100,9 @@ static void	test_response_requires_date(void)
 			== HTTTP_ERR_MISSING_REQUIRED_HEADER);
 		i++;
 	}
+	assert(htttp_message_set_header(&message, "Date",
+			"Thu, 29 Feb 2024 00:00:00 GMT") == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_OK);
 	assert(htttp_format_date((time_t)0, date) == HTTTP_OK);
 	assert(htttp_message_set_header(&message, "date", date) == HTTTP_OK);
 	assert(htttp_validate(&message, 0u) == HTTTP_OK);

@@ -33,7 +33,8 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER)
 	@ mkdir -p $(dir $@)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 
-$(NAME): $(OBJ)
+$(NAME): FORCE $(OBJ)
+	@ $(RM) $@
 	@ $(AR) $(ARFLAGS) $@ $(OBJ)
 	@ printf '[Success] %s created\n' "$(NAME)"
 
@@ -51,7 +52,8 @@ memcheck: $(NAME) $(TEST_BINS)
 			*"$(FILTER)"*) \
 				matched=$$((matched + 1)); \
 				$(VALGRIND) --leak-check=full --show-leak-kinds=all \
-					--error-exitcode=1 "$$test_bin" || status=1 ;; \
+					--errors-for-leak-kinds=all --error-exitcode=1 \
+					"$$test_bin" || status=1 ;; \
 		esac; \
 	done; \
 	if [ $$matched -eq 0 ]; then \
@@ -68,6 +70,8 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all test memcheck clean fclean re
+FORCE:
+
+.PHONY: all test memcheck clean fclean re FORCE
 
 .PRECIOUS: $(OBJ_DIR)/%.o

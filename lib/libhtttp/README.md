@@ -46,6 +46,8 @@ cc ... -I lib/libhtttp/include lib/libhtttp/libhtttp.a
 ```
 
 The library and tests compile as C11 with `-Wall -Wextra -Werror -pedantic`.
+The test runner treats both nonzero exits and emitted `FAIL` records as suite
+failures. `memcheck` treats every Valgrind leak kind as an error.
 
 ## Wire Grammar
 
@@ -72,7 +74,7 @@ BODY         ::= exactly Content-Length opaque bytes
 - Header folding and case-insensitive duplicate names are rejected.
 - `Content-Length` contains one or more decimal digits with no sign or spaces.
 - Input is an explicit byte pointer and length; it need not end with NUL.
-- Complete messages are limited to 65,536 bytes and 64 headers.
+- Complete messages are limited to 65,536 bytes and 64 emitted headers.
 
 Required game methods are `JOIN`, `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`,
 and `STATE`. Syntactically valid extension methods are accepted without parser
@@ -90,7 +92,8 @@ Body is exactly three bytes: `abc`.
 
 Header names contain ASCII letters, digits, and hyphens. Lookup and duplicate
 detection are ASCII case-insensitive. Whitespace before `:` is rejected;
-optional space or horizontal tab around values is trimmed. Parsing splits at
+parsing and builder insertion normalize values by trimming leading and trailing
+space or horizontal tab. Embedded whitespace is preserved. Parsing splits at
 first colon, so `Trace: room:a:join` preserves `room:a:join` as value. Unknown
 headers remain in message.
 
@@ -98,7 +101,8 @@ Bodies are opaque bytes and may contain NUL, CR, or LF. Every non-empty body
 requires decimal `Content-Length`, and declared length must equal all remaining
 frame bytes. Empty bodies may omit it or declare zero. Serialisation ignores a
 stored `Content-Length` value and emits one canonical value from `body_len`;
-empty bodies omit header.
+empty bodies omit header. This generated header counts toward the 64-header wire
+limit: a body may accompany at most 63 non-`Content-Length` headers.
 
 ## Ownership
 
@@ -130,7 +134,7 @@ requirements:
 
 | Message | Requirement |
 |---|---|
-| Response | RFC 1123-shaped UTC `Date` header with bounded fields |
+| Response | RFC 1123 UTC `Date` naming a real Gregorian date with matching weekday |
 | Request with body | `Content-Type: application/tetris-command` |
 | `STATE` request with body | `Content-Type: application/tetris-state` |
 | Authenticated request | Non-empty `Player-Id` when `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` is set |
@@ -144,7 +148,11 @@ NUL into `HTTTP_DATE_BUFSIZE` bytes.
 Dispatch is exact and case-sensitive. First matching route runs; handler return
 value is written separately from `t_htttp_result`. Unknown methods return
 `HTTTP_ERR_NO_HANDLER`. Complete route table is validated before any handler is
-called.
+called. Dispatch also applies structural and base protocol validation before
+route lookup, so malformed requests or bodies missing required `Content-Type`
+cannot reach a handler. After matching, route `validation_flags` are applied;
+authenticated routes therefore reject a missing or empty `Player-Id` before
+application code runs.
 
 ```c
 static int handle_pause(const t_htttp_message *message, void *context)
@@ -155,7 +163,7 @@ static int handle_pause(const t_htttp_message *message, void *context)
 }
 
 static const t_htttp_route routes[] = {
-    {"PAUSE", handle_pause}
+    {"PAUSE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, handle_pause}
 };
 
 int handler_result;
@@ -163,12 +171,17 @@ int handler_result;
 if (htttp_dispatch(&message, routes,
         sizeof(routes) / sizeof(routes[0]), context,
         &handler_result) != HTTTP_OK) {
-    /* no exact route or invalid dispatch arguments; parse/validate first */
+    /* INVALID_ARGUMENT, INVALID_MESSAGE, MISSING_REQUIRED_HEADER,
+     * or NO_HANDLER; malformed requests never reach handlers. */
 }
 ```
 
-Adding `PAUSE` needs no parser change: register route and implement handler in
-calling application.
+Adding `PAUSE` needs no parser change: register route with zero flags for a
+public method or `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` for a player method,
+then implement handler in calling application. This flag checks required
+identity metadata only. Daemon must still compare `Player-Id` with player bound
+to secure connection; `libtetrissh` authenticates server and frame bytes, not
+client identity.
 
 ## Status And Error Ownership
 

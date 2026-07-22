@@ -191,6 +191,21 @@ static void	test_headers_are_owned_and_case_insensitive(void)
 	printf("PASS test_headers_are_owned_and_case_insensitive\n");
 }
 
+static void	test_header_values_are_normalized_and_lookup_is_bounded(void)
+{
+	t_htttp_message	message;
+
+	htttp_message_init(&message);
+	assert(htttp_message_set_header(&message, "Player-Id", " \t p17 \t")
+		== HTTTP_OK);
+	assert(strcmp(htttp_message_get_header(&message, "player-id"), "p17") == 0);
+	message.header_count = HTTTP_MAX_HEADERS + 1u;
+	assert(htttp_message_get_header(&message, "Player-Id") == NULL);
+	message.header_count = 1u;
+	htttp_message_free(&message);
+	printf("PASS test_header_values_are_normalized_and_lookup_is_bounded\n");
+}
+
 static void	test_header_limit_is_enforced(void)
 {
 	t_htttp_message	message;
@@ -329,6 +344,7 @@ int	main(void)
 	test_request_and_response_are_owned();
 	test_constructors_require_empty_output();
 	test_headers_are_owned_and_case_insensitive();
+	test_header_values_are_normalized_and_lookup_is_bounded();
 	test_header_limit_is_enforced();
 	test_body_copy_and_failure_are_atomic();
 	test_allocation_failures_are_atomic();

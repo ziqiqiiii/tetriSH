@@ -63,6 +63,7 @@ t_htttp_result	htttp_serialize(const t_htttp_message *message,
 
 static t_htttp_result	validate_message(const t_htttp_message *message)
 {
+	size_t	emitted_header_count;
 	size_t	i;
 	size_t	j;
 
@@ -86,6 +87,7 @@ static t_htttp_result	validate_message(const t_htttp_message *message)
 	}
 	else
 		return (HTTTP_ERR_INVALID_MESSAGE);
+	emitted_header_count = 0u;
 	i = 0u;
 	while (i < message->header_count)
 	{
@@ -100,8 +102,17 @@ static t_htttp_result	validate_message(const t_htttp_message *message)
 				return (HTTTP_ERR_INVALID_MESSAGE);
 			j++;
 		}
+		if (!ascii_case_equal(message->headers[i].name,
+				g_content_length_name))
+			emitted_header_count++;
 		i++;
 	}
+	/* AI-assisted: generated Content-Length consumes one wire-header slot even
+	 * though it is absent from or replaces a caller-supplied header. */
+	if (message->body_len > 0u)
+		emitted_header_count++;
+	if (emitted_header_count > HTTTP_MAX_HEADERS)
+		return (HTTTP_ERR_TOO_MANY_HEADERS);
 	return (HTTTP_OK);
 }
 

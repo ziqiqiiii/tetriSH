@@ -13,7 +13,7 @@ static t_htttp_result	validate_request(const t_htttp_message *message,
 						unsigned int flags);
 static int	nonempty_non_ows(const char *value);
 static int	valid_rfc1123_date(const char *value);
-static int	token_in_table(const char *value, const char *const *table,
+static int	token_index(const char *value, const char *const *table,
 				size_t count);
 static int	two_digits(const char *value);
 
@@ -24,6 +24,14 @@ static const char	*const g_weekdays[] = {
 static const char	*const g_months[] = {
 	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+};
+
+static const int	g_month_days[] = {
+	31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+};
+
+static const int	g_weekday_offsets[] = {
+	0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4
 };
 
 t_htttp_result	htttp_validate(const t_htttp_message *message,
@@ -270,20 +278,27 @@ static int	nonempty_non_ows(const char *value)
 
 static int	valid_rfc1123_date(const char *value)
 {
-	int	day;
-	int	hour;
-	int	minute;
-	int	second;
-	int	year;
+	int		day;
+	int		hour;
+	int		minute;
+	int		month;
+	int		month_days;
+	int		second;
+	int		weekday;
+	int		weekday_year;
+	int		year;
 	size_t	i;
 
 	if (strlen(value) != HTTTP_DATE_BUFSIZE - 1u
-		|| !token_in_table(value, g_weekdays, 7u)
 		|| value[3] != ',' || value[4] != ' '
-		|| value[7] != ' ' || !token_in_table(value + 8u, g_months, 12u)
+		|| value[7] != ' '
 		|| value[11] != ' ' || value[16] != ' ' || value[19] != ':'
 		|| value[22] != ':' || value[25] != ' '
 		|| memcmp(value + 26u, "GMT", 3u) != 0)
+		return (0);
+	weekday = token_index(value, g_weekdays, 7u);
+	month = token_index(value + 8u, g_months, 12u);
+	if (weekday < 0 || month < 0)
 		return (0);
 	day = two_digits(value + 5u);
 	hour = two_digits(value + 17u);
@@ -301,10 +316,25 @@ static int	valid_rfc1123_date(const char *value)
 		year = year * 10 + (value[i] - '0');
 		i++;
 	}
-	return (year >= 1900);
+	if (year < 1900)
+		return (0);
+	month_days = g_month_days[month];
+	if (month == 1 && year % 4 == 0
+		&& (year % 100 != 0 || year % 400 == 0))
+		month_days++;
+	if (day > month_days)
+		return (0);
+	weekday_year = year;
+	if (month < 2)
+		weekday_year--;
+	/* AI-assisted: integer Gregorian arithmetic matches the fixed English
+	 * weekday table without consulting process locale or timezone state. */
+	return ((weekday_year + weekday_year / 4 - weekday_year / 100
+			+ weekday_year / 400 + g_weekday_offsets[month] + day) % 7
+		== weekday);
 }
 
-static int	token_in_table(const char *value, const char *const *table,
+static int	token_index(const char *value, const char *const *table,
 		size_t count)
 {
 	size_t	i;
@@ -313,10 +343,10 @@ static int	token_in_table(const char *value, const char *const *table,
 	while (i < count)
 	{
 		if (memcmp(value, table[i], 3u) == 0)
-			return (1);
+			return ((int)i);
 		i++;
 	}
-	return (0);
+	return (-1);
 }
 
 static int	two_digits(const char *value)

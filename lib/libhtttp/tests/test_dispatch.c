@@ -8,6 +8,16 @@ static int	handle_join(const t_htttp_message *message, void *context)
 	int	*count;
 
 	count = context;
+	assert(strcmp(message->method, "JOIN") == 0);
+	(*count)++;
+	return (201);
+}
+
+static int	handle_first_pause(const t_htttp_message *message, void *context)
+{
+	int	*count;
+
+	count = context;
 	assert(strcmp(message->method, "PAUSE") == 0);
 	(*count)++;
 	return (201);
@@ -23,6 +33,16 @@ static int	handle_pause(const t_htttp_message *message, void *context)
 	return (202);
 }
 
+static int	handle_move(const t_htttp_message *message, void *context)
+{
+	int	*count;
+
+	count = context;
+	assert(strcmp(message->method, "MOVE") == 0);
+	(*count)++;
+	return (203);
+}
+
 static int	handle_null_context(const t_htttp_message *message, void *context)
 {
 	assert(strcmp(message->method, "STATE") == 0);
@@ -33,8 +53,8 @@ static int	handle_null_context(const t_htttp_message *message, void *context)
 static void	test_dispatch_parsed_extension_method(void)
 {
 	static const t_htttp_route	routes[] = {
-		{"JOIN", handle_join},
-		{"PAUSE", handle_pause}
+		{"JOIN", 0u, handle_join},
+		{"PAUSE", 0u, handle_pause}
 	};
 	static const unsigned char	input[] =
 		"PAUSE /room/a HTTTP/1.0\r\n\r\n";
@@ -64,9 +84,9 @@ static void	test_dispatch_parsed_extension_method(void)
 static void	test_dispatch_uses_first_exact_match(void)
 {
 	static const t_htttp_route	routes[] = {
-		{"pause", handle_pause},
-		{"PAUSE", handle_join},
-		{"PAUSE", handle_pause}
+		{"pause", 0u, handle_pause},
+		{"PAUSE", 0u, handle_first_pause},
+		{"PAUSE", 0u, handle_pause}
 	};
 	t_htttp_message	message;
 	int				count;
@@ -88,7 +108,7 @@ static void	test_dispatch_uses_first_exact_match(void)
 static void	test_dispatch_supports_null_context(void)
 {
 	static const t_htttp_route	routes[] = {
-		{"STATE", handle_null_context}
+		{"STATE", 0u, handle_null_context}
 	};
 	t_htttp_message	message;
 	int				handler_result;
@@ -107,7 +127,7 @@ static void	test_dispatch_supports_null_context(void)
 static void	test_unknown_method_and_empty_table(void)
 {
 	static const t_htttp_route	routes[] = {
-		{"JOIN", handle_join}
+		{"JOIN", 0u, handle_join}
 	};
 	t_htttp_message	message;
 	int				handler_result;
@@ -136,8 +156,10 @@ static void	test_reject_invalid_dispatch_arguments(void)
 	htttp_message_init(&message);
 	assert(htttp_message_make_request(&message, "JOIN", "/room/a") == HTTTP_OK);
 	routes[0].method = "JOIN";
+	routes[0].validation_flags = 0u;
 	routes[0].handler = handle_join;
 	routes[1].method = "PAUSE";
+	routes[1].validation_flags = 0u;
 	routes[1].handler = NULL;
 	handler_result = 99;
 	assert(htttp_dispatch(NULL, routes, 1u, NULL, &handler_result)
@@ -162,6 +184,13 @@ static void	test_reject_invalid_dispatch_arguments(void)
 	routes[1].method = "";
 	assert(htttp_dispatch(&message, routes, 2u, NULL, &handler_result)
 		== HTTTP_ERR_INVALID_ARGUMENT);
+	routes[1].method = "PAUSE";
+	routes[1].validation_flags = 0x02u;
+	count = 0;
+	assert(htttp_dispatch(&message, routes, 2u, &count, &handler_result)
+		== HTTTP_ERR_INVALID_ARGUMENT);
+	assert(count == 0);
+	assert(handler_result == 0);
 	htttp_message_free(&message);
 	printf("PASS test_reject_invalid_dispatch_arguments\n");
 }
@@ -169,7 +198,7 @@ static void	test_reject_invalid_dispatch_arguments(void)
 static void	test_reject_response_and_missing_method(void)
 {
 	static const t_htttp_route	routes[] = {
-		{"JOIN", handle_join}
+		{"JOIN", 0u, handle_join}
 	};
 	t_htttp_message	message;
 	int				handler_result;
@@ -188,6 +217,72 @@ static void	test_reject_response_and_missing_method(void)
 	printf("PASS test_reject_response_and_missing_method\n");
 }
 
+static void	test_reject_malformed_request_before_handler(void)
+{
+	static const t_htttp_route	routes[] = {
+		{"JOIN", 0u, handle_join}
+	};
+	t_htttp_message	message;
+	int				count;
+	int				handler_result;
+
+	htttp_message_init(&message);
+	assert(htttp_message_make_request(&message, "JOIN", "/room/a") == HTTTP_OK);
+	free(message.path);
+	message.path = NULL;
+	count = 0;
+	handler_result = 99;
+	assert(htttp_dispatch(&message, routes, 1u, &count, &handler_result)
+		== HTTTP_ERR_INVALID_MESSAGE);
+	assert(count == 0);
+	assert(handler_result == 0);
+	htttp_message_free(&message);
+	assert(htttp_message_make_request(&message, "JOIN", "/room/a") == HTTTP_OK);
+	assert(htttp_message_set_body(&message, "x", 1u) == HTTTP_OK);
+	handler_result = 99;
+	assert(htttp_dispatch(&message, routes, 1u, &count, &handler_result)
+		== HTTTP_ERR_MISSING_REQUIRED_HEADER);
+	assert(count == 0);
+	assert(handler_result == 0);
+	htttp_message_free(&message);
+	printf("PASS test_reject_malformed_request_before_handler\n");
+}
+
+static void	test_route_flags_enforce_player_id(void)
+{
+	static const t_htttp_route	authenticated[] = {
+		{"MOVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, handle_move}
+	};
+	static const t_htttp_route	public[] = {
+		{"MOVE", 0u, handle_move}
+	};
+	t_htttp_message	message;
+	int				count;
+	int				handler_result;
+
+	htttp_message_init(&message);
+	assert(htttp_message_make_request(&message, "MOVE", "/room/a") == HTTTP_OK);
+	count = 0;
+	handler_result = 99;
+	assert(htttp_dispatch(&message, authenticated, 1u, &count, &handler_result)
+		== HTTTP_ERR_MISSING_REQUIRED_HEADER);
+	assert(count == 0);
+	assert(handler_result == 0);
+	assert(htttp_message_set_header(&message, "Player-Id", "p17") == HTTTP_OK);
+	assert(htttp_dispatch(&message, authenticated, 1u, &count, &handler_result)
+		== HTTTP_OK);
+	assert(count == 1);
+	assert(handler_result == 203);
+	htttp_message_free(&message);
+	assert(htttp_message_make_request(&message, "MOVE", "/room/a") == HTTTP_OK);
+	count = 0;
+	assert(htttp_dispatch(&message, public, 1u, &count, &handler_result)
+		== HTTTP_OK);
+	assert(count == 1);
+	htttp_message_free(&message);
+	printf("PASS test_route_flags_enforce_player_id\n");
+}
+
 int	main(void)
 {
 	test_dispatch_parsed_extension_method();
@@ -196,5 +291,7 @@ int	main(void)
 	test_unknown_method_and_empty_table();
 	test_reject_invalid_dispatch_arguments();
 	test_reject_response_and_missing_method();
+	test_reject_malformed_request_before_handler();
+	test_route_flags_enforce_player_id();
 	return (0);
 }

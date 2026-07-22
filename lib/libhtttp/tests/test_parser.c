@@ -190,6 +190,8 @@ static void	test_reject_malformed_request_lines(void)
 		HTTTP_ERR_MALFORMED_START_LINE);
 	assert_text_error("JOIN /room/a\r\n\r\n",
 		HTTTP_ERR_MALFORMED_START_LINE);
+	assert_text_error("JOIN /room/a \r\n\r\n",
+		HTTTP_ERR_MALFORMED_START_LINE);
 	assert_text_error("JOIN /room/a HTTTP/2.0\r\n\r\n",
 		HTTTP_ERR_UNSUPPORTED_VERSION);
 	assert_text_error("JOIN /room/a HTTTP/1.0 EXTRA\r\n\r\n",

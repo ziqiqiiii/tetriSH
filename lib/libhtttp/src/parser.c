@@ -166,6 +166,8 @@ static t_htttp_result	parse_request_line(const unsigned char *line,
 		|| second_space == first_space + 1u || second_space >= line_len)
 		return (HTTTP_ERR_MALFORMED_START_LINE);
 	version_start = second_space + 1u;
+	if (version_start == line_len)
+		return (HTTTP_ERR_MALFORMED_START_LINE);
 	i = version_start;
 	while (i < line_len)
 	{

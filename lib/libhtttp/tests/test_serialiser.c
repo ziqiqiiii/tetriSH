@@ -350,6 +350,52 @@ static void	test_complete_output_size_boundary(void)
 	printf("PASS test_complete_output_size_boundary\n");
 }
 
+static void	add_numbered_headers(t_htttp_message *message, size_t count)
+{
+	char	name[32];
+	size_t	i;
+
+	i = 0u;
+	while (i < count)
+	{
+		assert(snprintf(name, sizeof(name), "X-Header-%zu", i) > 0);
+		assert(htttp_message_set_header(message, name, "value") == HTTTP_OK);
+		i++;
+	}
+}
+
+static void	test_generated_content_length_respects_header_limit(void)
+{
+	t_htttp_message	message;
+	t_htttp_message	parsed;
+	unsigned char	*wire;
+	size_t			wire_len;
+
+	htttp_message_init(&message);
+	assert(htttp_message_make_request(&message, "MOVE", "/room/a") == HTTTP_OK);
+	add_numbered_headers(&message, HTTTP_MAX_HEADERS);
+	assert(htttp_message_set_body(&message, "X", 1u) == HTTTP_OK);
+	wire = (unsigned char *)1;
+	wire_len = 1u;
+	assert(htttp_serialize(&message, &wire, &wire_len)
+		== HTTTP_ERR_TOO_MANY_HEADERS);
+	assert(wire == NULL);
+	assert(wire_len == 0u);
+	htttp_message_free(&message);
+	htttp_message_init(&message);
+	htttp_message_init(&parsed);
+	assert(htttp_message_make_request(&message, "MOVE", "/room/a") == HTTTP_OK);
+	add_numbered_headers(&message, HTTTP_MAX_HEADERS - 1u);
+	assert(htttp_message_set_body(&message, "X", 1u) == HTTTP_OK);
+	assert(htttp_serialize(&message, &wire, &wire_len) == HTTTP_OK);
+	assert(htttp_parse(wire, wire_len, &parsed) == HTTTP_OK);
+	assert(parsed.header_count == HTTTP_MAX_HEADERS);
+	free(wire);
+	htttp_message_free(&parsed);
+	htttp_message_free(&message);
+	printf("PASS test_generated_content_length_respects_header_limit\n");
+}
+
 int	main(void)
 {
 	test_serialize_canonical_request();
@@ -358,5 +404,6 @@ int	main(void)
 	test_reject_invalid_structured_messages();
 	test_failure_outputs_and_allocation();
 	test_complete_output_size_boundary();
+	test_generated_content_length_respects_header_limit();
 	return (0);
 }

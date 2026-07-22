@@ -38,8 +38,11 @@ run_unit()
 			case "$line" in
 				"PASS "*) printf '  %-50s %sPASS%s\n' \
 					"${line#PASS }" "$green" "$reset" ;;
-				"FAIL "*) printf '  %-50s %sFAIL%s\n' \
-					"${line#FAIL }" "$red" "$reset" ;;
+				"FAIL "*) if [ "$status" -eq 0 ]; then
+						status=1
+					fi
+					printf '  %-50s %sFAIL%s\n' \
+						"${line#FAIL }" "$red" "$reset" ;;
 				*) printf '  %s\n' "$line" ;;
 			esac
 		done <<< "$output"

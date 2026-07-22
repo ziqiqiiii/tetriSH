@@ -45,14 +45,26 @@ static void	assert_parse_failure(const unsigned char *data, size_t data_len)
 static void	assert_all_truncations_fail(const unsigned char *fixture,
 		size_t fixture_len)
 {
+	unsigned char	*prefix;
+	unsigned char	zero_length_data;
 	size_t	prefix_len;
 
-	/* AI-assisted: exercise every frame boundary so partial network-derived
-	 * bytes always fail atomically and remain safe for unconditional cleanup. */
+	/* AI-assisted: exact-size nonzero prefixes put ASan's redzone at each parser
+	 * boundary; zero length uses a valid pointer to test data_len semantics. */
+	zero_length_data = 0u;
 	prefix_len = 0u;
 	while (prefix_len < fixture_len)
 	{
-		assert_parse_failure(fixture, prefix_len);
+		if (prefix_len == 0u)
+			assert_parse_failure(&zero_length_data, prefix_len);
+		else
+		{
+			prefix = malloc(prefix_len);
+			assert(prefix != NULL);
+			memcpy(prefix, fixture, prefix_len);
+			assert_parse_failure(prefix, prefix_len);
+			free(prefix);
+		}
 		prefix_len++;
 	}
 }
