@@ -18,7 +18,7 @@ Implementation status:
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
 | `lib/libcoreipc` | planning only — README is the agreed scope, no code |
-| `lib/libhtttp` | planning only — README is a design proposal, no code |
+| `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `tetrisd`, `tetrislogd`, `tetrisctl` | not started — no `src/` directories yet |
 
 ## Build & Test
