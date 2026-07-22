@@ -12,13 +12,9 @@ t_htttp_result	htttp_dispatch(const t_htttp_message *message,
 	*handler_result = 0;
 	if (message == NULL || (route_count > 0u && routes == NULL))
 		return (HTTTP_ERR_INVALID_ARGUMENT);
-	if (message->type != HTTTP_MESSAGE_REQUEST)
-		return (HTTTP_ERR_INVALID_MESSAGE);
-	result = htttp_validate(message, 0u);
-	if (result != HTTTP_OK)
-		return (result);
-	/* AI-assisted: validate the whole caller-owned table before dispatch so a
-	 * configuration error cannot be hidden by an earlier matching route. */
+	/* Validate the whole caller-owned table before any message check so a
+	 * configuration error is never masked by a malformed request or hidden
+	 * behind an earlier matching route. */
 	i = 0u;
 	while (i < route_count)
 	{
@@ -29,6 +25,11 @@ t_htttp_result	htttp_dispatch(const t_htttp_message *message,
 			return (HTTTP_ERR_INVALID_ARGUMENT);
 		i++;
 	}
+	if (message->type != HTTTP_MESSAGE_REQUEST)
+		return (HTTTP_ERR_INVALID_MESSAGE);
+	result = htttp_validate(message, 0u);
+	if (result != HTTTP_OK)
+		return (result);
 	i = 0u;
 	while (i < route_count)
 	{
