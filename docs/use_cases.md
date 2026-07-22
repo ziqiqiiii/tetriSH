@@ -16,8 +16,9 @@
   - [UC-05 — Join Room from List](#uc-05--join-room-from-list)
   - [UC-06 — Join Room by Room ID](#uc-06--join-room-by-room-id)
   - [UC-07 — Leave Room](#uc-07--leave-room)
+  - [UC-07a — Transfer Room Ownership](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24)
   - [UC-08 — Start Game](#uc-08--start-game)
-  - [UC-08b — Attempt to Start Game as Non-Owner (Denied)](#uc-08b--attempt-to-start-game-as-non-owner-denied)
+  - [UC-08a — Attempt to Start Game as Non-Owner (Denied)](#uc-08a--attempt-to-start-game-as-non-owner-denied)
   - [UC-09 — Chat in Room](#uc-09--chat-in-room)
 - [Gameplay](#gameplay)
   - [UC-10 — Play Single-Player Game](#uc-10--play-single-player-game)
@@ -89,7 +90,7 @@ Two distinct state systems back these use cases, and their status/result codes m
 | Group | Use cases | Backing store |
 |---|---|---|
 | **Persisted (DB)** | • UC-01 <br>• UC-02<br>• UC-15 <br>• UC-16 <br>• UC-17<br>• UC-18 <br>• UC-19<br>• UC-20 <br>• UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
-| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08b<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd / chatd memory |
+| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd / chatd memory |
 
 ---
 
@@ -118,11 +119,11 @@ Every use case's wire request and the status codes it can return. Three transpor
 | UC-06 Join by ID | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | • `404` no room<br>• `409` full*<br>• `409` in-game* |
 | UC-07 Leave Room | `LEAVE /room/<id>` | HTTTP → tetrisd | `200` | `404` not in room |
 | UC-08 Start Game | `START /room/<id>` (owner) | HTTTP → tetrisd | `200` | • `403` not owner<br>• `409` too few/started |
-| UC-08b Non-owner Start | `START /room/<id>` (non-owner) | HTTTP → tetrisd | — | `403` not owner |
+| UC-08a Non-owner Start | `START /room/<id>` (non-owner) | HTTTP → tetrisd | — | `403` not owner |
 | UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → chatd | `200` | • `429` rate-limited<br>• `403` muted<br>• `404` |
 | UC-10 Single Player | play via UC-13; server `db_record_game` on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
-| UC-11 Double | UC-13 inputs + UC-20 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
-| UC-12 Battle Royale | UC-13 inputs + UC-20 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
+| UC-11 Double | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
+| UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
 | UC-15 Buy Character | `BUY character <cid>` | marketd IPC | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
@@ -213,6 +214,122 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 ## Multiplayer Lobby & Rooms
 
+### Runtime Status Model *(shared by UC-04 – UC-08)*
+
+Rooms, slots, and player roles are **runtime-only** state held in `tetrisd` memory. The lobby use cases below (Create, Join, Leave, Start) each drive a set of status transitions across three enums.
+
+**Status enums**
+
+```
+PLAYER_STATUS
+{ 
+  OWNER,
+  PLAYER 
+} // role within a room
+
+GAME_ROOM_STATUS  
+{ 
+  WAITING, 
+  READY, 
+  IN_GAME, 
+  FINISHED 
+}
+
+SLOT_STATUS 
+{ 
+  WAITING, 
+  JOINING, 
+  LEAVING, 
+  READY 
+} // one per slot
+```
+
+**Room STATE message**
+  - shown at the bottom-left of the room UI, keyed by `GAME_ROOM_STATUS`:
+
+| Room status | STATE message |
+|---|---|
+| `WAITING` | `WAITING FOR OPPONENT` |
+| `READY` | `READY TO START, OWNER CAN START ANYTIME` |
+| `IN_GAME` | `GAME IN PROGRESS` |
+| `FINISHED` | `GAME OVER, RECORDING THE RESULTS` |
+
+**Mode generalization.** Single, Double, and Battle Royale share the *same* state machine; only the slot count and the start threshold differ:
+
+| Mode | `slot_count` | `min_to_start` |
+|---|---|---|
+| Single | 1 | 1 |
+| Double | 2 | 2 |
+| Battle Royale | 4–99 | 4 |
+
+- Room flips `WAITING → READY` when `number_of_players >= min_to_start` (and every occupied slot is `READY`).
+- Room falls back `READY → WAITING` if `number_of_players` drops below `min_to_start`.
+- In Battle Royale, a `READY` room keeps accepting joiners up to `slot_count`.
+- Only *crossing* `min_to_start` changes room status. E.g.
+  - BR at 5/8 dropping to 3 → `WAITING`
+  - back to 4 → `READY`.
+
+**Combined state machine**
+
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    %% ================= ROOM =================
+    state "ROOM" as ROOM {
+        [*] --> R_WAITING
+        state "WAITING<br/>(msg: WAITING FOR OPPONENT)" as R_WAITING
+        state "READY<br/>(msg: READY TO START, OWNER CAN START ANYTIME)" as R_READY
+        state "IN_GAME<br/>(msg: GAME IN PROGRESS)" as R_IN_GAME
+        state "FINISHED<br/>(msg: GAME OVER, RECORDING THE RESULTS)" as R_FINISHED
+
+        R_WAITING --> R_READY : players >= min
+        R_READY --> R_WAITING : players below min
+        R_READY --> R_IN_GAME : OWNER START
+        R_IN_GAME --> R_FINISHED : game ends
+        R_FINISHED --> [*] : records written
+    }
+    note right of ROOM
+        Cross-machine coupling:
+        • last slot READY & num_players >= min → ROOM.READY
+        • num_players drop below min → ROOM.WAITING
+          (BR: 5/8 → 3 falls back; back to 4 re-readies)
+        • START is OWNER-only (PLAYER.OWNER)
+        • ROOM.FINISHED clears all slots → SLOT.WAITING
+    end note
+
+    %% ================= SLOT =================
+    state "SLOT (per slot)" as SLOT {
+        [*] --> S_WAITING
+        state "WAITING (empty)" as S_WAITING
+        state "JOINING" as S_JOINING
+        state "READY (occupied)" as S_READY
+        state "LEAVING" as S_LEAVING
+
+        S_WAITING --> S_JOINING : slot begins occupying
+        S_JOINING --> S_READY : join complete / num_players += 1
+        S_READY --> S_LEAVING : occupant leaves
+        S_LEAVING --> S_WAITING : slot cleared / num_players -= 1
+        S_READY --> [*] : room FINISHED / all slots cleared
+    }
+
+    %% ================= PLAYER =================
+    state "PLAYER (role)" as PLAYER {
+        state "OWNER (can START)" as P_OWNER
+        state "PLAYER" as P_PLAYER
+
+        [*] --> P_OWNER : created room (first occupant)
+        [*] --> P_PLAYER : joined existing room
+
+        P_PLAYER --> P_OWNER : previous owner left and promoted (player in slot 2)
+
+        P_OWNER --> [*] : leaves room
+        P_PLAYER --> [*] : leaves room
+    }
+```
+
+---
+
 ### UC-03 — Browse Open Rooms
 
 | Field | Content |
@@ -227,7 +344,12 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Main Success Scenario**
 1. Player enters the Lobby.
 2. System requests the current room directory from the Game Server.
-3. System renders each room row: ID, Mode (D / BR), Players (e.g. 1/2, 8/8), State (WAITING / IN-GAME), Owner.
+3. System renders each room row: 
+    - ID
+    - Mode (D / BR) 
+    - Players (e.g. 1/2, 8/8) 
+    - State (WAITING / IN-GAME) 
+    - Owner
 4. System renders the header with the Player's username, leaderboard score, and ranking.
 
 **Extensions / Alternate Flows**
@@ -252,20 +374,28 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player (becomes Room Owner) |
 | **Goal** | Create a new game room in a chosen mode and become its owner. |
 | **Preconditions** | Player is in the Lobby. |
-| **Postconditions (success)** | A new room exists (server assigns a Room ID); Player is the Room Owner and is placed in the room's Waiting Room. |
+| **Postconditions (success)** | •  A new room exists (server assigns a Room ID <br>• Player is the Room Owner and is placed in the room's Waiting Room.  <br>•  Room status `WAITING`, slot 1 `READY` (Owner seated), `number_of_players = 1`, STATE message `WAITING FOR OPPONENT`. |
 | **Trigger** | Player presses `[C]` Create Room. |
+| **Status Model** | See [Runtime Status Model](#runtime-status-model-shared-by-uc-04--uc-08). |
 
 **Main Success Scenario**
 1. System opens the **Create Room** modal.
 2. System presents the mode options: `[1] Double` (2 players, default) and `[2] Battle Royale` (4–99 players).
 3. Player selects a mode with `[↑/↓]`.
 4. Player presses `[ENTER]` to create (`«include»` **UC-04a Select Game Mode**).
-5. System sends the create/JOIN request; the Game Server creates the room, assigns a Room ID, marks the Player as Owner, and returns `201 Created`.
-6. System closes the modal and shows the Waiting Room with the Player in slot 1 (Owner), status "Waiting for opponents".
+5. System sends the create/JOIN request; the Game Server:
+   - marks the creating Player as `OWNER` (PLAYER_STATUS);
+   - initialises the room with `slot_count` slots, each `WAITING`, and room status `WAITING`;
+   - seats the Owner in slot 1: slot 1 `WAITING → JOINING → READY`, `number_of_players += 1` (→ 1);
+   - since `number_of_players (1) < min_to_start`, the room stays `WAITING`;
+   - returns `201 Created`.
+6. System closes the modal and shows the Waiting Room with the Player in slot 1 (Owner); STATE message `WAITING FOR OPPONENT`.
+7. chatd narrates: `PLAYER <name> joined the room <id>` / `PLAYER <name> set as owner`.
 
 **Extensions / Alternate Flows**
-- **3a. Player presses `[ESC]` Cancel:** Modal closes; return to Lobby, no room created.
 - **2a. No mode selected:** Default (Double) is used.
+- **3a. Player presses `[ESC]` Cancel:** Modal closes; return to Lobby, no room created.
+- **5a. Owner seating fails (disconnect during join):** slot 1 → `WAITING`; with no members remaining the room is destroyed; Player returns to Lobby.
 
 **Exceptions**
 - **E1. Server rejects creation (500 / capacity):** System shows an error; return to Lobby.
@@ -283,21 +413,30 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **ID** | UC-05 |
 | **Primary Actor** | Player |
 | **Goal** | Join an existing open room selected from the lobby list. |
-| **Preconditions** | Player is in the Lobby; at least one room is in state WAITING with a free slot. |
-| **Postconditions (success)** | Player occupies a slot in the room and is placed in its Waiting Room. |
+| **Preconditions** | • Player is in the Lobby.  <br>•  at least one room is in state WAITING with a free slot. |
+| **Postconditions (success)** | •  Player occupies a `READY` slot in the room (role `PLAYER`) and is placed in its Waiting Room.  <br>• If `number_of_players` reaches `min_to_start`, the room becomes `READY` and its STATE message updates. |
 | **Trigger** | Player selects a room and presses `[ENTER]` Join. |
+| **Status Model** | See [Runtime Status Model](#runtime-status-model-shared-by-uc-04--uc-08). |
 
 **Main Success Scenario**
 1. Player highlights a room row using `[↑/↓]`.
 2. Player presses `[ENTER]` to join.
 3. System sends `JOIN /room/<id>` to the Game Server.
-4. Server assigns the Player an open slot and returns `200 OK` (joining an existing room, no resource created).
-5. System displays the Waiting Room; Player's name appears in the next free slot with status "ready".
+4. Server assigns the Player an open slot and returns `200 OK` (joining an existing room, no resource created):
+   - joiner's role → `PLAYER` (PLAYER_STATUS);
+   - target slot `WAITING → JOINING → READY`.
+   - `number_of_players += 1`;
+   - if `number_of_players >= min_to_start` (all occupied slots `READY`)
+      - room `WAITING → READY`
+      - STATE message → `READY TO START, OWNER CAN START ANYTIME`.
+5. System displays the Waiting Room; Player's name appears in the next free slot with status "ready". chatd narrates: `PLAYER <name> joined the room <id>`.
 
 **Extensions / Alternate Flows**
-- **4a. Room is full (409):** System shows "room full"; return to Lobby (UC-03).
+- **4a. Room is full (409):** System shows "room full"; return to Lobby (UC-03). (No slot enters `JOINING`.)
 - **4b. Room already IN-GAME (409):** Join is refused; System suggests other open rooms; return to Lobby.
 - **4c. Room no longer exists (404):** System refreshes the list; return to Lobby.
+- **4d. Still below `min_to_start` (Battle Royale, e.g. 2/4):** Slot becomes `READY` but the room stays `WAITING`; STATE message stays `WAITING FOR OPPONENT`.
+- **4e. Seating aborts (disconnect during join):** slot → `WAITING`; `number_of_players` unchanged; room status unchanged.
 
 **Exceptions**
 - **E1. Server unreachable:** System shows a connection error; Player stays in Lobby.
@@ -315,8 +454,9 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player |
 | **Goal** | Join a specific room directly by typing its Room ID (e.g. shared by a friend). |
 | **Preconditions** | Player is in the Lobby and knows a valid Room ID. |
-| **Postconditions (success)** | Player occupies a slot in the target room and is placed in its Waiting Room. |
+| **Postconditions (success)** | • Player occupies a `READY` slot in the target room (role `PLAYER`) and is placed in its Waiting Room.  <br>•  Status transitions are identical to UC-05 step 4. |
 | **Trigger** | Player types a Room ID in the **Join By Room ID** panel and presses `[ENTER]`. |
+| **Status Model** | Same as UC-05 — see [Runtime Status Model](#runtime-status-model-shared-by-uc-04--uc-08). |
 
 **Main Success Scenario**
 1. Player types a Room ID (e.g. `duel-42`) into the entry field.
@@ -346,24 +486,67 @@ Every use case's wire request and the status codes it can return. Three transpor
 | **Primary Actor** | Player |
 | **Goal** | Leave a waiting room and return to the Lobby. |
 | **Preconditions** | Player is in a Waiting Room. |
-| **Postconditions (success)** | Player's slot is freed; Player is back in the Lobby. If the Owner leaves and others remain, ownership passes to the next player in slot order before the Owner's slot is freed; if no one remains, the room is destroyed. |
+| **Postconditions (success)** | •  Leaver's slot is `WAITING` again and their data cleared (`number_of_players -= 1`) <br>• Player is back in the Lobby.  <br>• If the Owner leaves and others remain, ownership passes to the next player in slot order before the Owner's slot is freed .<br>• if no one remains, the room is destroyed.  <br>• If `number_of_players` drops below `min_to_start`, the room falls back to `WAITING`. |
 | **Trigger** | Player presses `[L]` Leave. |
+| **Status Model** | See [Runtime Status Model](#runtime-status-model-shared-by-uc-04--uc-08). |
 
 **Main Success Scenario**
 1. Player presses `[L]` Leave.
 2. System sends `LEAVE /room/<id>`.
-3. Server frees the Player's slot and updates the room for remaining players.
-4. System returns the Player to the Lobby.
+3. Server frees the Player's slot and updates the room for remaining players:
+   - leaver's slot → `LEAVING`, then (after data is cleared) → `WAITING`
+   - `number_of_players -= 1`
+   - if `number_of_players < min_to_start`
+      - room → `WAITING`
+      - STATE message → `WAITING FOR OPPONENT`.
+4. System returns the Player to the Lobby. chatd narrates: `PLAYER <name> left the room <id>`.
 
 **Extensions / Alternate Flows**
-- **3a. Leaving Player is the Owner and others remain:** Server (i) reassigns ownership to the **next player in slot order**, (ii) broadcasts the room update (new owner) to all remaining members, then (iii) frees the old Owner's slot and returns them to the Lobby. The transfer happens before the slot is freed so the room is never ownerless.
-- **3b. Last player leaves:** Server destroys the room (ROOM_DESTROYED); chat room is torn down.
+- **3a. Leaving Player is the Owner and others remain:** 
+    - Ownership is transferred **before** the old Owner's slot is freed → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
+- **3b. Last player leaves:** Server destroys the room (ROOM_DESTROYED); all slots and player data are cleared; chat room is torn down.
 
 **Exceptions**
 - **E1. Server unreachable:** System still returns Player to Lobby locally; session reconciles on reconnect.
 
 **Related Use Cases**
-- None.
+- `«include»` UC-07a Transfer Room Ownership (when the leaver is the Owner and others remain).
+
+---
+
+### UC-07a — Transfer Room Ownership *(included by UC-07 / UC-11 / UC-12 / UC-24)*
+
+| Field | Content |
+|---|---|
+| **ID** | UC-07a |
+| **Level** | Subfunction (server-internal; no direct user interaction) |
+| **Primary Actor** | Server (`tetrisd`) |
+| **Goal** | Hand the `OWNER` role to a remaining member when the current Owner's slot is about to be freed, so the room is never ownerless. |
+| **Preconditions** | • The departing player's role is `OWNER` <br>• at least one other slot in the room is occupied <br>• the departing player's slot is `LEAVING` but not yet cleared. |
+| **Postconditions (success)** | • Exactly one member holds role `OWNER` <br>• the new Owner occupies the vacated lower slot <br>• every remaining member has received the room update <br>• the old Owner's slot is `WAITING`. |
+| **Trigger** | •  The Owner's slot is about to be freed — voluntary leave (UC-07) <br>• mid-game quit/disconnect (UC-11 / UC-12) <br>•  Admin kick (UC-24). |
+| **Status Model** | See [Runtime Status Model](#runtime-status-model-shared-by-uc-04--uc-08). |
+
+**Main Success Scenario**
+1. Server selects the **next player in slot order** as the successor:
+    - that player's role → `OWNER`
+    - the successor is moved into the vacated lower slot.
+2. Server broadcasts the room update (new owner) to all remaining members.
+3. chatd narrates: `PLAYER <name> set as the owner`.
+4. Server frees the old Owner's slot:
+    - slot `LEAVING → WAITING`, data cleared
+    - `number_of_players -= 1`.
+
+**Extensions / Alternate Flows**
+- **1a. No other occupied slots:** No transfer occurs; the room is destroyed instead → see UC-07 alt-flow 3b.
+- **1b. Successor disconnects mid-transfer:** Server skips them and repeats step 1 with the next player in slot order; if none remain, fall through to 1a.
+- **2a. Trigger was an admin kick:** Identical flow; narration reflects the kick rather than a voluntary leave → see UC-24.
+
+**Exceptions**
+- **E1. Broadcast fails to a member:** Transfer still commits server-side; the affected client reconciles ownership on its next `STATE` push or reconnect.
+
+**Related Use Cases**
+- Included by UC-07 Leave Room, UC-11 / UC-12 (mid-game quit), and UC-24 Kick Player.
 
 ---
 
@@ -388,22 +571,22 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 **Extensions / Alternate Flows**
 - **4a. Not enough players (Battle Royale < 4):** Server refuses; status stays "Waiting for opponents — Need at least 4 players to start".
-- **4b. Requester is not the Owner (403):** Start is refused → see UC-08b.
+- **4b. Requester is not the Owner (403):** Start is refused → see UC-08a.
 
 **Exceptions**
 - **E1. A player disconnects during start:** Server aborts start; room returns to WAITING.
 
 **Related Use Cases**
 - Precedes UC-11 / UC-12.
-- Alternate actor path UC-08b.
+- Alternate actor path UC-08a.
 
 ---
 
-### UC-08b — Attempt to Start Game as Non-Owner (Denied)
+### UC-08a — Attempt to Start Game as Non-Owner (Denied)
 
 | Field | Content |
 |---|---|
-| **ID** | UC-08b |
+| **ID** | UC-08a |
 | **Primary Actor** | Player (non-owner member of the room) |
 | **Goal** | A non-owner attempts to start the match; the server must reject the attempt because starting is an owner-only privilege. |
 | **Preconditions** | Player is a member of a Waiting Room but is **not** the Room Owner. |
@@ -480,7 +663,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 4. System clears completed lines and updates the score.
 5. Loop steps 2–4 until the board tops out (game over).
 6. System shows the final score, then makes the **one** persisted call of this use case (this specific user): 
-    - `db_record_game(id, score_delta, points_delta, won=false)`, which updates 
+    - `db_record_game(id, score_delta, points_delta, won=true)`, which updates 
       - `leaderboard_score`
       - credits `wallet_points`
       - increments `games_played`
@@ -491,7 +674,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 - **5a. Player quits mid-game:** Session ends **without** calling `db_record_game` — an abandoned game is not scored, so no points, score, or games_played change. (Only a game that reaches game-over is recorded.)
 
 **Exceptions**
-- **E1. Server disconnect:** Game pauses/ends; session state reconciled on reconnect.
+- **E1. Server disconnect:** Game ends; Server restart and game restart.
 
 **Related Use Cases**
 - `«include»` UC-13 Control Falling Piece.
@@ -523,17 +706,17 @@ Every use case's wire request and the status codes it can return. Three transpor
 **Extensions / Alternate Flows**
 - **2a. A Player activates an equipped ability:** → UC-14 Activate Gaiden Ability (`«extend»`).
 - **5a. A Player quits/disconnects mid-game:** 
-    - Server sets the game to end.
-    - If the departing Player owns the room, ownership is transferred to the remaining Player (per UC-07 alt-flow 3a).
-    - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default; because that is a completed result for them, `db_record_game` **is** called for the winner.
+    - Only one Player remains, so the match ends immediately.
+    - If the departing Player owns the room, ownership is transferred to the remaining Player → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
+    - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default and **is** recorded (`won=true`).
 
 **Exceptions**
-- **E1. Server disconnect (whole match aborted):** No game-over is reached, so `db_record_game` is called for **no one**; handled per reconnection policy.
+- **E1. Server disconnect (whole match aborted):** No game-over is reached, so `db_record_game` is called for **no one**; handled per reconnection policy. Server restart and game restart.
 
 **Related Use Cases**
 - `«include»` UC-13.
-- `«extend»` UC-20.
-- `«reuses»` UC-07 Leave Room (ownership-transfer behaviour).
+- `«extend»` UC-14.
+- `«include»` UC-07a Transfer Room Ownership (on mid-game quit by the Owner).
 
 ---
 
@@ -563,17 +746,18 @@ Every use case's wire request and the status codes it can return. Three transpor
 - **5a. Player is KO'd:**
     - Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
 - **5b. Player quits/disconnects mid-game:** 
-    - Server ends the game.
-    - If the departing Player owns the room, ownership is transferred to the next player in slot order and the remaining players are notified (per UC-07 alt-flow 3a).
-    - The quitter is **not recorded** (`db_record_game` is not called for them). Remaining players play on; each is recorded normally at game-over.
+    - Server removes them from the match; remaining players play on.
+    - If the departing Player owns the room, ownership is transferred and the remaining players are notified → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
+    - The quitter is **not recorded** (`db_record_game` is not called for them). Each remaining player is recorded normally at game-over.
+    - **5b-i. Only one player remains:** They win by default; the match ends and they are recorded (`won=true`).
 
 **Exceptions**
-- **E1. Server disconnect (whole match aborted):** No game-over reached → `db_record_game` called for no one.
+- **E1. Server disconnect (whole match aborted):** No game-over reached → `db_record_game` called for no one. Server restart and game restart.
 
 **Related Use Cases**
 - `«include»` UC-13.
-- `«extend»` UC-20.
-- `«reuses»` UC-07 Leave Room (ownership-transfer behaviour).
+- `«extend»` UC-14.
+- `«include»` UC-07a Transfer Room Ownership (on mid-game quit by the Owner).
 
 ---
 
@@ -650,10 +834,10 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 **Main Success Scenario**
 1. Player selects **Characters tab** and a specific character (e.g. Princess, Halloween, Wolf-man, or Mirurun).
-2. System shows the preview and abilities (Ability 1, Ability 2, etc), and determines **BUY** / **Set as Default** button state (`«include»` **UC-14a Determine Character Button State**).
+2. System shows the preview and abilities (Ability 1, Ability 2, etc), and determines **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Character Button State**).
 3. Player presses **BUY**.
-4. Server calls `db_buy_character(id, cid)`. (`«include»` **UC-16 Deduct Wallet Points**).
-5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-14a Determine Character Button State**).
+4. Server calls `db_buy_character(id, cid)` (`«include»` **UC-17 Deduct Wallet Points**).
+5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Character Button State**).
 
 **Extensions / Alternate Flows**
 - **4a. Already owned (`DB_EXISTS` → 200, no-op):** 
@@ -720,10 +904,10 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 **Main Success Scenario**
 1. Player selects **Themes tab** and a specific theme (e.g. Default, Design and AI, Do u wanna build a snowman, Haaland, John Cena, Claude-ing).
-2. System shows the theme's color scheme and character nickname/profile-picture details, and determines **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Theme Button State**).
+2. System shows the theme's color scheme and character nickname/profile-picture details, and determines **BUY** / **Set as Default** button state (`«include»` **UC-16a Determine Theme Button State**).
 3. Player presses **BUY**.
-4. Server calls `db_buy_theme(id, tid)` (`«include»` **UC-16**).
-5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Theme Button State**).
+4. Server calls `db_buy_theme(id, tid)` (`«include»` **UC-17 Deduct Wallet Points**).
+5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-16a Determine Theme Button State**).
 
 
 **Extensions / Alternate Flows**
@@ -830,7 +1014,7 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 **Extensions / Alternate Flows**
 - **3a. Character not owned (`DB_NOT_OWNED` → 403):**
-  - Rejected; Player must Buy (UC-14) first.
+  - Rejected; Player must Buy (UC-15) first.
 
 **Related Use Cases**
 - Reachable from Marketplace and Settings (same use case, two entry points).
@@ -865,34 +1049,6 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 ---
 
-### UC-19 — Set Default Theme
-
-| Field | Content |
-|---|---|
-| **ID** | UC-19 |
-| **Primary Actor** | Player |
-| **Goal** | Choose which owned theme is applied by default. |
-| **Preconditions** | Player owns the theme. |
-| **Postconditions (success)** | `current_equipped_theme` is updated and persisted; the board and UI adopt its color scheme at game start. |
-| **Trigger** | Player presses **Set as Default Theme** (Marketplace) or **Change Default Theme** (Settings). |
-| **DB Mapping** | `db_equip_theme(id, tid)` →<br>• `DB_OK`=`200 OK`<br>• `DB_NOT_OWNED`=`403 Forbidden` |
-
-**Main Success Scenario**
-1. Player selects an owned theme.
-2. Player presses **Set as Default Theme** / **Change Default Theme**.
-3. Server calls `db_equip_theme(id, tid)`
-   - on `DB_OK` the current theme is updated.
-4. System reflects the change in Settings (Current Theme) and loads it on the next game start.
-
-**Extensions / Alternate Flows**
-- **3a. Theme not owned (`DB_NOT_OWNED` → 403):**
-  - Rejected; Player must Buy (UC-15) first.
-
-**Related Use Cases**
-- Reachable from Marketplace and Settings.
-
----
-
 ## Profile, Settings & Leaderboard
 
 ### UC-20 — View Settings / Profile
@@ -920,11 +1076,11 @@ Every use case's wire request and the status codes it can return. Three transpor
     - Leaderboard Ranking.
 
 **Extensions / Alternate Flows**
-- **3a. Player presses Change Default Character:** → UC-17.
-- **3b. Player presses Change Default Theme:** → UC-18.
+- **3a. Player presses Change Default Character:** → UC-18.
+- **3b. Player presses Change Default Theme:** → UC-19.
 
 **Related Use Cases**
-- Leads to UC-17, UC-18.
+- Leads to UC-18, UC-19.
 
 ---
 
@@ -953,291 +1109,291 @@ Every use case's wire request and the status codes it can return. Three transpor
 
 ---
 
-## Administration — `tetrisctl` Control Plane
-
-**Transport**
-
-- Unix domain socket, path from `.tetrishrc` — local-only, not the public TCP game port.
-- Served by `tetrisd`'s dedicated `ctl_listener_thread`, separate from the public TCP accept loop, so admin control stays responsive even if the game port is flooded (e.g. `tetrisctl shutdown` still works under load).
-- Client is `tetrisctl`, a separate binary from the player-facing game client.
-- AuthZ is by filesystem permissions on the socket, not `Player-Id`/session-based.
-- Every admin action is timestamped and forwarded to `tetrislogd`.
-
-**Wire format**
-
-- Fixed to HTTTP — same protocol as the public game traffic, not a bespoke admin format.
-- Same `libhtttp` parses/serializes both `tetrisctl` requests and `tetrisd` responses.
-- Same HTTTP status code set, no separate admin-specific codes.
-
----
-
-### UC-22 — Query Server Status
-
-| Field | Content |
-|---|---|
-| **ID** | UC-22 |
-| **Primary Actor** | Administrator |
-| **Goal** | Retrieve a health/status snapshot of the running daemon. |
-| **Preconditions** | `tetrisd` is running; the control socket exists and the operator can reach it. |
-| **Postconditions (success)** | A status snapshot (uptime, room count, player/connection count, tick rate, health) is returned to the operator; the query is logged. No server state changes. |
-| **Trigger** | Operator runs `tetrisctl status`. |
-| **Request** | `STATUS /admin HTTTP/1.0` over the control socket (control IPC, local). |
-| **Return** | • `200 OK` + status body<br>• `500` internal error |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl status`.
-2. `tetrisctl` connects to the control socket and sends `STATUS /admin`.
-3. `ctl_listener_thread` gathers a snapshot (uptime, rooms, players/connections, tick rate) and replies `200 OK` with the body.
-4. `tetrisctl` prints the snapshot and exits; the action is logged.
-
-**Extensions / Alternate Flows**
-- **2a. Control socket missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach control plane" and exits non-zero (no `tetrisd` response).
-
-**Related Use Cases**
-- None.
-
-**Example**
-
-```
-GET /admin/status HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:14:02 GMT
-Content-Type: application/json
-Content-Length: 97
-
-{"uptime_s":8412,"rooms":3,"players":7,"tcp_listener":"up","logd":"connected","pid":4123}
-```
-
----
-
-### UC-23 — Graceful Shutdown
-
-| Field | Content |
-|---|---|
-| **ID** | UC-23 |
-| **Primary Actor** | Administrator |
-| **Goal** | Stop `tetrisd` cleanly without data loss, even under load. |
-| **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the control socket, and exits. |
-| **Trigger** | Operator runs `tetrisctl shutdown`. |
-| **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). |
-| **Return** | • `202 Accepted` (shutdown initiated) then the daemon exits<br>• `500` |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl shutdown` (works even while the public TCP port is flooded, because the control listener is a separate thread).
-2. `tetrisctl` sends `SHUTDOWN /admin`; `tetrisd` replies `202 Accepted`.
-3. `tetrisd` stops accepting new TCP connections and stops room tickers.
-4. In-flight rooms are ended/notified; pending log records are shipped to `tetrislogd`.
-5. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
-6. `tetrisd` frees resources, closes the control socket, and exits.
-
-**Extensions / Alternate Flows**
-- **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
-
-**Related Use Cases**
-- None.
-
-**Example**
-
-```
-SHUTDOWN /admin HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:15:44 GMT
-Content-Type: application/json
-Content-Length: 24
-
-{"shutting_down":true}
-```
-
----
-
-### UC-24 — Kick Player 
-
-| Field | Content |
-|---|---|
-| **ID** | UC-24  |
-| **Primary Actor** | Administrator |
-| **Goal** | Forcibly disconnect a player and update their room. |
-| **Preconditions** | `tetrisd` is running; target player is connected. |
-| **Postconditions (success)** | The player's session is closed, their slot in any room is freed (ownership transfers per UC-07 if they owned the room), the room update is broadcast, and the action is logged. |
-| **Trigger** | Operator runs `tetrisctl kick <player>`. |
-| **Request** | `KICK /admin/player/<pid> HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` (kicked)<br>• `404` no such connected player<br>• `400` bad argument |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl kick <player>`.
-2. `tetrisd` locates the player's session, closes it, frees their room slot, and (if they were Room Owner) transfers ownership to the next player in slot order and broadcasts the room update (reuses UC-07 alt-flow 3a).
-3. `tetrisd` replies `200 OK`; the action is logged.
-
-**Extensions / Alternate Flows**
-- **2a. Player not found / already gone (`404`):** No change; operator informed.
-
-**Related Use Cases**
-- Reuses UC-07 ownership-transfer/broadcast behaviour.
-
-**Example**
-
-```
-KICK /admin/player/p17 HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-Content-Type: application/tetris-command
-Content-Length: 19
-
-{"reason":"admin"}
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:17:02 GMT
-Content-Length: 0
-```
-
----
-
-### UC-25 — List Rooms 
-
-| Field | Content |
-|---|---|
-| **ID** | UC-25  |
-| **Primary Actor** | Administrator |
-| **Goal** | Get a live snapshot of all rooms on the running daemon. |
-| **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | The current room directory is returned (id, mode, players, state, owner); no state changes; the query is logged. |
-| **Trigger** | Operator runs `tetrisctl rooms`. |
-| **Request** | `ROOMS /admin HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` + room list<br>• `500` |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl rooms`.
-2. `tetrisd` reads its in-memory room directory (under the room-directory lock) — the same runtime data the lobby shows (UC-03), but retrieved via the control plane.
-3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
-
-**Extensions / Alternate Flows**
-- **2a. No open rooms:** `200 OK` with an empty list.
-
-**Related Use Cases**
-- Same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
-
-**Example**
-
-```
-GET /admin/rooms HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:16:10 GMT
-Content-Type: application/json
-Content-Length: 113
-
-{"rooms":[{"id":"main","players":4,"state":"RUNNING","tick":48124},{"id":"lobby2","players":1,"state":"WAITING"}]}
-```
-
----
-
-### UC-26 — List Players 
-
-| Field | Content |
-|---|---|
-| **ID** | UC-26  |
-| **Primary Actor** | Administrator |
-| **Goal** | List the currently connected players / sessions. |
-| **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | Connected players are returned (player id, username, current room, session/connection info); no state changes; the query is logged. |
-| **Trigger** | Operator runs `tetrisctl players`. |
-| **Request** | `PLAYERS /admin HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` + player list<br>• `500` |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl players`.
-2. `tetrisd` reads its connection/session table (under the appropriate lock) and assembles the connected-player list.
-3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
-
-**Extensions / Alternate Flows**
-- **2a. No one connected:** `200 OK` with an empty list.
-
-**Related Use Cases**
-- Provides the `<player>` targets for UC-24 Kick Player.
-
-**Example**
-
-```
-GET /admin/players HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:16:31 GMT
-Content-Type: application/json
-Content-Length: 104
-
-{"players":[{"id":"p17","user":"alice","room":"main","score":9100},{"id":"p18","user":"bob","room":"main"}]}
-```
-
----
-
-### UC-27 — Query Dropped Logs 
-
-| Field | Content |
-|---|---|
-| **ID** | UC-27  |
-| **Primary Actor** | Administrator |
-| **Secondary Actor** | Logger Daemon (`tetrislogd`) |
-| **Goal** | Read the dropped-records counter — how many log records were lost when the log IPC channel was saturated. |
-| **Preconditions** | `tetrisd` is running; `tetrislogd` is reachable over the log IPC channel. |
-| **Postconditions (success)** | The dropped-records count is returned to the operator; no state changes; the query is logged. |
-| **Trigger** | Operator runs `tetrisctl dropped-logs`. |
-| **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` + count<br>• `500` (logger unreachable) |
-
-**Main Success Scenario**
-1. Operator runs `tetrisctl dropped-logs`.
-2. `tetrisd` receives `DROPPED-LOGS /admin` and queries `tetrislogd` over the log IPC channel for its dropped-records counter (optionally adding `tetrisd`'s own local-side drop count if it buffers internally).
-3. `tetrislogd` returns the counter; `tetrisd` replies `200 OK` with the total.
-4. `tetrisctl` prints the count; the query is logged.
-
-**Extensions / Alternate Flows**
-- **2a. `tetrisd` tracks local drops only (logger query optional):** Return the local-side counter and label it as such.
-
-**Exceptions**
-- **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
-
-**Related Use Cases**
-- Targets `tetrislogd`, not tetrisd game state or the DB.
-
-**Example**
-
-```
-GET /admin/logs/dropped HTTTP/1.0
-Host: tetrish.local
-Client: tetrisctl
-```
-
-```
-HTTTP/1.0 200 OK
-Date: Tue, 21 Jul 2026 09:19:05 GMT
-Content-Type: application/json
-Content-Length: 44
-
-{"logd_dropped":152,"tetrisd_local_dropped":8}
-```
-
----
+  ## Administration — `tetrisctl` Control Plane
+
+  **Transport**
+
+  - Unix domain socket, path from `.tetrishrc` — local-only, not the public TCP game port.
+  - Served by `tetrisd`'s dedicated `ctl_listener_thread`, separate from the public TCP accept loop, so admin control stays responsive even if the game port is flooded (e.g. `tetrisctl shutdown` still works under load).
+  - Client is `tetrisctl`, a separate binary from the player-facing game client.
+  - AuthZ is by filesystem permissions on the socket, not `Player-Id`/session-based.
+  - Every admin action is timestamped and forwarded to `tetrislogd`.
+
+  **Wire format**
+
+  - Fixed to HTTTP — same protocol as the public game traffic, not a bespoke admin format.
+  - Same `libhtttp` parses/serializes both `tetrisctl` requests and `tetrisd` responses.
+  - Same HTTTP status code set, no separate admin-specific codes.
+
+  ---
+
+  ### UC-22 — Query Server Status
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-22 |
+  | **Primary Actor** | Administrator |
+  | **Goal** | Retrieve a health/status snapshot of the running daemon. |
+  | **Preconditions** | `tetrisd` is running; the control socket exists and the operator can reach it. |
+  | **Postconditions (success)** | A status snapshot (uptime, room count, player/connection count, tick rate, health) is returned to the operator; the query is logged. No server state changes. |
+  | **Trigger** | Operator runs `tetrisctl status`. |
+  | **Request** | `STATUS /admin HTTTP/1.0` over the control socket (control IPC, local). |
+  | **Return** | • `200 OK` + status body<br>• `500` internal error |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl status`.
+  2. `tetrisctl` connects to the control socket and sends `STATUS /admin`.
+  3. `ctl_listener_thread` gathers a snapshot (uptime, rooms, players/connections, tick rate) and replies `200 OK` with the body.
+  4. `tetrisctl` prints the snapshot and exits; the action is logged.
+
+  **Extensions / Alternate Flows**
+  - **2a. Control socket missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach control plane" and exits non-zero (no `tetrisd` response).
+
+  **Related Use Cases**
+  - None.
+
+  **Example**
+
+  ```
+  GET /admin/status HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:14:02 GMT
+  Content-Type: application/json
+  Content-Length: 97
+
+  {"uptime_s":8412,"rooms":3,"players":7,"tcp_listener":"up","logd":"connected","pid":4123}
+  ```
+
+  ---
+
+  ### UC-23 — Graceful Shutdown
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-23 |
+  | **Primary Actor** | Administrator |
+  | **Goal** | Stop `tetrisd` cleanly without data loss, even under load. |
+  | **Preconditions** | `tetrisd` is running. |
+  | **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the control socket, and exits. |
+  | **Trigger** | Operator runs `tetrisctl shutdown`. |
+  | **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). |
+  | **Return** | • `202 Accepted` (shutdown initiated) then the daemon exits<br>• `500` |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl shutdown` (works even while the public TCP port is flooded, because the control listener is a separate thread).
+  2. `tetrisctl` sends `SHUTDOWN /admin`; `tetrisd` replies `202 Accepted`.
+  3. `tetrisd` stops accepting new TCP connections and stops room tickers.
+  4. In-flight rooms are ended/notified; pending log records are shipped to `tetrislogd`.
+  5. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
+  6. `tetrisd` frees resources, closes the control socket, and exits.
+
+  **Extensions / Alternate Flows**
+  - **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
+
+  **Related Use Cases**
+  - None.
+
+  **Example**
+
+  ```
+  SHUTDOWN /admin HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:15:44 GMT
+  Content-Type: application/json
+  Content-Length: 24
+
+  {"shutting_down":true}
+  ```
+
+  ---
+
+  ### UC-24 — Kick Player 
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-24  |
+  | **Primary Actor** | Administrator |
+  | **Goal** | Forcibly disconnect a player and update their room. |
+  | **Preconditions** | `tetrisd` is running; target player is connected. |
+  | **Postconditions (success)** | The player's session is closed, their slot in any room is freed (ownership transfers per UC-07a if they owned the room), the room update is broadcast, and the action is logged. |
+  | **Trigger** | Operator runs `tetrisctl kick <player>`. |
+  | **Request** | `KICK /admin/player/<pid> HTTTP/1.0` over the control socket. |
+  | **Return** | • `200 OK` (kicked)<br>• `404` no such connected player<br>• `400` bad argument |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl kick <player>`.
+  2. `tetrisd` locates the player's session, closes it, frees their room slot, and (if they were Room Owner) transfers ownership and broadcasts the room update → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
+  3. `tetrisd` replies `200 OK`; the action is logged.
+
+  **Extensions / Alternate Flows**
+  - **2a. Player not found / already gone (`404`):** No change; operator informed.
+
+  **Related Use Cases**
+  - `«include»` UC-07a Transfer Room Ownership.
+
+  **Example**
+
+  ```
+  KICK /admin/player/p17 HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  Content-Type: application/tetris-command
+  Content-Length: 19
+
+  {"reason":"admin"}
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:17:02 GMT
+  Content-Length: 0
+  ```
+
+  ---
+
+  ### UC-25 — List Rooms 
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-25  |
+  | **Primary Actor** | Administrator |
+  | **Goal** | Get a live snapshot of all rooms on the running daemon. |
+  | **Preconditions** | `tetrisd` is running. |
+  | **Postconditions (success)** | The current room directory is returned (id, mode, players, state, owner); no state changes; the query is logged. |
+  | **Trigger** | Operator runs `tetrisctl rooms`. |
+  | **Request** | `ROOMS /admin HTTTP/1.0` over the control socket. |
+  | **Return** | • `200 OK` + room list<br>• `500` |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl rooms`.
+  2. `tetrisd` reads its in-memory room directory (under the room-directory lock) — the same runtime data the lobby shows (UC-03), but retrieved via the control plane.
+  3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
+
+  **Extensions / Alternate Flows**
+  - **2a. No open rooms:** `200 OK` with an empty list.
+
+  **Related Use Cases**
+  - Same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
+
+  **Example**
+
+  ```
+  GET /admin/rooms HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:16:10 GMT
+  Content-Type: application/json
+  Content-Length: 113
+
+  {"rooms":[{"id":"main","players":4,"state":"RUNNING","tick":48124},{"id":"lobby2","players":1,"state":"WAITING"}]}
+  ```
+
+  ---
+
+  ### UC-26 — List Players 
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-26  |
+  | **Primary Actor** | Administrator |
+  | **Goal** | List the currently connected players / sessions. |
+  | **Preconditions** | `tetrisd` is running. |
+  | **Postconditions (success)** | Connected players are returned (player id, username, current room, session/connection info); no state changes; the query is logged. |
+  | **Trigger** | Operator runs `tetrisctl players`. |
+  | **Request** | `PLAYERS /admin HTTTP/1.0` over the control socket. |
+  | **Return** | • `200 OK` + player list<br>• `500` |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl players`.
+  2. `tetrisd` reads its connection/session table (under the appropriate lock) and assembles the connected-player list.
+  3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
+
+  **Extensions / Alternate Flows**
+  - **2a. No one connected:** `200 OK` with an empty list.
+
+  **Related Use Cases**
+  - Provides the `<player>` targets for UC-24 Kick Player.
+
+  **Example**
+
+  ```
+  GET /admin/players HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:16:31 GMT
+  Content-Type: application/json
+  Content-Length: 104
+
+  {"players":[{"id":"p17","user":"alice","room":"main","score":9100},{"id":"p18","user":"bob","room":"main"}]}
+  ```
+
+  ---
+
+  ### UC-27 — Query Dropped Logs 
+
+  | Field | Content |
+  |---|---|
+  | **ID** | UC-27  |
+  | **Primary Actor** | Administrator |
+  | **Secondary Actor** | Logger Daemon (`tetrislogd`) |
+  | **Goal** | Read the dropped-records counter — how many log records were lost when the log IPC channel was saturated. |
+  | **Preconditions** | `tetrisd` is running; `tetrislogd` is reachable over the log IPC channel. |
+  | **Postconditions (success)** | The dropped-records count is returned to the operator; no state changes; the query is logged. |
+  | **Trigger** | Operator runs `tetrisctl dropped-logs`. |
+  | **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
+  | **Return** | • `200 OK` + count<br>• `500` (logger unreachable) |
+
+  **Main Success Scenario**
+  1. Operator runs `tetrisctl dropped-logs`.
+  2. `tetrisd` receives `DROPPED-LOGS /admin` and queries `tetrislogd` over the log IPC channel for its dropped-records counter (optionally adding `tetrisd`'s own local-side drop count if it buffers internally).
+  3. `tetrislogd` returns the counter; `tetrisd` replies `200 OK` with the total.
+  4. `tetrisctl` prints the count; the query is logged.
+
+  **Extensions / Alternate Flows**
+  - **2a. `tetrisd` tracks local drops only (logger query optional):** Return the local-side counter and label it as such.
+
+  **Exceptions**
+  - **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
+
+  **Related Use Cases**
+  - Targets `tetrislogd`, not tetrisd game state or the DB.
+
+  **Example**
+
+  ```
+  GET /admin/logs/dropped HTTTP/1.0
+  Host: tetrish.local
+  Client: tetrisctl
+  ```
+
+  ```
+  HTTTP/1.0 200 OK
+  Date: Tue, 21 Jul 2026 09:19:05 GMT
+  Content-Type: application/json
+  Content-Length: 44
+
+  {"logd_dropped":152,"tetrisd_local_dropped":8}
+  ```
+
+  ---
 
 ## Summary of Relationships
 
@@ -1246,7 +1402,9 @@ Content-Length: 44
 | UC-02 Log In | `«include»` | UC-02a Connect to Server |
 | UC-03 Browse Open Rooms | `«include»` | UC-03a Refresh Room List |
 | UC-04 Create Room | `«include»` | UC-04a Select Game Mode |
-| UC-08 Start Game | alternate actor path | UC-08b Attempt to Start as Non-Owner |
+| UC-07 Leave Room | `«include»` | UC-07a Transfer Room Ownership |
+| UC-11 / UC-12 (Owner quits mid-game) | `«include»` | UC-07a Transfer Room Ownership |
+| UC-08 Start Game | alternate actor path | UC-08a Attempt to Start as Non-Owner |
 | UC-10/11/12 Play Game | `«include»` | UC-13 Control Falling Piece |
 | UC-11/12 Play Multiplayer | `«extend»` | UC-14 Activate Gaiden Ability |
 | UC-15 Buy Character | `«include»` | UC-15a Determine Character Button State |
@@ -1254,7 +1412,7 @@ Content-Length: 44
 | UC-16 Buy Theme | `«include»` | UC-16a Determine Theme Button State |
 | UC-16 Buy Theme | `«include»` | UC-17 Deduct Wallet Points |
 | UC-20 View Settings | navigates to | UC-18 / UC-19 |
-| UC-24 Kick Player | reuses | UC-07 Leave Room (ownership-transfer/broadcast behaviour) |
+| UC-24 Kick Player | `«include»` | UC-07a Transfer Room Ownership |
 | UC-25 List Rooms | same underlying data as | UC-03 Browse Open Rooms (runtime, not DB) |
 | UC-26 List Players | provides targets for | UC-24 Kick Player |
 
@@ -1282,7 +1440,7 @@ Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTT
 
 | Status / result | Used for | Convention |
 |---|---|---|
-| `403 Forbidden` | Both authorization denials and insufficient funds: equip an unowned item (`DB_NOT_OWNED`), non-owner start (UC-08b), can't-afford a purchase (`DB_INSUFFICIENT`). | Return a distinct error **body/reason** (e.g. `"insufficient_points"` vs `"not_owned"`) so the client can tell "broke" from "not allowed" even though the status code is the same. |
+| `403 Forbidden` | Both authorization denials and insufficient funds: equip an unowned item (`DB_NOT_OWNED`), non-owner start (UC-08a), can't-afford a purchase (`DB_INSUFFICIENT`). | Return a distinct error **body/reason** (e.g. `"insufficient_points"` vs `"not_owned"`) so the client can tell "broke" from "not allowed" even though the status code is the same. |
 | `401 Unauthorized` | Login failure. | Return the **same** response for bad password and unknown user so the endpoint doesn't leak which usernames exist. |
 | `409 Conflict` | **Taken username** (`DB_EXISTS` from `db_signup`), **inventory full** (`DB_FULL` from `db_buy_*`), and runtime room-state conflicts (room full / IN-GAME). | — |
 | `DB_EXISTS` (maps two ways by context) | `409` from `db_signup` vs `200` from `db_buy_*`. | Username collision is a real conflict the caller must fix (`409`); already-owned is a harmless no-op — the desired end state already holds (`200`). Same result code, different HTTP status depending on the endpoint. |
