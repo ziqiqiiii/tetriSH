@@ -40,7 +40,7 @@
 # define TETRISU_BIN_PATH	"./bin/tetrisu"
 # endif
 
-# define SPLASH_ASSET_PATH	ASSET_DIR "/default_theme/default_homepage.png"
+# define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
 # define BUNNY_ASSET_PATH \
 	ASSET_DIR "/default_theme/default_bunny_ghost_pointer.png"
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
@@ -56,7 +56,7 @@
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
 # define MENU_SELECT_SFX_PATH	ASSET_DIR "/menu_select.wav"
-# define MENU_ITEM_COUNT	4
+# define MENU_ITEM_COUNT	5
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
@@ -76,15 +76,20 @@
 # define BACKGROUND_SOURCE_PIXELS_X	1448
 
 /* RENDER_MENU.C */
+# define MENU_PANEL_X_RATIO		0.425
+# define MENU_PANEL_Y_RATIO		0.700
+# define MENU_PANEL_WIDTH_RATIO	0.515
+# define MENU_PANEL_HEIGHT_RATIO	0.290
+# define MENU_LABEL_LEFT_X_RATIO	0.520
 # define MENU_FIRST_Y_RATIO		0.740
-# define MENU_STEP_Y_RATIO		0.066
-# define BUNNY_LABEL_X_RATIO		0.443
-# define BUNNY_TEXT_GAP_COLS		2
-# define BUNNY_ROWS_RATIO		0.070
+# define MENU_STEP_Y_RATIO		0.055
+# define BUNNY_LABEL_X_RATIO		0.505
+# define BUNNY_TEXT_GAP_COLS		1
+# define BUNNY_ROWS_RATIO		0.055
 # define BUNNY_SOURCE_PIXELS_Y	160
 # define BUNNY_SOURCE_PIXELS_X	150
-# define BUNNY_MIN_ROWS			4
-# define BUNNY_MAX_ROWS			9
+# define BUNNY_MIN_ROWS			3
+# define BUNNY_MAX_ROWS			7
 
 /* RENDER_SOLO.C */
 # define SOLO_CANVAS_WIDTH		512
@@ -206,6 +211,7 @@ typedef struct
 	struct ncplane		*std;
 	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
+	struct ncplane		*menu_labels_plane;
 	struct ncplane		*bunny_plane;
 	int					bg_row;
 	int					bg_col;
@@ -386,6 +392,7 @@ const char		*menu_stub_text(int selected_index);
 /* RENDER_BACKGROUND.C */
 render_ctx_t	render_init(const char *image_path);
 uint32_t		render_wait_key(render_ctx_t *ctx);
+uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
 void			render_teardown(render_ctx_t *ctx);
 int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
@@ -396,8 +403,11 @@ bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 /* RENDER_MENU.C */
 void			render_menu_create(render_ctx_t *ctx);
 void			render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m);
+bool			render_menu_hit_test(const render_ctx_t *ctx,
+					const ncinput *input, int *selected);
 void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
 void			render_menu_destroy(render_ctx_t *ctx);
+struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,

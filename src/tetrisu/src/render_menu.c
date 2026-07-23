@@ -16,8 +16,9 @@ static void	set_transparent_base(struct ncplane *plane);
 /**
  * @brief Creates the bunny selector plane on top of the background image.
  *
- * The menu labels live inside homepage.png. We only draw the selector, using
- * the rendered background geometry so its row spacing follows image scaling.
+ * Five exact labels are rasterized from the shared pixel-font mask over the
+ * clean homepage art. The selector uses the same background-relative geometry
+ * so both layers stay aligned while the terminal resizes.
  *
  * @param ctx Pointer to the initialized render context.
  */
@@ -37,6 +38,7 @@ void	render_menu_create(render_ctx_t *ctx)
 	ctx->menu_col = bunny_x(ctx);
 	y = bunny_y_for_selection(ctx, &initial);
 	x = bunny_x(ctx);
+	ctx->menu_labels_plane = render_menu_labels_create(ctx);
 	ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
 	if (ctx->bunny_plane != NULL)
 		ncplane_move_top(ctx->bunny_plane);
@@ -67,16 +69,7 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		return ;
 	y = bunny_y_for_selection(ctx, m);
 	x = bunny_x(ctx);
-	/* Sixel-class terminals cannot relocate a bitmap without leaving trails,
-	 * so the sprite is rebuilt at the new spot instead of moved. */
-	if (notcurses_canpixel(ctx->nc) && !render_pixel_planes_reliable(ctx))
-	{
-		ncplane_destroy(ctx->bunny_plane);
-		ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
-		if (ctx->bunny_plane != NULL)
-			ncplane_move_top(ctx->bunny_plane);
-	}
-	else if (ncplane_move_yx(ctx->bunny_plane, y, x) != 0)
+	if (ncplane_move_yx(ctx->bunny_plane, y, x) != 0)
 		return ;
 	if (notcurses_render(ctx->nc) != 0)
 	{
@@ -86,6 +79,52 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		if (ctx->bunny_plane != NULL)
 			(void)notcurses_render(ctx->nc);
 	}
+}
+
+/**
+ * @brief Maps a mouse position over the visible home list to a menu item.
+ *
+ * The hit area includes the bunny and the complete label row. Empty space
+ * outside the five rows does not change the keyboard selection.
+ *
+ * @param ctx Pointer to the active render context.
+ * @param input Full Notcurses mouse event containing terminal coordinates.
+ * @param selected Destination for the zero-based item index.
+ * @return true when the pointer is over one of the five menu rows.
+ */
+bool	render_menu_hit_test(const render_ctx_t *ctx, const ncinput *input,
+	int *selected)
+{
+	int	first_y;
+	int	last_y;
+	int	step_y;
+	int	half_step;
+	int	left_x;
+	int	right_x;
+	int	index;
+	int	center_y;
+
+	if (ctx == NULL || input == NULL || selected == NULL)
+		return (false);
+	step_y = menu_step_y(ctx);
+	half_step = clamp_int(step_y / 2, 1, step_y);
+	first_y = scale_from_bg(ctx->bg_row, ctx->bg_rows, MENU_FIRST_Y_RATIO);
+	last_y = first_y + ((MENU_ITEM_COUNT - 1) * step_y);
+	left_x = bunny_x(ctx);
+	right_x = scale_from_bg(ctx->bg_col, ctx->bg_cols,
+		MENU_PANEL_X_RATIO + MENU_PANEL_WIDTH_RATIO);
+	if (input->x < left_x || input->x > right_x
+		|| input->y < first_y - half_step
+		|| input->y > last_y + half_step)
+		return (false);
+	index = (input->y - first_y + half_step) / step_y;
+	index = clamp_int(index, 0, MENU_ITEM_COUNT - 1);
+	center_y = first_y + (index * step_y);
+	if (input->y < center_y - half_step
+		|| input->y > center_y + half_step)
+		return (false);
+	*selected = index;
+	return (true);
 }
 
 /**
@@ -143,6 +182,11 @@ void	render_menu_destroy(render_ctx_t *ctx)
 	{
 		ncplane_destroy(ctx->menu_plane);
 		ctx->menu_plane = NULL;
+	}
+	if (ctx->menu_labels_plane != NULL)
+	{
+		ncplane_destroy(ctx->menu_labels_plane);
+		ctx->menu_labels_plane = NULL;
 	}
 }
 
@@ -257,9 +301,11 @@ static int	menu_step_y(const render_ctx_t *ctx)
 /**
  * @brief Creates the highest-quality bunny selector supported by the terminal.
  *
- * AI-assisted: the homepage is a cell backdrop, so the selector can use one
- * non-overlapping pixel plane. A cell-blitted sprite and then a text fallback
- * keep the menu usable when the terminal rejects pixel graphics.
+ * The selector deliberately uses the 4x2 cell blitter even when Kitty/iTerm
+ * bitmap graphics are available. Moving a Kitty-protocol bitmap placement on
+ * every key repeat makes affected terminals retain image data indefinitely.
+ * The stationary menu labels remain pixel-rendered, while the only moving
+ * element stays memory-stable.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -271,39 +317,12 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual			*ncv;
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
-	int						target_pixels_y;
-	int						target_pixels_x;
 
 	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
 	if (ncv == NULL)
 		return (create_bunny_fallback(ctx, y, x));
 	plane = NULL;
-	target_pixels_y = ctx->bunny_rows * ctx->cell_px_y;
-	target_pixels_x = ctx->bunny_cols * ctx->cell_px_x;
-	if (notcurses_canpixel(ctx->nc)
-		&& ncvisual_resize_noninterpolative(ncv,
-			target_pixels_y, target_pixels_x) == 0)
-	{
-		memset(&vopts, 0, sizeof(vopts));
-		vopts.n = ctx->std;
-		vopts.scaling = NCSCALE_NONE;
-		vopts.y = y;
-		vopts.x = x;
-		vopts.blitter = NCBLIT_PIXEL;
-		vopts.flags = NCVISUAL_OPTION_CHILDPLANE
-			| NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
-		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
-	}
-	if (plane != NULL)
-	{
-		ncvisual_destroy(ncv);
-		return (plane);
-	}
-	ncvisual_destroy(ncv);
-	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
-	if (ncv == NULL)
-		return (create_bunny_fallback(ctx, y, x));
-	if (ncvisual_resize_noninterpolative(ncv, ctx->bunny_rows * 4,
+	if (ncvisual_resize(ncv, ctx->bunny_rows * 4,
 			ctx->bunny_cols * 2) == 0)
 	{
 		memset(&vopts, 0, sizeof(vopts));
@@ -317,7 +336,7 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
 	}
 	if (plane == NULL
-		&& ncvisual_resize_noninterpolative(ncv, ctx->bunny_rows * 2,
+		&& ncvisual_resize(ncv, ctx->bunny_rows * 2,
 			ctx->bunny_cols) == 0)
 	{
 		memset(&vopts, 0, sizeof(vopts));

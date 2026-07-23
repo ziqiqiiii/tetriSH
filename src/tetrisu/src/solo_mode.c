@@ -66,7 +66,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	render_solo_create(ctx, &solo);
 	render_solo_draw(ctx, &solo, &game);
 	mouse_enabled = notcurses_mice_enable(ctx->nc,
-		NCMICE_MOVE_EVENT | NCMICE_BUTTON_EVENT) == 0;
+		NCMICE_ALL_EVENTS) == 0;
 	previous_ms = monotonic_ms();
 	last_render_ms = previous_ms;
 	render_pending = false;

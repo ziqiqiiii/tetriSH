@@ -145,10 +145,12 @@ and graphics-protocol support at startup. It exits with
 | Any key | Dismiss the splash and enter the main menu |
 | `↑` / `↓` | Move the menu selection (wraps at the ends) |
 | `Enter` | Select the highlighted item |
+| Mouse hover | Highlight the menu item under the pointer |
+| Left click | Select the menu item under the pointer |
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
-| `Enter` on Solo Battle | Start local Endless Solo |
+| `Enter` on Single Player | Start local Endless Solo |
 | `←` / `→` | Move the active piece |
 | `↑` or `X` | Rotate clockwise |
 | `Z` | Rotate counter-clockwise |
@@ -163,7 +165,7 @@ and graphics-protocol support at startup. It exits with
 | `R` | Restart after top-out |
 | `Esc` or `Q` | Return from Solo to the home screen |
 
-Solo Battle opens the playable local mode. The other three menu items still
+Single Player opens the playable local mode. The other four menu items still
 print a `[<item>] not wired up yet` message.
 
 ---
@@ -172,10 +174,11 @@ print a `[<item>] not wired up yet` message.
 
 | Item | Status |
 |---|---|
-| `Solo Battle` | Playable local Endless mode; later migrated to `tetrisd` |
-| `Multiplayer Battle` | Stub — prints "not wired up yet" |
+| `Single Player` | Playable local Endless mode; can remain as offline play |
+| `Multiplayer` | Stub — prints "not wired up yet" |
 | `Marketplace` | Stub — prints "not wired up yet" |
-| `Options` | Stub — prints "not wired up yet" |
+| `Leaderboard` | Stub — prints "not wired up yet" |
+| `Settings` | Stub — prints "not wired up yet" |
 
 ---
 
@@ -186,7 +189,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 
 | Macro | Role |
 |---|---|
-| `SPLASH_ASSET_PATH` | Home-screen background image (labels are baked in) |
+| `SPLASH_ASSET_PATH` | Clean home-screen artwork; five exact labels are rasterized from the shared pixel font at runtime |
 | `BUNNY_ASSET_PATH` | Bunny selector sprite (PNG with alpha) |
 | `INTRO_VIDEO_PATH` | MP4 splash intro streamed over the background |
 | `INTRO_AUDIO_PATH` | MP3 played once alongside the intro |
@@ -224,7 +227,7 @@ render_menu_create         draw the bunny selector over the background
      ▼
   input loop               render_wait_key → dispatch:
      ├── ↑/↓   menu_move_selection + render_menu_move_bunny + move SFX
-     ├── Enter Solo Battle -> solo_mode_run -> return to menu
+     ├── Enter Single Player -> solo_mode_run -> return to menu
      ├── Enter other item -> menu_stub_text + render_menu_show_message
      ├── +/-   audio_volume_up / audio_volume_down
      └── q     APP_QUIT

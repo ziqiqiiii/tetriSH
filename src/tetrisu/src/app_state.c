@@ -49,10 +49,11 @@ const char	*menu_item_label(int index)
 {
 	static const char	*labels[MENU_ITEM_COUNT] =
 	{
-		"Solo Battle",
-		"Multiplayer Battle",
+		"Single Player",
+		"Multiplayer",
 		"Marketplace",
-		"Options",
+		"Leaderboard",
+		"Settings",
 	};
 
 	if (index < 0 || index >= MENU_ITEM_COUNT)

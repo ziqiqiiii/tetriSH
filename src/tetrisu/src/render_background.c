@@ -173,16 +173,15 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	ncvisual_destroy(ncv);
 	old_plane = ctx->bg_plane;
 	if (old_plane != NULL)
-		ncplane_move_top(new_plane);
+		(void)ncplane_move_above(new_plane, old_plane);
+	else
+		(void)ncplane_move_above(new_plane, ctx->std);
 	set_opaque_backdrop(ctx->std);
 	if (notcurses_render(ctx->nc) != 0)
 	{
 		ncplane_destroy(new_plane);
 		if (old_plane != NULL)
-		{
-			ncplane_move_top(old_plane);
 			(void)notcurses_render(ctx->nc);
-		}
 		return (-1);
 	}
 	ctx->bg_plane = new_plane;
@@ -200,17 +199,40 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
  */
 uint32_t	render_wait_key(render_ctx_t *ctx)
 {
-	ncinput	ni;
+	return (render_wait_input(ctx, NULL));
+}
+
+/**
+ * @brief Blocks until one non-release input event is available.
+ *
+ * Supplying the full event lets screens use mouse coordinates and, later,
+ * terminal protocols with distinct press/repeat/release states. Callers which
+ * only need a key id can continue using render_wait_key().
+ *
+ * @param ctx Pointer to the render context.
+ * @param input Optional destination for the complete Notcurses input event.
+ * @return The Unicode codepoint or NCKEY_* constant for the event, or
+ * (uint32_t)-1 on input error.
+ */
+uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
+{
+	ncinput		local;
+	ncinput		*event;
 	uint32_t	key;
 
+	event = input;
+	if (event == NULL)
+		event = &local;
 	while (1)
 	{
-		key = notcurses_get(ctx->nc, NULL, &ni);
+		memset(event, 0, sizeof(*event));
+		key = notcurses_get(ctx->nc, NULL, event);
 		if (key == (uint32_t)-1)
 			return (key);
-		/* Ignore key-up events: terminals/notcurses can report both press and
-		 * release for one arrow tap, and selection should move once per tap. */
-		if (ni.evtype != NCTYPE_RELEASE)
+		/* Ignore keyboard key-up events so one arrow tap moves once. Mouse
+		 * motion can legitimately arrive with release/no-button state and
+		 * must still reach the menu for hover selection. */
+		if (event->evtype != NCTYPE_RELEASE || nckey_mouse_p(key))
 			return (key);
 	}
 }
@@ -229,6 +251,7 @@ void	render_teardown(render_ctx_t *ctx)
 		ctx->std = NULL;
 		ctx->bg_plane = NULL;
 		ctx->menu_plane = NULL;
+		ctx->menu_labels_plane = NULL;
 		ctx->bunny_plane = NULL;
 	}
 }
@@ -318,7 +341,7 @@ static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
 	(void)rows;
 	(void)cols;
 	/* Decorative backdrops are intentionally cell-rendered. This leaves the
-	 * terminal's bitmap layer for crisp characters, pieces, text, and bunny. */
+	 * bitmap layer for stationary crisp characters, pieces, and text. */
 	return (NCBLIT_4x2);
 }
 
