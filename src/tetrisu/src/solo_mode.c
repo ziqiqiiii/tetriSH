@@ -438,5 +438,7 @@ static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
 		return (solo_game_apply_action(game, SOLO_SOFT_DROP));
 	else if (key == ' ')
 		return (solo_game_apply_action(game, SOLO_HARD_DROP));
+	else if (key == 'c' || key == 'C')
+		return (solo_game_apply_action(game, SOLO_HOLD));
 	return (false);
 }

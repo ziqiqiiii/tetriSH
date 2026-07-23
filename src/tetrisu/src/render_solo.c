@@ -35,7 +35,7 @@ _Static_assert(SOLO_CONTROLS_X % HUD_TILE_SIZE == 0
 static void	reset_render_signatures(solo_render_t *solo);
 static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
-static bool	composite_board_required(const render_ctx_t *ctx);
+static bool	board_pixels_safe(const render_ctx_t *ctx);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
 static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
@@ -141,13 +141,50 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 		return ;
 	}
 	solo->assets_ready = solo_canvas_load(solo);
-	solo->composite_board = composite_board_required(ctx);
-	solo->cell_board = solo->composite_board;
+	/* A pixel board looks like the authored tiles but re-transmits a bitmap
+	 * whenever the terminal cannot animate in place, and some terminals never
+	 * free the replaced image — memory then balloons to gigabytes. Measured:
+	 * Kitty (animates in place) and Ghostty (frees replaced frames) stay flat;
+	 * WezTerm and iTerm2 climb without bound. Safe terminals get the pixel
+	 * board; the rest fall back to true-colour cells. */
+	solo->cell_board = !board_pixels_safe(ctx);
+	solo->composite_board = true;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
 			"Terminal rejected the Solo foreground bitmap",
 			NULL);
+}
+
+/**
+ * @brief Reports whether a pixel board stays memory-bounded on this terminal.
+ *
+ * The board redraws constantly, so a pixel bitmap is safe only where the
+ * terminal either animates it in place (Kitty's animated / self-referential
+ * protocol) or frees each replaced static image. Measured behaviour: Kitty and
+ * Ghostty stay flat; WezTerm and iTerm2 retain every re-transmitted frame and
+ * climb to gigabytes. Sixel, framebuffer, and no-pixel terminals are not
+ * trusted for the moving board either. Everything unproven falls back to cells.
+ *
+ * @param ctx Active render context.
+ * @return true when the pixel board is memory-safe here, otherwise false.
+ */
+static bool	board_pixels_safe(const render_ctx_t *ctx)
+{
+	ncpixelimpl_e	backend;
+	char			*term;
+	bool			safe;
+
+	backend = notcurses_check_pixel_support(ctx->nc);
+	if (backend == NCPIXEL_KITTY_ANIMATED || backend == NCPIXEL_KITTY_SELFREF)
+		return (true);
+	if (backend != NCPIXEL_KITTY_STATIC)
+		return (false);
+	term = notcurses_detected_terminal(ctx->nc);
+	safe = (term != NULL && (strstr(term, "ghostty") != NULL
+				|| strstr(term, "Ghostty") != NULL));
+	free(term);
+	return (safe);
 }
 
 /**
@@ -255,8 +292,14 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
-	solo->composite_board = composite_board_required(ctx);
-	solo->cell_board = solo->composite_board;
+	/* A pixel board looks like the authored tiles but re-transmits a bitmap
+	 * whenever the terminal cannot animate in place, and some terminals never
+	 * free the replaced image — memory then balloons to gigabytes. Measured:
+	 * Kitty (animates in place) and Ghostty (frees replaced frames) stay flat;
+	 * WezTerm and iTerm2 climb without bound. Safe terminals get the pixel
+	 * board; the rest fall back to true-colour cells. */
+	solo->cell_board = !board_pixels_safe(ctx);
+	solo->composite_board = true;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
@@ -293,20 +336,6 @@ static void	reset_render_signatures(solo_render_t *solo)
 	solo->piece_planes_combined = false;
 }
 
-/**
- * @brief Selects the cell-composited path for unsafe movable-image backends.
- *
- * AI-assisted: terminals without reliable movable pixel planes use one
- * cell-composited board. Native Kitty/iTerm2/WezTerm backends retain the exact
- * authored tile sprites; the Solo loop bounds their presentation rate.
- *
- * @param ctx Active render context.
- * @return true when Solo should refresh one stationary board plane.
- */
-static bool	composite_board_required(const render_ctx_t *ctx)
-{
-	return (!render_pixel_planes_reliable(ctx));
-}
 
 /**
  * @brief Calculates an aspect-correct integer-grid Solo layout.
@@ -752,7 +781,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 }
 
 /**
- * @brief Hashes the three-piece preview queue.
+ * @brief Hashes HOLD state and the three-piece preview queue.
  *
  * The next panel changes only after a piece locks and the queue advances.
  *
@@ -765,6 +794,9 @@ static uint64_t	next_frame_signature(const solo_game_t *game)
 	int			index;
 
 	hash = UINT64_C(1469598103934665603);
+	hash = hash_value(hash, game->has_hold);
+	hash = hash_value(hash, (uint64_t)game->hold);
+	hash = hash_value(hash, game->hold_used);
 	index = 0;
 	while (index < SOLO_NEXT_COUNT)
 	{
@@ -974,16 +1006,16 @@ static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
 	ncplane_set_bg_alpha(solo->controls_plane, NCALPHA_TRANSPARENT);
 	ncplane_dim_yx(solo->controls_plane, &rows, &cols);
 	(void)rows;
-	text = "ARROWS MOVE | UP/X CW | Z CCW | SPACE DROP | 1-4 ABILITY | "
+	text = "ARROWS MOVE | X/Z ROTATE | SPACE DROP | C HOLD | 1-4 ABILITY | "
 		"P PAUSE | ESC HOME";
 	if (cols < strlen(text))
-		text = "ARROWS MOVE | X CW | SPACE DROP | 1-4 ABILITY | ESC HOME";
+		text = "ARROWS | X/Z ROTATE | SPACE DROP | C HOLD | 1-4 | ESC HOME";
 	if (cols < strlen(text))
-		text = "ARROWS MOVE | SPACE DROP | 1-4 ABILITY | ESC HOME";
+		text = "ARROWS | SPACE DROP | C HOLD | 1-4 | ESC HOME";
 	if (cols < strlen(text))
-		text = "ARROWS | X/Z ROT | SPACE | 1-4 | ESC";
+		text = "ARROWS | X/Z | SPACE | C HOLD | 1-4 | ESC";
 	if (cols < strlen(text))
-		text = "ARROWS X/Z SPACE 1-4 ESC";
+		text = "ARROWS X/Z SPACE C 1-4 ESC";
 	if (ncplane_putstr_aligned(solo->controls_plane, 0,
 			NCALIGN_CENTER, text) < 0)
 	{

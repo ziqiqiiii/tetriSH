@@ -4,6 +4,8 @@
 static void	test_init_has_active_and_three_previews(void);
 static void	test_ghost_and_hard_drop(void);
 static void	test_ghost_stops_above_stack(void);
+static void	test_first_hold_consumes_queue_once(void);
+static void	test_hold_rearms_after_lock(void);
 static void	test_locking_piece_in_top_row_reveals_before_game_over(void);
 static void	test_locking_piece_below_top_row_continues(void);
 static void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(
@@ -34,6 +36,8 @@ int	main(void)
 	test_init_has_active_and_three_previews();
 	test_ghost_and_hard_drop();
 	test_ghost_stops_above_stack();
+	test_first_hold_consumes_queue_once();
+	test_hold_rearms_after_lock();
 	test_locking_piece_in_top_row_reveals_before_game_over();
 	test_locking_piece_below_top_row_continues();
 	test_blocked_spawn_with_empty_top_row_reveals_before_game_over();
@@ -123,6 +127,62 @@ static void	test_ghost_stops_above_stack(void)
 	assert(ghost.row == BOARD_HEIGHT - 3);
 	assert(game.active.row == 0);
 	printf("PASS test_ghost_stops_above_stack\n");
+}
+
+/**
+ * @brief Exercises first HOLD consumes the preview head exactly once.
+ */
+static void	test_first_hold_consumes_queue_once(void)
+{
+	solo_game_t	game;
+	t_piece_type	initial;
+	t_piece_type	first_next;
+	t_piece_type	second_next;
+	t_piece		active_after_hold;
+
+	solo_game_init(&game, 470u);
+	initial = game.active.type;
+	first_next = game.next[0];
+	second_next = game.next[1];
+	assert(!game.has_hold && !game.hold_used);
+	assert(solo_game_apply_action(&game, SOLO_HOLD));
+	assert(game.has_hold && game.hold_used);
+	assert(game.hold == initial);
+	assert(game.active.type == first_next);
+	assert(game.next[0] == second_next);
+	active_after_hold = game.active;
+	assert(!solo_game_apply_action(&game, SOLO_HOLD));
+	assert(game.active.type == active_after_hold.type);
+	assert(game.active.rotation == active_after_hold.rotation);
+	assert(game.active.col == active_after_hold.col);
+	assert(game.active.row == active_after_hold.row);
+	assert(game.hold == initial && game.hold_used);
+	printf("PASS test_first_hold_consumes_queue_once\n");
+}
+
+/**
+ * @brief Exercises locking rearms HOLD and a swap uses canonical spawn state.
+ */
+static void	test_hold_rearms_after_lock(void)
+{
+	solo_game_t	game;
+	t_piece_type	first_held;
+	t_piece_type	outgoing;
+	t_piece		expected;
+
+	solo_game_init(&game, 471u);
+	first_held = game.active.type;
+	assert(solo_game_apply_action(&game, SOLO_HOLD));
+	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
+	assert(game.phase == SOLO_ACTIVE && !game.hold_used);
+	outgoing = game.active.type;
+	expected = piece_spawn(first_held);
+	assert(solo_game_apply_action(&game, SOLO_HOLD));
+	assert(game.hold == outgoing && game.hold_used);
+	assert(game.active.type == expected.type);
+	assert(game.active.rotation == expected.rotation);
+	assert(game.active.col == expected.col && game.active.row == expected.row);
+	printf("PASS test_hold_rearms_after_lock\n");
 }
 
 /**

@@ -6,11 +6,13 @@ static bool	apply_shift(solo_game_t *game, int direction);
 static bool	piece_is_grounded(const solo_game_t *game);
 static void	reset_lock_after_move(solo_game_t *game, bool was_grounded);
 static bool	apply_rotation(solo_game_t *game, int direction);
+static bool	apply_hold(solo_game_t *game);
 static void	lock_active_piece(solo_game_t *game);
 static bool	piece_touches_top(const t_piece *piece);
 static void	begin_top_out_reveal(solo_game_t *game);
 static void	remember_score_event(solo_game_t *game, int lines,
 	t_spin_type spin, bool perfect_clear);
+static void	activate_piece(solo_game_t *game, t_piece_type type);
 static void	spawn_queued_piece(solo_game_t *game);
 static bool	process_due_event(solo_game_t *game);
 static void	finish_line_clear(solo_game_t *game);
@@ -74,6 +76,8 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 		return (apply_rotation(game, 1));
 	if (action == SOLO_ROTATE_CCW)
 		return (apply_rotation(game, -1));
+	if (action == SOLO_HOLD)
+		return (apply_hold(game));
 	if (action == SOLO_SOFT_DROP)
 	{
 		if (piece_soft_drop(&game->board, &game->active) != BRAIN_OK)
@@ -384,6 +388,40 @@ static bool	apply_rotation(solo_game_t *game, int direction)
 }
 
 /**
+ * @brief Stores or swaps the active tetromino once per spawned piece.
+ *
+ * A held tetromino always returns at its canonical spawn rotation and
+ * position. The first hold consumes the preview head; later holds swap without
+ * advancing the queue.
+ *
+ * @param game Pointer to the Solo state.
+ * @return true when the hold changed state, otherwise false.
+ */
+static bool	apply_hold(solo_game_t *game)
+{
+	t_piece_type	outgoing;
+	t_piece_type	incoming;
+
+	if (game->hold_used)
+		return (false);
+	outgoing = game->active.type;
+	if (game->has_hold)
+	{
+		incoming = game->hold;
+		game->hold = outgoing;
+		activate_piece(game, incoming);
+	}
+	else
+	{
+		game->hold = outgoing;
+		game->has_hold = true;
+		spawn_queued_piece(game);
+	}
+	game->hold_used = true;
+	return (true);
+}
+
+/**
  * @brief Locks the active piece and chooses its next phase.
  *
  * T-spin classification happens before stamping; top-out, clear animation, and
@@ -400,6 +438,7 @@ static void	lock_active_piece(solo_game_t *game)
 		spin = piece_t_spin_type(&game->board, &game->active,
 			game->last_kick_index);
 	piece_stamp(&game->board, &game->active);
+	game->hold_used = false;
 	if (piece_touches_top(&game->active))
 	{
 		begin_top_out_reveal(game);
@@ -480,10 +519,31 @@ static void	remember_score_event(solo_game_t *game, int lines,
 }
 
 /**
+ * @brief Replaces the active tetromino with a canonical spawned piece.
+ *
+ * Movement bookkeeping is reset and a blocked spawn enters the same visible
+ * top-out reveal used after a normal lock.
+ *
+ * @param game Pointer to the Solo state.
+ * @param type Tetromino type to spawn.
+ */
+static void	activate_piece(solo_game_t *game, t_piece_type type)
+{
+	game->active = piece_spawn(type);
+	reset_piece_timers(game);
+	game->phase = SOLO_ACTIVE;
+	if (!piece_is_valid(&game->board, &game->active))
+	{
+		/* A blocked spawn keeps the final settled board visible too. */
+		begin_top_out_reveal(game);
+	}
+}
+
+/**
  * @brief Promotes the preview head and appends one bag piece.
  *
- * A blocked spawn enters the same visible top-out reveal used by a top-row
- *   lock.
+ * Queue advancement is shared by normal locks and the first HOLD. Hold
+ * availability is reset by locking, not here, so first HOLD remains consumed.
  *
  * @param game Pointer to the Solo state.
  */
@@ -500,14 +560,7 @@ static void	spawn_queued_piece(solo_game_t *game)
 		index++;
 	}
 	game->next[SOLO_NEXT_COUNT - 1] = piece_bag_next(&game->bag);
-	game->active = piece_spawn(type);
-	reset_piece_timers(game);
-	game->phase = SOLO_ACTIVE;
-	if (!piece_is_valid(&game->board, &game->active))
-	{
-		/* A blocked spawn keeps the final settled board visible too. */
-		begin_top_out_reveal(game);
-	}
+	activate_piece(game, type);
 }
 
 /**

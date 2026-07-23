@@ -100,6 +100,12 @@
 # define HUD_NEXT_Y				4
 # define HUD_NEXT_WIDTH			160
 # define HUD_NEXT_HEIGHT		36
+# define HUD_HOLD_X				24
+# define HUD_HOLD_Y				4
+# define HUD_HOLD_WIDTH			48
+# define HUD_HOLD_HEIGHT		35
+# define HOLD_PREVIEW_TILE_SIZE	10
+# define HOLD_USED_OPACITY		140
 # define HUD_BOARD_X				80
 # define HUD_BOARD_Y				48
 # define HUD_TILE_SIZE			16
@@ -152,9 +158,10 @@
 # define SOLO_RESIZE_POLL_MS		100
 # define SOLO_RENDER_INTERVAL_MS	33
 # define SOLO_INPUT_BATCH_MAX		64
-# define SOLO_NEXT_X				80
+/* The dynamic top strip spans one HOLD box and the three-piece NEXT box. */
+# define SOLO_NEXT_X				16
 # define SOLO_NEXT_Y				0
-# define SOLO_NEXT_WIDTH			160
+# define SOLO_NEXT_WIDTH			240
 # define SOLO_NEXT_HEIGHT		48
 # define SOLO_METER_X			32
 # define SOLO_METER_Y			32
@@ -278,7 +285,8 @@ typedef enum e_solo_action
 	SOLO_ROTATE_CW,
 	SOLO_ROTATE_CCW,
 	SOLO_SOFT_DROP,
-	SOLO_HARD_DROP
+	SOLO_HARD_DROP,
+	SOLO_HOLD
 }	solo_action_t;
 
 typedef enum e_solo_ability
@@ -304,6 +312,7 @@ typedef struct s_solo_game
 {
 	t_board			board;
 	t_piece			active;
+	t_piece_type	hold;
 	t_piece_type	next[SOLO_NEXT_COUNT];
 	t_piece_bag	bag;
 	t_score_state	scoring;
@@ -329,6 +338,8 @@ typedef struct s_solo_game
 	int				last_kick_index;
 	bool			last_action_was_rotation;
 	bool			last_perfect_clear;
+	bool			has_hold;
+	bool			hold_used;
 	bool			paused;
 }	solo_game_t;
 

@@ -33,7 +33,8 @@ static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend);
 static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game);
 static void	draw_preview_piece(uint32_t *canvas,
-	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_width);
+	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_y,
+	int slot_width, int slot_height, unsigned opacity, int forced_tile);
 static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
 	int tile_index, int x, int y, int size, unsigned opacity, bool outline_only);
 static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
@@ -201,6 +202,8 @@ bool	solo_canvas_load(solo_render_t *solo)
 		 * competing with falling pieces and tiny HUD glyphs. */
 		draw_rect(solo->static_pixels, HUD_NEXT_X, HUD_NEXT_Y,
 			HUD_NEXT_WIDTH, HUD_NEXT_HEIGHT, make_pixel(g_panel, 248));
+		draw_rect(solo->static_pixels, HUD_HOLD_X, HUD_HOLD_Y,
+			HUD_HOLD_WIDTH, HUD_HOLD_HEIGHT, make_pixel(g_panel, 248));
 		draw_rect(solo->static_pixels, HUD_METER_X, HUD_METER_Y,
 			HUD_METER_WIDTH, HUD_METER_HEIGHT, make_pixel(g_panel, 255));
 		draw_rect(solo->static_pixels, HUD_MIRURUN_X, HUD_MIRURUN_Y,
@@ -811,9 +814,12 @@ static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend)
 }
 
 /**
- * @brief Draws the three queued tetromino previews.
+ * @brief Draws the HOLD preview and the three queued NEXT previews.
  *
- * The authored next panel is divided into equal slots without a hold area.
+ * HOLD sits in the authored top-left frame with fixed-size tiles and dims to
+ * 55% once consumed for the current piece. NEXT keeps its three equal slots in
+ * the authored panel to its right. The authored frame is never redrawn here;
+ * only the piece interiors are painted.
  *
  * @param canvas Pointer to the destination RGBA canvas.
  * @param solo Pointer to the Solo render state.
@@ -824,34 +830,44 @@ static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
 {
 	int	index;
 	int	slot_x;
-	int	next_slot_x;
+	int	slot_width;
 
+	if (game->has_hold)
+		draw_preview_piece(canvas, solo, game->hold, HUD_HOLD_X, HUD_HOLD_Y,
+			HUD_HOLD_WIDTH, HUD_HOLD_HEIGHT,
+			game->hold_used ? HOLD_USED_OPACITY : 255u, HOLD_PREVIEW_TILE_SIZE);
+	slot_width = HUD_NEXT_WIDTH / SOLO_NEXT_COUNT;
 	index = 0;
 	while (index < SOLO_NEXT_COUNT)
 	{
-		slot_x = HUD_NEXT_X + index * HUD_NEXT_WIDTH / SOLO_NEXT_COUNT;
-		next_slot_x = HUD_NEXT_X
-			+ (index + 1) * HUD_NEXT_WIDTH / SOLO_NEXT_COUNT;
+		slot_x = HUD_NEXT_X + index * slot_width;
 		draw_preview_piece(canvas, solo, game->next[index], slot_x,
-			next_slot_x - slot_x);
+			HUD_NEXT_Y, slot_width, HUD_NEXT_HEIGHT, 255u, 0);
 		index++;
 	}
 }
 
 /**
- * @brief Centers one spawned tetromino in a next-queue slot.
+ * @brief Centers one spawned tetromino in a HOLD or NEXT slot.
  *
- * Full-size tiles are preferred; only shapes that exceed the slot use the
- *   smaller preview scale.
+ * With forced_tile set (HOLD), every shape uses that exact tile size for a
+ * consistent preview. Otherwise (NEXT) full-size atlas tiles are preferred and
+ * only shapes that exceed the slot drop to the smaller preview scale. Either
+ * way the result is clamped to fit the slot.
  *
  * @param canvas Pointer to the destination RGBA canvas.
  * @param solo Pointer to the Solo render state.
  * @param type Tetromino type to map.
  * @param slot_x Left edge of the preview slot.
+ * @param slot_y Top edge of the preview slot.
  * @param slot_width Preview-slot width in pixels.
+ * @param slot_height Preview-slot height in pixels.
+ * @param opacity Alpha multiplier for available or consumed HOLD state.
+ * @param forced_tile Fixed tile size in pixels, or 0 to auto-fit.
  */
 static void	draw_preview_piece(uint32_t *canvas,
-	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_width)
+	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_y,
+	int slot_width, int slot_height, unsigned opacity, int forced_tile)
 {
 	t_piece	piece;
 	int		cols[4];
@@ -864,6 +880,8 @@ static void	draw_preview_piece(uint32_t *canvas,
 	int		origin_y;
 	int		index;
 	int		tile_size;
+	int		piece_width;
+	int		piece_height;
 
 	piece = piece_spawn(type);
 	if (!piece_cells(&piece, cols, rows))
@@ -885,23 +903,34 @@ static void	draw_preview_piece(uint32_t *canvas,
 			max_row = rows[index];
 		index++;
 	}
-	/* Full-size tiles copy the atlas 1:1 and stay crisp; only pieces too
-	 * wide for their slot (the I piece) drop to the squeezed preview size. */
-	tile_size = TILE_SOURCE_SIZE;
-	if ((max_col - min_col + 1) * tile_size > slot_width
-		|| (max_row - min_row + 1) * tile_size > HUD_NEXT_HEIGHT)
-		tile_size = PREVIEW_TILE_SIZE;
+	piece_width = max_col - min_col + 1;
+	piece_height = max_row - min_row + 1;
+	/* HOLD forces one size; NEXT prefers crisp atlas pixels, then shrinks. */
+	if (forced_tile > 0)
+		tile_size = forced_tile;
+	else
+	{
+		tile_size = TILE_SOURCE_SIZE;
+		if (piece_width * tile_size > slot_width
+			|| piece_height * tile_size > slot_height)
+			tile_size = PREVIEW_TILE_SIZE;
+	}
+	if (piece_width * tile_size > slot_width)
+		tile_size = slot_width / piece_width;
+	if (piece_height * tile_size > slot_height)
+		tile_size = slot_height / piece_height;
+	if (tile_size < 1)
+		return ;
 	origin_x = slot_x + (slot_width
-		- (max_col - min_col + 1) * tile_size) / 2;
-	origin_y = HUD_NEXT_Y + (HUD_NEXT_HEIGHT
-		- (max_row - min_row + 1) * tile_size) / 2;
+		- piece_width * tile_size) / 2;
+	origin_y = slot_y + (slot_height - piece_height * tile_size) / 2;
 	index = 0;
 	while (index < 4)
 	{
 		draw_tile(canvas, solo, solo_canvas_piece_tile(type),
 			origin_x + (cols[index] - min_col) * tile_size,
 			origin_y + (rows[index] - min_row) * tile_size,
-			tile_size, 255, false);
+			tile_size, opacity, false);
 		index++;
 	}
 }

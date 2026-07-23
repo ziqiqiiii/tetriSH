@@ -156,6 +156,7 @@ and graphics-protocol support at startup. It exits with
 | `Z` | Rotate counter-clockwise |
 | `↓` | Soft drop; 1 point per descended cell |
 | `Space` | Hard drop and lock; 2 points per descended cell |
+| `C` | Hold or swap the active piece once before it locks |
 | `1` | Mirurun (2 charge): remove the bottom four settled rows |
 | `2` | Inversion (4 charge): visual-only Solo test activation |
 | `3` | Pentaris (6 charge): visual-only Solo test activation |
