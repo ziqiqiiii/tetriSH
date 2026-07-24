@@ -35,7 +35,6 @@ _Static_assert(SOLO_CONTROLS_X % HUD_TILE_SIZE == 0
 static void	reset_render_signatures(solo_render_t *solo);
 static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
-static bool	board_pixels_safe(const render_ctx_t *ctx);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
 static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
@@ -141,50 +140,18 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 		return ;
 	}
 	solo->assets_ready = solo_canvas_load(solo);
-	/* A pixel board looks like the authored tiles but re-transmits a bitmap
-	 * whenever the terminal cannot animate in place, and some terminals never
-	 * free the replaced image — memory then balloons to gigabytes. Measured:
-	 * Kitty (animates in place) and Ghostty (frees replaced frames) stay flat;
-	 * WezTerm and iTerm2 climb without bound. Safe terminals get the pixel
-	 * board; the rest fall back to true-colour cells. */
-	solo->cell_board = !board_pixels_safe(ctx);
-	solo->composite_board = true;
+	/* Leak-safe terminals keep the authored pixel tiles and render the board
+	 * from small per-piece planes: only the moving piece is (re)transmitted, so
+	 * it stays snappy even where the terminal cannot animate a bitmap in place
+	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
+	 * true-colour cell board, which carries no bitmaps to retain. */
+	solo->cell_board = !render_pixels_leak_safe(ctx);
+	solo->composite_board = solo->cell_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
 			"Terminal rejected the Solo foreground bitmap",
 			NULL);
-}
-
-/**
- * @brief Reports whether a pixel board stays memory-bounded on this terminal.
- *
- * The board redraws constantly, so a pixel bitmap is safe only where the
- * terminal either animates it in place (Kitty's animated / self-referential
- * protocol) or frees each replaced static image. Measured behaviour: Kitty and
- * Ghostty stay flat; WezTerm and iTerm2 retain every re-transmitted frame and
- * climb to gigabytes. Sixel, framebuffer, and no-pixel terminals are not
- * trusted for the moving board either. Everything unproven falls back to cells.
- *
- * @param ctx Active render context.
- * @return true when the pixel board is memory-safe here, otherwise false.
- */
-static bool	board_pixels_safe(const render_ctx_t *ctx)
-{
-	ncpixelimpl_e	backend;
-	char			*term;
-	bool			safe;
-
-	backend = notcurses_check_pixel_support(ctx->nc);
-	if (backend == NCPIXEL_KITTY_ANIMATED || backend == NCPIXEL_KITTY_SELFREF)
-		return (true);
-	if (backend != NCPIXEL_KITTY_STATIC)
-		return (false);
-	term = notcurses_detected_terminal(ctx->nc);
-	safe = (term != NULL && (strstr(term, "ghostty") != NULL
-				|| strstr(term, "Ghostty") != NULL));
-	free(term);
-	return (safe);
 }
 
 /**
@@ -292,14 +259,13 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 			NULL);
 		return ;
 	}
-	/* A pixel board looks like the authored tiles but re-transmits a bitmap
-	 * whenever the terminal cannot animate in place, and some terminals never
-	 * free the replaced image — memory then balloons to gigabytes. Measured:
-	 * Kitty (animates in place) and Ghostty (frees replaced frames) stay flat;
-	 * WezTerm and iTerm2 climb without bound. Safe terminals get the pixel
-	 * board; the rest fall back to true-colour cells. */
-	solo->cell_board = !board_pixels_safe(ctx);
-	solo->composite_board = true;
+	/* Leak-safe terminals keep the authored pixel tiles and render the board
+	 * from small per-piece planes: only the moving piece is (re)transmitted, so
+	 * it stays snappy even where the terminal cannot animate a bitmap in place
+	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
+	 * true-colour cell board, which carries no bitmaps to retain. */
+	solo->cell_board = !render_pixels_leak_safe(ctx);
+	solo->composite_board = solo->cell_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,

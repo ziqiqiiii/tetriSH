@@ -410,6 +410,7 @@ int				render_background_replace(render_ctx_t *ctx,
 void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
+bool				render_pixels_leak_safe(const render_ctx_t *ctx);
 
 /* RENDER_MENU.C */
 void			render_menu_create(render_ctx_t *ctx);

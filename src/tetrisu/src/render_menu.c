@@ -9,6 +9,7 @@ static int	bunny_y_for_selection(const render_ctx_t *ctx,
 	const menu_selection_t *m);
 static int	menu_step_y(const render_ctx_t *ctx);
 static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x);
+static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x);
 static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
 	int y, int x);
 static void	set_transparent_base(struct ncplane *plane);
@@ -299,13 +300,53 @@ static int	menu_step_y(const render_ctx_t *ctx)
 }
 
 /**
+ * @brief Blits the bunny as a crisp pixel sprite, scaled to its cell box.
+ *
+ * Used only where render_pixels_leak_safe() confirms the terminal will not
+ * retain the placement when the selector moves on key repeat. The source is
+ * resized to the selector's cell box in pixels using the terminal's cell
+ * geometry, so it reads as smoothly as the authored HUD art.
+ *
+ * @param ctx Pointer to the render context.
+ * @param y Target terminal row.
+ * @param x Target terminal column.
+ * @return Owned selector plane, or NULL when the pixel blit is unavailable.
+ */
+static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
+{
+	struct ncvisual			*ncv;
+	struct ncvisual_options	vopts;
+	struct ncplane			*plane;
+
+	if (ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0)
+		return (NULL);
+	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
+	if (ncv == NULL)
+		return (NULL);
+	plane = NULL;
+	if (ncvisual_resize(ncv, ctx->bunny_rows * ctx->cell_px_y,
+			ctx->bunny_cols * ctx->cell_px_x) == 0)
+	{
+		memset(&vopts, 0, sizeof(vopts));
+		vopts.n = ctx->std;
+		vopts.scaling = NCSCALE_NONE;
+		vopts.y = y;
+		vopts.x = x;
+		vopts.blitter = NCBLIT_PIXEL;
+		vopts.flags = NCVISUAL_OPTION_CHILDPLANE;
+		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
+	}
+	ncvisual_destroy(ncv);
+	return (plane);
+}
+
+/**
  * @brief Creates the highest-quality bunny selector supported by the terminal.
  *
- * The selector deliberately uses the 4x2 cell blitter even when Kitty/iTerm
- * bitmap graphics are available. Moving a Kitty-protocol bitmap placement on
- * every key repeat makes affected terminals retain image data indefinitely.
- * The stationary menu labels remain pixel-rendered, while the only moving
- * element stays memory-stable.
+ * Leak-safe pixel terminals (Kitty, Ghostty) get a crisp pixel sprite. Where a
+ * moving bitmap would be retained indefinitely (WezTerm, iTerm2) or bitmaps are
+ * unavailable, the selector falls back to the densest cell blitter so the only
+ * moving element stays memory-stable.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -318,6 +359,12 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
 
+	if (render_pixels_leak_safe(ctx))
+	{
+		plane = create_bunny_pixel(ctx, y, x);
+		if (plane != NULL)
+			return (plane);
+	}
 	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
 	if (ncv == NULL)
 		return (create_bunny_fallback(ctx, y, x));

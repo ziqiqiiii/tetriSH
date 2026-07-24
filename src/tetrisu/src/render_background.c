@@ -75,6 +75,38 @@ bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
 }
 
 /**
+ * @brief Reports whether repeatedly (re)transmitted bitmaps stay bounded here.
+ *
+ * A moving or frequently redrawn pixel plane is only memory-safe where the
+ * terminal either animates the bitmap in place (Kitty's animated /
+ * self-referential protocol) or frees each replaced/old image. Measured: Kitty
+ * and Ghostty stay flat; WezTerm and iTerm2 retain every frame and climb to
+ * gigabytes despite reporting the same static-Kitty backend. The enum cannot
+ * tell those apart, so static backends are gated by a name allowlist of
+ * terminals verified to free their images.
+ *
+ * @param ctx Active render context.
+ * @return true when pixel graphics may move/redraw without leaking here.
+ */
+bool	render_pixels_leak_safe(const render_ctx_t *ctx)
+{
+	ncpixelimpl_e	backend;
+	char			*term;
+	bool			safe;
+
+	backend = notcurses_check_pixel_support(ctx->nc);
+	if (backend == NCPIXEL_KITTY_ANIMATED || backend == NCPIXEL_KITTY_SELFREF)
+		return (true);
+	if (backend != NCPIXEL_KITTY_STATIC)
+		return (false);
+	term = notcurses_detected_terminal(ctx->nc);
+	safe = (term != NULL && (strstr(term, "ghostty") != NULL
+				|| strstr(term, "Ghostty") != NULL));
+	free(term);
+	return (safe);
+}
+
+/**
  * @brief Refreshes terminal and background geometry.
  *
  * @param ctx Context whose dimensions are updated.
