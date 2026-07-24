@@ -90,18 +90,12 @@ bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
  */
 bool	render_pixels_leak_safe(const render_ctx_t *ctx)
 {
-	ncpixelimpl_e	backend;
-	char			*term;
-	bool			safe;
+	char	*term;
+	bool	safe;
 
-	backend = notcurses_check_pixel_support(ctx->nc);
-	if (backend == NCPIXEL_KITTY_ANIMATED || backend == NCPIXEL_KITTY_SELFREF)
-		return (true);
-	if (backend != NCPIXEL_KITTY_STATIC)
-		return (false);
 	term = notcurses_detected_terminal(ctx->nc);
-	safe = (term != NULL && (strstr(term, "ghostty") != NULL
-				|| strstr(term, "Ghostty") != NULL));
+	safe = tetrisu_pixel_backend_leak_safe(
+			notcurses_check_pixel_support(ctx->nc), term);
 	free(term);
 	return (safe);
 }

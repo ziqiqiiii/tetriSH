@@ -109,7 +109,7 @@
 # define HUD_BOARD_X				80
 # define HUD_BOARD_Y				48
 # define HUD_TILE_SIZE			16
-# define HUD_METER_X				48
+# define HUD_METER_X				40
 # define HUD_METER_Y				42
 # define HUD_METER_WIDTH			16
 # define HUD_METER_HEIGHT		320
@@ -411,6 +411,8 @@ void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 bool				render_pixels_leak_safe(const render_ctx_t *ctx);
+bool				tetrisu_pixel_backend_leak_safe(ncpixelimpl_e backend,
+					const char *term);
 
 /* RENDER_MENU.C */
 void			render_menu_create(render_ctx_t *ctx);

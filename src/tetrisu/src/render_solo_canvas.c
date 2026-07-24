@@ -53,6 +53,7 @@ static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
 static int	text_width(const char *text, int glyph_width, int spacing);
+static void	draw_solo_controls(uint32_t *canvas, const solo_render_t *solo);
 static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
@@ -222,13 +223,16 @@ bool	solo_canvas_load(solo_render_t *solo)
 		blit_asset_scaled(solo->static_pixels, SOLO_CANVAS_WIDTH,
 			SOLO_CANVAS_HEIGHT, &mirurun, HUD_MIRURUN_X, HUD_MIRURUN_Y,
 			HUD_MIRURUN_SIZE, HUD_MIRURUN_SIZE, 255);
+		solo->font_pixels = font.pixels;
+		solo->font_width = font.width;
+		font.pixels = NULL;
+		/* The static legend is baked into the background at the small HUD font
+		 * so it no longer towers over the board in the terminal cell font. */
+		draw_solo_controls(solo->static_pixels, solo);
 		memcpy(solo->frame_pixels, solo->static_pixels, canvas_bytes);
 		solo->tile_pixels = tiles.pixels;
 		solo->tile_width = tiles.width;
 		tiles.pixels = NULL;
-		solo->font_pixels = font.pixels;
-		solo->font_width = font.width;
-		font.pixels = NULL;
 		solo->number_pixels = numbers.pixels;
 		solo->number_width = numbers.width;
 		numbers.pixels = NULL;
@@ -1304,6 +1308,38 @@ static int	text_width(const char *text, int glyph_width, int spacing)
 }
 
 /**
+ * @brief Draws the control legend in the frame's bottom strip, pixel-font.
+ *
+ * Rendered at the small HUD glyph size so it matches the score text instead of
+ * the oversized terminal cell font the strip used before. Narrower widths drop
+ * to shorter variants; the legend is static, so it is composed once.
+ *
+ * @param canvas Pointer to the destination RGBA canvas.
+ * @param solo Pointer to the Solo render state (supplies the font mask).
+ */
+static void	draw_solo_controls(uint32_t *canvas, const solo_render_t *solo)
+{
+	const char	*text;
+	int			center_x;
+	int			available;
+
+	center_x = (HUD_ART_CONTROLS_LEFT + HUD_ART_CONTROLS_RIGHT) / 2;
+	available = HUD_ART_CONTROLS_RIGHT - HUD_ART_CONTROLS_LEFT - 6;
+	text = "ARROWS  X/Z ROTATE  SPACE DROP  C HOLD";
+	if (text_width(text, 6, 1) > available)
+		text = "ARROWS  X/Z ROT  SPACE  C HOLD";
+	if (text_width(text, 6, 1) > available)
+		text = "ARROWS X/Z SPACE C";
+	/* Dark backing inside the frame's strip so the legend reads over scenery. */
+	draw_rect(canvas, HUD_ART_CONTROLS_LEFT + 2, HUD_ART_CONTROLS_TOP + 2,
+		HUD_ART_CONTROLS_RIGHT - HUD_ART_CONTROLS_LEFT - 4,
+		HUD_ART_CONTROLS_BOTTOM - HUD_ART_CONTROLS_TOP - 4,
+		make_pixel(g_playfield, 245));
+	draw_text_centered(canvas, solo, text, center_x,
+		HUD_ART_CONTROLS_TOP + 5, 6, 8, 1, g_white);
+}
+
+/**
  * @brief Draws legible masked text with a one-pixel shadow.
  *
  * A dark translucent pass precedes the opaque tinted foreground pass.
@@ -1768,9 +1804,12 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 		title = "PAUSED";
 		help = "P RESUME";
 	}
-	draw_text_centered(canvas, solo, title, x + 64, y + 12,
+	draw_text_centered(canvas, solo, title, x + 64, y + 8,
 		16, 16, 1, g_pink);
-	draw_text_centered(canvas, solo, help, x + 64, y + 39,
+	draw_text_centered(canvas, solo, help, x + 64, y + 32,
+		8, 8, 1, g_white);
+	/* Home lives here, not in the gameplay legend (roadmap item 4). */
+	draw_text_centered(canvas, solo, "ESC HOME", x + 64, y + 46,
 		8, 8, 1, g_white);
 }
 

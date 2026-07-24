@@ -1,8 +1,5 @@
 #include "tetrisu.h"
 
-// Static Variables
-static const color_t	g_white = {250, 245, 250};
-
 _Static_assert(HUD_BOARD_X % HUD_TILE_SIZE == 0
 	&& HUD_BOARD_Y % HUD_TILE_SIZE == 0
 	&& SOLO_NEXT_X % HUD_TILE_SIZE == 0
@@ -63,7 +60,6 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height, const char *region_name);
-static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo);
 static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
 static bool	update_composite_board(render_ctx_t *ctx,
@@ -733,16 +729,6 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 		solo->score_event_signature = event_signature;
 		changed = 1;
 	}
-	if (solo->controls_plane == NULL)
-	{
-		if (!create_controls_plane(ctx, solo))
-		{
-			solo_canvas_set_error(solo,
-				"Solo controls do not fit this terminal width", NULL);
-			return (-1);
-		}
-		changed = 1;
-	}
 	return (changed);
 }
 
@@ -941,57 +927,6 @@ static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	return (false);
 }
 
-/**
- * @brief Creates the compact terminal-font controls strip.
- *
- * Controls are cell text rather than a scaled mask so they remain readable at
- *   every supported size.
- *
- * @param ctx Pointer to the active render context.
- * @param solo Pointer to the Solo render state.
- * @return true on success, otherwise false.
- */
-static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
-{
-	const char	*text;
-	unsigned	rows;
-	unsigned	cols;
-	int			x;
-	int			width;
-
-	x = solo->canvas_col
-		+ SOLO_CONTROLS_X / HUD_TILE_SIZE * solo->tile_cols;
-	width = SOLO_CONTROLS_WIDTH / HUD_TILE_SIZE * solo->tile_cols;
-	solo->controls_plane = create_plane(ctx,
-		solo->canvas_row + solo->canvas_rows - 1, x, 1, width);
-	if (solo->controls_plane == NULL)
-		return (false);
-	set_transparent_base(solo->controls_plane);
-	ncplane_set_fg_rgb8(solo->controls_plane,
-		g_white.r, g_white.g, g_white.b);
-	ncplane_set_bg_alpha(solo->controls_plane, NCALPHA_TRANSPARENT);
-	ncplane_dim_yx(solo->controls_plane, &rows, &cols);
-	(void)rows;
-	text = "ARROWS MOVE | X/Z ROTATE | SPACE DROP | C HOLD | 1-4 ABILITY | "
-		"P PAUSE | ESC HOME";
-	if (cols < strlen(text))
-		text = "ARROWS | X/Z ROTATE | SPACE DROP | C HOLD | 1-4 | ESC HOME";
-	if (cols < strlen(text))
-		text = "ARROWS | SPACE DROP | C HOLD | 1-4 | ESC HOME";
-	if (cols < strlen(text))
-		text = "ARROWS | X/Z | SPACE | C HOLD | 1-4 | ESC";
-	if (cols < strlen(text))
-		text = "ARROWS X/Z SPACE C 1-4 ESC";
-	if (ncplane_putstr_aligned(solo->controls_plane, 0,
-			NCALIGN_CENTER, text) < 0)
-	{
-		ncplane_destroy(solo->controls_plane);
-		solo->controls_plane = NULL;
-		return (false);
-	}
-	ncplane_move_top(solo->controls_plane);
-	return (true);
-}
 
 /**
  * @brief Refreshes the capability-specific board representation.
@@ -1071,6 +1006,10 @@ static bool	update_composite_board(render_ctx_t *ctx, solo_render_t *solo,
 	int	source_x_end;
 	int	source_y_start;
 	int	source_y_end;
+	int	quad_left;
+	int	quad_right;
+	int	quad_top;
+	int	quad_bottom;
 
 	y = solo->canvas_row + HUD_BOARD_Y / HUD_TILE_SIZE * solo->tile_rows;
 	x = solo->canvas_col + HUD_BOARD_X / HUD_TILE_SIZE * solo->tile_cols;
@@ -1103,19 +1042,24 @@ static bool	update_composite_board(render_ctx_t *ctx, solo_render_t *solo,
 		{
 			source_y_start = y * SOLO_BOARD_HEIGHT / rows;
 			source_y_end = (y + 1) * SOLO_BOARD_HEIGHT / rows;
+			quad_top = source_y_start + (source_y_end - source_y_start) / 4;
+			quad_bottom = source_y_start
+				+ (source_y_end - source_y_start) * 3 / 4;
 			x = 0;
 			while (x < cols)
 			{
 				source_x_start = x * SOLO_BOARD_WIDTH / cols;
 				source_x_end = (x + 1) * SOLO_BOARD_WIDTH / cols;
-				samples[0] = sample_board_pixel(solo,
-					source_x_start, source_y_start);
-				samples[1] = sample_board_pixel(solo,
-					source_x_end - 1, source_y_start);
-				samples[2] = sample_board_pixel(solo,
-					source_x_start, source_y_end - 1);
-				samples[3] = sample_board_pixel(solo,
-					source_x_end - 1, source_y_end - 1);
+				quad_left = source_x_start
+					+ (source_x_end - source_x_start) / 4;
+				quad_right = source_x_start
+					+ (source_x_end - source_x_start) * 3 / 4;
+				/* Sample quadrant interiors, not corners: corners land on the
+				 * dark tile borders and washed every block to near-black. */
+				samples[0] = sample_board_pixel(solo, quad_left, quad_top);
+				samples[1] = sample_board_pixel(solo, quad_right, quad_top);
+				samples[2] = sample_board_pixel(solo, quad_left, quad_bottom);
+				samples[3] = sample_board_pixel(solo, quad_right, quad_bottom);
 				if (!put_quadrant_cell(solo->board_overlay_plane,
 						y, x, samples))
 					return (false);
