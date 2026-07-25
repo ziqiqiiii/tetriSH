@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phase 1 is complete. Phase 2 items 5 and 6 are complete; item 7 remains
-partially implemented.
+Phases 1 and 2 are complete. Phase 3 begins with the global notification
+overlay in item 8.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -29,8 +29,9 @@ partially implemented.
 - Responsive rendering now uses 23 artwork rows plus one control row, allowing
   the larger 160 x 70 Solo layout in a 210 x 71 Kitty terminal. Home and Solo
   also poll tty geometry so Ghostty reflows without waiting for a key press.
-- Item 7 already has a reliable cell-board path, but still needs the forced
-  renderer setting and complete no-image screen coverage.
+- Item 7 adds an attractive no-bitmap compatibility presentation across Home
+  and Solo, selects it automatically on unsafe terminals, and exposes
+  `TETRISU_RENDERER=cell` for deterministic testing or user preference.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -84,13 +85,19 @@ partially implemented.
    - Preserve the two-frame animation by splitting each duration at midpoint.
    - Keep the current Tetris Worlds gravity curve through 20G at level 19.
 
-7. **Complete the forced cell-renderer fallback** — in progress
+7. **Complete the forced cell-renderer fallback** — complete
 
-   - Add `TETRISU_RENDERER=auto|cell`.
-   - Verify home, selector, HOLD/NEXT, board, overlays, and text without
-     Kitty/iTerm bitmap support.
-   - Missing image support must reduce decoration, never hide information or
-     controls.
+   - `TETRISU_RENDERER=auto|cell` defaults to automatic capability selection;
+     invalid values safely behave like `auto`.
+   - Compatibility mode uses a clear top badge, terminal-font menu pills, a
+     cell selector, 4 x 2 HOLD/NEXT/HUD surfaces, and a true-colour
+     quadrant-cell board through active play and game over.
+   - At the exact minimum height, the mode label moves into the one-row control
+     legend so the authored game area remains unobscured.
+   - Home, Solo, movement, resize, and the 64 x 24 compact layout were checked
+     in a real Kitty terminal with the cell renderer forced.
+   - Missing or unsafe image support reduces decoration without hiding
+     information or controls.
 
 ## Phase 3 — feedback, sound, and danger mode
 

@@ -43,6 +43,7 @@ void	render_menu_create(render_ctx_t *ctx)
 	ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
 	if (ctx->bunny_plane != NULL)
 		ncplane_move_top(ctx->bunny_plane);
+	render_compatibility_badge_refresh(ctx);
 	if (notcurses_render(ctx->nc) != 0 && ctx->bunny_plane != NULL)
 	{
 		ncplane_destroy(ctx->bunny_plane);
@@ -50,6 +51,7 @@ void	render_menu_create(render_ctx_t *ctx)
 		if (ctx->bunny_plane != NULL)
 		{
 			ncplane_move_top(ctx->bunny_plane);
+			render_compatibility_badge_refresh(ctx);
 			(void)notcurses_render(ctx->nc);
 		}
 	}
@@ -359,7 +361,7 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
 
-	if (render_pixels_leak_safe(ctx))
+	if (!render_compatibility_mode(ctx) && render_pixels_leak_safe(ctx))
 	{
 		plane = create_bunny_pixel(ctx, y, x);
 		if (plane != NULL)

@@ -36,6 +36,8 @@ render_ctx_t	render_init(const char *image_path)
 		exit(1);
 	}
 	ctx.std = notcurses_stdplane(ctx.nc);
+	ctx.cell_mode = tetrisu_renderer_forced_cell()
+		|| !render_pixels_leak_safe(&ctx);
 	if (render_geometry_refresh(&ctx, false) < 0)
 	{
 		notcurses_stop(ctx.nc);
@@ -98,6 +100,84 @@ bool	render_pixels_leak_safe(const render_ctx_t *ctx)
 			notcurses_check_pixel_support(ctx->nc), term);
 	free(term);
 	return (safe);
+}
+
+/**
+ * @brief Reports whether this session uses the terminal-native renderer.
+ *
+ * Automatic mode selects cells when movable bitmap updates are unavailable or
+ * unsafe; TETRISU_RENDERER=cell makes the same polished path deterministic.
+ *
+ * @param ctx Active render context.
+ * @return true when all changing UI surfaces must remain terminal cells.
+ */
+bool	render_compatibility_mode(const render_ctx_t *ctx)
+{
+	return (ctx != NULL && ctx->cell_mode);
+}
+
+/**
+ * @brief Shows the compact terminal-native mode badge at the top of the grid.
+ *
+ * The badge is intentionally opaque and high-contrast so users understand why
+ * the presentation differs from bitmap-capable screenshots.
+ *
+ * @param ctx Active render context.
+ */
+void	render_compatibility_badge_refresh(render_ctx_t *ctx)
+{
+	ncplane_options	opts;
+	const char		*text;
+	uint64_t		channels;
+	unsigned		rows;
+	unsigned		cols;
+	int				width;
+
+	render_compatibility_badge_hide(ctx);
+	if (!render_compatibility_mode(ctx) || ctx->std == NULL)
+		return ;
+	ncplane_dim_yx(ctx->std, &rows, &cols);
+	if (rows == 0 || cols < 12)
+		return ;
+	text = COMPATIBILITY_BADGE_TEXT;
+	if (cols < strlen(text) + 4)
+		text = COMPATIBILITY_BADGE_SHORT;
+	width = (int)strlen(text) + 4;
+	if (width > (int)cols)
+		width = (int)cols;
+	memset(&opts, 0, sizeof(opts));
+	opts.y = 0;
+	opts.x = ((int)cols - width) / 2;
+	opts.rows = 1;
+	opts.cols = width;
+	ctx->compatibility_plane = ncplane_create(ctx->std, &opts);
+	if (ctx->compatibility_plane == NULL)
+		return ;
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 203, 102);
+	(void)ncchannels_set_bg_rgb8(&channels, 28, 13, 39);
+	(void)ncplane_set_base(ctx->compatibility_plane, " ", 0, channels);
+	ncplane_erase(ctx->compatibility_plane);
+	(void)ncplane_set_fg_rgb8(ctx->compatibility_plane, 255, 203, 102);
+	(void)ncplane_set_bg_rgb8(ctx->compatibility_plane, 28, 13, 39);
+	(void)ncplane_on_styles(ctx->compatibility_plane, NCSTYLE_BOLD);
+	(void)ncplane_putstr_aligned(ctx->compatibility_plane, 0,
+		NCALIGN_CENTER, text);
+	ncplane_move_top(ctx->compatibility_plane);
+}
+
+/**
+ * @brief Removes the compatibility badge when a screen has no spare top row.
+ *
+ * @param ctx Active render context.
+ */
+void	render_compatibility_badge_hide(render_ctx_t *ctx)
+{
+	if (ctx != NULL && ctx->compatibility_plane != NULL)
+	{
+		ncplane_destroy(ctx->compatibility_plane);
+		ctx->compatibility_plane = NULL;
+	}
 }
 
 /**
@@ -325,6 +405,7 @@ void	render_teardown(render_ctx_t *ctx)
 {
 	if (ctx->nc != NULL)
 	{
+		render_compatibility_badge_hide(ctx);
 		notcurses_stop(ctx->nc);
 		ctx->nc = NULL;
 		ctx->std = NULL;
@@ -332,6 +413,7 @@ void	render_teardown(render_ctx_t *ctx)
 		ctx->menu_plane = NULL;
 		ctx->menu_labels_plane = NULL;
 		ctx->bunny_plane = NULL;
+		ctx->cell_mode = false;
 	}
 }
 

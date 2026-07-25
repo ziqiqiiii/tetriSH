@@ -54,7 +54,8 @@ struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
 	pixel_asset_t	font;
 	struct ncplane	*plane;
 
-	if (!notcurses_canpixel(ctx->nc) || !load_font_mask(&font))
+	if (render_compatibility_mode(ctx) || !notcurses_canpixel(ctx->nc)
+		|| !load_font_mask(&font))
 		return (create_text_fallback(ctx));
 	plane = blit_menu_pixels(ctx, &font);
 	font_mask_destroy(&font);
@@ -321,6 +322,7 @@ static struct ncplane	*create_text_fallback(render_ctx_t *ctx)
 	int				left;
 	int				index;
 	int				row;
+	char			label[48];
 
 	memset(&opts, 0, sizeof(opts));
 	opts.y = ctx->bg_row
@@ -348,7 +350,13 @@ static struct ncplane	*create_text_fallback(render_ctx_t *ctx)
 			(int)opts.rows - 1);
 		ncplane_set_fg_rgb8(plane, g_menu_colors[index].r,
 			g_menu_colors[index].g, g_menu_colors[index].b);
-		(void)ncplane_putstr_yx(plane, row, left, menu_item_label(index));
+		(void)ncplane_set_bg_rgb8(plane, 18, 5, 24);
+		(void)ncplane_set_bg_alpha(plane, NCALPHA_BLEND);
+		(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+		snprintf(label, sizeof(label), "  %s  ", menu_item_label(index));
+		(void)ncplane_putstr_yx(plane, row, left, label);
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+		(void)ncplane_set_bg_alpha(plane, NCALPHA_TRANSPARENT);
 		index++;
 	}
 	return (plane);

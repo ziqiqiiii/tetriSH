@@ -31,6 +31,8 @@ _Static_assert(SOLO_CONTENT_HEIGHT % HUD_TILE_SIZE == 0
 // Static Functions
 static void	reset_render_signatures(solo_render_t *solo);
 static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
+static void	update_solo_compatibility_badge(render_ctx_t *ctx,
+	solo_render_t *solo);
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
@@ -129,26 +131,21 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 	memset(solo, 0, sizeof(*solo));
 	reset_render_signatures(solo);
 	calculate_solo_layout(ctx, solo);
-	if (!notcurses_canpixel(ctx->nc))
-	{
-		solo_canvas_set_error(solo,
-			"Solo requires Kitty, Sixel, or another pixel-graphics terminal",
-			NULL);
-		return ;
-	}
+	update_solo_compatibility_badge(ctx, solo);
 	solo->assets_ready = solo_canvas_load(solo);
 	/* Leak-safe terminals keep the authored pixel tiles and render the board
 	 * from small per-piece planes: only the moving piece is (re)transmitted, so
 	 * it stays snappy even where the terminal cannot animate a bitmap in place
 	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
 	 * true-colour cell board, which carries no bitmaps to retain. */
-	solo->cell_board = !render_pixels_leak_safe(ctx);
+	solo->cell_board = render_compatibility_mode(ctx);
 	solo->composite_board = solo->cell_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
-			"Terminal rejected the Solo foreground bitmap",
+			"Terminal rejected the Solo foreground surface",
 			NULL);
+	update_solo_compatibility_badge(ctx, solo);
 }
 
 /**
@@ -171,13 +168,19 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 	{
 		if (draw_status_message(ctx, solo,
 				"Game paused - resize the terminal to at least 64 x 24"))
+		{
+			render_compatibility_badge_refresh(ctx);
 			(void)notcurses_render(ctx->nc);
+		}
 		return ;
 	}
 	if (!solo->assets_ready || !solo->planes_ready)
 	{
 		if (draw_status_message(ctx, solo, solo->asset_error))
+		{
+			render_compatibility_badge_refresh(ctx);
 			(void)notcurses_render(ctx->nc);
+		}
 		return ;
 	}
 	changed = 0;
@@ -191,13 +194,15 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 	{
 		if (result == -2 && solo->asset_error[0] == '\0')
 			solo_canvas_set_error(solo,
-				"Notcurses rejected a Solo HUD image", NULL);
+				"Notcurses rejected a Solo HUD surface", NULL);
 		else if (result != -2)
 			solo_canvas_set_error(solo,
 				"Notcurses rejected the Solo board cells", NULL);
 		goto render_failure;
 	}
 	changed |= result;
+	if (ctx->compatibility_plane != NULL)
+		ncplane_move_top(ctx->compatibility_plane);
 	if (changed > 0 && notcurses_render(ctx->nc) != 0)
 	{
 		solo_canvas_set_error(solo,
@@ -209,7 +214,10 @@ render_failure:
 	destroy_solo_planes(solo);
 	set_standard_backdrop(ctx);
 	if (draw_status_message(ctx, solo, solo->asset_error))
+	{
+		render_compatibility_badge_refresh(ctx);
 		(void)notcurses_render(ctx->nc);
+	}
 }
 
 /**
@@ -249,25 +257,20 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 		return ;
 	}
 	calculate_solo_layout(ctx, solo);
-	if (!notcurses_canpixel(ctx->nc))
-	{
-		solo_canvas_set_error(solo,
-			"Solo requires Kitty, Sixel, or another pixel-graphics terminal",
-			NULL);
-		return ;
-	}
+	update_solo_compatibility_badge(ctx, solo);
 	/* Leak-safe terminals keep the authored pixel tiles and render the board
 	 * from small per-piece planes: only the moving piece is (re)transmitted, so
 	 * it stays snappy even where the terminal cannot animate a bitmap in place
 	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
 	 * true-colour cell board, which carries no bitmaps to retain. */
-	solo->cell_board = !render_pixels_leak_safe(ctx);
+	solo->cell_board = render_compatibility_mode(ctx);
 	solo->composite_board = solo->cell_board;
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
-			"Terminal rejected the Solo foreground bitmap",
+			"Terminal rejected the Solo foreground surface",
 			NULL);
+	update_solo_compatibility_badge(ctx, solo);
 }
 
 /**
@@ -333,7 +336,8 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
 	max_bitmap_x = 0;
 	ncplane_pixel_geom(ctx->std, NULL, NULL, NULL, NULL,
 		&max_bitmap_y, &max_bitmap_x);
-	pixel_capable = notcurses_canpixel(ctx->nc);
+	pixel_capable = notcurses_canpixel(ctx->nc)
+		&& !render_compatibility_mode(ctx);
 	solo->tile_cols = 0;
 	solo->tile_rows = 0;
 	best_cols = 0;
@@ -396,6 +400,25 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
 		return ;
 	solo->canvas_col = ((int)std_cols - solo->canvas_cols) / 2;
 	solo->canvas_row = ((int)std_rows - solo->canvas_rows) / 2;
+	if (render_compatibility_mode(ctx) && solo->canvas_row == 0
+		&& (int)std_rows > solo->canvas_rows)
+		solo->canvas_row = 1;
+}
+
+/**
+ * @brief Keeps the mode badge visible without hiding minimum-size Solo HUD.
+ *
+ * Exact-height layouts reuse the terminal control row for the mode label;
+ * larger layouts keep one spare row above the authored content.
+ */
+static void	update_solo_compatibility_badge(render_ctx_t *ctx,
+	solo_render_t *solo)
+{
+	if (render_compatibility_mode(ctx) && solo->layout_valid
+		&& solo->canvas_row == 0)
+		render_compatibility_badge_hide(ctx);
+	else
+		render_compatibility_badge_refresh(ctx);
 }
 
 /**
@@ -482,6 +505,8 @@ static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
 	uint64_t	channels;
 
 	legend = "ARROWS MOVE  X/Z ROTATE  SPACE DROP  C HOLD";
+	if (render_compatibility_mode(ctx) && solo->canvas_row == 0)
+		legend = "CELL MODE | ARROWS | X/Z | SPACE | C";
 	solo->controls_plane = create_plane(ctx,
 		solo->canvas_row + solo->content_rows, solo->canvas_col,
 		SOLO_TERMINAL_CONTROLS_ROWS, solo->canvas_cols);
@@ -898,7 +923,7 @@ static uint64_t	score_event_signature(const solo_render_t *solo,
  * @brief Replaces one aligned high-resolution foreground region.
  *
  * Regions are mapped from the 512x384 canvas to terminal cells and blitted as
- *   independent pixel planes.
+ * independent bitmap or 4x2 cell planes according to the active renderer.
  *
  * @param ctx Pointer to the active render context.
  * @param solo Pointer to the Solo render state.
@@ -919,6 +944,7 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	int				x;
 	int				rows;
 	int				cols;
+	ncblitter_e		blitter;
 
 	if (source_x < 0 || source_y < 0 || source_width <= 0 || source_height <= 0
 		|| source_x + source_width > SOLO_CANVAS_WIDTH
@@ -941,8 +967,11 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	}
 	pixels = &solo->frame_pixels[(size_t)source_y * SOLO_CANVAS_WIDTH
 		+ source_x];
+	blitter = NCBLIT_PIXEL;
+	if (solo->cell_board)
+		blitter = NCBLIT_4x2;
 	if (!blit_surface(ctx, *plane, pixels, source_width, source_height,
-			SOLO_CANVAS_WIDTH, NCBLIT_PIXEL))
+			SOLO_CANVAS_WIDTH, blitter))
 	{
 		if (created)
 			destroy_plane(plane);
@@ -953,7 +982,7 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 }
 
 /**
- * @brief Refreshes a named HUD bitmap and records actionable fallback text.
+ * @brief Refreshes a named HUD surface and records actionable fallback text.
  *
  * Keeping the failed region name lets users distinguish an asset-size/backend
  * limit from a board or terminal-presentation failure.
@@ -967,8 +996,8 @@ static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	if (update_pixel_region(ctx, solo, plane, source_x, source_y,
 			source_width, source_height))
 		return (true);
-	snprintf(message, sizeof(message),
-		"Notcurses rejected the Solo %s image", region_name);
+	snprintf(message, sizeof(message), "Notcurses rejected the Solo %s %s",
+		region_name, solo->cell_board ? "cells" : "image");
 	solo_canvas_set_error(solo, message, NULL);
 	return (false);
 }
@@ -1002,9 +1031,9 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 			return (0);
 		destroy_board_tiles(solo);
 		solo_canvas_compose_board(solo, game);
-		/* AI-assisted: fallback terminals keep active frames in cells, but
-		 * spend one pixel image on the final board once animation stops. */
-		use_cells = solo->cell_board && game->phase != SOLO_GAME_OVER;
+		/* Compatibility rendering stays in cells for every phase, including
+		 * game over, so forcing the renderer never emits a bitmap. */
+		use_cells = solo->cell_board;
 		if (!update_composite_board(ctx, solo, use_cells))
 			return (-1);
 		solo->overlay_signature = signature;
@@ -1033,8 +1062,8 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
  *
  * AI-assisted: true-colour quadrant glyphs encode four samples per terminal
  * cell. Reusing this plane lets Notcurses diff rotations down to changed cells
- * on pixel backends that cannot move image planes reliably. The final board
- * uses one pixel blit because it no longer animates.
+ * on terminals that cannot safely move image planes. Compatibility mode keeps
+ * the same cell representation through game over.
  *
  * @param ctx Active render context.
  * @param solo Solo renderer with a freshly composed board pixel buffer.

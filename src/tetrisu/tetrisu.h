@@ -78,6 +78,8 @@
 # define BACKGROUND_SOURCE_PIXELS_Y	1086
 # define BACKGROUND_SOURCE_PIXELS_X	1448
 # define RENDER_RESIZE_POLL_MS	100
+# define COMPATIBILITY_BADGE_TEXT	":: COMPATIBILITY MODE ::"
+# define COMPATIBILITY_BADGE_SHORT	":: CELL MODE ::"
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
@@ -201,6 +203,12 @@ typedef enum
 	APP_QUIT,
 }	app_state_t;
 
+typedef enum e_tetrisu_renderer_mode
+{
+	TETRISU_RENDERER_AUTO,
+	TETRISU_RENDERER_CELL
+}	tetrisu_renderer_mode_t;
+
 typedef struct
 {
 	int	selected;
@@ -226,6 +234,7 @@ typedef struct
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*bunny_plane;
+	struct ncplane		*compatibility_plane;
 	int					bg_row;
 	int					bg_col;
 	int					bg_rows;
@@ -235,7 +244,8 @@ typedef struct
 	int					menu_row;
 	int					menu_col;
 	int					bunny_rows;
-	int				bunny_cols;
+	int					bunny_cols;
+	bool				cell_mode;
 }	render_ctx_t;
 
 typedef struct s_intro_stream
@@ -439,8 +449,15 @@ int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 bool				render_pixels_leak_safe(const render_ctx_t *ctx);
+bool				render_compatibility_mode(const render_ctx_t *ctx);
+void				render_compatibility_badge_refresh(render_ctx_t *ctx);
+void				render_compatibility_badge_hide(render_ctx_t *ctx);
 bool				tetrisu_pixel_backend_leak_safe(ncpixelimpl_e backend,
 					const char *term);
+
+/* RENDERER_POLICY.C */
+tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value);
+bool				tetrisu_renderer_forced_cell(void);
 
 /* SOLO_LAYOUT.C */
 int				solo_layout_content_rows(int tile_rows);

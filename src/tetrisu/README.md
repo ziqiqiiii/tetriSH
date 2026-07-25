@@ -42,9 +42,12 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Transparent image HUD with exact `#2E222F` authored borders, 16 x 16
   tetromino sprites, custom text/number masks, and centered Mirurun art
 - Low-resolution scenery plus independently refreshed high-resolution HUD
-  planes; native Kitty/iTerm2/WezTerm backends use atomic pixel-piece planes
-  with the exact authored tile sprites, while backends without reliable image
-  movement use a true-colour quadrant-cell fallback
+  planes; bitmap-safe backends use atomic pixel-piece planes with the exact
+  authored tile sprites, while unsafe or unsupported backends use a
+  true-colour quadrant-cell fallback
+- Attractive compatibility mode for terminals without safe bitmap rendering:
+  a visible mode badge, terminal-font menu labels, cell selector, 4 x 2
+  HOLD/NEXT/HUD art, and a true-colour cell board with no hidden controls
 - Bounded input batches and a 30 FPS presentation ceiling coalesce rapid
   movement and rotation without delaying gameplay state or flooding the PTY
 - Terminal-aware press/release handling with immediate taps, 167 ms DAS,
@@ -136,6 +139,18 @@ Or build and run in one step:
 ```bash
 make run
 ```
+
+Renderer selection defaults to `auto`: terminals with safe bitmap support keep
+the authored high-resolution presentation, while unsupported or unsafe
+terminals enter the cell-based compatibility presentation automatically. Force
+that presentation anywhere for testing or preference with:
+
+```bash
+TETRISU_RENDERER=cell make run
+```
+
+The accepted values are `auto` and `cell`. Missing, empty, or unrecognised
+values behave like `auto`.
 
 `tetrisu` requires a real terminal: notcurses queries palette, pixel geometry,
 and graphics-protocol support at startup. It exits with
@@ -246,6 +261,7 @@ Modules (each a `.c` under `src/`):
 | `main.c` | Entry point; wires render + audio and runs the input loop |
 | `app_state.c` | Handle pure menu state, selection, and labels |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
+| `renderer_policy.c` | renderer environment parsing and forced compatibility policy |
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
@@ -268,6 +284,7 @@ tetrisu/
 │   ├── main.c                 Entry point + input loop → bin/tetrisu
 │   ├── app_state.c            Pure menu/state logic → logic.a (unit-tested)
 │   ├── render_background.c    notcurses init, background, input, teardown
+│   ├── renderer_policy.c      Renderer environment and compatibility policy
 │   ├── render_intro.c         Splash video streamer
 │   ├── render_menu.c          Bunny selector + messages
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates

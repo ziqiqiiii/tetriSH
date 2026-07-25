@@ -6,6 +6,7 @@ static void	test_animated_and_selfref_are_safe(void);
 static void	test_ghostty_static_is_safe(void);
 static void	test_wezterm_and_iterm_static_leak(void);
 static void	test_non_kitty_backends_use_cells(void);
+static void	test_renderer_mode_value_parsing(void);
 
 int	main(void)
 {
@@ -13,6 +14,7 @@ int	main(void)
 	test_ghostty_static_is_safe();
 	test_wezterm_and_iterm_static_leak();
 	test_non_kitty_backends_use_cells();
+	test_renderer_mode_value_parsing();
 	return (0);
 }
 
@@ -65,4 +67,17 @@ static void	test_non_kitty_backends_use_cells(void)
 	assert(!tetrisu_pixel_backend_leak_safe(NCPIXEL_LINUXFB, "linux"));
 	assert(!tetrisu_pixel_backend_leak_safe(NCPIXEL_ITERM2, "iTerm2"));
 	printf("PASS test_non_kitty_backends_use_cells\n");
+}
+
+/**
+ * @brief Only the documented cell value forces compatibility rendering.
+ */
+static void	test_renderer_mode_value_parsing(void)
+{
+	assert(tetrisu_renderer_mode_from_value(NULL) == TETRISU_RENDERER_AUTO);
+	assert(tetrisu_renderer_mode_from_value("") == TETRISU_RENDERER_AUTO);
+	assert(tetrisu_renderer_mode_from_value("auto") == TETRISU_RENDERER_AUTO);
+	assert(tetrisu_renderer_mode_from_value("CELL") == TETRISU_RENDERER_AUTO);
+	assert(tetrisu_renderer_mode_from_value("cell") == TETRISU_RENDERER_CELL);
+	printf("PASS test_renderer_mode_value_parsing\n");
 }
