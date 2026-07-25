@@ -67,6 +67,34 @@ struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
 }
 
 /**
+ * @brief Returns the exact terminal row used by a fallback menu label.
+ *
+ * Sharing this calculation with the compatibility selector prevents separate
+ * rounding steps from placing the marker one row above or below its label.
+ *
+ * @param ctx Active render context with fitted background geometry.
+ * @param index Zero-based menu item index.
+ * @return Absolute terminal row for the label baseline.
+ */
+int	render_menu_label_y(const render_ctx_t *ctx, int index)
+{
+	double	ratio;
+	int		panel_y;
+	int		panel_rows;
+	int		row;
+
+	panel_y = ctx->bg_row
+		+ (int)(ctx->bg_rows * MENU_PANEL_Y_RATIO + 0.5);
+	panel_rows = (int)(ctx->bg_rows * MENU_PANEL_HEIGHT_RATIO + 0.5);
+	if (panel_rows < 1)
+		panel_rows = 1;
+	ratio = (MENU_FIRST_Y_RATIO + index * MENU_STEP_Y_RATIO
+			- MENU_PANEL_Y_RATIO) / MENU_PANEL_HEIGHT_RATIO;
+	row = clamp_int((int)(ratio * panel_rows + 0.5), 0, panel_rows - 1);
+	return (panel_y + row);
+}
+
+/**
  * @brief Decodes and validates the shared 16-by-6 ASCII glyph sheet.
  */
 static bool	load_font_mask(pixel_asset_t *font)
@@ -344,10 +372,7 @@ static struct ncplane	*create_text_fallback(render_ctx_t *ctx)
 	index = 0;
 	while (index < MENU_ITEM_COUNT)
 	{
-		ratio = (MENU_FIRST_Y_RATIO + index * MENU_STEP_Y_RATIO
-				- MENU_PANEL_Y_RATIO) / MENU_PANEL_HEIGHT_RATIO;
-		row = clamp_int((int)(ratio * opts.rows + 0.5), 0,
-			(int)opts.rows - 1);
+		row = render_menu_label_y(ctx, index) - opts.y;
 		ncplane_set_fg_rgb8(plane, g_menu_colors[index].r,
 			g_menu_colors[index].g, g_menu_colors[index].b);
 		(void)ncplane_set_bg_rgb8(plane, 18, 5, 24);

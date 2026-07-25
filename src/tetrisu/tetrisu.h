@@ -477,6 +477,7 @@ bool			render_menu_hit_test(const render_ctx_t *ctx,
 void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
 void			render_menu_destroy(render_ctx_t *ctx);
 struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
+int				render_menu_label_y(const render_ctx_t *ctx, int index);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,

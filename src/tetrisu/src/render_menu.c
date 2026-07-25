@@ -296,8 +296,15 @@ static int	bunny_y_for_selection(const render_ctx_t *ctx,
 	int	y;
 	int	max_y;
 
-	center_y = scale_from_bg(ctx->bg_row, ctx->bg_rows, MENU_FIRST_Y_RATIO);
-	y = center_y + (m->selected * menu_step_y(ctx)) - (ctx->bunny_rows / 2);
+	if (render_compatibility_mode(ctx))
+		center_y = render_menu_label_y(ctx, m->selected);
+	else
+	{
+		center_y = scale_from_bg(ctx->bg_row, ctx->bg_rows,
+				MENU_FIRST_Y_RATIO);
+		center_y += m->selected * menu_step_y(ctx);
+	}
+	y = center_y - (ctx->bunny_rows / 2);
 	max_y = ctx->bg_row + ctx->bg_rows - ctx->bunny_rows;
 	if (max_y < ctx->bg_row)
 		max_y = ctx->bg_row;
