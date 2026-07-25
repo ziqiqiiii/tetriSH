@@ -151,7 +151,7 @@ picks one of three tiers:
 | Tier | Chosen for | Presentation |
 |---|---|---|
 | movable | kitty and Ghostty — Kitty-protocol terminals measured to free a replaced image | Authored bitmaps everywhere; the selector and the falling piece are their own planes and slide |
-| stationary | Sixel and the Linux framebuffer (foot, XTerm, mlterm, VTE ≥ 0.78, `/dev/fb0`), plus any other Kitty-protocol terminal (Konsole, contour) | The same authored bitmaps, but never moved or restacked: the board is flattened into one image and the selector is a native marker |
+| stationary | Sixel and the Linux framebuffer (foot, XTerm, mlterm, VTE ≥ 0.78, `/dev/fb0`), plus any other Kitty-protocol terminal (Konsole, contour) | The same authored bitmaps, but no bitmap is ever moved: the board is flattened into one image redrawn in place, and the selector is destroyed and blitted again at its new row |
 | cell | Terminals reporting no bitmap support, plus WezTerm and iTerm2, measured to retain every replaced frame | True-colour terminal cells throughout, with the `:: COMPATIBILITY MODE ::` badge |
 
 Two independent properties decide this, and conflating them is what previously
@@ -162,7 +162,12 @@ sprixel movement in `kitty_move` and leaves `ti->pixel_move` NULL for both
 `setup_sixel_bitmaps()` and `setup_fbcon_bitmaps()`, and redisplaying a Sixel
 cannot write transparency over what is already on screen. So Sixel terminals
 draw bitmaps, just never moving ones — no version of foot changes that, since
-foot implements the Kitty *keyboard* protocol but not the graphics one.
+foot implements the Kitty *keyboard* protocol but not the graphics one. Note
+that this bans `ncplane_move_yx()` on a bitmap plane, not bitmaps that change
+position: destroying a plane and blitting a new one damages the cells the old
+one held and repaints them from the layer below, which is an ordinary render
+rather than the sprixel wipe Sixel cannot honour. Both the board and the menu
+selector rely on that distinction to keep their artwork here.
 
 **Does memory stay bounded?** Only the Kitty and iTerm2 protocols hand the
 terminal an image registry that a buggy terminal can grow without bound. Sixel

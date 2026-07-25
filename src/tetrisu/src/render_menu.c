@@ -14,6 +14,7 @@ static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
 	int y, int x);
 static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
 	int y, int x);
+static void	destroy_bunny_visual(render_ctx_t *ctx);
 static void	set_transparent_base(struct ncplane *plane);
 
 /**
@@ -36,7 +37,7 @@ void	render_menu_create(render_ctx_t *ctx)
 	ctx->bunny_rows = clamp_int((int)((double)ctx->bg_rows * BUNNY_ROWS_RATIO
 		+ 0.5), BUNNY_MIN_ROWS, BUNNY_MAX_ROWS);
 	ctx->bunny_cols = bunny_cols_for_rows(ctx);
-	if (!render_pixel_planes_reliable(ctx))
+	if (render_compatibility_mode(ctx))
 	{
 		ctx->bunny_rows = COMPAT_SELECTOR_ROWS;
 		ctx->bunny_cols = COMPAT_SELECTOR_COLS;
@@ -81,12 +82,15 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		return ;
 	y = bunny_y_for_selection(ctx, m);
 	x = bunny_x(ctx);
-	/* Only the movable tier may slide a live plane: elsewhere the marker is
-	 * torn down and recreated so nothing is dragged across a bitmap. */
+	/* Only the movable tier may slide a live plane. Elsewhere the selector is
+	 * torn down and built again at the new row, which keeps the bitmap sprite
+	 * on the stationary tier: destroying a plane damages the cells it held and
+	 * they are repainted from the layer below, where sliding a live sprixel
+	 * would instead go through the wipe path Sixel cannot honour. */
 	if (!render_pixel_planes_reliable(ctx))
 	{
 		ncplane_destroy(ctx->bunny_plane);
-		ctx->bunny_plane = create_compatibility_selector(ctx, y, x);
+		ctx->bunny_plane = create_bunny_sprite(ctx, y, x);
 		if (ctx->bunny_plane != NULL)
 		{
 			ncplane_move_top(ctx->bunny_plane);
@@ -217,6 +221,9 @@ void	render_menu_destroy(render_ctx_t *ctx)
 		ncplane_destroy(ctx->menu_labels_plane);
 		ctx->menu_labels_plane = NULL;
 	}
+	/* The cached sprite is scaled to the current cell geometry, so it must not
+	 * outlive the layout it was sized for. */
+	destroy_bunny_visual(ctx);
 }
 
 /**
@@ -341,10 +348,11 @@ static int	menu_step_y(const render_ctx_t *ctx)
 /**
  * @brief Blits the bunny as a crisp pixel sprite, scaled to its cell box.
  *
- * Used only on the movable tier, where the terminal neither tears nor retains
- * the old placement when the selector slides on key repeat. The source is
- * resized to the selector's cell box in pixels using the terminal's cell
- * geometry, so it reads as smoothly as the authored HUD art.
+ * The source is resized to the selector's cell box in pixels using the
+ * terminal's cell geometry, so it reads as smoothly as the authored HUD art.
+ * That decode and rescale is cached on the context, because the stationary
+ * tier calls this again for every selection change rather than moving the
+ * plane, and a fresh file decode per key repeat would be felt.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -353,39 +361,40 @@ static int	menu_step_y(const render_ctx_t *ctx)
  */
 static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
 {
-	struct ncvisual			*ncv;
 	struct ncvisual_options	vopts;
-	struct ncplane			*plane;
 
 	if (ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0)
 		return (NULL);
-	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
-	if (ncv == NULL)
-		return (NULL);
-	plane = NULL;
-	if (ncvisual_resize(ncv, ctx->bunny_rows * ctx->cell_px_y,
-			ctx->bunny_cols * ctx->cell_px_x) == 0)
+	if (ctx->bunny_visual == NULL)
 	{
-		memset(&vopts, 0, sizeof(vopts));
-		vopts.n = ctx->std;
-		vopts.scaling = NCSCALE_NONE;
-		vopts.y = y;
-		vopts.x = x;
-		vopts.blitter = NCBLIT_PIXEL;
-		vopts.flags = NCVISUAL_OPTION_CHILDPLANE;
-		plane = ncvisual_blit(ctx->nc, ncv, &vopts);
+		ctx->bunny_visual = ncvisual_from_file(BUNNY_ASSET_PATH);
+		if (ctx->bunny_visual == NULL)
+			return (NULL);
+		if (ncvisual_resize(ctx->bunny_visual,
+				ctx->bunny_rows * ctx->cell_px_y,
+				ctx->bunny_cols * ctx->cell_px_x) != 0)
+		{
+			destroy_bunny_visual(ctx);
+			return (NULL);
+		}
 	}
-	ncvisual_destroy(ncv);
-	return (plane);
+	memset(&vopts, 0, sizeof(vopts));
+	vopts.n = ctx->std;
+	vopts.scaling = NCSCALE_NONE;
+	vopts.y = y;
+	vopts.x = x;
+	vopts.blitter = NCBLIT_PIXEL;
+	vopts.flags = NCVISUAL_OPTION_CHILDPLANE;
+	return (ncvisual_blit(ctx->nc, ctx->bunny_visual, &vopts));
 }
 
 /**
  * @brief Creates the highest-quality bunny selector supported by the terminal.
  *
- * Terminals that can move a sprixel (Kitty, Ghostty) get a crisp pixel sprite
- * that slides between entries. Every other tier gets a compact native marker
- * that is recreated in place, which avoids dragging either a bitmap or a
- * cell-blitted visual plane that some terminals retain at its old position.
+ * Every bitmap tier gets the crisp pixel sprite; the difference is only how it
+ * reaches the next entry, which the caller decides. Terminals with no bitmap
+ * path get a compact native marker instead, and one that cannot manage the
+ * pixel blit falls back to the densest cell blitter it does support.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -398,7 +407,7 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
 
-	if (!render_pixel_planes_reliable(ctx))
+	if (render_compatibility_mode(ctx))
 		return (create_compatibility_selector(ctx, y, x));
 	plane = create_bunny_pixel(ctx, y, x);
 	if (plane != NULL)
@@ -506,6 +515,20 @@ static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
 	(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
 	(void)ncplane_putstr_aligned(plane, 0, NCALIGN_CENTER, "[>]");
 	return (plane);
+}
+
+/**
+ * @brief Releases the decoded and rescaled selector sprite.
+ *
+ * @param ctx Pointer to the render context, which may hold no cached sprite.
+ */
+static void	destroy_bunny_visual(render_ctx_t *ctx)
+{
+	if (ctx->bunny_visual != NULL)
+	{
+		ncvisual_destroy(ctx->bunny_visual);
+		ctx->bunny_visual = NULL;
+	}
 }
 
 /**

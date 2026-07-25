@@ -271,6 +271,7 @@ typedef struct
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*bunny_plane;
+	struct ncvisual		*bunny_visual;
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
 	ui_notification_stack_t	notifications;

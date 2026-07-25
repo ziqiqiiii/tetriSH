@@ -393,6 +393,9 @@ void	render_teardown(render_ctx_t *ctx)
 	{
 		render_notification_destroy(ctx);
 		render_compatibility_badge_hide(ctx);
+		/* Runs before notcurses_stop() because the menu owns a decoded sprite
+		 * that no plane teardown would release. */
+		render_menu_destroy(ctx);
 		notcurses_stop(ctx->nc);
 		ctx->nc = NULL;
 		ctx->std = NULL;
