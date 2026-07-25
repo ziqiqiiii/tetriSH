@@ -1264,7 +1264,8 @@ static int	board_tile_index(const solo_game_t *game, int col, int row)
 
 	if (solo_game_row_is_clearing(game, row))
 	{
-		if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS / 2)
+		if (game->clear_elapsed_ms
+			>= solo_clear_duration_ms(game->level) / 2)
 			return (TILE_CLEAR_SECOND);
 		return (TILE_CLEAR_FIRST);
 	}

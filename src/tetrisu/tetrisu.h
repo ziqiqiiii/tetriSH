@@ -62,10 +62,13 @@
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
 # define SOLO_ABILITY_COUNT	4
 # define SOLO_ABILITY_FEEDBACK_MS	1000
-# define SOLO_CLEAR_ANIMATION_MS	200
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
+# define SOLO_DEFAULT_DAS_MS	167
+# define SOLO_DEFAULT_ARR_MS	33
+# define SOLO_DEFAULT_SOFT_DROP_FACTOR	20
+# define SOLO_HANDLING_ACTION_CAP	64
 
 /* AUDIO.C */
 # define AUDIO_DEFAULT_VOLUME	96
@@ -289,6 +292,26 @@ typedef enum e_solo_action
 	SOLO_HOLD
 }	solo_action_t;
 
+typedef struct s_solo_handling_config
+{
+	int	das_ms;
+	int	arr_ms;
+	int	soft_drop_factor;
+}	solo_handling_config_t;
+
+typedef struct s_solo_handling_state
+{
+	uint64_t	sequence;
+	uint64_t	left_order;
+	uint64_t	right_order;
+	int			horizontal_direction;
+	int			horizontal_wait_ms;
+	int			soft_drop_wait_ms;
+	bool		left_held;
+	bool		right_held;
+	bool		down_held;
+}	solo_handling_state_t;
+
 typedef enum e_solo_ability
 {
 	SOLO_ABILITY_NONE,
@@ -446,9 +469,23 @@ void			solo_game_init(solo_game_t *game, uint32_t seed);
 bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
 bool			solo_game_update(solo_game_t *game, int elapsed_ms);
 int				solo_game_next_wake_ms(const solo_game_t *game);
+int				solo_clear_duration_ms(int level);
 t_piece			solo_game_ghost(const solo_game_t *game);
 bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
 void			solo_game_toggle_pause(solo_game_t *game);
+
+/* SOLO_HANDLING.C — terminal-aware DAS, ARR, and soft-drop timing */
+solo_handling_config_t	solo_handling_default_config(void);
+void			solo_handling_reset(solo_handling_state_t *state);
+bool			solo_handling_event(solo_handling_state_t *state,
+					const solo_handling_config_t *config, uint32_t key,
+					ncintype_e event_type, solo_action_t *action);
+int				solo_handling_update(solo_handling_state_t *state,
+					const solo_handling_config_t *config, int gravity_ms,
+					int elapsed_ms, solo_action_t *actions, int capacity);
+int				solo_handling_next_wake_ms(
+					const solo_handling_state_t *state,
+					const solo_handling_config_t *config, int gravity_ms);
 
 /* SOLO_ABILITIES.C — temporary local ability authority for Solo testing */
 int				solo_ability_cost(solo_ability_t ability);

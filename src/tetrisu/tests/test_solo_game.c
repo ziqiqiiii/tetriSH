@@ -4,6 +4,7 @@
 static void	test_init_has_active_and_three_previews(void);
 static void	test_ghost_and_hard_drop(void);
 static void	test_ghost_stops_above_stack(void);
+static void	test_soft_drop_overrides_gravity_timer(void);
 static void	test_first_hold_consumes_queue_once(void);
 static void	test_hold_rearms_after_lock(void);
 static void	test_locking_piece_in_top_row_reveals_before_game_over(void);
@@ -16,6 +17,8 @@ static void	test_landing_starts_a_fresh_lock_delay(void);
 static void	test_next_wake_tracks_gravity_and_lock_deadlines(void);
 static void	test_zero_elapsed_consumes_due_deadlines(void);
 static void	test_grounded_piece_sleeps_until_lock_deadline(void);
+static void	test_clear_duration_progresses_by_level(void);
+static void	test_level_seven_clear_splits_at_midpoint(void);
 static void	test_clear_animation_wakes_at_visual_boundaries(void);
 static void	test_pause_freezes_active_and_clear_timers(void);
 static void	test_clear_animation_then_level_and_meter_update(void);
@@ -36,6 +39,7 @@ int	main(void)
 	test_init_has_active_and_three_previews();
 	test_ghost_and_hard_drop();
 	test_ghost_stops_above_stack();
+	test_soft_drop_overrides_gravity_timer();
 	test_first_hold_consumes_queue_once();
 	test_hold_rearms_after_lock();
 	test_locking_piece_in_top_row_reveals_before_game_over();
@@ -47,11 +51,50 @@ int	main(void)
 	test_next_wake_tracks_gravity_and_lock_deadlines();
 	test_zero_elapsed_consumes_due_deadlines();
 	test_grounded_piece_sleeps_until_lock_deadline();
+	test_clear_duration_progresses_by_level();
+	test_level_seven_clear_splits_at_midpoint();
 	test_clear_animation_wakes_at_visual_boundaries();
 	test_pause_freezes_active_and_clear_timers();
 	test_clear_animation_then_level_and_meter_update();
 	test_rotation_stress_preserves_valid_state();
 	return (0);
+}
+
+/**
+ * @brief Exercises odd clear duration splits into 87 ms and 88 ms frames.
+ */
+static void	test_level_seven_clear_splits_at_midpoint(void)
+{
+	solo_game_t	game;
+
+	prepare_single_line_clear(&game, 323u);
+	game.level = 7;
+	assert(solo_game_next_wake_ms(&game) == 87);
+	assert(solo_game_update(&game, 87));
+	assert(game.phase == SOLO_CLEARING);
+	assert(game.clear_elapsed_ms == 87);
+	assert(solo_game_next_wake_ms(&game) == 88);
+	assert(solo_game_update(&game, 88));
+	assert(game.phase == SOLO_ACTIVE);
+	printf("PASS test_level_seven_clear_splits_at_midpoint\n");
+}
+
+/**
+ * @brief Exercises soft drop overrides accumulated natural gravity.
+ */
+static void	test_soft_drop_overrides_gravity_timer(void)
+{
+	solo_game_t	game;
+	int				row;
+
+	solo_game_init(&game, 125u);
+	game.gravity_elapsed_ms = gravity_interval_ms(game.level) - 1;
+	row = game.active.row;
+	assert(solo_game_apply_action(&game, SOLO_SOFT_DROP));
+	assert(game.active.row == row + 1);
+	assert(game.gravity_elapsed_ms == 0);
+	assert(game.scoring.total == 1);
+	printf("PASS test_soft_drop_overrides_gravity_timer\n");
 }
 
 /**
@@ -418,7 +461,7 @@ static void	test_zero_elapsed_consumes_due_deadlines(void)
 	assert(filled_cells(&game.board) == 4);
 	assert(solo_game_next_wake_ms(&game) > 0);
 	prepare_single_line_clear(&game, 795u);
-	game.clear_elapsed_ms = SOLO_CLEAR_ANIMATION_MS;
+	game.clear_elapsed_ms = solo_clear_duration_ms(game.level);
 	assert(solo_game_next_wake_ms(&game) == 0);
 	assert(solo_game_update(&game, 0));
 	assert(game.phase == SOLO_ACTIVE);
@@ -431,6 +474,21 @@ static void	test_zero_elapsed_consumes_due_deadlines(void)
 	assert(solo_game_update(&game, 0));
 	assert(game.phase == SOLO_GAME_OVER);
 	printf("PASS test_zero_elapsed_consumes_due_deadlines\n");
+}
+
+/**
+ * @brief Exercises progressive line-clear durations.
+ */
+static void	test_clear_duration_progresses_by_level(void)
+{
+	assert(solo_clear_duration_ms(1) == 200);
+	assert(solo_clear_duration_ms(6) == 200);
+	assert(solo_clear_duration_ms(7) == 175);
+	assert(solo_clear_duration_ms(8) == 150);
+	assert(solo_clear_duration_ms(9) == 125);
+	assert(solo_clear_duration_ms(10) == 100);
+	assert(solo_clear_duration_ms(19) == 100);
+	printf("PASS test_clear_duration_progresses_by_level\n");
 }
 
 /**
@@ -465,10 +523,12 @@ static void	test_grounded_piece_sleeps_until_lock_deadline(void)
 static void	test_clear_animation_wakes_at_visual_boundaries(void)
 {
 	solo_game_t	game;
+	int				duration_ms;
 	int				halfway;
 
 	prepare_single_line_clear(&game, 322u);
-	halfway = SOLO_CLEAR_ANIMATION_MS / 2;
+	duration_ms = solo_clear_duration_ms(game.level);
+	halfway = duration_ms / 2;
 	assert(solo_game_next_wake_ms(&game) == halfway);
 	assert(!solo_game_update(&game, halfway - 1));
 	assert(game.clear_elapsed_ms == halfway - 1);
@@ -478,7 +538,7 @@ static void	test_clear_animation_wakes_at_visual_boundaries(void)
 	assert(game.clear_elapsed_ms == halfway);
 	assert(solo_game_next_wake_ms(&game) == halfway);
 	assert(!solo_game_update(&game, halfway - 1));
-	assert(game.clear_elapsed_ms == SOLO_CLEAR_ANIMATION_MS - 1);
+	assert(game.clear_elapsed_ms == duration_ms - 1);
 	assert(solo_game_next_wake_ms(&game) == 1);
 	assert(solo_game_update(&game, 1));
 	assert(game.phase == SOLO_ACTIVE);
@@ -521,7 +581,7 @@ static void	test_pause_freezes_active_and_clear_timers(void)
 	assert(solo_game_next_wake_ms(&clearing) == -1);
 	solo_game_toggle_pause(&clearing);
 	assert(solo_game_next_wake_ms(&clearing)
-		== SOLO_CLEAR_ANIMATION_MS / 2 - 40);
+		== solo_clear_duration_ms(clearing.level) / 2 - 40);
 	printf("PASS test_pause_freezes_active_and_clear_timers\n");
 }
 
@@ -549,7 +609,7 @@ static void	test_clear_animation_then_level_and_meter_update(void)
 	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
 	assert(game.phase == SOLO_CLEARING);
 	assert(solo_game_row_is_clearing(&game, BOARD_HEIGHT - 1));
-	solo_game_update(&game, SOLO_CLEAR_ANIMATION_MS - 1);
+	solo_game_update(&game, solo_clear_duration_ms(game.level) - 1);
 	assert(game.phase == SOLO_CLEARING);
 	solo_game_update(&game, 1);
 	assert(game.phase == SOLO_ACTIVE);
@@ -564,7 +624,7 @@ static void	test_clear_animation_then_level_and_meter_update(void)
 	}
 	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
 	assert(game.phase == SOLO_CLEARING);
-	assert(solo_game_update(&game, SOLO_CLEAR_ANIMATION_MS));
+	assert(solo_game_update(&game, solo_clear_duration_ms(game.level)));
 	assert(game.total_lines == 11 && game.level == 2);
 	assert(game.crystal_charge == 1 && game.crystal_line_progress == 0);
 	printf("PASS test_clear_animation_then_level_and_meter_update\n");

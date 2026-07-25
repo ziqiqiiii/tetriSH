@@ -1322,21 +1322,24 @@ static void	draw_solo_controls(uint32_t *canvas, const solo_render_t *solo)
 	const char	*text;
 	int			center_x;
 	int			available;
+	int			pill_width;
+	int			pill_x;
 
 	center_x = (HUD_ART_CONTROLS_LEFT + HUD_ART_CONTROLS_RIGHT) / 2;
 	available = HUD_ART_CONTROLS_RIGHT - HUD_ART_CONTROLS_LEFT - 6;
-	text = "ARROWS  X/Z ROTATE  SPACE DROP  C HOLD";
-	if (text_width(text, 6, 1) > available)
-		text = "ARROWS  X/Z ROT  SPACE  C HOLD";
-	if (text_width(text, 6, 1) > available)
-		text = "ARROWS X/Z SPACE C";
-	/* Dark backing inside the frame's strip so the legend reads over scenery. */
-	draw_rect(canvas, HUD_ART_CONTROLS_LEFT + 2, HUD_ART_CONTROLS_TOP + 2,
-		HUD_ART_CONTROLS_RIGHT - HUD_ART_CONTROLS_LEFT - 4,
-		HUD_ART_CONTROLS_BOTTOM - HUD_ART_CONTROLS_TOP - 4,
-		make_pixel(g_playfield, 245));
+	text = "ARROWS MOVE | X/Z ROTATE | SPACE DROP | C HOLD";
+	if (text_width(text, 5, 1) > available)
+		text = "ARROWS | X/Z TURN | SPACE | C HOLD";
+	if (text_width(text, 5, 1) > available)
+		text = "ARROWS | X/Z | SPACE | C";
+	pill_width = text_width(text, 5, 1) + 12;
+	pill_x = center_x - pill_width / 2;
+	draw_rect(canvas, pill_x, HUD_ART_CONTROLS_TOP + 3, pill_width, 11,
+		make_pixel(g_dark, 220));
+	draw_outline(canvas, pill_x, HUD_ART_CONTROLS_TOP + 3, pill_width, 11,
+		1, make_pixel(g_pink, 115));
 	draw_text_centered(canvas, solo, text, center_x,
-		HUD_ART_CONTROLS_TOP + 5, 6, 8, 1, g_white);
+		HUD_ART_CONTROLS_TOP + 5, 5, 7, 1, g_white);
 }
 
 /**
@@ -1706,7 +1709,7 @@ static void	draw_settled_board(uint32_t *canvas, const solo_render_t *solo,
 	int		col;
 
 	clear_tile = TILE_CLEAR_FIRST;
-	if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS / 2)
+	if (game->clear_elapsed_ms >= solo_clear_duration_ms(game->level) / 2)
 		clear_tile = TILE_CLEAR_SECOND;
 	row = 0;
 	while (row < BOARD_HEIGHT)

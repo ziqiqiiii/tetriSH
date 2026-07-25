@@ -13,11 +13,16 @@ static bool	terminal_geometry_changed(const render_ctx_t *ctx);
 static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
-	bool *resize_pending, bool *state_changed);
+	bool *resize_pending, bool *state_changed,
+	solo_handling_state_t *handling,
+	const solo_handling_config_t *handling_config);
 static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
 	solo_game_t *game, uint32_t key, const ncinput *input,
 	bool display_ready, bool resize_pending, bool *state_changed);
 static bool	dispatch_game_key(solo_game_t *game, uint32_t key);
+static bool	apply_handling_actions(solo_game_t *game,
+				solo_handling_state_t *handling,
+				const solo_handling_config_t *config, int elapsed_ms);
 
 /**
  * @brief Runs the temporary local-authority Solo game loop.
@@ -34,6 +39,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 {
 	solo_game_t	game;
 	solo_render_t	solo;
+	solo_handling_config_t	handling_config;
+	solo_handling_state_t	handling;
 	ncinput			input;
 	uint32_t		key;
 	uint64_t		previous_ms;
@@ -45,6 +52,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	int				wake_ms;
 	int				wait_ms;
 	int				render_wait_ms;
+	int				handling_wake_ms;
 	bool			leave;
 	bool			resize_pending;
 	bool			display_ready;
@@ -63,6 +71,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		return (-1);
 	}
 	solo_game_init(&game, new_game_seed());
+	handling_config = solo_handling_default_config();
+	solo_handling_reset(&handling);
 	render_solo_create(ctx, &solo);
 	render_solo_draw(ctx, &solo, &game);
 	mouse_enabled = notcurses_mice_enable(ctx->nc,
@@ -76,6 +86,14 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	{
 		display_ready = solo_display_ready(&solo);
 		wake_ms = display_ready ? solo_game_next_wake_ms(&game) : -1;
+		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
+		{
+			handling_wake_ms = solo_handling_next_wake_ms(&handling,
+					&handling_config, gravity_interval_ms(game.level));
+			if (wake_ms < 0 || (handling_wake_ms >= 0
+					&& handling_wake_ms < wake_ms))
+				wake_ms = handling_wake_ms;
+		}
 		wait_ms = wake_ms;
 		if (wait_ms < 0 || wait_ms > SOLO_RESIZE_POLL_MS)
 			wait_ms = SOLO_RESIZE_POLL_MS;
@@ -106,6 +124,9 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		force_render = false;
 		if (display_ready)
 			needs_draw = solo_game_update(&game, elapsed_ms);
+		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
+			needs_draw = apply_handling_actions(&game, &handling,
+					&handling_config, elapsed_ms) || needs_draw;
 		resize_pending = terminal_geometry_changed(ctx);
 		if (key == (uint32_t)-1)
 		{
@@ -120,7 +141,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		{
 			if (handle_solo_key(&game, audio, ctx, &solo, key, &input,
 					display_ready,
-					&resize_pending, &needs_draw))
+					&resize_pending, &needs_draw, &handling,
+					&handling_config))
 			{
 				leave = true;
 				break ;
@@ -144,6 +166,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 			break ;
 		if (resize_pending)
 		{
+			solo_handling_reset(&handling);
 			render_solo_resize(ctx, &solo);
 			needs_draw = true;
 			force_render = true;
@@ -307,7 +330,7 @@ static bool	terminal_geometry_changed(const render_ctx_t *ctx)
 }
 
 /**
- * @brief Handles one non-release Solo input event.
+ * @brief Handles one Solo input event.
  *
  * @param game Pointer to the local Solo state.
  * @param audio Pointer to the audio context.
@@ -323,11 +346,31 @@ static bool	terminal_geometry_changed(const render_ctx_t *ctx)
 static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
-	bool *resize_pending, bool *state_changed)
+	bool *resize_pending, bool *state_changed,
+	solo_handling_state_t *handling,
+	const solo_handling_config_t *handling_config)
 {
+	solo_action_t	action;
+
 	if (nckey_mouse_p(key))
 		return (handle_solo_mouse(ctx, solo, game, key, input,
 				display_ready, *resize_pending, state_changed));
+	if (key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_DOWN)
+	{
+		if (game->paused || game->phase != SOLO_ACTIVE
+			|| !display_ready || *resize_pending)
+		{
+			if (input->evtype == NCTYPE_RELEASE)
+				(void)solo_handling_event(handling, handling_config, key,
+					input->evtype, &action);
+			return (false);
+		}
+		if (solo_handling_event(handling, handling_config, key,
+				input->evtype, &action))
+			*state_changed = solo_game_apply_action(game, action)
+				|| *state_changed;
+		return (false);
+	}
 	if (input->evtype == NCTYPE_RELEASE)
 		return (false);
 	if (key == NCKEY_ESC || key == NCKEY_EOF || key == 'q' || key == 'Q')
@@ -350,12 +393,14 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
 	{
 		solo_game_init(game, new_game_seed());
+		solo_handling_reset(handling);
 		*state_changed = true;
 		return (false);
 	}
 	if (key == 'p' || key == 'P')
 	{
 		solo_game_toggle_pause(game);
+		solo_handling_reset(handling);
 		*state_changed = true;
 		return (false);
 	}
@@ -426,19 +471,44 @@ static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
 			(solo_ability_t)(SOLO_ABILITY_MIRURUN + key - '1'));
 		return (result != SOLO_ABILITY_RESULT_INVALID);
 	}
-	if (key == NCKEY_LEFT)
-		return (solo_game_apply_action(game, SOLO_MOVE_LEFT));
-	else if (key == NCKEY_RIGHT)
-		return (solo_game_apply_action(game, SOLO_MOVE_RIGHT));
-	else if (key == NCKEY_UP || key == 'x' || key == 'X')
+	if (key == NCKEY_UP || key == 'x' || key == 'X')
 		return (solo_game_apply_action(game, SOLO_ROTATE_CW));
 	else if (key == 'z' || key == 'Z')
 		return (solo_game_apply_action(game, SOLO_ROTATE_CCW));
-	else if (key == NCKEY_DOWN)
-		return (solo_game_apply_action(game, SOLO_SOFT_DROP));
 	else if (key == ' ')
 		return (solo_game_apply_action(game, SOLO_HARD_DROP));
 	else if (key == 'c' || key == 'C')
 		return (solo_game_apply_action(game, SOLO_HOLD));
 	return (false);
+}
+
+/**
+ * @brief Applies every repeat due on the shared monotonic loop clock.
+ *
+ * @param game Active Solo state.
+ * @param handling Mutable key-repeat state.
+ * @param config DAS, ARR, and soft-drop configuration.
+ * @param elapsed_ms Elapsed monotonic time.
+ * @return true when at least one action changed visible game state.
+ */
+static bool	apply_handling_actions(solo_game_t *game,
+	solo_handling_state_t *handling,
+	const solo_handling_config_t *config, int elapsed_ms)
+{
+	solo_action_t	actions[SOLO_HANDLING_ACTION_CAP];
+	int				count;
+	int				index;
+	bool			changed;
+
+	count = solo_handling_update(handling, config,
+			gravity_interval_ms(game->level), elapsed_ms, actions,
+			SOLO_HANDLING_ACTION_CAP);
+	changed = false;
+	index = 0;
+	while (index < count)
+	{
+		changed = solo_game_apply_action(game, actions[index]) || changed;
+		index++;
+	}
+	return (changed);
 }

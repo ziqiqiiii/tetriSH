@@ -47,6 +47,9 @@ Battle while the authoritative `tetrisd` game loop is being built.
   movement use a true-colour quadrant-cell fallback
 - Bounded input batches and a 30 FPS presentation ceiling coalesce rapid
   movement and rotation without delaying gameplay state or flooding the PTY
+- Terminal-aware press/release handling with immediate taps, 167 ms DAS,
+  33 ms ARR, 20x soft drop, last-pressed direction priority, and safe
+  terminal-repeat fallback when release events are unavailable
 - Dirty row/HUD signatures rebuild only changed content, while the compact
   control legend uses one crisp terminal-font row
 - Responsive PTY geometry checks reflow Solo between compact and full layouts
@@ -57,11 +60,12 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Local Mirurun level-one activation removes the bottom four settled rows;
   opponent-targeted levels two-four currently spend charge and show a clearly
   labelled Solo test effect without mutating the board
-- Two-frame, 200 ms sprite animation before cleared rows compact
+- Two-frame progressive clear animation: 200 ms through level 6, then
+  175/150/125 ms at levels 7/8/9 and 100 ms from level 10 onward
 
-Hold is intentionally omitted from this project mode. Solo state is temporarily
-local; [the migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes
-how it becomes server-authoritative without rewriting the renderer.
+HOLD is implemented under temporary local Solo authority. The
+[migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes how it
+becomes server-authoritative without rewriting the renderer.
 
 ---
 

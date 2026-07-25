@@ -83,6 +83,7 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 		if (piece_soft_drop(&game->board, &game->active) != BRAIN_OK)
 			return (false);
 		score_add_drop(&game->scoring, 1, false);
+		game->gravity_elapsed_ms = 0;
 		game->lock_elapsed_ms = 0;
 		game->last_action_was_rotation = false;
 		return (true);
@@ -194,6 +195,7 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
  */
 static int	gameplay_next_wake_ms(const solo_game_t *game)
 {
+	int	clear_ms;
 	int	gravity_ms;
 	int	wake_ms;
 	int	lock_ms;
@@ -209,9 +211,10 @@ static int	gameplay_next_wake_ms(const solo_game_t *game)
 	}
 	if (game->phase == SOLO_CLEARING)
 	{
-		if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
-			return (SOLO_CLEAR_ANIMATION_MS / 2 - game->clear_elapsed_ms);
-		return (SOLO_CLEAR_ANIMATION_MS - game->clear_elapsed_ms);
+		clear_ms = solo_clear_duration_ms(game->level);
+		if (game->clear_elapsed_ms < clear_ms / 2)
+			return (clear_ms / 2 - game->clear_elapsed_ms);
+		return (clear_ms - game->clear_elapsed_ms);
 	}
 	if (piece_is_grounded(game))
 	{
@@ -231,6 +234,25 @@ static int	gameplay_next_wake_ms(const solo_game_t *game)
 	if (wake_ms < 0)
 		return (0);
 	return (wake_ms);
+}
+
+/**
+ * @brief Returns level-aware line-clear animation duration.
+ *
+ * @param level Current Solo level.
+ * @return Total two-frame animation duration in milliseconds.
+ */
+int	solo_clear_duration_ms(int level)
+{
+	if (level <= 6)
+		return (200);
+	if (level == 7)
+		return (175);
+	if (level == 8)
+		return (150);
+	if (level == 9)
+		return (125);
+	return (100);
 }
 
 /**
@@ -574,6 +596,7 @@ static void	spawn_queued_piece(solo_game_t *game)
  */
 static bool	process_due_event(solo_game_t *game)
 {
+	int	clear_ms;
 	int	gravity_ms;
 
 	if (game->phase == SOLO_TOP_OUT_REVEAL)
@@ -587,7 +610,8 @@ static bool	process_due_event(solo_game_t *game)
 	}
 	if (game->phase == SOLO_CLEARING)
 	{
-		if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
+		clear_ms = solo_clear_duration_ms(game->level);
+		if (game->clear_elapsed_ms >= clear_ms)
 		{
 			finish_line_clear(game);
 			return (true);
@@ -731,23 +755,25 @@ static int	min_int(int left, int right)
  */
 static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
 {
+	int	duration_ms;
 	int	target;
 	int	step;
 
-	target = SOLO_CLEAR_ANIMATION_MS;
-	if (game->clear_elapsed_ms < SOLO_CLEAR_ANIMATION_MS / 2)
-		target = SOLO_CLEAR_ANIMATION_MS / 2;
+	duration_ms = solo_clear_duration_ms(game->level);
+	target = duration_ms;
+	if (game->clear_elapsed_ms < duration_ms / 2)
+		target = duration_ms / 2;
 	step = min_int(*remaining_ms, target - game->clear_elapsed_ms);
 	if (step < 0)
 		step = 0;
 	game->clear_elapsed_ms += step;
 	*remaining_ms -= step;
-	if (game->clear_elapsed_ms >= SOLO_CLEAR_ANIMATION_MS)
+	if (game->clear_elapsed_ms >= duration_ms)
 	{
 		finish_line_clear(game);
 		return (true);
 	}
-	return (game->clear_elapsed_ms == SOLO_CLEAR_ANIMATION_MS / 2);
+	return (game->clear_elapsed_ms == duration_ms / 2);
 }
 
 /**
