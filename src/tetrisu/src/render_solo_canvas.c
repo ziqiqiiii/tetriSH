@@ -53,7 +53,6 @@ static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
 static int	text_width(const char *text, int glyph_width, int spacing);
-static void	draw_solo_controls(uint32_t *canvas, const solo_render_t *solo);
 static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
@@ -226,9 +225,6 @@ bool	solo_canvas_load(solo_render_t *solo)
 		solo->font_pixels = font.pixels;
 		solo->font_width = font.width;
 		font.pixels = NULL;
-		/* The static legend is baked into the background at the small HUD font
-		 * so it no longer towers over the board in the terminal cell font. */
-		draw_solo_controls(solo->static_pixels, solo);
 		memcpy(solo->frame_pixels, solo->static_pixels, canvas_bytes);
 		solo->tile_pixels = tiles.pixels;
 		solo->tile_width = tiles.width;
@@ -1305,41 +1301,6 @@ static int	text_width(const char *text, int glyph_width, int spacing)
 	if (length == 0)
 		return (0);
 	return (length * glyph_width + (length - 1) * spacing);
-}
-
-/**
- * @brief Draws the control legend in the frame's bottom strip, pixel-font.
- *
- * Rendered at the small HUD glyph size so it matches the score text instead of
- * the oversized terminal cell font the strip used before. Narrower widths drop
- * to shorter variants; the legend is static, so it is composed once.
- *
- * @param canvas Pointer to the destination RGBA canvas.
- * @param solo Pointer to the Solo render state (supplies the font mask).
- */
-static void	draw_solo_controls(uint32_t *canvas, const solo_render_t *solo)
-{
-	const char	*text;
-	int			center_x;
-	int			available;
-	int			pill_width;
-	int			pill_x;
-
-	center_x = (HUD_ART_CONTROLS_LEFT + HUD_ART_CONTROLS_RIGHT) / 2;
-	available = HUD_ART_CONTROLS_RIGHT - HUD_ART_CONTROLS_LEFT - 6;
-	text = "ARROWS MOVE | X/Z ROTATE | SPACE DROP | C HOLD";
-	if (text_width(text, 5, 1) > available)
-		text = "ARROWS | X/Z TURN | SPACE | C HOLD";
-	if (text_width(text, 5, 1) > available)
-		text = "ARROWS | X/Z | SPACE | C";
-	pill_width = text_width(text, 5, 1) + 12;
-	pill_x = center_x - pill_width / 2;
-	draw_rect(canvas, pill_x, HUD_ART_CONTROLS_TOP + 3, pill_width, 11,
-		make_pixel(g_dark, 220));
-	draw_outline(canvas, pill_x, HUD_ART_CONTROLS_TOP + 3, pill_width, 11,
-		1, make_pixel(g_pink, 115));
-	draw_text_centered(canvas, solo, text, center_x,
-		HUD_ART_CONTROLS_TOP + 5, 5, 7, 1, g_white);
 }
 
 /**

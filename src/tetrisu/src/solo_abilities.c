@@ -134,12 +134,12 @@ bool	solo_mouse_canvas_position(const render_ctx_t *ctx,
 	if (ctx == NULL || solo == NULL || input == NULL
 		|| canvas_x == NULL || canvas_y == NULL || !solo->layout_valid
 		|| ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
-		|| solo->canvas_cols <= 0 || solo->canvas_rows <= 0)
+		|| solo->canvas_cols <= 0 || solo->content_rows <= 0)
 		return (false);
 	cell_x = input->x - solo->canvas_col;
 	cell_y = input->y - solo->canvas_row;
 	if (cell_x < 0 || cell_y < 0 || cell_x >= solo->canvas_cols
-		|| cell_y >= solo->canvas_rows)
+		|| cell_y >= solo->content_rows)
 		return (false);
 	physical_x = (int64_t)cell_x * ctx->cell_px_x
 		+ mouse_subpixel(input->xpx, ctx->cell_px_x);
@@ -147,8 +147,8 @@ bool	solo_mouse_canvas_position(const render_ctx_t *ctx,
 		+ mouse_subpixel(input->ypx, ctx->cell_px_y);
 	*canvas_x = (int)(physical_x * SOLO_CANVAS_WIDTH
 		/ ((int64_t)solo->canvas_cols * ctx->cell_px_x));
-	*canvas_y = (int)(physical_y * SOLO_CANVAS_HEIGHT
-		/ ((int64_t)solo->canvas_rows * ctx->cell_px_y));
+	*canvas_y = (int)(physical_y * SOLO_CONTENT_HEIGHT
+		/ ((int64_t)solo->content_rows * ctx->cell_px_y));
 	return (true);
 }
 

@@ -23,9 +23,12 @@ partially implemented.
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
   `0af4bd0 [tetrisu] add HOLD and terminal-aware Solo board rendering`.
-- Item 4 now uses one compact, framed 5 x 7 pixel-font legend.
+- Item 4 now uses one compact terminal-font row beneath the authored artwork.
 - Item 5 owns press/release timing while preserving safe legacy repeat.
 - Item 6 uses one tested level-aware clear-duration function.
+- Responsive rendering now uses 23 artwork rows plus one control row, allowing
+  the larger 160 x 70 Solo layout in a 210 x 71 Kitty terminal. Home and Solo
+  also poll tty geometry so Ghostty reflows without waiting for a key press.
 - Item 7 already has a reliable cell-board path, but still needs the forced
   renderer setting and complete no-image screen coverage.
 
@@ -61,8 +64,8 @@ partially implemented.
 
 4. **Simplify the in-game control legend** — complete
 
-   - Primary legend: `ARROWS  X/Z ROTATE  SPACE DROP  C HOLD`.
-   - Use shorter variants at narrow widths.
+   - Primary legend: `ARROWS MOVE  X/Z ROTATE  SPACE DROP  C HOLD`.
+   - Keep it to one crisp, centered terminal-font row beneath the artwork.
    - Put pause, home, and ability controls in their relevant overlays.
 
 ## Phase 2 — responsive Solo controls and rendering

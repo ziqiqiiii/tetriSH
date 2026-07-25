@@ -24,9 +24,9 @@ _Static_assert(HUD_SCORE_X % HUD_TILE_SIZE == 0
 	&& SOLO_SCORE_VALUE_Y + SOLO_SCORE_VALUE_HEIGHT == SOLO_SCORE_STATS_Y
 	&& SOLO_SCORE_STATS_Y + SOLO_SCORE_STATS_HEIGHT == SOLO_SCORE_EVENT_Y,
 	"score pixel regions must be aligned and non-overlapping");
-_Static_assert(SOLO_CONTROLS_X % HUD_TILE_SIZE == 0
-	&& SOLO_CONTROLS_WIDTH % HUD_TILE_SIZE == 0,
-	"controls cell region must align horizontally to the HUD grid");
+_Static_assert(SOLO_CONTENT_HEIGHT % HUD_TILE_SIZE == 0
+	&& SOLO_CONTENT_HEIGHT / HUD_TILE_SIZE == SOLO_CONTENT_TILE_ROWS,
+	"Solo content height must end on the authored 16px grid");
 
 // Static Functions
 static void	reset_render_signatures(solo_render_t *solo);
@@ -34,6 +34,7 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
+static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo);
 static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
 	int rows, int cols);
 static bool	blit_surface(render_ctx_t *ctx, struct ncplane *plane,
@@ -351,12 +352,14 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
 		pixel_height = candidate_rows * ctx->cell_px_y;
 		error = abs(pixel_width - pixel_height);
 		minimum = pixel_width < pixel_height ? pixel_width : pixel_height;
-		if (candidate_rows * 24 <= (int)std_rows
+		if (solo_layout_terminal_fits((int)std_rows, (int)std_cols,
+				candidate_rows, candidate_cols)
 			&& (!pixel_capable || max_bitmap_x == 0
 				|| candidate_cols * 14 * ctx->cell_px_x
 				<= (int)max_bitmap_x)
 			&& (!pixel_capable || max_bitmap_y == 0
-				|| candidate_rows * 23 * ctx->cell_px_y
+				|| candidate_rows * SOLO_CONTENT_TILE_ROWS
+				* ctx->cell_px_y
 				<= (int)max_bitmap_y))
 		{
 			if (error * 10 <= minimum)
@@ -385,7 +388,8 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
 		solo->tile_rows = best_rows;
 	}
 	solo->canvas_cols = solo->tile_cols * 32;
-	solo->canvas_rows = solo->tile_rows * 24;
+	solo->content_rows = solo_layout_content_rows(solo->tile_rows);
+	solo->canvas_rows = solo_layout_canvas_rows(solo->tile_rows);
 	solo->layout_valid = solo->canvas_cols >= SOLO_MIN_CANVAS_COLS
 		&& solo->canvas_rows >= SOLO_MIN_CANVAS_ROWS;
 	if (!solo->layout_valid)
@@ -407,8 +411,12 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo)
 {
 	set_standard_backdrop(ctx);
-	if (!create_background_plane(ctx, solo))
+	if (!create_background_plane(ctx, solo)
+		|| !create_controls_plane(ctx, solo))
+	{
+		destroy_solo_planes(solo);
 		return (false);
+	}
 	solo->planes_ready = true;
 	return (true);
 }
@@ -445,14 +453,52 @@ static void	set_standard_backdrop(render_ctx_t *ctx)
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo)
 {
 	solo->background_plane = create_plane(ctx, solo->canvas_row,
-		solo->canvas_col, solo->canvas_rows, solo->canvas_cols);
+		solo->canvas_col, solo->content_rows, solo->canvas_cols);
 	if (solo->background_plane == NULL)
 		return (false);
 	if (!blit_surface(ctx, solo->background_plane, solo->static_pixels,
-			SOLO_CANVAS_WIDTH, SOLO_CANVAS_HEIGHT,
+			SOLO_CANVAS_WIDTH, SOLO_CONTENT_HEIGHT,
 			SOLO_CANVAS_WIDTH, NCBLIT_4x2))
 	{
 		destroy_plane(&solo->background_plane);
+		return (false);
+	}
+	return (true);
+}
+
+/**
+ * @brief Creates a crisp one-row terminal control legend below the artwork.
+ *
+ * Keeping controls out of the scaled bitmap makes them readable at every
+ * integer artwork scale and recovers the row needed by the larger Kitty fit.
+ *
+ * @param ctx Pointer to the active render context.
+ * @param solo Pointer to the Solo render state.
+ * @return true on success, otherwise false.
+ */
+static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
+{
+	const char	*legend;
+	uint64_t	channels;
+
+	legend = "ARROWS MOVE  X/Z ROTATE  SPACE DROP  C HOLD";
+	solo->controls_plane = create_plane(ctx,
+		solo->canvas_row + solo->content_rows, solo->canvas_col,
+		SOLO_TERMINAL_CONTROLS_ROWS, solo->canvas_cols);
+	if (solo->controls_plane == NULL)
+		return (false);
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 236, 248);
+	(void)ncchannels_set_bg_rgb8(&channels, 20, 9, 29);
+	(void)ncplane_set_base(solo->controls_plane, " ", 0, channels);
+	ncplane_erase(solo->controls_plane);
+	(void)ncplane_set_fg_rgb8(solo->controls_plane, 255, 236, 248);
+	(void)ncplane_set_bg_rgb8(solo->controls_plane, 20, 9, 29);
+	(void)ncplane_on_styles(solo->controls_plane, NCSTYLE_BOLD);
+	if (ncplane_putstr_aligned(solo->controls_plane, 0,
+			NCALIGN_CENTER, legend) < 0)
+	{
+		destroy_plane(&solo->controls_plane);
 		return (false);
 	}
 	return (true);

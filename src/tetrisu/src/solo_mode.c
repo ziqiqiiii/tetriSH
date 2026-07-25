@@ -9,7 +9,6 @@ static int	milliseconds_until_render(uint64_t now_ms,
 static bool	solo_display_ready(const solo_render_t *solo);
 static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
 	ncinput *input, int *input_errno);
-static bool	terminal_geometry_changed(const render_ctx_t *ctx);
 static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
@@ -95,8 +94,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 				wake_ms = handling_wake_ms;
 		}
 		wait_ms = wake_ms;
-		if (wait_ms < 0 || wait_ms > SOLO_RESIZE_POLL_MS)
-			wait_ms = SOLO_RESIZE_POLL_MS;
+		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
+			wait_ms = RENDER_RESIZE_POLL_MS;
 		if (render_pending)
 		{
 			render_wait_ms = milliseconds_until_render(monotonic_ms(),
@@ -127,7 +126,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
 			needs_draw = apply_handling_actions(&game, &handling,
 					&handling_config, elapsed_ms) || needs_draw;
-		resize_pending = terminal_geometry_changed(ctx);
+		resize_pending = render_terminal_geometry_changed(ctx);
 		if (key == (uint32_t)-1)
 		{
 			if (input_errno == EINTR)
@@ -307,26 +306,6 @@ static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
 	key = notcurses_get_nblock(ctx->nc, input);
 	*input_errno = errno;
 	return (key);
-}
-
-/**
- * @brief Detects terminal resize changes not delivered as input events.
- *
- * @param ctx Pointer to the render context.
- * @return true when the tty and standard-plane dimensions differ.
- */
-static bool	terminal_geometry_changed(const render_ctx_t *ctx)
-{
-	struct winsize	terminal;
-	unsigned		plane_rows;
-	unsigned		plane_cols;
-
-	memset(&terminal, 0, sizeof(terminal));
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal) != 0
-		|| terminal.ws_row == 0 || terminal.ws_col == 0)
-		return (false);
-	ncplane_dim_yx(ctx->std, &plane_rows, &plane_cols);
-	return (terminal.ws_row != plane_rows || terminal.ws_col != plane_cols);
 }
 
 /**

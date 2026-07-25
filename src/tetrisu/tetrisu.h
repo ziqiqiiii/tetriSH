@@ -77,6 +77,7 @@
 /* RENDER_BACKGROUND.C */
 # define BACKGROUND_SOURCE_PIXELS_Y	1086
 # define BACKGROUND_SOURCE_PIXELS_X	1448
+# define RENDER_RESIZE_POLL_MS	100
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
@@ -97,6 +98,9 @@
 /* RENDER_SOLO.C */
 # define SOLO_CANVAS_WIDTH		512
 # define SOLO_CANVAS_HEIGHT		384
+# define SOLO_CONTENT_HEIGHT	368
+# define SOLO_CONTENT_TILE_ROWS	23
+# define SOLO_TERMINAL_CONTROLS_ROWS	1
 # define SOLO_MIN_CANVAS_ROWS	24
 # define SOLO_MIN_CANVAS_COLS	64
 # define HUD_NEXT_X				80
@@ -158,7 +162,6 @@
 # define GHOST_OUTLINE_BLEND		96u
 # define GHOST_INTERIOR_BLEND	24u
 # define SOLO_MAX_CATCHUP_MS		1000
-# define SOLO_RESIZE_POLL_MS		100
 # define SOLO_RENDER_INTERVAL_MS	33
 # define SOLO_INPUT_BATCH_MAX		64
 /* The dynamic top strip spans one HOLD box and the three-piece NEXT box. */
@@ -394,6 +397,7 @@ typedef struct s_solo_render
 	int				canvas_col;
 	int				canvas_rows;
 	int				canvas_cols;
+	int				content_rows;
 	int				tile_rows;
 	int				tile_cols;
 	uint64_t		row_signatures[BOARD_HEIGHT];
@@ -432,10 +436,17 @@ int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
 void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
+bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 bool				render_pixels_leak_safe(const render_ctx_t *ctx);
 bool				tetrisu_pixel_backend_leak_safe(ncpixelimpl_e backend,
 					const char *term);
+
+/* SOLO_LAYOUT.C */
+int				solo_layout_content_rows(int tile_rows);
+int				solo_layout_canvas_rows(int tile_rows);
+bool				solo_layout_terminal_fits(int terminal_rows,
+					int terminal_cols, int tile_rows, int tile_cols);
 
 /* RENDER_MENU.C */
 void			render_menu_create(render_ctx_t *ctx);

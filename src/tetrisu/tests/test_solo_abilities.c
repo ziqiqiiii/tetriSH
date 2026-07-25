@@ -224,12 +224,13 @@ static void	test_canvas_hitboxes_and_terminal_mapping(void)
 	solo.canvas_col = 7;
 	solo.canvas_row = 3;
 	solo.canvas_cols = 128;
-	solo.canvas_rows = 48;
+	solo.content_rows = 46;
+	solo.canvas_rows = 47;
 	center_y = solo_ability_center_y(SOLO_ABILITY_MIRURUN);
 	physical_x = center_x * solo.canvas_cols * ctx.cell_px_x
 		/ SOLO_CANVAS_WIDTH;
-	physical_y = center_y * solo.canvas_rows * ctx.cell_px_y
-		/ SOLO_CANVAS_HEIGHT;
+	physical_y = center_y * solo.content_rows * ctx.cell_px_y
+		/ SOLO_CONTENT_HEIGHT;
 	input.x = solo.canvas_col + physical_x / ctx.cell_px_x;
 	input.y = solo.canvas_row + physical_y / ctx.cell_px_y;
 	input.xpx = physical_x % ctx.cell_px_x;
@@ -246,6 +247,10 @@ static void	test_canvas_hitboxes_and_terminal_mapping(void)
 	assert(solo_ability_at_canvas(canvas_x, canvas_y)
 		== SOLO_ABILITY_MIRURUN);
 	input.x = solo.canvas_col - 1;
+	assert(!solo_mouse_canvas_position(&ctx, &solo, &input,
+			&canvas_x, &canvas_y));
+	input.x = solo.canvas_col;
+	input.y = solo.canvas_row + solo.content_rows;
 	assert(!solo_mouse_canvas_position(&ctx, &solo, &input,
 			&canvas_x, &canvas_y));
 	printf("PASS test_canvas_hitboxes_and_terminal_mapping\n");

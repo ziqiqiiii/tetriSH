@@ -52,8 +52,9 @@ Battle while the authoritative `tetrisd` game loop is being built.
   terminal-repeat fallback when release events are unavailable
 - Dirty row/HUD signatures rebuild only changed content, while the compact
   control legend uses one crisp terminal-font row
-- Responsive PTY geometry checks reflow Solo between compact and full layouts
-  without busy-waiting when a terminal does not report resize as input
+- Responsive PTY geometry checks reflow both home and Solo between compact and
+  full layouts without busy-waiting when a terminal does not report resize as
+  input
 - Interactive ten-segment Mirurun crystal meter that gains one charge per two
   cleared lines, exposes evenly spaced `2 / 4 / 6 / 8` ability thresholds, and
   supports hover descriptions, mouse clicks, and `1`-`4` hotkeys

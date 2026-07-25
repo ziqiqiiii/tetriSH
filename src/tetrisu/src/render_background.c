@@ -125,6 +125,32 @@ int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
 }
 
 /**
+ * @brief Detects terminal geometry changes missing from the input stream.
+ *
+ * Ghostty can resize its drawable grid without emitting NCKEY_RESIZE. Comparing
+ * the tty geometry with Notcurses' current standard plane lets every screen
+ * recover without requiring a key press.
+ *
+ * @param ctx Pointer to the render context.
+ * @return true when the tty and standard-plane dimensions differ.
+ */
+bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
+{
+	struct winsize	terminal;
+	unsigned		plane_rows;
+	unsigned		plane_cols;
+
+	if (ctx == NULL || ctx->std == NULL)
+		return (false);
+	memset(&terminal, 0, sizeof(terminal));
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal) != 0
+		|| terminal.ws_row == 0 || terminal.ws_col == 0)
+		return (false);
+	ncplane_dim_yx(ctx->std, &plane_rows, &plane_cols);
+	return (terminal.ws_row != plane_rows || terminal.ws_col != plane_cols);
+}
+
+/**
  * @brief Destroys the currently owned background plane.
  *
  * @param ctx Context whose background pointer is cleared.
@@ -244,17 +270,44 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 {
 	ncinput		local;
 	ncinput		*event;
+	struct pollfd	input_fd;
+	int			poll_result;
 	uint32_t	key;
 
 	event = input;
 	if (event == NULL)
 		event = &local;
+	memset(&input_fd, 0, sizeof(input_fd));
+	input_fd.fd = notcurses_inputready_fd(ctx->nc);
+	input_fd.events = POLLIN;
 	while (1)
 	{
 		memset(event, 0, sizeof(*event));
-		key = notcurses_get(ctx->nc, NULL, event);
+		poll_result = poll(&input_fd, 1, RENDER_RESIZE_POLL_MS);
+		if (poll_result < 0)
+		{
+			if (errno == EINTR)
+				continue ;
+			return ((uint32_t)-1);
+		}
+		if (poll_result == 0)
+		{
+			if (render_terminal_geometry_changed(ctx))
+				return (NCKEY_RESIZE);
+			continue ;
+		}
+		if ((input_fd.revents & POLLIN) == 0)
+			return ((uint32_t)-1);
+		errno = 0;
+		key = notcurses_get_nblock(ctx->nc, event);
+		if (key == 0)
+			continue ;
 		if (key == (uint32_t)-1)
+		{
+			if (errno == EINTR)
+				continue ;
 			return (key);
+		}
 		/* Ignore keyboard key-up events so one arrow tap moves once. Mouse
 		 * motion can legitimately arrive with release/no-button state and
 		 * must still reach the menu for hover selection. */
