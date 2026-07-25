@@ -92,6 +92,8 @@ overlay in item 8.
    - Compatibility mode uses a clear top badge, terminal-font menu pills, a
      cell selector, 4 x 2 HOLD/NEXT/HUD surfaces, and a true-colour
      quadrant-cell board through active play and game over.
+   - Score, level, lines, combo, event feedback, pause, and top-out copy use
+     native terminal glyphs instead of downsampled image-font masks.
    - At the exact minimum height, the mode label moves into the one-row control
      legend so the authored game area remains unobscured.
    - Home, Solo, movement, resize, and the 64 x 24 compact layout were checked

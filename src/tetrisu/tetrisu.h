@@ -389,6 +389,8 @@ typedef struct s_solo_render
 	struct ncplane	*score_value_plane;
 	struct ncplane	*score_stats_plane;
 	struct ncplane	*score_event_plane;
+	struct ncplane	*compatibility_score_plane;
+	struct ncplane	*compatibility_overlay_plane;
 	struct ncplane	*controls_plane;
 	struct ncplane	*board_overlay_plane;
 	struct ncplane	*settled_runs[BOARD_HEIGHT][(BOARD_WIDTH + 1) / 2];

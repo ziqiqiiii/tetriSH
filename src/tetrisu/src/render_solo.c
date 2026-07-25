@@ -50,6 +50,17 @@ static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
 static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
+static bool	update_compatibility_score(render_ctx_t *ctx,
+	solo_render_t *solo, const solo_game_t *game);
+static bool	update_compatibility_overlay(render_ctx_t *ctx,
+	solo_render_t *solo, const solo_game_t *game);
+static bool	compatibility_put_centered(struct ncplane *plane, int row,
+	const char *text, color_t color, bool bold);
+static bool	compatibility_put_overlay_line(struct ncplane *plane, int row,
+	const char *text, color_t color, bool bold);
+static bool	compatibility_put_stat(struct ncplane *plane, int row,
+	const char *label, int value);
+static const char	*compatibility_clear_name(const solo_game_t *game);
 static uint64_t	next_frame_signature(const solo_game_t *game);
 static uint64_t	hash_value(uint64_t hash, uint64_t value);
 static uint64_t	meter_frame_signature(const solo_render_t *solo,
@@ -680,6 +691,309 @@ static void	set_transparent_base(struct ncplane *plane)
 }
 
 /**
+ * @brief Draws the score panel with native terminal glyphs in cell mode.
+ *
+ * Pixel-font masks lose their counters and stems when compressed into a small
+ * 4x2 cell surface. Native glyphs keep every label, value, and event readable
+ * while the authored panel and surrounding artwork remain cell-rendered.
+ */
+static bool	update_compatibility_score(render_ctx_t *ctx,
+	solo_render_t *solo, const solo_game_t *game)
+{
+	char			line[64];
+	const char		*event;
+	solo_ability_t	ability;
+	color_t			white;
+	color_t			pink;
+	color_t			purple;
+	int				rows;
+	int				cols;
+	int				combo;
+	int				event_row;
+
+	rows = (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+			- SOLO_SCORE_HEADER_Y) / HUD_TILE_SIZE * solo->tile_rows;
+	cols = HUD_SCORE_WIDTH / HUD_TILE_SIZE * solo->tile_cols;
+	if (solo->compatibility_score_plane == NULL)
+	{
+		solo->compatibility_score_plane = create_plane(ctx,
+			solo->canvas_row + SOLO_SCORE_HEADER_Y / HUD_TILE_SIZE
+			* solo->tile_rows,
+			solo->canvas_col + HUD_SCORE_X / HUD_TILE_SIZE * solo->tile_cols,
+			rows, cols);
+		if (solo->compatibility_score_plane == NULL)
+			return (false);
+		set_transparent_base(solo->compatibility_score_plane);
+	}
+	ncplane_erase(solo->compatibility_score_plane);
+	white = (color_t){255, 236, 248};
+	pink = (color_t){255, 98, 186};
+	purple = (color_t){181, 117, 216};
+	if (!compatibility_put_centered(solo->compatibility_score_plane,
+			(HUD_SCORE_Y + 6 - SOLO_SCORE_HEADER_Y) * rows
+			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+				- SOLO_SCORE_HEADER_Y), "SCORE", white, true))
+		return (false);
+	snprintf(line, sizeof(line), "%010" PRIu64, game->scoring.total);
+	if (!compatibility_put_centered(solo->compatibility_score_plane,
+			(HUD_SCORE_Y + 27 - SOLO_SCORE_HEADER_Y) * rows
+			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+				- SOLO_SCORE_HEADER_Y), line, pink, true))
+		return (false);
+	combo = game->scoring.combo;
+	if (combo < 0)
+		combo = 0;
+	if (!compatibility_put_stat(solo->compatibility_score_plane,
+			(HUD_SCORE_STAT_FIRST_Y - SOLO_SCORE_HEADER_Y) * rows
+			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+				- SOLO_SCORE_HEADER_Y), "LEVEL", game->level)
+		|| !compatibility_put_stat(solo->compatibility_score_plane,
+			(HUD_SCORE_STAT_FIRST_Y + HUD_SCORE_STAT_ROW_STEP
+				- SOLO_SCORE_HEADER_Y) * rows
+			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+				- SOLO_SCORE_HEADER_Y), "LINES", game->total_lines)
+		|| !compatibility_put_stat(solo->compatibility_score_plane,
+			(HUD_SCORE_STAT_FIRST_Y + 2 * HUD_SCORE_STAT_ROW_STEP
+				- SOLO_SCORE_HEADER_Y) * rows
+			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+				- SOLO_SCORE_HEADER_Y), "COMBO", combo))
+		return (false);
+	event_row = (SOLO_SCORE_EVENT_Y + 2 - SOLO_SCORE_HEADER_Y) * rows
+		/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
+			- SOLO_SCORE_HEADER_Y);
+	ability = solo->hovered_ability;
+	if (game->ability_result != SOLO_ABILITY_RESULT_NONE)
+		ability = game->last_ability;
+	if (ability != SOLO_ABILITY_NONE)
+	{
+		if (!compatibility_put_centered(solo->compatibility_score_plane,
+				event_row, solo_ability_name(ability), pink, true))
+			return (false);
+		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			event = "ACTIVATED";
+		else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
+			event = "NOT READY";
+		else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
+			event = "BLOCKED";
+		else if (game->ability_result == SOLO_ABILITY_RESULT_UNAVAILABLE)
+			event = "UNAVAILABLE";
+		else
+		{
+			snprintf(line, sizeof(line), "COST %d  KEY %d",
+				solo_ability_cost(ability), ability);
+			event = line;
+		}
+		if (!compatibility_put_centered(solo->compatibility_score_plane,
+				event_row + 1, event, purple, false))
+			return (false);
+		ncplane_move_top(solo->compatibility_score_plane);
+		return (true);
+	}
+	if (game->scoring.back_to_back
+		&& !compatibility_put_centered(solo->compatibility_score_plane,
+			event_row, "BACK-TO-BACK", pink, true))
+		return (false);
+	event = compatibility_clear_name(game);
+	if (event[0] != '\0'
+		&& !compatibility_put_centered(solo->compatibility_score_plane,
+			event_row + 1, event, white, true))
+		return (false);
+	if (game->last_score.total_awarded > 0)
+	{
+		snprintf(line, sizeof(line), "+%" PRIu64,
+			game->last_score.total_awarded);
+		if (!compatibility_put_centered(solo->compatibility_score_plane,
+				event_row + 2, line, pink, true))
+			return (false);
+	}
+	ncplane_move_top(solo->compatibility_score_plane);
+	return (true);
+}
+
+/**
+ * @brief Draws pause and top-out instructions as native terminal text.
+ */
+static bool	update_compatibility_overlay(render_ctx_t *ctx,
+	solo_render_t *solo, const solo_game_t *game)
+{
+	const char	*title;
+	const char	*action;
+	color_t		white;
+	color_t		pink;
+	uint64_t	channels;
+	int			y;
+	int			x;
+	int			rows;
+	int			cols;
+
+	if (!game->paused && game->phase != SOLO_GAME_OVER)
+	{
+		destroy_plane(&solo->compatibility_overlay_plane);
+		return (true);
+	}
+	y = solo->canvas_row + (HUD_BOARD_Y + 128) / HUD_TILE_SIZE
+		* solo->tile_rows;
+	x = solo->canvas_col + (HUD_BOARD_X + 16) / HUD_TILE_SIZE
+		* solo->tile_cols;
+	rows = 64 / HUD_TILE_SIZE * solo->tile_rows;
+	cols = 128 / HUD_TILE_SIZE * solo->tile_cols;
+	if (solo->compatibility_overlay_plane == NULL)
+	{
+		solo->compatibility_overlay_plane = create_plane(ctx,
+			y, x, rows, cols);
+		if (solo->compatibility_overlay_plane == NULL)
+			return (false);
+	}
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 236, 248);
+	(void)ncchannels_set_bg_rgb8(&channels, 24, 11, 32);
+	(void)ncplane_set_base(solo->compatibility_overlay_plane,
+		" ", 0, channels);
+	ncplane_erase(solo->compatibility_overlay_plane);
+	white = (color_t){255, 236, 248};
+	pink = (color_t){255, 98, 186};
+	if (game->phase == SOLO_GAME_OVER)
+	{
+		title = "TOP OUT";
+		action = "R  RESTART";
+	}
+	else
+	{
+		title = "PAUSED";
+		action = "P  RESUME";
+	}
+	if (!compatibility_put_overlay_line(solo->compatibility_overlay_plane,
+			rows / 6, title, pink, true)
+		|| !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
+			rows / 2, action, white, true)
+		|| !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
+			rows - 1, "ESC  HOME", white, false))
+		return (false);
+	ncplane_move_top(solo->compatibility_overlay_plane);
+	return (true);
+}
+
+/**
+ * @brief Writes one clipped and centered terminal string.
+ */
+static bool	compatibility_put_centered(struct ncplane *plane, int row,
+	const char *text, color_t color, bool bold)
+{
+	char		clipped[128];
+	unsigned	rows;
+	unsigned	cols;
+	int			limit;
+	int			x;
+	int			result;
+
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (row < 0 || row >= (int)rows || cols == 0)
+		return (true);
+	limit = (int)cols - 2;
+	if (limit < 1)
+		limit = (int)cols;
+	snprintf(clipped, sizeof(clipped), "%.*s", limit, text);
+	x = ((int)cols - (int)strlen(clipped)) / 2;
+	(void)ncplane_set_fg_rgb8(plane, color.r, color.g, color.b);
+	(void)ncplane_set_bg_alpha(plane, NCALPHA_TRANSPARENT);
+	if (bold)
+		(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	result = ncplane_putstr_yx(plane, row, x, clipped);
+	if (bold)
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+	return (result >= 0);
+}
+
+/**
+ * @brief Writes centered text while retaining the overlay's opaque backdrop.
+ */
+static bool	compatibility_put_overlay_line(struct ncplane *plane, int row,
+	const char *text, color_t color, bool bold)
+{
+	char		clipped[128];
+	unsigned	rows;
+	unsigned	cols;
+	int			limit;
+	int			x;
+	int			result;
+
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (row < 0 || row >= (int)rows || cols == 0)
+		return (true);
+	limit = (int)cols - 2;
+	if (limit < 1)
+		limit = (int)cols;
+	snprintf(clipped, sizeof(clipped), "%.*s", limit, text);
+	x = ((int)cols - (int)strlen(clipped)) / 2;
+	(void)ncplane_set_fg_rgb8(plane, color.r, color.g, color.b);
+	(void)ncplane_set_bg_rgb8(plane, 24, 11, 32);
+	if (bold)
+		(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	result = ncplane_putstr_yx(plane, row, x, clipped);
+	if (bold)
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+	return (result >= 0);
+}
+
+/**
+ * @brief Writes one label/value row with a stable right-aligned number.
+ */
+static bool	compatibility_put_stat(struct ncplane *plane, int row,
+	const char *label, int value)
+{
+	char		line[64];
+	unsigned	rows;
+	unsigned	cols;
+	int			inner;
+	int			value_width;
+
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (row < 0 || row >= (int)rows)
+		return (true);
+	inner = (int)cols - 2;
+	if (inner >= 8)
+	{
+		value_width = inner - 6;
+		snprintf(line, sizeof(line), "%-5s %*d",
+			label, value_width, value);
+	}
+	else
+		snprintf(line, sizeof(line), "%c %d", label[0], value);
+	(void)ncplane_set_fg_rgb8(plane, 255, 236, 248);
+	(void)ncplane_set_bg_alpha(plane, NCALPHA_TRANSPARENT);
+	(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	if (ncplane_putstr_yx(plane, row, cols > 2 ? 1 : 0, line) < 0)
+	{
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+		return (false);
+	}
+	(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+	return (true);
+}
+
+/**
+ * @brief Returns a compact native-text name for the last scoring event.
+ */
+static const char	*compatibility_clear_name(const solo_game_t *game)
+{
+	if (game->last_perfect_clear)
+		return ("PERFECT CLEAR");
+	if (game->last_spin == T_SPIN_FULL)
+		return ("T-SPIN");
+	if (game->last_spin == T_SPIN_MINI)
+		return ("MINI T-SPIN");
+	if (game->last_lines == 4)
+		return ("TETRIS");
+	if (game->last_lines == 3)
+		return ("TRIPLE");
+	if (game->last_lines == 2)
+		return ("DOUBLE");
+	if (game->last_lines == 1)
+		return ("SINGLE");
+	return ("");
+}
+
+/**
  * @brief Updates all dirty foreground regions for one frame.
  *
  * HUD and board changes are accumulated so Notcurses renders at most once per
@@ -732,7 +1046,9 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	event_signature = score_event_signature(solo, game);
 	hud_dirty = next_signature != solo->next_signature
 		|| meter_signature != solo->meter_signature
-		|| solo->mirurun_plane == NULL || solo->score_header_plane == NULL
+		|| solo->mirurun_plane == NULL
+		|| (solo->cell_board && solo->compatibility_score_plane == NULL)
+		|| (!solo->cell_board && solo->score_header_plane == NULL)
 		|| game->scoring.total != solo->score_value_signature
 		|| stats_signature != solo->score_stats_signature
 		|| event_signature != solo->score_event_signature;
@@ -764,6 +1080,22 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 				SOLO_MIRURUN_WIDTH, SOLO_MIRURUN_HEIGHT, "Mirurun portrait"))
 			return (-1);
 		changed = 1;
+	}
+	if (solo->cell_board)
+	{
+		if (solo->compatibility_score_plane == NULL
+			|| game->scoring.total != solo->score_value_signature
+			|| stats_signature != solo->score_stats_signature
+			|| event_signature != solo->score_event_signature)
+		{
+			if (!update_compatibility_score(ctx, solo, game))
+				return (-1);
+			solo->score_value_signature = game->scoring.total;
+			solo->score_stats_signature = stats_signature;
+			solo->score_event_signature = event_signature;
+			changed = 1;
+		}
+		return (changed);
 	}
 	if (solo->score_header_plane == NULL)
 	{
@@ -1036,10 +1368,18 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 		use_cells = solo->cell_board;
 		if (!update_composite_board(ctx, solo, use_cells))
 			return (-1);
+		if (solo->cell_board
+			&& !update_compatibility_overlay(ctx, solo, game))
+			return (-1);
 		solo->overlay_signature = signature;
 		return (1);
 	}
 	changed = 0;
+	if (solo->compatibility_overlay_plane != NULL)
+	{
+		destroy_plane(&solo->compatibility_overlay_plane);
+		changed = 1;
+	}
 	if (solo->board_overlay_plane != NULL)
 	{
 		destroy_plane(&solo->board_overlay_plane);
@@ -2069,6 +2409,8 @@ static void	destroy_solo_planes(solo_render_t *solo)
 	destroy_plane(&solo->status_plane);
 	destroy_board_planes(solo);
 	destroy_plane(&solo->controls_plane);
+	destroy_plane(&solo->compatibility_overlay_plane);
+	destroy_plane(&solo->compatibility_score_plane);
 	destroy_plane(&solo->score_event_plane);
 	destroy_plane(&solo->score_stats_plane);
 	destroy_plane(&solo->score_value_plane);

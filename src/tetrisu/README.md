@@ -47,7 +47,8 @@ Battle while the authoritative `tetrisd` game loop is being built.
   true-colour quadrant-cell fallback
 - Attractive compatibility mode for terminals without safe bitmap rendering:
   a visible mode badge, terminal-font menu labels, cell selector, 4 x 2
-  HOLD/NEXT/HUD art, and a true-colour cell board with no hidden controls
+  HOLD/NEXT/HUD art, a true-colour cell board, and native terminal text for
+  score statistics and pause/top-out instructions
 - Bounded input batches and a 30 FPS presentation ceiling coalesce rapid
   movement and rotation without delaying gameplay state or flooding the PTY
 - Terminal-aware press/release handling with immediate taps, 167 ms DAS,

@@ -1758,6 +1758,8 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 	y = HUD_BOARD_Y + 128;
 	draw_rect(canvas, x, y, 128, 64, make_pixel(g_dark, 225));
 	draw_outline(canvas, x, y, 128, 64, 2, make_pixel(g_pink, 255));
+	if (solo->cell_board)
+		return ;
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";
