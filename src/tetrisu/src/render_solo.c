@@ -144,13 +144,16 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
 	calculate_solo_layout(ctx, solo);
 	update_solo_compatibility_badge(ctx, solo);
 	solo->assets_ready = solo_canvas_load(solo);
-	/* Leak-safe terminals keep the authored pixel tiles and render the board
-	 * from small per-piece planes: only the moving piece is (re)transmitted, so
-	 * it stays snappy even where the terminal cannot animate a bitmap in place
-	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
-	 * true-colour cell board, which carries no bitmaps to retain. */
+	/* Terminals that can move a sprixel keep the authored pixel tiles and render
+	 * the board from small per-piece planes: only the moving piece is
+	 * (re)transmitted, so it stays snappy even where the terminal cannot animate
+	 * a bitmap in place (e.g. Ghostty). Sixel and the framebuffer draw the same
+	 * authored pixels, but flattened into one stationary board image, because
+	 * moving or restacking a bitmap tears there. Terminals with no usable bitmap
+	 * path at all composite one true-colour cell board instead. */
 	solo->cell_board = render_compatibility_mode(ctx);
-	solo->composite_board = solo->cell_board;
+	solo->composite_board = solo->cell_board
+		|| !render_pixel_planes_reliable(ctx);
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,
@@ -273,13 +276,16 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
 	}
 	calculate_solo_layout(ctx, solo);
 	update_solo_compatibility_badge(ctx, solo);
-	/* Leak-safe terminals keep the authored pixel tiles and render the board
-	 * from small per-piece planes: only the moving piece is (re)transmitted, so
-	 * it stays snappy even where the terminal cannot animate a bitmap in place
-	 * (e.g. Ghostty). Leaky terminals (WezTerm, iTerm2) instead composite one
-	 * true-colour cell board, which carries no bitmaps to retain. */
+	/* Terminals that can move a sprixel keep the authored pixel tiles and render
+	 * the board from small per-piece planes: only the moving piece is
+	 * (re)transmitted, so it stays snappy even where the terminal cannot animate
+	 * a bitmap in place (e.g. Ghostty). Sixel and the framebuffer draw the same
+	 * authored pixels, but flattened into one stationary board image, because
+	 * moving or restacking a bitmap tears there. Terminals with no usable bitmap
+	 * path at all composite one true-colour cell board instead. */
 	solo->cell_board = render_compatibility_mode(ctx);
-	solo->composite_board = solo->cell_board;
+	solo->composite_board = solo->cell_board
+		|| !render_pixel_planes_reliable(ctx);
 	if (solo->layout_valid && solo->assets_ready
 		&& !create_solo_planes(ctx, solo))
 		solo_canvas_set_error(solo,

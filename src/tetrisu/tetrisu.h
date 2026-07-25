@@ -2,6 +2,7 @@
 # define TETRISU_H
 
 # include <assert.h>
+# include <ctype.h>
 # include <errno.h>
 # include <inttypes.h>
 # include <poll.h>
@@ -217,8 +218,20 @@ typedef enum
 typedef enum e_tetrisu_renderer_mode
 {
 	TETRISU_RENDERER_AUTO,
-	TETRISU_RENDERER_CELL
+	TETRISU_RENDERER_CELL,
+	TETRISU_RENDERER_STATIONARY,
+	TETRISU_RENDERER_PIXEL
 }	tetrisu_renderer_mode_t;
+
+// How far the terminal can be trusted with bitmap graphics. NONE is the
+// terminal-cell compatibility renderer; STATIONARY draws bitmaps but never
+// moves or overlaps them; MOVABLE allows freely moved and restacked sprixels.
+typedef enum e_tetrisu_pixel_policy
+{
+	TETRISU_PIXELS_NONE,
+	TETRISU_PIXELS_STATIONARY,
+	TETRISU_PIXELS_MOVABLE
+}	tetrisu_pixel_policy_t;
 
 typedef struct
 {
@@ -271,7 +284,7 @@ typedef struct
 	int					menu_col;
 	int					bunny_rows;
 	int					bunny_cols;
-	bool				cell_mode;
+	tetrisu_pixel_policy_t	pixels;
 }	render_ctx_t;
 
 typedef struct s_intro_stream
@@ -489,7 +502,7 @@ void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
-bool				render_pixels_leak_safe(const render_ctx_t *ctx);
+bool				render_pixels_available(const render_ctx_t *ctx);
 bool				render_compatibility_mode(const render_ctx_t *ctx);
 void				render_compatibility_badge_refresh(render_ctx_t *ctx);
 void				render_compatibility_badge_hide(render_ctx_t *ctx);
@@ -501,12 +514,12 @@ int					render_notification_next_wake_ms(
 void				render_notification_reflow(render_ctx_t *ctx);
 void				render_notification_raise(render_ctx_t *ctx);
 void				render_notification_destroy(render_ctx_t *ctx);
-bool				tetrisu_pixel_backend_leak_safe(ncpixelimpl_e backend,
-					const char *term);
+tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
+					const char *term, tetrisu_renderer_mode_t forced);
 
 /* RENDERER_POLICY.C */
 tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value);
-bool				tetrisu_renderer_forced_cell(void);
+tetrisu_renderer_mode_t	tetrisu_renderer_mode_requested(void);
 
 /* SOLO_LAYOUT.C */
 int				solo_layout_content_rows(int tile_rows);

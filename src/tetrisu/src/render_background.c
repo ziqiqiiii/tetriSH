@@ -1,6 +1,7 @@
 #include "tetrisu.h"
 
 // Static Functions
+static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx);
 static void	refresh_cell_geometry(render_ctx_t *ctx);
 static void	fit_background_to_terminal(render_ctx_t *ctx,
 	int std_rows, int std_cols);
@@ -36,8 +37,7 @@ render_ctx_t	render_init(const char *image_path)
 		exit(1);
 	}
 	ctx.std = notcurses_stdplane(ctx.nc);
-	ctx.cell_mode = tetrisu_renderer_forced_cell()
-		|| !render_pixels_leak_safe(&ctx);
+	ctx.pixels = detect_pixel_policy(&ctx);
 	if (render_geometry_refresh(&ctx, false) < 0)
 	{
 		notcurses_stop(ctx.nc);
@@ -54,66 +54,44 @@ render_ctx_t	render_init(const char *image_path)
 }
 
 /**
- * @brief Reports whether movable bitmap planes are safe for this backend.
+ * @brief Reports whether bitmap planes may be moved and overlapped freely.
  *
- * Kitty and iTerm2 preserve overlapping bitmap movement; Sixel and the Linux
- * framebuffer use the stationary composite-board fallback.
+ * Only the Kitty-protocol tier can restack a sprixel or slide it a cell without
+ * tearing, so per-piece board planes and the animated selector are limited to
+ * it. Sixel and the Linux framebuffer still draw bitmaps, but stationary ones.
  *
  * @param ctx Active render context.
- * @return true for backends that preserve movable bitmap planes.
+ * @return true when bitmap planes may move, overlap, and restack.
  */
 bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
 {
-	ncpixelimpl_e	backend;
-
-	/* AI-assisted compatibility exception: Notcurses calls this enum
-	 * informational, but moving overlapping planes visibly tears on the tested
-	 * Sixel/Linux framebuffer paths. Match named backends instead of relying on
-	 * enum ordering, which is not an API stability promise. */
-	backend = notcurses_check_pixel_support(ctx->nc);
-	return (backend == NCPIXEL_ITERM2 || backend == NCPIXEL_KITTY_STATIC
-		|| backend == NCPIXEL_KITTY_ANIMATED
-		|| backend == NCPIXEL_KITTY_SELFREF);
+	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_MOVABLE);
 }
 
 /**
- * @brief Reports whether repeatedly (re)transmitted bitmaps stay bounded here.
- *
- * A moving or frequently redrawn pixel plane is only memory-safe where the
- * terminal either animates the bitmap in place (Kitty's animated /
- * self-referential protocol) or frees each replaced/old image. Measured: Kitty
- * and Ghostty stay flat; WezTerm and iTerm2 retain every frame and climb to
- * gigabytes despite reporting the same static-Kitty backend. The enum cannot
- * tell those apart, so static backends are gated by a name allowlist of
- * terminals verified to free their images.
+ * @brief Reports whether this session may draw bitmaps at all.
  *
  * @param ctx Active render context.
- * @return true when pixel graphics may move/redraw without leaking here.
+ * @return true for every tier above the terminal-cell renderer.
  */
-bool	render_pixels_leak_safe(const render_ctx_t *ctx)
+bool	render_pixels_available(const render_ctx_t *ctx)
 {
-	char	*term;
-	bool	safe;
-
-	term = notcurses_detected_terminal(ctx->nc);
-	safe = tetrisu_pixel_backend_leak_safe(
-			notcurses_check_pixel_support(ctx->nc), term);
-	free(term);
-	return (safe);
+	return (ctx != NULL && ctx->pixels != TETRISU_PIXELS_NONE);
 }
 
 /**
  * @brief Reports whether this session uses the terminal-native renderer.
  *
- * Automatic mode selects cells when movable bitmap updates are unavailable or
- * unsafe; TETRISU_RENDERER=cell makes the same polished path deterministic.
+ * Automatic mode only falls back to cells when the terminal reports no bitmap
+ * support, or when its bitmap registry is known to grow without bound;
+ * TETRISU_RENDERER=cell makes the same polished path deterministic.
  *
  * @param ctx Active render context.
  * @return true when all changing UI surfaces must remain terminal cells.
  */
 bool	render_compatibility_mode(const render_ctx_t *ctx)
 {
-	return (ctx != NULL && ctx->cell_mode);
+	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_NONE);
 }
 
 /**
@@ -422,8 +400,26 @@ void	render_teardown(render_ctx_t *ctx)
 		ctx->menu_plane = NULL;
 		ctx->menu_labels_plane = NULL;
 		ctx->bunny_plane = NULL;
-		ctx->cell_mode = false;
+		ctx->pixels = TETRISU_PIXELS_NONE;
 	}
+}
+
+/**
+ * @brief Probes the terminal once and resolves the renderer capability tier.
+ *
+ * @param ctx Render context holding a started notcurses instance.
+ * @return The tier every later render decision is derived from.
+ */
+static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx)
+{
+	tetrisu_pixel_policy_t	policy;
+	char					*term;
+
+	term = notcurses_detected_terminal(ctx->nc);
+	policy = tetrisu_pixel_policy_for(notcurses_check_pixel_support(ctx->nc),
+			term, tetrisu_renderer_mode_requested());
+	free(term);
+	return (policy);
 }
 
 /**

@@ -33,6 +33,8 @@ static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
 					color_t tint, unsigned alpha);
 static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 					const pixel_asset_t *font);
+static int	selector_crop_cols(const render_ctx_t *ctx, int panel_x,
+					int panel_cols);
 static struct ncplane	*create_text_fallback(render_ctx_t *ctx);
 static void	set_transparent_base(struct ncplane *plane);
 static int	max_int(int left, int right);
@@ -54,7 +56,7 @@ struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
 	pixel_asset_t	font;
 	struct ncplane	*plane;
 
-	if (render_compatibility_mode(ctx) || !notcurses_canpixel(ctx->nc)
+	if (!render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc)
 		|| !load_font_mask(&font))
 		return (create_text_fallback(ctx));
 	plane = blit_menu_pixels(ctx, &font);
@@ -281,6 +283,12 @@ static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
 
 /**
  * @brief Blits one exact-resolution pixel plane above the cell background.
+ *
+ * The composition grid always spans the whole authored panel so glyphs land on
+ * their designed coordinates, but the plane itself starts past the selector
+ * column on terminals that cannot restack a bitmap. Those terminals would
+ * otherwise have to wipe and rebuild the bitmap every time the marker is
+ * recreated over it, which is exactly the operation Sixel does not survive.
  */
 static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 	const pixel_asset_t *font)
@@ -292,6 +300,7 @@ static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 	uint32_t				*pixels;
 	int						pixel_width;
 	int						pixel_height;
+	int						crop_cols;
 
 	memset(&opts, 0, sizeof(opts));
 	opts.y = ctx->bg_row
@@ -302,11 +311,14 @@ static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 	opts.cols = (unsigned)(ctx->bg_cols * MENU_PANEL_WIDTH_RATIO + 0.5);
 	if (opts.rows == 0 || opts.cols == 0)
 		return (NULL);
+	crop_cols = selector_crop_cols(ctx, opts.x, (int)opts.cols);
 	pixel_width = (int)opts.cols * ctx->cell_px_x;
 	pixel_height = (int)opts.rows * ctx->cell_px_y;
 	pixels = NULL;
 	if (!compose_menu_pixels(font, pixel_width, pixel_height, &pixels))
 		return (NULL);
+	opts.x += crop_cols;
+	opts.cols -= (unsigned)crop_cols;
 	plane = ncplane_create(ctx->std, &opts);
 	if (plane == NULL)
 	{
@@ -314,8 +326,9 @@ static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 		return (NULL);
 	}
 	set_transparent_base(plane);
-	ncv = ncvisual_from_rgba(pixels, pixel_height,
-		pixel_width * (int)sizeof(*pixels), pixel_width);
+	ncv = ncvisual_from_rgba(pixels + crop_cols * ctx->cell_px_x,
+		pixel_height, pixel_width * (int)sizeof(*pixels),
+		pixel_width - crop_cols * ctx->cell_px_x);
 	if (ncv == NULL)
 	{
 		free(pixels);
@@ -337,6 +350,29 @@ static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
 	ncvisual_destroy(ncv);
 	free(pixels);
 	return (plane);
+}
+
+/**
+ * @brief Counts the leading panel columns the selector marker needs to itself.
+ *
+ * Zero on the movable tier, where the sprite may overlap the labels freely.
+ * The result never consumes the whole panel, so a cramped terminal still gets
+ * a label surface rather than none at all.
+ *
+ * @param ctx Active render context with selector geometry already resolved.
+ * @param panel_x Absolute terminal column of the authored panel's left edge.
+ * @param panel_cols Panel width in terminal columns.
+ * @return Columns to drop from the left of the label plane.
+ */
+static int	selector_crop_cols(const render_ctx_t *ctx, int panel_x,
+	int panel_cols)
+{
+	int	crop;
+
+	if (render_pixel_planes_reliable(ctx))
+		return (0);
+	crop = ctx->menu_col + ctx->bunny_cols - panel_x;
+	return (clamp_int(crop, 0, panel_cols - 1));
 }
 
 /**

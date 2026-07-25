@@ -36,7 +36,7 @@ void	render_menu_create(render_ctx_t *ctx)
 	ctx->bunny_rows = clamp_int((int)((double)ctx->bg_rows * BUNNY_ROWS_RATIO
 		+ 0.5), BUNNY_MIN_ROWS, BUNNY_MAX_ROWS);
 	ctx->bunny_cols = bunny_cols_for_rows(ctx);
-	if (render_compatibility_mode(ctx))
+	if (!render_pixel_planes_reliable(ctx))
 	{
 		ctx->bunny_rows = COMPAT_SELECTOR_ROWS;
 		ctx->bunny_cols = COMPAT_SELECTOR_COLS;
@@ -81,7 +81,9 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		return ;
 	y = bunny_y_for_selection(ctx, m);
 	x = bunny_x(ctx);
-	if (render_compatibility_mode(ctx))
+	/* Only the movable tier may slide a live plane: elsewhere the marker is
+	 * torn down and recreated so nothing is dragged across a bitmap. */
+	if (!render_pixel_planes_reliable(ctx))
 	{
 		ncplane_destroy(ctx->bunny_plane);
 		ctx->bunny_plane = create_compatibility_selector(ctx, y, x);
@@ -301,7 +303,11 @@ static int	bunny_y_for_selection(const render_ctx_t *ctx,
 	int	y;
 	int	max_y;
 
-	if (render_compatibility_mode(ctx))
+	/* The compact marker is one row tall, so it lines up with the label
+	 * baseline itself rather than with a sprite's centre. Both the cell
+	 * fallback and the composed pixel canvas put that baseline on the row
+	 * render_menu_label_y() returns. */
+	if (!render_pixel_planes_reliable(ctx))
 		center_y = render_menu_label_y(ctx, m->selected);
 	else
 	{
@@ -335,8 +341,8 @@ static int	menu_step_y(const render_ctx_t *ctx)
 /**
  * @brief Blits the bunny as a crisp pixel sprite, scaled to its cell box.
  *
- * Used only where render_pixels_leak_safe() confirms the terminal will not
- * retain the placement when the selector moves on key repeat. The source is
+ * Used only on the movable tier, where the terminal neither tears nor retains
+ * the old placement when the selector slides on key repeat. The source is
  * resized to the selector's cell box in pixels using the terminal's cell
  * geometry, so it reads as smoothly as the authored HUD art.
  *
@@ -376,10 +382,10 @@ static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
 /**
  * @brief Creates the highest-quality bunny selector supported by the terminal.
  *
- * Leak-safe pixel terminals (Kitty, Ghostty) get a crisp pixel sprite. Where a
- * Compatibility mode always uses a native terminal marker. This avoids moving
- * a cell-blitted visual plane, which some terminals retain at its old position.
- * Other bitmap-unsafe terminals use the densest cell blitter available.
+ * Terminals that can move a sprixel (Kitty, Ghostty) get a crisp pixel sprite
+ * that slides between entries. Every other tier gets a compact native marker
+ * that is recreated in place, which avoids dragging either a bitmap or a
+ * cell-blitted visual plane that some terminals retain at its old position.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -392,14 +398,11 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
 
-	if (render_compatibility_mode(ctx))
+	if (!render_pixel_planes_reliable(ctx))
 		return (create_compatibility_selector(ctx, y, x));
-	if (!render_compatibility_mode(ctx) && render_pixels_leak_safe(ctx))
-	{
-		plane = create_bunny_pixel(ctx, y, x);
-		if (plane != NULL)
-			return (plane);
-	}
+	plane = create_bunny_pixel(ctx, y, x);
+	if (plane != NULL)
+		return (plane);
 	ncv = ncvisual_from_file(BUNNY_ASSET_PATH);
 	if (ncv == NULL)
 		return (create_bunny_fallback(ctx, y, x));
@@ -468,7 +471,7 @@ static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
 }
 
 /**
- * @brief Creates the compact native selector used by compatibility mode.
+ * @brief Creates the compact native selector used wherever planes cannot move.
  *
  * ASCII-only text keeps the marker equally readable in terminals with
  * different Unicode width tables.

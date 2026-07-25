@@ -32,6 +32,15 @@ item 9.
 - Item 7 adds an attractive no-bitmap compatibility presentation across Home
   and Solo, selects it automatically on unsafe terminals, and exposes
   `TETRISU_RENDERER=cell` for deterministic testing or user preference.
+- Capability detection is now three tiers, not a single bitmap-safety flag.
+  Movability and memory safety are separate questions: notcurses only
+  implements sprixel movement for the Kitty protocols (`pixel_move` is NULL
+  for both Sixel and the framebuffer), while only the Kitty and iTerm2
+  protocols keep a terminal-side image registry that can leak. So foot, XTerm,
+  mlterm, VTE-based terminals, Konsole, and contour all keep the authored
+  bitmaps under a stationary tier that never moves or restacks a sprixel.
+  Cells are reserved for terminals reporting no bitmap support and for the two
+  registry terminals measured to retain every replaced frame.
 - Item 8 adds a reusable terminal-native notification stack. Music changes
   now show a compact top-right percentage and 16-step bar on Home and Solo,
   including compatibility mode and builds without SDL audio.
@@ -90,8 +99,8 @@ item 9.
 
 7. **Complete the forced cell-renderer fallback** — complete
 
-   - `TETRISU_RENDERER=auto|cell` defaults to automatic capability selection;
-     invalid values safely behave like `auto`.
+   - `TETRISU_RENDERER=auto|cell|stationary|pixel` defaults to automatic
+     capability selection; invalid values safely behave like `auto`.
    - Compatibility mode uses a clear top badge, terminal-font menu pills, a
      native terminal selector, 4 x 2 HOLD/NEXT/HUD surfaces, and a true-colour
      quadrant-cell board through active play and game over.
@@ -255,7 +264,8 @@ item 9.
   hysteresis, notification timers, personal-best persistence, screen
   transitions, and fixture failures.
 - Test each screen at normal and minimum terminal sizes, during resize, after
-  returning home, with audio disabled, and with `TETRISU_RENDERER=cell`.
+  returning home, with audio disabled, and with each forced
+  `TETRISU_RENDERER` tier (`cell`, `stationary`, `pixel`).
 - Home menu checklist: rapid Up/Down, both wrap directions, no background
   movement, trails, clipping, delayed bunny, or hidden labels.
 - HOLD checklist: empty HOLD, first store, swap, blocked second HOLD, rearm

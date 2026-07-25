@@ -5,24 +5,31 @@
  *
  * Unknown and absent values deliberately preserve automatic selection so a
  * typo cannot disable graphics support or prevent the client from starting.
+ * The three explicit values map onto the three capability tiers, which lets a
+ * tier be exercised on a terminal the probe would have classified differently.
  *
  * @param value Value of TETRISU_RENDERER, or NULL when unset.
- * @return Forced cell mode only for the exact public "cell" value.
+ * @return The matching forced tier, or automatic selection.
  */
 tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value)
 {
-	if (value != NULL && strcmp(value, "cell") == 0)
+	if (value == NULL)
+		return (TETRISU_RENDERER_AUTO);
+	if (strcmp(value, "cell") == 0)
 		return (TETRISU_RENDERER_CELL);
+	if (strcmp(value, "stationary") == 0)
+		return (TETRISU_RENDERER_STATIONARY);
+	if (strcmp(value, "pixel") == 0)
+		return (TETRISU_RENDERER_PIXEL);
 	return (TETRISU_RENDERER_AUTO);
 }
 
 /**
- * @brief Reports whether the user explicitly requested terminal-cell output.
+ * @brief Reads the renderer tier the user asked for on this run.
  *
- * @return true for TETRISU_RENDERER=cell, otherwise false.
+ * @return Forced tier from TETRISU_RENDERER, or automatic selection.
  */
-bool	tetrisu_renderer_forced_cell(void)
+tetrisu_renderer_mode_t	tetrisu_renderer_mode_requested(void)
 {
-	return (tetrisu_renderer_mode_from_value(getenv("TETRISU_RENDERER"))
-		== TETRISU_RENDERER_CELL);
+	return (tetrisu_renderer_mode_from_value(getenv("TETRISU_RENDERER")));
 }

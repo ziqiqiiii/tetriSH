@@ -145,17 +145,48 @@ Or build and run in one step:
 make run
 ```
 
-Renderer selection defaults to `auto`: terminals with safe bitmap support keep
-the authored high-resolution presentation, while unsupported or unsafe
-terminals enter the cell-based compatibility presentation automatically. Force
-that presentation anywhere for testing or preference with:
+Renderer selection defaults to `auto`, which probes the terminal once and
+picks one of three tiers:
+
+| Tier | Chosen for | Presentation |
+|---|---|---|
+| movable | kitty and Ghostty — Kitty-protocol terminals measured to free a replaced image | Authored bitmaps everywhere; the selector and the falling piece are their own planes and slide |
+| stationary | Sixel and the Linux framebuffer (foot, XTerm, mlterm, VTE ≥ 0.78, `/dev/fb0`), plus any other Kitty-protocol terminal (Konsole, contour) | The same authored bitmaps, but never moved or restacked: the board is flattened into one image and the selector is a native marker |
+| cell | Terminals reporting no bitmap support, plus WezTerm and iTerm2, measured to retain every replaced frame | True-colour terminal cells throughout, with the `:: COMPATIBILITY MODE ::` badge |
+
+Two independent properties decide this, and conflating them is what previously
+sent perfectly capable terminals to the cell renderer:
+
+**Can a bitmap plane move?** Only on the Kitty protocols. notcurses implements
+sprixel movement in `kitty_move` and leaves `ti->pixel_move` NULL for both
+`setup_sixel_bitmaps()` and `setup_fbcon_bitmaps()`, and redisplaying a Sixel
+cannot write transparency over what is already on screen. So Sixel terminals
+draw bitmaps, just never moving ones — no version of foot changes that, since
+foot implements the Kitty *keyboard* protocol but not the graphics one.
+
+**Does memory stay bounded?** Only the Kitty and iTerm2 protocols hand the
+terminal an image registry that a buggy terminal can grow without bound. Sixel
+and the framebuffer paint straight into the grid and keep nothing. The backend
+enum cannot grade the registry terminals, because notcurses reserves
+`NCPIXEL_KITTY_ANIMATED` and `NCPIXEL_KITTY_SELFREF` for kitty itself and drops
+every other Kitty-graphics terminal onto `NCPIXEL_KITTY_STATIC`, so they are
+split by name: measured-good moves, measured-leaky uses cells, and anything
+unmeasured takes the stationary tier, which retransmits on board change rather
+than once per frame.
+
+Any tier can be forced, which is how an unmeasured terminal is tried or a
+suspected rendering bug is bisected:
 
 ```bash
-TETRISU_RENDERER=cell make run
+TETRISU_RENDERER=cell make run        # terminal cells only
+TETRISU_RENDERER=stationary make run  # bitmaps, never moved
+TETRISU_RENDERER=pixel make run       # bitmaps, freely moved
 ```
 
-The accepted values are `auto` and `cell`. Missing, empty, or unrecognised
-values behave like `auto`.
+The accepted values are `auto`, `cell`, `stationary`, and `pixel`. Missing,
+empty, or unrecognised values behave like `auto`. Forcing `pixel` on a terminal
+whose bitmap registry is not measured is exactly the case the automatic gate
+avoids: watch the process's memory while a game runs before trusting it.
 
 `tetrisu` requires a real terminal: notcurses queries palette, pixel geometry,
 and graphics-protocol support at startup. It exits with
