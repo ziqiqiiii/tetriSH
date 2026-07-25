@@ -46,7 +46,8 @@ Battle while the authoritative `tetrisd` game loop is being built.
   authored tile sprites, while unsafe or unsupported backends use a
   true-colour quadrant-cell fallback
 - Attractive compatibility mode for terminals without safe bitmap rendering:
-  a visible mode badge, terminal-font menu labels, cell selector, 4 x 2
+  a visible mode badge, terminal-font menu labels, native terminal selector,
+  4 x 2
   HOLD/NEXT/HUD art, a true-colour cell board, and native terminal text for
   score statistics and pause/top-out instructions
 - Bounded input batches and a 30 FPS presentation ceiling coalesce rapid

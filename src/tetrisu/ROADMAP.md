@@ -90,7 +90,7 @@ overlay in item 8.
    - `TETRISU_RENDERER=auto|cell` defaults to automatic capability selection;
      invalid values safely behave like `auto`.
    - Compatibility mode uses a clear top badge, terminal-font menu pills, a
-     cell selector, 4 x 2 HOLD/NEXT/HUD surfaces, and a true-colour
+     native terminal selector, 4 x 2 HOLD/NEXT/HUD surfaces, and a true-colour
      quadrant-cell board through active play and game over.
    - Score, level, lines, combo, event feedback, pause, and top-out copy use
      native terminal glyphs instead of downsampled image-font masks.

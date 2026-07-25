@@ -12,6 +12,8 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x);
 static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x);
 static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
 	int y, int x);
+static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
+	int y, int x);
 static void	set_transparent_base(struct ncplane *plane);
 
 /**
@@ -34,6 +36,11 @@ void	render_menu_create(render_ctx_t *ctx)
 	ctx->bunny_rows = clamp_int((int)((double)ctx->bg_rows * BUNNY_ROWS_RATIO
 		+ 0.5), BUNNY_MIN_ROWS, BUNNY_MAX_ROWS);
 	ctx->bunny_cols = bunny_cols_for_rows(ctx);
+	if (render_compatibility_mode(ctx))
+	{
+		ctx->bunny_rows = COMPAT_SELECTOR_ROWS;
+		ctx->bunny_cols = COMPAT_SELECTOR_COLS;
+	}
 	ctx->menu_row = scale_from_bg(ctx->bg_row, ctx->bg_rows,
 		MENU_FIRST_Y_RATIO);
 	ctx->menu_col = bunny_x(ctx);
@@ -72,6 +79,18 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		return ;
 	y = bunny_y_for_selection(ctx, m);
 	x = bunny_x(ctx);
+	if (render_compatibility_mode(ctx))
+	{
+		ncplane_destroy(ctx->bunny_plane);
+		ctx->bunny_plane = create_compatibility_selector(ctx, y, x);
+		if (ctx->bunny_plane != NULL)
+		{
+			ncplane_move_top(ctx->bunny_plane);
+			render_compatibility_badge_refresh(ctx);
+			(void)notcurses_render(ctx->nc);
+		}
+		return ;
+	}
 	if (ncplane_move_yx(ctx->bunny_plane, y, x) != 0)
 		return ;
 	if (notcurses_render(ctx->nc) != 0)
@@ -346,9 +365,9 @@ static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
  * @brief Creates the highest-quality bunny selector supported by the terminal.
  *
  * Leak-safe pixel terminals (Kitty, Ghostty) get a crisp pixel sprite. Where a
- * moving bitmap would be retained indefinitely (WezTerm, iTerm2) or bitmaps are
- * unavailable, the selector falls back to the densest cell blitter so the only
- * moving element stays memory-stable.
+ * Compatibility mode always uses a native terminal marker. This avoids moving
+ * a cell-blitted visual plane, which some terminals retain at its old position.
+ * Other bitmap-unsafe terminals use the densest cell blitter available.
  *
  * @param ctx Pointer to the render context.
  * @param y Target terminal row.
@@ -361,6 +380,8 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
 	struct ncvisual_options	vopts;
 	struct ncplane			*plane;
 
+	if (render_compatibility_mode(ctx))
+		return (create_compatibility_selector(ctx, y, x));
 	if (!render_compatibility_mode(ctx) && render_pixels_leak_safe(ctx))
 	{
 		plane = create_bunny_pixel(ctx, y, x);
@@ -431,6 +452,44 @@ static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
 	ncplane_set_bg_alpha(plane, NCALPHA_TRANSPARENT);
 	ncplane_putstr_yx(plane, ctx->bunny_rows / 2,
 		ctx->bunny_cols > 2 ? ctx->bunny_cols - 2 : 0, ">");
+	return (plane);
+}
+
+/**
+ * @brief Creates the compact native selector used by compatibility mode.
+ *
+ * ASCII-only text keeps the marker equally readable in terminals with
+ * different Unicode width tables.
+ *
+ * @param ctx Pointer to the render context.
+ * @param y Target terminal row.
+ * @param x Target terminal column.
+ * @return Owned selector plane, or NULL when allocation fails.
+ */
+static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
+	int y, int x)
+{
+	ncplane_options	opts;
+	struct ncplane	*plane;
+	uint64_t		channels;
+
+	memset(&opts, 0, sizeof(opts));
+	opts.y = y;
+	opts.x = x;
+	opts.rows = COMPAT_SELECTOR_ROWS;
+	opts.cols = COMPAT_SELECTOR_COLS;
+	plane = ncplane_create(ctx->std, &opts);
+	if (plane == NULL)
+		return (NULL);
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 203, 102);
+	(void)ncchannels_set_bg_rgb8(&channels, 63, 23, 78);
+	(void)ncplane_set_base(plane, " ", 0, channels);
+	ncplane_erase(plane);
+	(void)ncplane_set_fg_rgb8(plane, 255, 203, 102);
+	(void)ncplane_set_bg_rgb8(plane, 63, 23, 78);
+	(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	(void)ncplane_putstr_aligned(plane, 0, NCALIGN_CENTER, "[>]");
 	return (plane);
 }
 
