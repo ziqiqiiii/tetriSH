@@ -51,6 +51,7 @@ void	render_menu_create(render_ctx_t *ctx)
 	if (ctx->bunny_plane != NULL)
 		ncplane_move_top(ctx->bunny_plane);
 	render_compatibility_badge_refresh(ctx);
+	render_notification_raise(ctx);
 	if (notcurses_render(ctx->nc) != 0 && ctx->bunny_plane != NULL)
 	{
 		ncplane_destroy(ctx->bunny_plane);
@@ -59,6 +60,7 @@ void	render_menu_create(render_ctx_t *ctx)
 		{
 			ncplane_move_top(ctx->bunny_plane);
 			render_compatibility_badge_refresh(ctx);
+			render_notification_raise(ctx);
 			(void)notcurses_render(ctx->nc);
 		}
 	}
@@ -87,12 +89,14 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
 		{
 			ncplane_move_top(ctx->bunny_plane);
 			render_compatibility_badge_refresh(ctx);
+			render_notification_raise(ctx);
 			(void)notcurses_render(ctx->nc);
 		}
 		return ;
 	}
 	if (ncplane_move_yx(ctx->bunny_plane, y, x) != 0)
 		return ;
+	render_notification_raise(ctx);
 	if (notcurses_render(ctx->nc) != 0)
 	{
 		if (ctx->bunny_plane != NULL)
@@ -185,6 +189,7 @@ void	render_menu_show_message(render_ctx_t *ctx, const char *msg)
 		x = 0;
 	ncplane_putstr_yx(ctx->menu_plane, 0, x, msg);
 	ncplane_move_top(ctx->menu_plane);
+	render_notification_raise(ctx);
 	(void)notcurses_render(ctx->nc);
 }
 

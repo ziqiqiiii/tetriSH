@@ -181,6 +181,7 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 				"Game paused - resize the terminal to at least 64 x 24"))
 		{
 			render_compatibility_badge_refresh(ctx);
+			render_notification_raise(ctx);
 			(void)notcurses_render(ctx->nc);
 		}
 		return ;
@@ -190,6 +191,7 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 		if (draw_status_message(ctx, solo, solo->asset_error))
 		{
 			render_compatibility_badge_refresh(ctx);
+			render_notification_raise(ctx);
 			(void)notcurses_render(ctx->nc);
 		}
 		return ;
@@ -214,6 +216,7 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 	changed |= result;
 	if (ctx->compatibility_plane != NULL)
 		ncplane_move_top(ctx->compatibility_plane);
+	render_notification_raise(ctx);
 	if (changed > 0 && notcurses_render(ctx->nc) != 0)
 	{
 		solo_canvas_set_error(solo,
@@ -227,6 +230,7 @@ render_failure:
 	if (draw_status_message(ctx, solo, solo->asset_error))
 	{
 		render_compatibility_badge_refresh(ctx);
+		render_notification_raise(ctx);
 		(void)notcurses_render(ctx->nc);
 	}
 }

@@ -52,6 +52,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	int				wait_ms;
 	int				render_wait_ms;
 	int				handling_wake_ms;
+	int				notification_wake_ms;
 	bool			leave;
 	bool			resize_pending;
 	bool			display_ready;
@@ -93,6 +94,10 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 					&& handling_wake_ms < wake_ms))
 				wake_ms = handling_wake_ms;
 		}
+		notification_wake_ms = render_notification_next_wake_ms(ctx);
+		if (wake_ms < 0 || (notification_wake_ms >= 0
+				&& notification_wake_ms < wake_ms))
+			wake_ms = notification_wake_ms;
 		wait_ms = wake_ms;
 		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
 			wait_ms = RENDER_RESIZE_POLL_MS;
@@ -111,6 +116,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		}
 		else
 			key = wait_solo_input(ctx, wait_ms, &input, &input_errno);
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
 		now_ms = monotonic_ms();
 		if (now_ms < previous_ms)
 			elapsed_ms = 0;
@@ -167,6 +174,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		{
 			solo_handling_reset(&handling);
 			render_solo_resize(ctx, &solo);
+			render_notification_reflow(ctx);
 			needs_draw = true;
 			force_render = true;
 			/* Reflow is an explicit pause; protocol negotiation time must not
@@ -362,11 +370,13 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	if (key == '+' || key == '=')
 	{
 		audio_volume_up(audio);
+		render_notification_show_volume(ctx, audio->music_volume);
 		return (false);
 	}
 	if (key == '-' || key == '_')
 	{
 		audio_volume_down(audio);
+		render_notification_show_volume(ctx, audio->music_volume);
 		return (false);
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)

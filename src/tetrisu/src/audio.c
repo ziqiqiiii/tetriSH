@@ -185,14 +185,12 @@ void	audio_set_music_volume(audio_ctx_t *audio, int volume)
 		return ;
 	if (volume < 0)
 		volume = 0;
-#if TETRISU_ENABLE_AUDIO
-	if (volume > MIX_MAX_VOLUME)
-		volume = MIX_MAX_VOLUME;
+	if (volume > AUDIO_MAX_VOLUME)
+		volume = AUDIO_MAX_VOLUME;
 	audio->music_volume = volume;
+#if TETRISU_ENABLE_AUDIO
 	if (audio->enabled)
 		Mix_VolumeMusic(audio->music_volume);
-#else
-	audio->music_volume = volume;
 #endif
 }
 
@@ -203,13 +201,14 @@ void	audio_set_music_volume(audio_ctx_t *audio, int volume)
  */
 void	audio_volume_up(audio_ctx_t *audio)
 {
-	if (audio == NULL || !audio->enabled)
+	if (audio == NULL)
 		return ;
-#if TETRISU_ENABLE_AUDIO
 	audio->music_volume += AUDIO_VOLUME_STEP;
-	if (audio->music_volume > MIX_MAX_VOLUME)
-		audio->music_volume = MIX_MAX_VOLUME;
-	Mix_VolumeMusic(audio->music_volume);
+	if (audio->music_volume > AUDIO_MAX_VOLUME)
+		audio->music_volume = AUDIO_MAX_VOLUME;
+#if TETRISU_ENABLE_AUDIO
+	if (audio->enabled)
+		Mix_VolumeMusic(audio->music_volume);
 #endif
 }
 
@@ -220,13 +219,14 @@ void	audio_volume_up(audio_ctx_t *audio)
  */
 void	audio_volume_down(audio_ctx_t *audio)
 {
-	if (audio == NULL || !audio->enabled)
+	if (audio == NULL)
 		return ;
-#if TETRISU_ENABLE_AUDIO
 	audio->music_volume -= AUDIO_VOLUME_STEP;
 	if (audio->music_volume < 0)
 		audio->music_volume = 0;
-	Mix_VolumeMusic(audio->music_volume);
+#if TETRISU_ENABLE_AUDIO
+	if (audio->enabled)
+		Mix_VolumeMusic(audio->music_volume);
 #endif
 }
 

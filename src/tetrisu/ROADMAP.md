@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 begins with the global notification
-overlay in item 8.
+Phases 1 and 2 are complete. Phase 3 continues with the ability popover in
+item 9.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -32,6 +32,9 @@ overlay in item 8.
 - Item 7 adds an attractive no-bitmap compatibility presentation across Home
   and Solo, selects it automatically on unsafe terminals, and exposes
   `TETRISU_RENDERER=cell` for deterministic testing or user preference.
+- Item 8 adds a reusable terminal-native notification stack. Music changes
+  now show a compact top-right percentage and 16-step bar on Home and Solo,
+  including compatibility mode and builds without SDL audio.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -103,12 +106,15 @@ overlay in item 8.
 
 ## Phase 3 — feedback, sound, and danger mode
 
-8. **Add a global notification overlay**
+8. **Add a global notification overlay** — complete
 
    - Reusable top-right notification stack using monotonic timers.
    - Volume notification: `MUSIC`, percentage, and a 16-step bar.
    - Show for 900 ms, then fade for 180 ms.
    - Work on home, gameplay, future screens, and silent-audio builds.
+   - Repeated volume changes refresh one notification instead of creating
+     duplicates; the shared stack retains room for future notification types.
+   - Verified in Kitty artwork mode and WezTerm compatibility mode.
 
 9. **Replace ability help with a fading popover**
 

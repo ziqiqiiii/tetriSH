@@ -70,9 +70,15 @@ int	main(void)
 				state = APP_QUIT;
 		}
 		else if (key == '+' || key == '=')
+		{
 			audio_volume_up(&audio);
+			render_notification_show_volume(&ctx, audio.music_volume);
+		}
 		else if (key == '-' || key == '_')
+		{
 			audio_volume_down(&audio);
+			render_notification_show_volume(&ctx, audio.music_volume);
+		}
 		else
 			state = app_handle_key(state, key);
 	}
@@ -138,5 +144,6 @@ static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
 		return (-1);
 	render_menu_create(ctx);
 	render_menu_move_bunny(ctx, menu);
+	render_notification_reflow(ctx);
 	return (0);
 }

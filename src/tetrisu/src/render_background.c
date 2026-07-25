@@ -352,6 +352,8 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 	ncinput		*event;
 	struct pollfd	input_fd;
 	int			poll_result;
+	int			wait_ms;
+	int			notification_wait_ms;
 	uint32_t	key;
 
 	event = input;
@@ -363,13 +365,19 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 	while (1)
 	{
 		memset(event, 0, sizeof(*event));
-		poll_result = poll(&input_fd, 1, RENDER_RESIZE_POLL_MS);
+		wait_ms = RENDER_RESIZE_POLL_MS;
+		notification_wait_ms = render_notification_next_wake_ms(ctx);
+		if (notification_wait_ms >= 0 && notification_wait_ms < wait_ms)
+			wait_ms = notification_wait_ms;
+		poll_result = poll(&input_fd, 1, wait_ms);
 		if (poll_result < 0)
 		{
 			if (errno == EINTR)
 				continue ;
 			return ((uint32_t)-1);
 		}
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
 		if (poll_result == 0)
 		{
 			if (render_terminal_geometry_changed(ctx))
@@ -405,6 +413,7 @@ void	render_teardown(render_ctx_t *ctx)
 {
 	if (ctx->nc != NULL)
 	{
+		render_notification_destroy(ctx);
 		render_compatibility_badge_hide(ctx);
 		notcurses_stop(ctx->nc);
 		ctx->nc = NULL;

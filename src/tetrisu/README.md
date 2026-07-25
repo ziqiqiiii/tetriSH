@@ -32,6 +32,9 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Kernel-sleeping keyboard input through notcurses' pollable input descriptor;
   arrow-key selection wraps around
 - Optional background music and menu SFX via SDL2_mixer, with runtime volume control
+- Compact terminal-native volume feedback on Home and Solo: `MUSIC`, a rounded
+  percentage, and a 16-step top-right bar that remains available in
+  compatibility mode and silent-audio builds
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
 - Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,

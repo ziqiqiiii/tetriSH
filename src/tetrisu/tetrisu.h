@@ -73,6 +73,15 @@
 /* AUDIO.C */
 # define AUDIO_DEFAULT_VOLUME	96
 # define AUDIO_VOLUME_STEP		8
+# define AUDIO_MAX_VOLUME		128
+
+/* UI_NOTIFICATION.C */
+# define UI_NOTIFICATION_STACK_MAX	3
+# define UI_NOTIFICATION_TITLE_MAX	15
+# define UI_NOTIFICATION_HOLD_MS	900
+# define UI_NOTIFICATION_FADE_MS	180
+# define UI_NOTIFICATION_FRAME_MS	33
+# define UI_NOTIFICATION_BAR_STEPS	16
 
 /* RENDER_BACKGROUND.C */
 # define BACKGROUND_SOURCE_PIXELS_Y	1086
@@ -225,6 +234,19 @@ typedef struct
 	void	*menu_select_sfx;
 }	audio_ctx_t;
 
+typedef struct s_ui_notification
+{
+	char		title[UI_NOTIFICATION_TITLE_MAX + 1];
+	int			percent;
+	uint64_t	shown_at_ms;
+}	ui_notification_t;
+
+typedef struct s_ui_notification_stack
+{
+	ui_notification_t	items[UI_NOTIFICATION_STACK_MAX];
+	int					count;
+}	ui_notification_stack_t;
+
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
 // follow the art even when notcurses scales it to different terminals.
@@ -237,6 +259,8 @@ typedef struct
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*bunny_plane;
 	struct ncplane		*compatibility_plane;
+	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
+	ui_notification_stack_t	notifications;
 	int					bg_row;
 	int					bg_col;
 	int					bg_rows;
@@ -441,6 +465,19 @@ void			menu_move_selection(menu_selection_t *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
 
+/* UI_NOTIFICATION.C */
+void			ui_notification_stack_init(ui_notification_stack_t *stack);
+void			ui_notification_show(ui_notification_stack_t *stack,
+					const char *title, int percent, uint64_t now_ms);
+bool			ui_notification_update(ui_notification_stack_t *stack,
+					uint64_t now_ms);
+int				ui_notification_opacity(const ui_notification_t *notification,
+					uint64_t now_ms);
+int				ui_notification_next_wake_ms(
+					const ui_notification_stack_t *stack, uint64_t now_ms);
+int				ui_notification_volume_percent(int volume);
+uint64_t		ui_notification_now_ms(void);
+
 /* RENDER_BACKGROUND.C */
 render_ctx_t	render_init(const char *image_path);
 uint32_t		render_wait_key(render_ctx_t *ctx);
@@ -456,6 +493,14 @@ bool				render_pixels_leak_safe(const render_ctx_t *ctx);
 bool				render_compatibility_mode(const render_ctx_t *ctx);
 void				render_compatibility_badge_refresh(render_ctx_t *ctx);
 void				render_compatibility_badge_hide(render_ctx_t *ctx);
+void				render_notification_show_volume(render_ctx_t *ctx,
+					int volume);
+void				render_notification_tick(render_ctx_t *ctx);
+int					render_notification_next_wake_ms(
+					const render_ctx_t *ctx);
+void				render_notification_reflow(render_ctx_t *ctx);
+void				render_notification_raise(render_ctx_t *ctx);
+void				render_notification_destroy(render_ctx_t *ctx);
 bool				tetrisu_pixel_backend_leak_safe(ncpixelimpl_e backend,
 					const char *term);
 
