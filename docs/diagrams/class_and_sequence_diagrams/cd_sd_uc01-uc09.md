@@ -1418,18 +1418,18 @@ sequenceDiagram
         RC->>R: canAccept()
         activate R
 
-        alt status == IN_GAME  (ext 4b)
-            R-->>RC: false(IN_GAME)
+        alt canAccept() == IN_GAME  (ext 4b)
+            R-->>RC: IN_GAME
             RC-->>C: 409 Conflict
             C-->>UI: error(409)
             UI-->>P: show("game already in progress")
-        else numberOfPlayers == slotCount  (ext 4a)
-            R-->>RC: false(FULL)
+        else canAccept() == FULL  (ext 4a)
+            R-->>RC: FULL
             RC-->>C: 409 Conflict
             C-->>UI: error(409)
             UI-->>P: show("room full")
-        else acceptable
-            R-->>RC: true
+        else canAccept() == ACCEPTED
+            R-->>RC: ACCEPTED
             RC->>R: seat(playerId)
             R->>Sn: setStatus(JOINING)
             activate Sn
