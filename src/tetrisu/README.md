@@ -32,9 +32,10 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Kernel-sleeping keyboard input through notcurses' pollable input descriptor;
   arrow-key selection wraps around
 - Optional background music and menu SFX via SDL2_mixer, with runtime volume control
-- Compact terminal-native volume feedback on Home and Solo: `MUSIC`, a rounded
-  percentage, and a 16-step top-right bar that remains available in
-  compatibility mode and silent-audio builds
+- Cutesy Mirurun-and-speaker pixel-art volume feedback on Home and Solo:
+  `MUSIC`, a rounded percentage, and a 16-step crystal bar; compatibility mode
+  recreates the same artwork with dense terminal cells, and silent-audio
+  builds retain the visual feedback
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
 - Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,
@@ -260,6 +261,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `DEFAULT_HUD_PATH` | Transparent 512 x 384 Solo HUD/frame |
 | `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
 | `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
+| `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |

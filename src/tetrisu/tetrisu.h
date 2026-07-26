@@ -53,6 +53,8 @@
 # define DEFAULT_HUD_PATH	ASSET_DIR "/default_theme/default_board.png"
 # define DEFAULT_TILE_PATH	ASSET_DIR "/default_theme/default_tile.png"
 # define DEFAULT_MIRURUN_PATH	ASSET_DIR "/default_theme/default_mirurun.png"
+# define VOLUME_NOTIFICATION_PATH \
+	ASSET_DIR "/default_theme/volume_notification.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
@@ -273,6 +275,7 @@ typedef struct
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
 	struct ncplane		*compatibility_plane;
+	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
 	ui_notification_stack_t	notifications;
 	int					bg_row;

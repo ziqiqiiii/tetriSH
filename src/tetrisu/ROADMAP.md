@@ -41,9 +41,10 @@ item 9.
   bitmaps under a stationary tier that never moves or restacks a sprixel.
   Cells are reserved for terminals reporting no bitmap support and for the two
   registry terminals measured to retain every replaced frame.
-- Item 8 adds a reusable terminal-native notification stack. Music changes
-  now show a compact top-right percentage and 16-step bar on Home and Solo,
-  including compatibility mode and builds without SDL audio.
+- Item 8 adds a reusable notification stack with a cutesy authored Mirurun
+  music card. Music changes show a crisp live percentage and 16-step crystal
+  bar on Home and Solo, including compatibility mode and builds without SDL
+  audio.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -118,12 +119,14 @@ item 9.
 8. **Add a global notification overlay** — complete
 
    - Reusable top-right notification stack using monotonic timers.
-   - Volume notification: `MUSIC`, percentage, and a 16-step bar.
+   - Volume notification: authored Mirurun-and-speaker pixel art, `MUSIC`,
+     percentage, and a 16-step crystal bar.
    - Show for 900 ms, then fade for 180 ms.
    - Work on home, gameplay, future screens, and silent-audio builds.
    - Repeated volume changes refresh one notification instead of creating
      duplicates; the shared stack retains room for future notification types.
-   - Verified in Kitty artwork mode and WezTerm compatibility mode.
+   - Kitty uses the authored bitmap; WezTerm compatibility mode renders the
+     same PNG through dense terminal cells with crisp native text above it.
 
 9. **Replace ability help with a fading popover**
 
