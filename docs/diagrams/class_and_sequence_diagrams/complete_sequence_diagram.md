@@ -194,6 +194,8 @@ sequenceDiagram
     L-->>LC: RoomSummary[]
     deactivate L
 
+    LC->>LC: header(playerId)
+    activate LC
     LC->>DB: db_get_player(playerId)
     activate DB
     DB-->>LC: player(username, leaderboardScore)
@@ -203,6 +205,8 @@ sequenceDiagram
     activate DB
     DB-->>LC: rank
     deactivate DB
+    LC-->>LC: HeaderDto{username, score, rank}
+    deactivate LC
 
     LC-->>C: 200 OK {rooms[], header{username, score, rank}}
     deactivate LC
