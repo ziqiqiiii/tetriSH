@@ -79,24 +79,28 @@ t_db_result	db_get_player(t_db *db, t_player_id id, t_player *out)
 /**
  * @brief Report whether a player owns a given character.
  *
- * Read-locked membership probe (serves does_player_own_*). A NULL handle or an
- * unknown player simply reports false.
+ * Read-locked membership probe (serves does_player_own_*). An unknown player
+ * reports DB_FALSE; only a NULL handle is undeterminable.
  *
  * @param db The handle (may be NULL).
  * @param id The player's id.
  * @param cid The character id to test.
- * @return true if the player exists and owns the character, false otherwise.
+ * @return DB_TRUE if the player exists and owns the character, DB_FALSE if not,
+ *         DB_UNKNOWN if the handle is NULL.
  */
-bool	db_player_owns_character(t_db *db, t_player_id id, t_item_id cid)
+t_db_bool	db_player_owns_character(t_db *db, t_player_id id, t_item_id cid)
 {
 	t_player	*p;
-	bool		owns;
+	t_db_bool	owns;
 
 	if (!db)
-		return (false);
+		return (DB_UNKNOWN);
 	pthread_rwlock_rdlock(&db->lock);
 	p = db_find_by_id(db, id);
-	owns = p && owned_has(p->owned_characters, p->owned_characters_count, cid);
+	if (p && owned_has(p->owned_characters, p->owned_characters_count, cid))
+		owns = DB_TRUE;
+	else
+		owns = DB_FALSE;
 	pthread_rwlock_unlock(&db->lock);
 	return (owns);
 }
@@ -109,18 +113,22 @@ bool	db_player_owns_character(t_db *db, t_player_id id, t_item_id cid)
  * @param db The handle (may be NULL).
  * @param id The player's id.
  * @param tid The theme id to test.
- * @return true if the player exists and owns the theme, false otherwise.
+ * @return DB_TRUE if the player exists and owns the theme, DB_FALSE if not,
+ *         DB_UNKNOWN if the handle is NULL.
  */
-bool	db_player_owns_theme(t_db *db, t_player_id id, t_item_id tid)
+t_db_bool	db_player_owns_theme(t_db *db, t_player_id id, t_item_id tid)
 {
 	t_player	*p;
-	bool		owns;
+	t_db_bool	owns;
 
 	if (!db)
-		return (false);
+		return (DB_UNKNOWN);
 	pthread_rwlock_rdlock(&db->lock);
 	p = db_find_by_id(db, id);
-	owns = p && owned_has(p->owned_themes, p->owned_themes_count, tid);
+	if (p && owned_has(p->owned_themes, p->owned_themes_count, tid))
+		owns = DB_TRUE;
+	else
+		owns = DB_FALSE;
 	pthread_rwlock_unlock(&db->lock);
 	return (owns);
 }

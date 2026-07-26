@@ -137,6 +137,13 @@ over the in-memory index) and returns a `t_db_result`: `DB_OK`, `DB_NOT_FOUND`,
 `DB_EXISTS`, `DB_BAD_CREDS`, `DB_INSUFFICIENT`, `DB_NOT_OWNED`, `DB_IO_ERROR`,
 `DB_FULL`, `DB_INVALID`.
 
+The two ownership probes (`db_player_owns_character` / `db_player_owns_theme`)
+are the exception: they answer a predicate rather than reporting an outcome, so
+they return a `t_db_bool` — `DB_TRUE`, `DB_FALSE`, `DB_UNKNOWN` (bad handle).
+`DB_FALSE` means "does not own it", which is a successful read, not a failure —
+so never test these against `DB_OK`. The catalogue getters `db_get_character` /
+`db_get_theme` return a borrowed pointer or `NULL`.
+
 Surface: `db_signup` / `db_login` / `db_get_player`, `db_buy_character` /
 `db_buy_theme` / `db_equip_character` / `db_equip_theme`,
 `db_player_owns_character` / `db_player_owns_theme`, `db_record_game`,
@@ -175,5 +182,7 @@ Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other
 
 - `README.md` — full protocol grammar, method table, `.tetrishrc` keys, IPC design
 - `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs
-- `docs/class_diagrams/class-diagrams.md` — system and per-library class diagrams
+- `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
+- `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
+- `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
 - `docs/cleaning/{code_style,makefile_style,readme_style}.md` — style guides these files are expected to follow

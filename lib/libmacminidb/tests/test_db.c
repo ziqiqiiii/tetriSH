@@ -56,8 +56,11 @@ void	test_buy_and_equip(void)
 	assert(db_buy_character(db, id, 2) == DB_EXISTS);
 	assert(db_equip_character(db, id, 2) == DB_OK);
 	assert(db_equip_character(db, id, 3) == DB_NOT_OWNED);
-	assert(db_player_owns_character(db, id, 2) == true);
-	assert(db_player_owns_character(db, id, 3) == false);
+	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
+	assert(db_player_owns_character(db, id, 3) == DB_FALSE);
+	// A NULL handle is undeterminable, not a plain "does not own".
+	assert(db_player_owns_character(NULL, id, 2) == DB_UNKNOWN);
+	assert(db_player_owns_theme(NULL, id, 1) == DB_UNKNOWN);
 	db_close(db);
 	printf("PASS test_buy_and_equip\n");
 }
@@ -110,7 +113,7 @@ void	test_durability_roundtrip(void)
 	assert(out.leaderboard_score == 250);
 	assert(out.wallet_points == 1000 - 10);
 	assert(out.current_equipped_character == 2);
-	assert(db_player_owns_character(db, id, 2) == true);
+	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
 	assert(db_rank(db, id, &rank) == DB_OK && rank == 1);
 	db_close(db);
 	printf("PASS test_durability_roundtrip\n");

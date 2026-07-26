@@ -407,7 +407,7 @@ classDiagram
     }
     class Db {
         <<interface>>
-        +db_player_owns_character(id, cid) DbResult
+        +db_player_owns_character(id, cid) DbBool
         +db_get_character(cid, out) DbResult
     }
     class AbilityVerdict {
@@ -1080,7 +1080,7 @@ sequenceDiagram
 
     AC->>DB: db_player_owns_character(playerId, characterId)
     activate DB
-    DB-->>AC: DB_OK | DB_NOT_OWNED
+    DB-->>AC: DB_TRUE | DB_FALSE
     deactivate DB
 
     alt character not owned  (ext 3a)
@@ -1342,7 +1342,7 @@ classDiagram
         <<interface>>
         libmacminidb
         +db_record_game(id, scoreDelta, pointsDelta, won) DbResult
-        +db_player_owns_character(id, cid) DbResult
+        +db_player_owns_character(id, cid) DbBool
         +db_get_character(cid, out) DbResult
     }
 

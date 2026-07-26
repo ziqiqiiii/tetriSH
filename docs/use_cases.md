@@ -831,7 +831,7 @@ The four selected characters retain their complete, four-level ability sets from
 | Wolf-man | 4 | Thwack | For the Player's next four pieces, blocks above a cleared line fall, allowing incomplete lower lines to clear in the same sequence. |
 
 **Extensions / Alternate Flows**
-- **3a. Character/ability not owned (`db_player_owns_character` false / `DB_NOT_OWNED` → 403):** Request rejected; no effect.
+- **3a. Character/ability not owned (`db_player_owns_character` returns `DB_FALSE` → 403):** Request rejected; no effect.
 - **4a. Insufficient line-clear charge (`409`):** Request rejected; no charge is consumed and no effect is applied.
 
 **Related Use Cases**
@@ -894,7 +894,7 @@ The four selected characters retain their complete, four-level ability sets from
 | **Preconditions** | Player has selected a character in the Marketplace (Characters tab). |
 | **Postconditions (success)** | **BUY** is enabled and **Set as Default** disabled if not owned, or the reverse if owned; no persisted state changes. |
 | **Trigger** | Player selects/highlights a character. |
-| **DB Mapping** | `db_player_owns_character(id, cid)` — read-lock read.|
+| **DB Mapping** | `db_player_owns_character(id, cid)` — read-lock read, returns `t_db_bool` (`DB_TRUE` / `DB_FALSE`).|
 
 **Main Success Scenario**
 1. Player selects/highlights a character.
@@ -966,7 +966,7 @@ The four selected characters retain their complete, four-level ability sets from
 | **Preconditions** | Player has selected a theme in the Marketplace (Themes tab). |
 | **Postconditions (success)** | **BUY** is enabled and **Set as Default** disabled if not owned, or the reverse if owned; no persisted state changes. |
 | **Trigger** | Player selects/highlights a theme. |
-| **DB Mapping** | `db_player_owns_theme(id, tid)` — read-lock read. |
+| **DB Mapping** | `db_player_owns_theme(id, tid)` — read-lock read, returns `t_db_bool` (`DB_TRUE` / `DB_FALSE`). |
 
 **Main Success Scenario**
 1. Player selects/highlights a theme.
@@ -1454,7 +1454,7 @@ Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTT
 | UC-19 Set Default Theme | `db_equip_theme` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
 | UC-10/11/12 Play (post-game) | `db_record_game` once per participant **at game-over** (all three modes; **not** called on mid-game quit) | credits points, updates score, increments `games_played` (and `games_won` on a win) |
 | UC-20 View Settings | `db_get_player` + `db_rank` (+ catalogue lookups) | 200 |
-| UC-14 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_NOT_OWNED`→403 |
+| UC-14 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_FALSE`→403 |
 | UC-21 View Leaderboard | `db_leaderboard` | 200 |
 
 **Status-code conventions used above**

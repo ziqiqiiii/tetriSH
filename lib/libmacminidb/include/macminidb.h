@@ -24,6 +24,18 @@ typedef enum e_db_result
 	DB_INVALID			/* malformed argument */
 }	t_db_result;
 
+/*
+** Predicate answers. Kept separate from t_db_result: a probe that returns
+** DB_FALSE succeeded — "no" is an answer, not a failure. DB_FALSE is 0 so a
+** bare truth test still reads correctly.
+*/
+typedef enum e_db_bool
+{
+	DB_FALSE = 0,		/* predicate does not hold */
+	DB_TRUE,			/* predicate holds */
+	DB_UNKNOWN			/* could not determine (bad handle) */
+}	t_db_bool;
+
 typedef uint64_t	t_player_id;
 typedef uint32_t	t_item_id;
 
@@ -82,8 +94,8 @@ t_db_result			db_equip_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_record_game(t_db *db, t_player_id id, int64_t score_delta, int64_t points_delta, bool won);
 t_db_result			db_login(t_db *db, const char *username, const char *password_hashed, t_player *out);
 t_db_result			db_get_player(t_db *db, t_player_id id, t_player *out);
-bool				db_player_owns_character(t_db *db, t_player_id id, t_item_id cid);
-bool				db_player_owns_theme(t_db *db, t_player_id id, t_item_id tid);
+t_db_bool			db_player_owns_character(t_db *db, t_player_id id, t_item_id cid);
+t_db_bool			db_player_owns_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_leaderboard(t_db *db, t_rank_entry *out, size_t cap, size_t *out_count);
 t_db_result			db_rank(t_db *db, t_player_id id, size_t *out_rank);
 const t_character	*db_get_character(t_db *db, t_item_id cid);

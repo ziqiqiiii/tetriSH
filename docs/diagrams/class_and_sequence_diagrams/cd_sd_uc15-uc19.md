@@ -144,7 +144,7 @@ classDiagram
     }
     class StoreController {
         <<control>>
-        +ownsCharacter(playerId : PlayerId, cid : ItemId) bool
+        +ownsCharacter(playerId : PlayerId, cid : ItemId) DbBool
     }
     class Inventory {
         -ownedCharacters : ItemId[]
@@ -153,13 +153,20 @@ classDiagram
     class Db {
         <<interface>>
         libmacminidb
-        +db_player_owns_character(id, cid) bool
+        +db_player_owns_character(id, cid) DbBool
+    }
+    class DbBool {
+        <<enum>>
+        DB_TRUE
+        DB_FALSE
+        DB_UNKNOWN
     }
 
     MarketplaceUI ..> HtttpClient : 1. on select/highlight
     HtttpClient ..> StoreController : ownership query
     StoreController ..> Db : 2. db_player_owns_character (read lock)
     Db ..> Inventory : reads owned set
+    Db ..> DbBool : DB_TRUE / DB_FALSE / DB_UNKNOWN
     StoreController ..> ButtonState : 3. unowned → BUY on<br/>4. owned → Set-as-Default on
     MarketplaceUI ..> ButtonState : applies
     note for Db "read-lock read — no persisted change"
@@ -271,7 +278,7 @@ classDiagram
     }
     class StoreController {
         <<control>>
-        +ownsTheme(playerId : PlayerId, tid : ItemId) bool
+        +ownsTheme(playerId : PlayerId, tid : ItemId) DbBool
     }
     class Inventory {
         -ownedThemes : ItemId[]
@@ -280,13 +287,20 @@ classDiagram
     class Db {
         <<interface>>
         libmacminidb
-        +db_player_owns_theme(id, tid) bool
+        +db_player_owns_theme(id, tid) DbBool
+    }
+    class DbBool {
+        <<enum>>
+        DB_TRUE
+        DB_FALSE
+        DB_UNKNOWN
     }
 
     MarketplaceUI ..> HtttpClient : 1. on select/highlight
     HtttpClient ..> StoreController : ownership query
     StoreController ..> Db : 2. db_player_owns_theme (read lock)
     Db ..> Inventory : reads owned set
+    Db ..> DbBool : DB_TRUE / DB_FALSE / DB_UNKNOWN
     StoreController ..> ButtonState : 3. unowned → BUY on<br/>4. owned → Set-as-Default on
     MarketplaceUI ..> ButtonState : applies
     note for MarketplaceUI "ext 2a DB_IO_ERROR →<br/>bothDisabled() + transient error"
@@ -707,7 +721,7 @@ sequenceDiagram
         activate SC
         SC->>DB: db_player_owns_character(id, cid)
         activate DB
-        DB-->>SC: false
+        DB-->>SC: DB_FALSE
         deactivate DB
         SC-->>C: unowned
         deactivate SC
@@ -798,13 +812,13 @@ sequenceDiagram
     note right of DB: read lock only —<br/>no persisted state change
 
     alt not owned  (step 3)
-        DB-->>SC: false
+        DB-->>SC: DB_FALSE
         SC-->>C: unowned
         C-->>UI: unowned
         UI->>UI: applyButtonState(unownedState())
         UI-->>P: BUY enabled, Set as Default disabled
     else owned  (step 4)
-        DB-->>SC: true
+        DB-->>SC: DB_TRUE
         SC-->>C: owned
         C-->>UI: owned
         UI->>UI: applyButtonState(ownedState())
@@ -845,7 +859,7 @@ sequenceDiagram
         activate SC
         SC->>DB: db_player_owns_theme(id, tid)
         activate DB
-        DB-->>SC: false
+        DB-->>SC: DB_FALSE
         deactivate DB
         SC-->>C: unowned
         deactivate SC
@@ -933,13 +947,13 @@ sequenceDiagram
     note right of DB: read lock only
 
     alt not owned  (step 3)
-        DB-->>SC: false
+        DB-->>SC: DB_FALSE
         SC-->>C: unowned
         C-->>UI: unowned
         UI->>UI: applyButtonState(unownedState())
         UI-->>P: BUY enabled, Set as Default disabled
     else owned  (step 4)
-        DB-->>SC: true
+        DB-->>SC: DB_TRUE
         SC-->>C: owned
         C-->>UI: owned
         UI->>UI: applyButtonState(ownedState())
@@ -1243,8 +1257,8 @@ classDiagram
         <<control>>
         +buyCharacter(playerId : PlayerId, cid : ItemId) HtttpStatus
         +buyTheme(playerId : PlayerId, tid : ItemId) HtttpStatus
-        +ownsCharacter(playerId : PlayerId, cid : ItemId) bool
-        +ownsTheme(playerId : PlayerId, tid : ItemId) bool
+        +ownsCharacter(playerId : PlayerId, cid : ItemId) DbBool
+        +ownsTheme(playerId : PlayerId, tid : ItemId) DbBool
     }
     class EquipController {
         <<control>>
@@ -1355,8 +1369,8 @@ classDiagram
         +db_buy_theme(id, tid) DbResult
         +db_equip_character(id, cid) DbResult
         +db_equip_theme(id, tid) DbResult
-        +db_player_owns_character(id, cid) bool
-        +db_player_owns_theme(id, tid) bool
+        +db_player_owns_character(id, cid) DbBool
+        +db_player_owns_theme(id, tid) DbBool
         +db_get_character(cid) Character
         +db_get_theme(tid) Theme
     }
@@ -1376,6 +1390,12 @@ classDiagram
         DB_FULL
         DB_NOT_FOUND
         DB_IO_ERROR
+    }
+    class DbBool {
+        <<enum>>
+        DB_TRUE
+        DB_FALSE
+        DB_UNKNOWN
     }
     class HtttpStatus {
         <<enum>>
@@ -1410,6 +1430,7 @@ classDiagram
     Db ..> Loadout : equip writes
     Db ..> Catalogue : item lookup
     Db ..> DbResult
+    Db ..> DbBool : probe answers (owns / unknown)
 
     PurchaseTxn ..> WriteLock : one atom
     PurchaseTxn ..> Wallet : canAfford / debit
