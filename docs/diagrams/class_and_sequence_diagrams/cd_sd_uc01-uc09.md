@@ -143,7 +143,7 @@ classDiagram
     }
     class Db {
         <<interface>>
-        +db_get_player(username, out) DbResult
+        +db_get_salt(username, out_salt, cap) DbResult
         +db_login(username, hash, out) DbResult
     }
     class DbResult {
@@ -1191,12 +1191,13 @@ sequenceDiagram
     C->>AC: LOGIN /session {username, password}
     activate AC
 
-    AC->>DB: db_get_player(username)  %% fetch salt
+    AC->>DB: db_get_salt(username, out_salt, cap)
     activate DB
-    DB-->>AC: player | DB_NOT_FOUND
+    DB-->>AC: DB_OK + salt | DB_NOT_FOUND
     deactivate DB
+    note right of AC: on DB_NOT_FOUND, hash against a dummy salt and<br/>fall through to the same 401 — no username enumeration
 
-    AC->>AC: hash(password, player.salt)
+    AC->>AC: hash(password, salt)
 
     AC->>DB: db_login(username, passwordHashed, &player)
     activate DB
@@ -1781,6 +1782,7 @@ sequenceDiagram
 | hash with fresh salt | `Credential` | `create(String) : Credential` | UC-01.5 |
 | create the account | `AuthController` | `signup(String, String) : HtttpStatus` | UC-01.6 |
 | authenticate | `AuthController` | `login(String, String) : LoginResult` | UC-02.6 |
+| fetch the account salt | `Db` | `db_get_salt(String, char*, size_t) : DbResult` | UC-02.6 |
 | establish secure channel | `Session` | `connect(ServerEndpoint) : bool` | UC-02a |
 | bind identity to session | `Session` | `bind(PlayerId)` | UC-02.7 |
 | list rooms | `Lobby` | `listOpenRooms() : RoomSummary[]` | UC-03.2 |
@@ -2015,6 +2017,7 @@ classDiagram
         <<interface>>
         libmacminidb
         +db_signup(username, hash, salt, out) DbResult
+        +db_get_salt(username, out_salt, cap) DbResult
         +db_login(username, hash, out) DbResult
         +db_get_player(playerId, out) DbResult
         +db_rank(playerId) int

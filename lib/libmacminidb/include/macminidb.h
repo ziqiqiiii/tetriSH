@@ -94,6 +94,21 @@ t_db_result			db_equip_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_record_game(t_db *db, t_player_id id, int64_t score_delta, int64_t points_delta, bool won);
 t_db_result			db_login(t_db *db, const char *username, const char *password_hashed, t_player *out);
 t_db_result			db_get_player(t_db *db, t_player_id id, t_player *out);
+
+/*
+** Fetch a player's salt so the caller can hash a login attempt before calling
+** db_login (which compares precomputed hashes only). Keyed by username because
+** at login time no player id is known yet.
+**
+** Unlike db_login, this DOES distinguish an unknown username (DB_NOT_FOUND)
+** from a successful read: the store's job is to answer accurately, and folding
+** the two would leave the caller unable to tell a missing user from an I/O
+** failure. That makes the distinction the CALLER's to hide — on DB_NOT_FOUND
+** an authentication path must still hash against a dummy salt and return the
+** same 401 on the same code path, so neither the message nor the timing
+** reveals whether the username exists.
+*/
+t_db_result			db_get_salt(t_db *db, const char *username, char *out_salt, size_t cap);
 t_db_bool			db_player_owns_character(t_db *db, t_player_id id, t_item_id cid);
 t_db_bool			db_player_owns_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_leaderboard(t_db *db, t_rank_entry *out, size_t cap, size_t *out_count);

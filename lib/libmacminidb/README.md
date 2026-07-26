@@ -122,6 +122,7 @@ Characters and themes are read-only catalogues loaded from `config/characters.cf
 |---|---|
 | `db_login(db, username, password_hashed, out)` | Verify credentials; `DB_BAD_CREDS` on mismatch |
 | `db_get_player(db, id, out)` | Fetch a player document by id |
+| `db_get_salt(db, username, out_salt, cap)` | Fetch a player's salt **by username** so a caller can hash a login attempt before `db_login`. `cap` must be ≥ `DB_SALT_LEN` (short buffers are rejected, not truncated). Unlike `db_login` this reports `DB_NOT_FOUND` for an unknown user — concealing that is the authentication caller's job |
 | `db_player_owns_character(db, id, cid)` | Test membership in `owned_characters`; returns `t_db_bool` (`DB_TRUE` / `DB_FALSE` / `DB_UNKNOWN`) |
 | `db_player_owns_theme(db, id, tid)` | Test membership in `owned_themes`; returns `t_db_bool` |
 | `db_leaderboard(db, out, cap, out_count)` | Top entries by `(score, id)`, capped at `cap` |

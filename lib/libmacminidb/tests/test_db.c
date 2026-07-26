@@ -40,6 +40,35 @@ void	test_signup_and_login(void)
 	printf("PASS test_signup_and_login\n");
 }
 
+// get_salt returns the salt stored at signup so a caller can hash a login
+// attempt; it rejects an undersized buffer rather than truncating, and reports
+// an unknown username distinguishably (hiding that is the caller's job).
+void	test_get_salt(void)
+{
+	t_db		*db;
+	t_player_id	id;
+	char		salt[DB_SALT_LEN];
+	char		again[DB_SALT_LEN];
+	char		small[DB_SALT_LEN - 1];
+
+	db = fresh_db();
+	assert(db_signup(db, "amber", "hashAAA", "saltAAA", &id) == DB_OK);
+	assert(db_get_salt(db, "amber", salt, sizeof(salt)) == DB_OK);
+	assert(memcmp(salt, "saltAAA", strlen("saltAAA")) == 0);
+	// Unknown user is reported, not folded into a credentials failure.
+	assert(db_get_salt(db, "ghost", salt, sizeof(salt)) == DB_NOT_FOUND);
+	// A short buffer would yield a wrong hash and an unexplainable 401.
+	assert(db_get_salt(db, "amber", small, sizeof(small)) == DB_INVALID);
+	assert(db_get_salt(NULL, "amber", salt, sizeof(salt)) == DB_INVALID);
+	assert(db_get_salt(db, NULL, salt, sizeof(salt)) == DB_INVALID);
+	assert(db_get_salt(db, "amber", NULL, sizeof(salt)) == DB_INVALID);
+	// The read leaves the record intact: same salt, login still works.
+	assert(db_get_salt(db, "amber", again, sizeof(again)) == DB_OK);
+	assert(memcmp(salt, again, DB_SALT_LEN) == 0);
+	db_close(db);
+	printf("PASS test_get_salt\n");
+}
+
 // buy charges the wallet, rejects re-purchase / insufficient funds, and equip
 // requires ownership.
 void	test_buy_and_equip(void)
@@ -139,6 +168,7 @@ void	test_catalogue_passthrough(void)
 int	main(void)
 {
 	test_signup_and_login();
+	test_get_salt();
 	test_buy_and_equip();
 	test_leaderboard_and_rank();
 	test_durability_roundtrip();

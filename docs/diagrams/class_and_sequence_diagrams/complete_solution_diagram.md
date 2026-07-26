@@ -20,6 +20,7 @@
 | hash with fresh salt | `Credential` | `create(String) : Credential` | UC-01.5 |
 | create the account | `AuthController` | `signup(String, String) : HtttpStatus` | UC-01.6 |
 | authenticate | `AuthController` | `login(String, String) : LoginResult` | UC-02.6 |
+| fetch the account salt | `Db` | `db_get_salt(String, char*, size_t) : DbResult` | UC-02.6 |
 | establish secure channel | `Session` | `connect(ServerEndpoint) : bool` | UC-02a |
 | bind identity to session | `Session` | `bind(PlayerId)` | UC-02.7 |
 | list rooms | `Lobby` | `listOpenRooms() : RoomSummary[]` | UC-03.2 |
@@ -781,6 +782,7 @@ classDiagram
         <<interface>>
         libmacminidb
         +db_signup(username, hash, salt, out) DbResult
+        +db_get_salt(username, out_salt, cap) DbResult
         +db_login(username, hash, out) DbResult
         +db_get_player(id, out) DbResult
         +db_record_game(id, scoreDelta, pointsDelta, won) DbResult

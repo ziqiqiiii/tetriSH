@@ -183,7 +183,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | **Preconditions** | The Login page is displayed. A valid account exists. |
 | **Postconditions (success)** | An authenticated session is established; the Home page is displayed as a Player. |
 | **Trigger** | Guest presses **LOGIN**. |
-| **DB Mapping** | `db_login(username, password_hashed, &player)` →<br>• `DB_OK`=`200 OK`<br>• `DB_BAD_CREDS`=`401 Unauthorized`<br>• `DB_NOT_FOUND`=`401` (do not reveal whether the username exists)<br>Server hashes the entered password with the account's stored salt **before** the call; the DB compares hashes only. |
+| **DB Mapping** | `db_login(username, password_hashed, &player)` →<br>• `DB_OK`=`200 OK`<br>• `DB_BAD_CREDS`=`401 Unauthorized`<br>• `DB_NOT_FOUND`=`401` (do not reveal whether the username exists)<br>Server fetches the account's stored salt with `db_get_salt(username, &salt, cap)`, hashes the entered password with it **before** the call; the DB compares hashes only.<br>`db_get_salt` returns `DB_NOT_FOUND` for an unknown username — the server must still hash against a dummy salt and return the same `401` on the same path, so neither message nor timing reveals whether the account exists. |
 
 **Main Success Scenario**
 1. Guest enters username.

@@ -129,12 +129,13 @@ sequenceDiagram
     C->>AC: LOGIN /session {username, password}
     activate AC
 
-    AC->>DB: db_get_player(username)  %% fetch salt
+    AC->>DB: db_get_salt(username, out_salt, cap)
     activate DB
-    DB-->>AC: player | DB_NOT_FOUND
+    DB-->>AC: DB_OK + salt | DB_NOT_FOUND
     deactivate DB
+    note right of AC: on DB_NOT_FOUND, hash against a dummy salt and<br/>fall through to the same 401 — no username enumeration
 
-    AC->>AC: hash(password, player.salt)
+    AC->>AC: hash(password, salt)
 
     AC->>DB: db_login(username, passwordHashed, &player)
     activate DB

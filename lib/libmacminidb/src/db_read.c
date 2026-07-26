@@ -77,6 +77,45 @@ t_db_result	db_get_player(t_db *db, t_player_id id, t_player *out)
 }
 
 /**
+ * @brief Copy a player's stored salt out by username.
+ *
+ * Login hashes the entered password with the account's own salt before calling
+ * db_login, but at that point no player id exists yet — hence the username key.
+ * Read-locked; copies exactly DB_SALT_LEN bytes, which are not NUL-terminated
+ * when the salt fills the field. A cap below DB_SALT_LEN is rejected rather
+ * than truncated: a short salt silently produces a wrong hash and an
+ * unexplainable 401.
+ *
+ * An unknown username reports DB_NOT_FOUND. That is deliberately distinguish-
+ * able here (see macminidb.h); hiding it is the authentication caller's job.
+ *
+ * @param db The handle.
+ * @param username The login username.
+ * @param out_salt Receives DB_SALT_LEN bytes of salt on success.
+ * @param cap Size of out_salt; must be at least DB_SALT_LEN.
+ * @return DB_OK, DB_INVALID, or DB_NOT_FOUND.
+ */
+t_db_result	db_get_salt(t_db *db, const char *username, char *out_salt, size_t cap)
+{
+	t_player	*p;
+	t_db_result	r;
+
+	if (!db || !username || !out_salt || cap < DB_SALT_LEN)
+		return (DB_INVALID);
+	pthread_rwlock_rdlock(&db->lock);
+	p = hashmap_get(db->players, username);
+	if (!p)
+		r = DB_NOT_FOUND;
+	else
+	{
+		memcpy(out_salt, p->salt, DB_SALT_LEN);
+		r = DB_OK;
+	}
+	pthread_rwlock_unlock(&db->lock);
+	return (r);
+}
+
+/**
  * @brief Report whether a player owns a given character.
  *
  * Read-locked membership probe (serves does_player_own_*). An unknown player
