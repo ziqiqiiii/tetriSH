@@ -25,7 +25,6 @@
 - [Solution Class Diagram](#solution-class-diagram)
   - [Method inventory by use case](#method-inventory-by-use-case)
   - [Solution diagram](#solution-diagram)
-- [Traceability Matrix](#traceability-matrix)
 
 ---
 
@@ -1454,17 +1453,3 @@ classDiagram
     Loadout --> "1" Theme : equipped
     ButtonState ..> Inventory : derived from owns()
 ```
-
----
-
-## Traceability Matrix
-
-| UC | Sequence diagram | Domain classes exercised | New solution methods |
-|---|---|---|---|
-| UC-15 | [SD UC-15](#sd-uc-15--buy-character-includes-uc-15a-uc-17) | `Character`, `Ability`, `Wallet`, `Inventory`, `ButtonState` | `StoreController.buyCharacter`, `Character.grants`, `MarketplaceUI.selectTab/showPreview/pressBuy` |
-| UC-15a | [SD UC-15a](#sd-uc-15a--determine-character-button-state) | `Inventory`, `ButtonState` | `StoreController.ownsCharacter`, `ButtonState.ownedState/unownedState/bothDisabled`, `MarketplaceUI.applyButtonState` |
-| UC-16 | [SD UC-16](#sd-uc-16--buy-theme-includes-uc-16a-uc-17) | `Theme`, `ColorScheme`, `Wallet`, `Inventory`, `ButtonState` | `StoreController.buyTheme`, `Theme.palette` |
-| UC-16a | [SD UC-16a](#sd-uc-16a--determine-theme-button-state) | `Inventory`, `ButtonState` | `StoreController.ownsTheme` |
-| UC-17 | [SD UC-17](#sd-uc-17--deduct-wallet-points) | `PurchaseTxn`, `WriteLock`, `Wallet`, `Inventory`, `PlayerRecord`, `WalLog` | `PurchaseTxn.run/precheck/settle`, `WriteLock.acquire/release`, `Wallet.canAfford/debit`, `Inventory.owns/isFull/add`, `PlayerRecord.debit/grant`, `WalLog.append` |
-| UC-18 | [SD UC-18](#sd-uc-18--set-default-character) | `Loadout`, `Inventory`, `Character` | `EquipController.equipCharacter`, `Loadout.setCharacter`, `SettingsUI.showDefaultCharacter/showProfilePicture` |
-| UC-19 | [SD UC-19](#sd-uc-19--set-default-theme) | `Loadout`, `Inventory`, `Theme`, `ColorScheme` | `EquipController.equipTheme`, `Loadout.setTheme`, `SettingsUI.showCurrentTheme`, `GameplayUI.applyTheme` |

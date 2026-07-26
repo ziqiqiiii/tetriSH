@@ -30,7 +30,6 @@
 - [Solution Class Diagram](#solution-class-diagram)
   - [Method inventory by use case](#method-inventory-by-use-case)
   - [Solution diagram](#solution-diagram)
-- [Traceability Matrix](#traceability-matrix)
 
 ---
 
@@ -2130,21 +2129,3 @@ classDiagram
     Db ..> Player : materialises
     Db ..> DbResult
 ```
-
----
-
-## Traceability Matrix
-
-| UC | Sequence diagram | Domain classes exercised | New solution methods |
-|---|---|---|---|
-| UC-01 | [SD UC-01](#sd-uc-01--register-account) | `Credential`, `Player` | `SignUpUI.validateMatch`, `Credential.create`, `AuthController.signup` |
-| UC-02 | [SD UC-02](#sd-uc-02--log-in) | `Session`, `ServerEndpoint`, `Credential`, `Player` | `Session.connect`, `Session.bind`, `AuthController.login` |
-| UC-03 | [SD UC-03](#sd-uc-03--browse-open-rooms) | `Lobby`, `Room`, `RoomSummary`, `Player` | `Lobby.listOpenRooms`, `Room.toSummary`, `LobbyController.header` |
-| UC-04 | [SD UC-04](#sd-uc-04--create-room) | `Lobby`, `Room`, `Slot`, `Membership`, `GameMode` | `Lobby.createRoom`, `Room.seat`, `GameMode.slotCount/minToStart` |
-| UC-05 | [SD UC-05](#sd-uc-05--join-room-from-list) | `Lobby`, `Room`, `Slot`, `Membership` | `Room.canAccept`, `Room.recomputeStatus`, `RoomController.join` |
-| UC-06 | [SD UC-06](#sd-uc-06--join-room-by-room-id) | same as UC-05 | *(none — reuses `RoomController.join`)* |
-| UC-07 | [SD UC-07](#sd-uc-07--leave-room-includes-uc-07a) | `Room`, `Slot`, `Membership`, `Lobby` | `Room.release`, `Room.selectSuccessor`, `Membership.setRole`, `Lobby.destroyRoom` |
-| UC-07a | folded into SD UC-07 | `Room`, `Membership` | `Room.selectSuccessor`, `Membership.setRole` |
-| UC-08 | [SD UC-08](#sd-uc-08--start-game-with-uc-08a) | `Room`, `Slot`, `Membership`, `GameSession`, `StateFrame` | `Room.canStart`, `Room.start`, `GameSession.initialState/abort`, `RoomController.start` |
-| UC-08a | folded into SD UC-08 | `Room`, `Membership`, `AuditLog` | `Room.isOwner`, `AuditLog.warn` |
-| UC-09 | [SD UC-09](#sd-uc-09--chat-in-room) | `Lobby`, `Room`, `Membership`, `ChatMessage`, `RateLimiter` | `RateLimiter.tryConsume`, `Membership.isMuted`, `Room.broadcast`, `ChatController.post` |

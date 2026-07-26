@@ -23,7 +23,6 @@
 - [Solution Class Diagram](#solution-class-diagram)
   - [Method inventory by use case](#method-inventory-by-use-case)
   - [Solution diagram](#solution-diagram)
-- [Traceability Matrix](#traceability-matrix)
 
 ---
 
@@ -1201,16 +1200,3 @@ classDiagram
     LogIpcChannel ..> tetrislogd : IPC request/response
     LogIpcChannel ..> DroppedLogCount : assembles total
 ```
-
----
-
-## Traceability Matrix
-
-| UC | Sequence diagram | Domain classes exercised | New solution methods |
-|---|---|---|---|
-| UC-22 | [SD UC-22](#sd-uc-22--query-server-status) | `tetrisd`, `StatusSnapshot` | `CtlListenerThread.handleStatus`, `tetrisd.getRoomCount/getPlayerCount/getTcpListenerStatus/getLogdStatus` |
-| UC-23 | [SD UC-23](#sd-uc-23--graceful-shutdown) | `tetrisd`, `Db`, `Flusher`, `tetrislogd` | `tetrisd.stopAccepting/stopTickers/endInFlightRooms/flushLogsToLogd/freeResources/exit`, `Db.db_close`, `Flusher.stop/finalFsync` |
-| UC-24 | [SD UC-24](#sd-uc-24--kick-player-includes-uc-07a) | `Session`, `Room`, `Slot`, `Membership` | `tetrisd.findSession/closeSession`, `Session.close`, `Room.release/selectSuccessor/recomputeStatus/broadcast/narrate` |
-| UC-25 | [SD UC-25](#sd-uc-25--list-rooms) | `Lobby`, `Room`, `RoomSnapshot` | `Lobby.listAllRooms`, `Room.toSnapshot` |
-| UC-26 | [SD UC-26](#sd-uc-26--list-players) | `SessionTable`, `Session`, `PlayerSnapshot` | `SessionTable.listConnected` |
-| UC-27 | [SD UC-27](#sd-uc-27--query-dropped-logs) | `LogIpcChannel`, `tetrislogd`, `DroppedLogCount` | `tetrisd.getLocalDropCount`, `LogIpcChannel.queryDroppedCount`, `tetrislogd.getDroppedCount`, `DroppedLogCount.total` |

@@ -21,7 +21,6 @@
 - [Solution Class Diagram](#solution-class-diagram)
   - [Method inventory by use case](#method-inventory-by-use-case)
   - [Solution diagram](#solution-diagram)
-- [Traceability Matrix](#traceability-matrix)
 
 ---
 
@@ -1435,16 +1434,3 @@ classDiagram
     MatchResult o--> "0..1" Ranking
     Db ..> DbResult
 ```
-
----
-
-## Traceability Matrix
-
-| UC | Sequence diagram | Domain classes exercised | New solution methods |
-|---|---|---|---|
-| UC-10 | [SD UC-10](#sd-uc-10--play-single-player-game) | `GameSession`, `Board`, `Piece`, `ScoreKeeper`, `ScoreCard` | `GameSession.advance/isOver`, `Board.gravityTick/clearLines`, `ScoreKeeper.onClear/pointsEarned`, `GameController.finish` |
-| UC-11 | [SD UC-11](#sd-uc-11--play-double-2-player-game) | `GameSession`, `Board`, `GarbageRouter`, `MatchResult`, `Room` | `GameSession.winner/dropPlayer/snapshot`, `GarbageRouter.route`, `Board.injectGarbage` |
-| UC-12 | [SD UC-12](#sd-uc-12--play-battle-royale-game) | `GameSession`, `Board`, `GarbageRouter`, `Ranking`, `MatchResult` | `GameSession.eliminate/survivorCount`, `GarbageRouter.pickTarget`, `Ranking.record/lastStanding` |
-| UC-13 | [SD UC-13](#sd-uc-13--control-falling-piece) | `Board`, `Piece`, `InputCommand`, `ScoreKeeper` | `GameplayUI.onKey`, `GameController.applyInput`, `Board.move/rotate/softDrop/hardDrop`, `Piece.isValid` |
-| UC-14 | [SD UC-14](#sd-uc-14--activate-gaiden-ability) | `Character`, `Ability`, `AbilityEffect`, `ChargeMeter`, `Board`, `Room` | `AbilityController.activate`, `Character.grants`, `ChargeMeter.grant/canAfford/deduct`, `AbilityEffect.apply`, `Board.cutTop/invert/fillRows/…` |
-| UC-07a | folded into SD UC-11 / SD UC-12 | `Room`, `Membership` | *(none — reuses `Room.selectSuccessor`)* |

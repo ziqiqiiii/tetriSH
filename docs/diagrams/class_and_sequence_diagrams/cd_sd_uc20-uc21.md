@@ -15,7 +15,6 @@
 - [Solution Class Diagram](#solution-class-diagram)
   - [Method inventory by use case](#method-inventory-by-use-case)
   - [Solution diagram](#solution-diagram)
-- [Traceability Matrix](#traceability-matrix)
 
 ---
 
@@ -658,12 +657,3 @@ classDiagram
     Loadout --> "1" Character : equipped
     Loadout --> "1" Theme : equipped
 ```
-
----
-
-## Traceability Matrix
-
-| UC | Sequence diagram | Domain classes exercised | New solution methods |
-|---|---|---|---|
-| UC-20 | [SD UC-20](#sd-uc-20--view-settings--profile) | `PlayerRecord`, `Inventory`, `Loadout`, `Catalogue`, `Character`, `Theme`, `ProfileView`, `SkipList`, `ReadLock` | `ProfileController.profile/assemble`, `SettingsUI.openSettings/render`, `Inventory.ids`, `SkipList.position` |
-| UC-21 | [SD UC-21](#sd-uc-21--view-leaderboard) | `Leaderboard`, `RankEntry`, `SkipList`, `ReadLock` | `LeaderboardController.leaderboard`, `Leaderboard.top/podium/remainder`, `SkipList.topN`, `LeaderboardUI.openLeaderboard/renderPodium/renderList` |
