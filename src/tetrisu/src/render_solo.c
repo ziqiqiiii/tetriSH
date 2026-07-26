@@ -48,6 +48,15 @@ static bool	draw_status_message(render_ctx_t *ctx, solo_render_t *solo,
 static void	set_transparent_base(struct ncplane *plane);
 static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
+static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
+	const solo_game_t *game);
+static uint64_t	ability_popover_signature(const solo_render_t *solo,
+	const solo_game_t *game);
+static bool	draw_ability_popover(struct ncplane *plane,
+	const solo_render_t *solo, const solo_game_t *game, int opacity);
+static bool	popover_put_centered(struct ncplane *plane, int row,
+	const char *text, color_t color, int opacity, bool bold);
+static color_t	popover_faded_color(color_t color, int opacity);
 static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
 static bool	update_compatibility_score(render_ctx_t *ctx,
@@ -66,8 +75,7 @@ static uint64_t	hash_value(uint64_t hash, uint64_t value);
 static uint64_t	meter_frame_signature(const solo_render_t *solo,
 	const solo_game_t *game);
 static uint64_t	score_stats_signature(const solo_game_t *game);
-static uint64_t	score_event_signature(const solo_render_t *solo,
-	const solo_game_t *game);
+static uint64_t	score_event_signature(const solo_game_t *game);
 static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height);
@@ -211,6 +219,9 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 		if (result == -2 && solo->asset_error[0] == '\0')
 			solo_canvas_set_error(solo,
 				"Notcurses rejected a Solo HUD surface", NULL);
+		else if (result == -4)
+			solo_canvas_set_error(solo,
+				"Notcurses rejected the ability popover", NULL);
 		else if (result != -2)
 			solo_canvas_set_error(solo,
 				"Notcurses rejected the Solo board cells", NULL);
@@ -317,6 +328,7 @@ static void	reset_render_signatures(solo_render_t *solo)
 	solo->score_value_signature = UINT64_MAX;
 	solo->score_stats_signature = UINT64_MAX;
 	solo->score_event_signature = UINT64_MAX;
+	solo->popover_signature = UINT64_MAX;
 	solo->overlay_signature = UINT64_MAX;
 	solo->active_shape_signature = UINT64_MAX;
 	solo->ghost_shape_signature = UINT64_MAX;
@@ -712,10 +724,8 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 {
 	char			line[64];
 	const char		*event;
-	solo_ability_t	ability;
 	color_t			white;
 	color_t			pink;
-	color_t			purple;
 	int				rows;
 	int				cols;
 	int				combo;
@@ -738,7 +748,6 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 	ncplane_erase(solo->compatibility_score_plane);
 	white = (color_t){255, 236, 248};
 	pink = (color_t){255, 98, 186};
-	purple = (color_t){181, 117, 216};
 	if (!compatibility_put_centered(solo->compatibility_score_plane,
 			(HUD_SCORE_Y + 6 - SOLO_SCORE_HEADER_Y) * rows
 			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
@@ -771,34 +780,6 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 	event_row = (SOLO_SCORE_EVENT_Y + 2 - SOLO_SCORE_HEADER_Y) * rows
 		/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
 			- SOLO_SCORE_HEADER_Y);
-	ability = solo->hovered_ability;
-	if (game->ability_result != SOLO_ABILITY_RESULT_NONE)
-		ability = game->last_ability;
-	if (ability != SOLO_ABILITY_NONE)
-	{
-		if (!compatibility_put_centered(solo->compatibility_score_plane,
-				event_row, solo_ability_name(ability), pink, true))
-			return (false);
-		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
-			event = "ACTIVATED";
-		else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
-			event = "NOT READY";
-		else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
-			event = "BLOCKED";
-		else if (game->ability_result == SOLO_ABILITY_RESULT_UNAVAILABLE)
-			event = "UNAVAILABLE";
-		else
-		{
-			snprintf(line, sizeof(line), "COST %d  KEY %d",
-				solo_ability_cost(ability), ability);
-			event = line;
-		}
-		if (!compatibility_put_centered(solo->compatibility_score_plane,
-				event_row + 1, event, purple, false))
-			return (false);
-		ncplane_move_top(solo->compatibility_score_plane);
-		return (true);
-	}
 	if (game->scoring.back_to_back
 		&& !compatibility_put_centered(solo->compatibility_score_plane,
 			event_row, "BACK-TO-BACK", pink, true))
@@ -1026,7 +1007,259 @@ static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 	result = update_board_region(ctx, solo, game);
 	if (result < 0)
 		return (-3);
+	changed |= result;
+	result = update_ability_popover(ctx, solo, game);
+	if (result < 0)
+		return (-4);
 	return (changed | result);
+}
+
+/**
+ * @brief Creates, moves, and redraws the native-text ability popover.
+ *
+ * The plane is deliberately shared by pixel and cell renderers. This keeps
+ * every label crisp while the board beneath it follows terminal capability.
+ */
+static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
+	const solo_game_t *game)
+{
+	solo_ability_t	ability;
+	uint64_t		signature;
+	int				opacity;
+	int				rows;
+	int				cols;
+	int				y;
+	int				x;
+	bool			changed;
+
+	ability = solo_popover_displayed_ability(solo, game);
+	opacity = solo_popover_displayed_opacity(solo, game);
+	if (ability == SOLO_ABILITY_NONE || opacity <= 0)
+	{
+		if (solo->ability_popover_plane == NULL)
+			return (0);
+		destroy_plane(&solo->ability_popover_plane);
+		solo->popover_signature = UINT64_MAX;
+		return (1);
+	}
+	rows = SOLO_POPOVER_ROWS;
+	cols = SOLO_POPOVER_COLS;
+	if (cols > solo->canvas_cols - 2)
+		cols = solo->canvas_cols - 2;
+	if (cols < 18 || rows > solo->content_rows)
+		return (-1);
+	x = solo->canvas_col + (SOLO_METER_X + SOLO_METER_WIDTH)
+		* solo->canvas_cols / SOLO_CANVAS_WIDTH + 1;
+	if (x + cols > solo->canvas_col + solo->canvas_cols - 1)
+		x = solo->canvas_col + solo->canvas_cols - cols - 1;
+	y = solo->canvas_row + solo_ability_center_y(ability)
+		* solo->content_rows / SOLO_CONTENT_HEIGHT - rows / 2;
+	if (y < solo->canvas_row)
+		y = solo->canvas_row;
+	if (y + rows > solo->canvas_row + solo->content_rows)
+		y = solo->canvas_row + solo->content_rows - rows;
+	if (solo->ability_popover_plane == NULL)
+	{
+		solo->ability_popover_plane = create_plane(ctx, y, x, rows, cols);
+		if (solo->ability_popover_plane == NULL)
+			return (-1);
+	}
+	else if (ncplane_move_yx(solo->ability_popover_plane, y, x) != 0)
+		return (-1);
+	signature = ability_popover_signature(solo, game);
+	changed = signature != solo->popover_signature;
+	if (changed)
+	{
+		if (!draw_ability_popover(solo->ability_popover_plane,
+				solo, game, opacity))
+			return (-1);
+		solo->popover_signature = signature;
+	}
+	ncplane_move_top(solo->ability_popover_plane);
+	return (changed ? 1 : 0);
+}
+
+/**
+ * @brief Hashes every value affecting popover content or fade brightness.
+ */
+static uint64_t	ability_popover_signature(const solo_render_t *solo,
+	const solo_game_t *game)
+{
+	uint64_t	hash;
+
+	hash = UINT64_C(1469598103934665603);
+	hash = hash_value(hash,
+			(uint64_t)solo_popover_displayed_ability(solo, game));
+	hash = hash_value(hash,
+			(uint64_t)solo_popover_displayed_opacity(solo, game));
+	hash = hash_value(hash, (uint64_t)game->ability_result);
+	return (hash);
+}
+
+/**
+ * @brief Draws a compact dark terminal-font card for help or feedback.
+ */
+static bool	draw_ability_popover(struct ncplane *plane,
+	const solo_render_t *solo, const solo_game_t *game, int opacity)
+{
+	char			border[SOLO_POPOVER_COLS + 1];
+	char			middle[SOLO_POPOVER_COLS + 1];
+	char			title[64];
+	char			cost[64];
+	char			detail[64];
+	char			hint[64];
+	solo_ability_t	ability;
+	color_t			pink;
+	color_t			white;
+	color_t			gold;
+	color_t			purple;
+	color_t			dark;
+	nccell			base;
+	unsigned		rows;
+	unsigned		cols;
+	unsigned		background_alpha;
+	int				index;
+
+	ability = solo_popover_displayed_ability(solo, game);
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (rows < SOLO_POPOVER_ROWS || cols < 18)
+		return (false);
+	index = 0;
+	while (index < (int)cols)
+	{
+		border[index] = '-';
+		middle[index] = ' ';
+		index++;
+	}
+	border[0] = '+';
+	border[cols - 1] = '+';
+	border[cols] = '\0';
+	middle[0] = '|';
+	middle[cols - 1] = '|';
+	middle[cols] = '\0';
+	pink = (color_t){255, 98, 186};
+	white = (color_t){255, 236, 248};
+	gold = (color_t){255, 206, 92};
+	purple = (color_t){181, 117, 216};
+	dark = popover_faded_color((color_t){24, 11, 32}, opacity);
+	background_alpha = NCALPHA_OPAQUE;
+	if (opacity < 56)
+		background_alpha = NCALPHA_TRANSPARENT;
+	else if (opacity < 208)
+		background_alpha = NCALPHA_BLEND;
+	nccell_init(&base);
+	if (nccell_load(plane, &base, " ") < 0)
+		return (false);
+	(void)nccell_set_fg_rgb8(&base, dark.r, dark.g, dark.b);
+	(void)nccell_set_bg_rgb8(&base, dark.r, dark.g, dark.b);
+	(void)nccell_set_bg_alpha(&base, background_alpha);
+	(void)ncplane_set_base_cell(plane, &base);
+	nccell_release(plane, &base);
+	ncplane_erase(plane);
+	(void)ncplane_set_bg_rgb8(plane, dark.r, dark.g, dark.b);
+	(void)ncplane_set_bg_alpha(plane, background_alpha);
+	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
+	{
+		snprintf(title, sizeof(title), "%s  [%d]",
+			solo_ability_name(ability), ability);
+		snprintf(cost, sizeof(cost), "COST %d CRYSTALS",
+			solo_ability_cost(ability));
+		snprintf(detail, sizeof(detail), "%s",
+			solo_ability_description(ability));
+		snprintf(hint, sizeof(hint), "CLICK OR PRESS %d", ability);
+	}
+	else
+	{
+		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			snprintf(title, sizeof(title), "%s ACTIVATED",
+				solo_ability_name(ability));
+		else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
+			snprintf(title, sizeof(title), "%s NOT READY",
+				solo_ability_name(ability));
+		else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
+			snprintf(title, sizeof(title), "MIRURUN BLOCKED");
+		else
+			snprintf(title, sizeof(title), "%s UNAVAILABLE",
+				solo_ability_name(ability));
+		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED
+			&& ability == SOLO_ABILITY_MIRURUN)
+			snprintf(detail, sizeof(detail), "BOTTOM 4 ROWS REMOVED");
+		else if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			snprintf(detail, sizeof(detail), "SOLO TEST - NO TARGET");
+		else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
+			snprintf(cost, sizeof(cost), "NEED %d CRYSTALS",
+				solo_ability_cost(ability));
+		else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
+			snprintf(detail, sizeof(detail), "ACTIVE PIECE COLLISION");
+		else
+			snprintf(detail, sizeof(detail), "RETURN TO ACTIVE PLAY");
+		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			snprintf(cost, sizeof(cost), "-%d CRYSTALS",
+				solo_ability_cost(ability));
+		else if (game->ability_result != SOLO_ABILITY_RESULT_NO_CHARGE)
+			snprintf(cost, sizeof(cost), "CHARGE NOT SPENT");
+		if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			snprintf(hint, sizeof(hint), "ABILITY CONFIRMED");
+		else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
+		{
+			snprintf(detail, sizeof(detail), "CLEAR 2 LINES = 1");
+			snprintf(hint, sizeof(hint), "CHARGE NOT SPENT");
+		}
+		else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
+			snprintf(hint, sizeof(hint), "TRY AFTER PIECE LOCKS");
+		else
+			snprintf(hint, sizeof(hint), "TRY AGAIN IN PLAY");
+	}
+	return (popover_put_centered(plane, 0, border, pink, opacity, true)
+		&& popover_put_centered(plane, 0, title, white, opacity, true)
+		&& popover_put_centered(plane, 1, middle, pink, opacity, true)
+		&& popover_put_centered(plane, 2, middle, pink, opacity, true)
+		&& popover_put_centered(plane, 3, middle, pink, opacity, true)
+		&& popover_put_centered(plane, 1, cost, gold, opacity, true)
+		&& popover_put_centered(plane, 2, detail, white, opacity, false)
+		&& popover_put_centered(plane, 3, hint, purple, opacity, false)
+		&& popover_put_centered(plane, 4, border, pink, opacity, true));
+}
+
+/**
+ * @brief Centers one clipped popover line using native terminal glyphs.
+ */
+static bool	popover_put_centered(struct ncplane *plane, int row,
+	const char *text, color_t color, int opacity, bool bold)
+{
+	char		clipped[SOLO_POPOVER_COLS + 1];
+	color_t		faded;
+	unsigned	rows;
+	unsigned	cols;
+	int			limit;
+	int			x;
+	int			result;
+
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (row < 0 || row >= (int)rows || cols == 0)
+		return (true);
+	limit = (int)cols;
+	snprintf(clipped, sizeof(clipped), "%.*s", limit, text);
+	x = ((int)cols - (int)strlen(clipped)) / 2;
+	faded = popover_faded_color(color, opacity);
+	(void)ncplane_set_fg_rgb8(plane, faded.r, faded.g, faded.b);
+	if (bold)
+		(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	result = ncplane_putstr_yx(plane, row, x, clipped);
+	if (bold)
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+	return (result >= 0);
+}
+
+/**
+ * @brief Scales one true-colour tint toward black for terminal-safe fading.
+ */
+static color_t	popover_faded_color(color_t color, int opacity)
+{
+	color.r = (unsigned char)((int)color.r * opacity / 255);
+	color.g = (unsigned char)((int)color.g * opacity / 255);
+	color.b = (unsigned char)((int)color.b * opacity / 255);
+	return (color);
 }
 
 /**
@@ -1053,7 +1286,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	next_signature = next_frame_signature(game);
 	meter_signature = meter_frame_signature(solo, game);
 	stats_signature = score_stats_signature(game);
-	event_signature = score_event_signature(solo, game);
+	event_signature = score_event_signature(game);
 	hud_dirty = next_signature != solo->next_signature
 		|| meter_signature != solo->meter_signature
 		|| solo->mirurun_plane == NULL
@@ -1244,8 +1477,7 @@ static uint64_t	score_stats_signature(const solo_game_t *game)
  * @param game Pointer to the current Solo game state.
  * @return Signature for the last scoring event.
  */
-static uint64_t	score_event_signature(const solo_render_t *solo,
-	const solo_game_t *game)
+static uint64_t	score_event_signature(const solo_game_t *game)
 {
 	uint64_t	hash;
 
@@ -1255,9 +1487,6 @@ static uint64_t	score_event_signature(const solo_render_t *solo,
 	hash = hash_value(hash, (uint64_t)game->last_spin);
 	hash = hash_value(hash, game->last_perfect_clear);
 	hash = hash_value(hash, game->last_score.total_awarded);
-	hash = hash_value(hash, (uint64_t)solo->hovered_ability);
-	hash = hash_value(hash, (uint64_t)game->last_ability);
-	hash = hash_value(hash, (uint64_t)game->ability_result);
 	return (hash);
 }
 
@@ -2419,6 +2648,7 @@ static void	destroy_solo_planes(solo_render_t *solo)
 	destroy_plane(&solo->status_plane);
 	destroy_board_planes(solo);
 	destroy_plane(&solo->controls_plane);
+	destroy_plane(&solo->ability_popover_plane);
 	destroy_plane(&solo->compatibility_overlay_plane);
 	destroy_plane(&solo->compatibility_score_plane);
 	destroy_plane(&solo->score_event_plane);

@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 continues with the ability popover in
-item 9.
+Phases 1 and 2 are complete. Phase 3 continues with event-driven retro sound
+effects in item 10.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -128,13 +128,17 @@ item 9.
    - Kitty uses the authored bitmap; WezTerm compatibility mode renders the
      same PNG through dense terminal cells with crisp native text above it.
 
-9. **Replace ability help with a fading popover**
+9. **Replace ability help with a fading popover** — complete
 
-   - Hover opens a dark terminal-font box with ability name, charge cost, and
-     short description.
-   - Fade in over 120 ms and out over 180 ms.
-   - Activation/rejection feedback takes priority for one second.
-   - Keyboard activation shows the same feedback.
+   - Hover opens a compact dark terminal-font card beside the selected meter
+     marker with ability name, charge cost, description, and input hint.
+   - A shared monotonic presentation state fades in over 120 ms and out over
+     180 ms without polling while idle.
+   - Activation and rejection feedback take full-opacity priority for the
+     existing one-second game deadline, then return to hovered help or fade.
+   - Mouse and keyboard activation use the same feedback card.
+   - Kitty's pixel renderer and WezTerm compatibility mode share the same
+     crisp native-text plane; score events remain independent underneath.
 
 10. **Add event-driven retro sound effects**
 

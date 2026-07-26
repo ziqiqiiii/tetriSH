@@ -5,6 +5,7 @@ static void	test_mirurun_removes_bottom_four_rows(void);
 static void	test_activation_rejections_preserve_charge(void);
 static void	test_opponent_abilities_are_visual_solo_tests(void);
 static void	test_feedback_expires_on_shared_wake_deadline(void);
+static void	test_popover_fades_and_feedback_priority(void);
 static void	test_canvas_hitboxes_and_terminal_mapping(void);
 
 /**
@@ -19,6 +20,7 @@ int	main(void)
 	test_activation_rejections_preserve_charge();
 	test_opponent_abilities_are_visual_solo_tests();
 	test_feedback_expires_on_shared_wake_deadline();
+	test_popover_fades_and_feedback_priority();
 	test_canvas_hitboxes_and_terminal_mapping();
 	return (0);
 }
@@ -183,7 +185,65 @@ static void	test_feedback_expires_on_shared_wake_deadline(void)
 	assert(solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS));
 	assert(game.ability_result == SOLO_ABILITY_RESULT_NONE);
 	assert(solo_game_next_wake_ms(&game) == -1);
+	solo_game_init(&game, 905u);
+	game.paused = true;
+	assert(solo_game_activate_ability(&game, SOLO_ABILITY_MIRURUN)
+		== SOLO_ABILITY_RESULT_UNAVAILABLE);
+	assert(solo_game_next_wake_ms(&game) == SOLO_ABILITY_FEEDBACK_MS);
+	assert(solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS));
+	assert(game.ability_result == SOLO_ABILITY_RESULT_NONE);
+	assert(solo_game_next_wake_ms(&game) == -1);
 	printf("PASS test_feedback_expires_on_shared_wake_deadline\n");
+}
+
+/**
+ * @brief Exercises exact hover fades and one-second feedback ownership.
+ */
+static void	test_popover_fades_and_feedback_priority(void)
+{
+	solo_render_t	solo;
+	solo_game_t		game;
+
+	memset(&solo, 0, sizeof(solo));
+	solo_game_init(&game, 904u);
+	assert(solo_popover_set_hover(&solo, SOLO_ABILITY_MIRURUN));
+	assert(solo.popover_phase == SOLO_POPOVER_FADING_IN);
+	assert(solo_popover_next_wake_ms(&solo) == SOLO_RENDER_INTERVAL_MS);
+	assert(solo_popover_update(&solo, &game,
+			SOLO_POPOVER_FADE_IN_MS / 2));
+	assert(solo.popover_opacity == 127);
+	assert(solo_popover_update(&solo, &game,
+			SOLO_POPOVER_FADE_IN_MS / 2));
+	assert(solo.popover_opacity == 255);
+	assert(solo.popover_phase == SOLO_POPOVER_VISIBLE);
+	assert(solo_popover_next_wake_ms(&solo) == -1);
+	assert(solo_popover_set_hover(&solo, SOLO_ABILITY_NONE));
+	assert(solo_popover_update(&solo, &game,
+			SOLO_POPOVER_FADE_OUT_MS / 2));
+	assert(solo.popover_opacity == 128);
+	assert(solo_popover_update(&solo, &game,
+			SOLO_POPOVER_FADE_OUT_MS / 2));
+	assert(solo.popover_phase == SOLO_POPOVER_HIDDEN);
+	assert(solo_popover_displayed_ability(&solo, &game)
+		== SOLO_ABILITY_NONE);
+	assert(solo_popover_set_hover(&solo, SOLO_ABILITY_INVERSION));
+	assert(solo_popover_update(&solo, &game, SOLO_POPOVER_FADE_IN_MS));
+	game.last_ability = SOLO_ABILITY_MIRURUN;
+	game.ability_result = SOLO_ABILITY_RESULT_NO_CHARGE;
+	assert(solo_popover_update(&solo, &game, 0));
+	assert(solo_popover_displayed_ability(&solo, &game)
+		== SOLO_ABILITY_MIRURUN);
+	assert(solo_popover_displayed_opacity(&solo, &game) == 255);
+	assert(solo_popover_set_hover(&solo, SOLO_ABILITY_SIRTET));
+	assert(solo_popover_displayed_ability(&solo, &game)
+		== SOLO_ABILITY_MIRURUN);
+	game.ability_result = SOLO_ABILITY_RESULT_NONE;
+	game.last_ability = SOLO_ABILITY_NONE;
+	assert(solo_popover_update(&solo, &game, 0));
+	assert(solo_popover_displayed_ability(&solo, &game)
+		== SOLO_ABILITY_SIRTET);
+	assert(solo.popover_phase == SOLO_POPOVER_VISIBLE);
+	printf("PASS test_popover_fades_and_feedback_priority\n");
 }
 
 /**

@@ -53,6 +53,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	int				render_wait_ms;
 	int				handling_wake_ms;
 	int				notification_wake_ms;
+	int				popover_wake_ms;
 	bool			leave;
 	bool			resize_pending;
 	bool			display_ready;
@@ -98,6 +99,10 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		if (wake_ms < 0 || (notification_wake_ms >= 0
 				&& notification_wake_ms < wake_ms))
 			wake_ms = notification_wake_ms;
+		popover_wake_ms = solo_popover_next_wake_ms(&solo);
+		if (wake_ms < 0 || (popover_wake_ms >= 0
+				&& popover_wake_ms < wake_ms))
+			wake_ms = popover_wake_ms;
 		wait_ms = wake_ms;
 		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
 			wait_ms = RENDER_RESIZE_POLL_MS;
@@ -130,6 +135,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		force_render = false;
 		if (display_ready)
 			needs_draw = solo_game_update(&game, elapsed_ms);
+		needs_draw = solo_popover_update(&solo, &game, elapsed_ms)
+			|| needs_draw;
 		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
 			needs_draw = apply_handling_actions(&game, &handling,
 					&handling_config, elapsed_ms) || needs_draw;
@@ -428,11 +435,8 @@ static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
 	if (display_ready && !resize_pending
 		&& solo_mouse_canvas_position(ctx, solo, input, &canvas_x, &canvas_y))
 		ability = solo_ability_at_canvas(canvas_x, canvas_y);
-	if (ability != solo->hovered_ability)
-	{
-		solo->hovered_ability = ability;
+	if (solo_popover_set_hover(solo, ability))
 		*state_changed = true;
-	}
 	if (key != NCKEY_BUTTON1 || ability == SOLO_ABILITY_NONE
 		|| (input->evtype != NCTYPE_PRESS
 			&& input->evtype != NCTYPE_UNKNOWN))

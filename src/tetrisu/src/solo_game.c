@@ -116,10 +116,12 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 	bool	changed;
 	bool	started_in_reveal;
 
-	if (elapsed_ms < 0 || game->paused)
+	if (elapsed_ms < 0)
 		return (false);
 	remaining_ms = elapsed_ms;
 	changed = advance_ability_feedback(game, elapsed_ms);
+	if (game->paused)
+		return (changed);
 	if (game->phase == SOLO_GAME_OVER)
 		return (changed);
 	started_in_reveal = game->phase == SOLO_TOP_OUT_REVEAL;
@@ -170,9 +172,9 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
 	int	feedback_ms;
 	int	wake_ms;
 
-	if (game->paused)
-		return (-1);
-	wake_ms = gameplay_next_wake_ms(game);
+	wake_ms = -1;
+	if (!game->paused)
+		wake_ms = gameplay_next_wake_ms(game);
 	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
 		return (wake_ms);
 	feedback_ms = SOLO_ABILITY_FEEDBACK_MS

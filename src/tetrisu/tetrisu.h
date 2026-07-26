@@ -65,6 +65,10 @@
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
 # define SOLO_ABILITY_COUNT	4
 # define SOLO_ABILITY_FEEDBACK_MS	1000
+# define SOLO_POPOVER_FADE_IN_MS	120
+# define SOLO_POPOVER_FADE_OUT_MS	180
+# define SOLO_POPOVER_ROWS	5
+# define SOLO_POPOVER_COLS	38
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
@@ -387,6 +391,14 @@ typedef enum e_solo_ability_result
 	SOLO_ABILITY_RESULT_INVALID
 }	solo_ability_result_t;
 
+typedef enum e_solo_popover_phase
+{
+	SOLO_POPOVER_HIDDEN,
+	SOLO_POPOVER_FADING_IN,
+	SOLO_POPOVER_VISIBLE,
+	SOLO_POPOVER_FADING_OUT
+}	solo_popover_phase_t;
+
 typedef struct s_solo_game
 {
 	t_board			board;
@@ -434,6 +446,7 @@ typedef struct s_solo_render
 	struct ncplane	*score_event_plane;
 	struct ncplane	*compatibility_score_plane;
 	struct ncplane	*compatibility_overlay_plane;
+	struct ncplane	*ability_popover_plane;
 	struct ncplane	*controls_plane;
 	struct ncplane	*board_overlay_plane;
 	struct ncplane	*settled_runs[BOARD_HEIGHT][(BOARD_WIDTH + 1) / 2];
@@ -461,11 +474,18 @@ typedef struct s_solo_render
 	uint64_t		score_value_signature;
 	uint64_t		score_stats_signature;
 	uint64_t		score_event_signature;
+	uint64_t		popover_signature;
 	uint64_t		overlay_signature;
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
 	solo_ability_t	hovered_ability;
+	solo_ability_t	popover_ability;
+	solo_popover_phase_t	popover_phase;
+	int				popover_opacity;
+	int				popover_fade_start_opacity;
+	int				popover_fade_elapsed_ms;
+	bool			popover_feedback_active;
 	bool			piece_planes_combined;
 	bool			layout_valid;
 	bool			assets_ready;
@@ -593,6 +613,17 @@ bool				solo_mouse_canvas_position(const render_ctx_t *ctx,
 					int *canvas_x, int *canvas_y);
 solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
 					solo_ability_t ability);
+
+/* SOLO_POPOVER.C — timed hover presentation shared by every renderer */
+bool			solo_popover_set_hover(solo_render_t *solo,
+					solo_ability_t ability);
+bool			solo_popover_update(solo_render_t *solo,
+					const solo_game_t *game, int elapsed_ms);
+int				solo_popover_next_wake_ms(const solo_render_t *solo);
+solo_ability_t	solo_popover_displayed_ability(const solo_render_t *solo,
+					const solo_game_t *game);
+int				solo_popover_displayed_opacity(const solo_render_t *solo,
+					const solo_game_t *game);
 
 /* RENDER_SOLO_CANVAS.C */
 bool			solo_canvas_load(solo_render_t *solo);

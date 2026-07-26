@@ -47,8 +47,6 @@ static void	draw_circle_ring(uint32_t *canvas, int center_x, int center_y,
 	int radius, int thickness, uint32_t pixel);
 static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game);
-static bool	draw_ability_message(uint32_t *canvas,
-	const solo_render_t *solo, const solo_game_t *game);
 static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
@@ -1163,8 +1161,6 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 		HUD_SCORE_STAT_FIRST_Y + HUD_SCORE_STAT_ROW_STEP);
 	draw_stat_line(canvas, solo, "COMBO", combo,
 		HUD_SCORE_STAT_FIRST_Y + 2 * HUD_SCORE_STAT_ROW_STEP);
-	if (draw_ability_message(canvas, solo, game))
-		return ;
 	if (game->scoring.back_to_back)
 		draw_text_centered(canvas, solo, "BACK-TO-BACK",
 			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 118,
@@ -1179,82 +1175,6 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 		draw_numbers_centered_fit(canvas, solo, points, HUD_SCORE_Y + 143,
 			g_pink);
 	}
-}
-
-/**
- * @brief Draws hover help or bounded activation feedback in the event panel.
- *
- * Activation feedback takes priority for one second; afterward the current
- * hovered marker supplies its name, cost, description, and keyboard hint.
- *
- * @param canvas Pointer to the destination RGBA canvas.
- * @param solo Pointer to the renderer containing hover state.
- * @param game Pointer to the current Solo state.
- * @return true when ability content replaced ordinary score-event content.
- */
-static bool	draw_ability_message(uint32_t *canvas,
-	const solo_render_t *solo, const solo_game_t *game)
-{
-	solo_ability_t	ability;
-	char				title[48];
-	char				detail[48];
-	char				hint[48];
-	int				cost;
-
-	ability = solo->hovered_ability;
-	if (game->ability_result != SOLO_ABILITY_RESULT_NONE)
-		ability = game->last_ability;
-	if (ability == SOLO_ABILITY_NONE)
-		return (false);
-	cost = solo_ability_cost(ability);
-	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
-	{
-		snprintf(title, sizeof(title), "%s [%d] COST %d",
-			solo_ability_name(ability), ability, cost);
-		snprintf(detail, sizeof(detail), "%s",
-			solo_ability_description(ability));
-		snprintf(hint, sizeof(hint), "CLICK OR PRESS %d", ability);
-	}
-	else if (game->ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
-	{
-		snprintf(title, sizeof(title), "%s ACTIVATED",
-			solo_ability_name(ability));
-		if (ability == SOLO_ABILITY_MIRURUN)
-			snprintf(detail, sizeof(detail), "BOTTOM 4 ROWS REMOVED");
-		else
-			snprintf(detail, sizeof(detail), "SOLO TEST - NO TARGET");
-		snprintf(hint, sizeof(hint), "-%d CRYSTALS", cost);
-	}
-	else if (game->ability_result == SOLO_ABILITY_RESULT_NO_CHARGE)
-	{
-		snprintf(title, sizeof(title), "%s NOT READY",
-			solo_ability_name(ability));
-		snprintf(detail, sizeof(detail), "NEED %d CRYSTALS", cost);
-		snprintf(hint, sizeof(hint), "CLEAR 2 LINES = 1");
-	}
-	else if (game->ability_result == SOLO_ABILITY_RESULT_BLOCKED)
-	{
-		snprintf(title, sizeof(title), "MIRURUN BLOCKED");
-		snprintf(detail, sizeof(detail), "ACTIVE PIECE COLLISION");
-		snprintf(hint, sizeof(hint), "TRY AGAIN AFTER LOCK");
-	}
-	else
-	{
-		snprintf(title, sizeof(title), "%s UNAVAILABLE",
-			solo_ability_name(ability));
-		snprintf(detail, sizeof(detail), "WAIT FOR ACTIVE PLAY");
-		snprintf(hint, sizeof(hint), "CHARGE NOT SPENT");
-	}
-	draw_text_centered(canvas, solo, title,
-		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 119,
-		5, 6, 1, g_pink);
-	draw_text_centered(canvas, solo, detail,
-		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 133,
-		5, 6, 1, g_white);
-	draw_text_centered(canvas, solo, hint,
-		HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 147,
-		5, 6, 1, g_purple);
-	return (true);
 }
 
 /**
