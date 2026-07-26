@@ -713,11 +713,7 @@ sequenceDiagram
     activate CS
     CS->>LT: SHUTDOWN /admin HTTTP/1.0
     activate LT
-    LT-->>CS: 202 Accepted
-    CS-->>CLI: 202 Accepted
-    CLI-->>A: prints confirmation, exits
-    deactivate CS
-    deactivate CLI
+    note right of CLI: tetrisctl blocks until teardown completes,<br/>may take several seconds if a game is mid-play (ext 4a)
 
     LT->>D: initiate shutdown sequence
     activate D
@@ -737,14 +733,20 @@ sequenceDiagram
     D->>DB: db_close()
     activate DB
     DB->>F: stop()
-    DB->>F: finalFsync()
+    F-->>DB:
     DB-->>D: closed
     deactivate DB
 
     D->>D: log(shutdown event)
-    D->>D: freeResources() → close control socket → exit
+    D->>D: freeResources() → close control socket
+    D-->>LT: shutdown complete
     deactivate D
+    LT-->>CS: 200 OK
     deactivate LT
+    CS-->>CLI: 200 OK
+    deactivate CS
+    CLI-->>A: prints "server shut down", exits
+    deactivate CLI
 ```
 
 ### SD UC-24 — Kick Player (includes UC-07a)
@@ -770,7 +772,6 @@ sequenceDiagram
 
     alt session found  (step 2)
         D-->>LT: Session
-        deactivate D
         LT->>S: close()
         activate S
         S-->>LT: closed

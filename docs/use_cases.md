@@ -129,7 +129,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
 | UC-21 View Leaderboard | `LEADERBOARD /leaderboard` (top-N) | HTTTP → tetrisd | `200` (top entries) | `500` |
 | UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
-| UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `202` (shutdown initiated) | `500` |
+| UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `200` (shutdown complete) | `500` |
 | UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
 | UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (control) | `200` (room list) | `500` |
 | UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (control) | `200` (player list) | `500` |
@@ -1202,16 +1202,17 @@ The four selected characters retain their complete, four-level ability sets from
   | **Preconditions** | `tetrisd` is running. |
   | **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the control socket, and exits. |
   | **Trigger** | Operator runs `tetrisctl shutdown`. |
-  | **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). |
-  | **Return** | • `202 Accepted` (shutdown initiated) then the daemon exits<br>• `500` |
+  | **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). `tetrisctl` blocks on the response — it does not return control until `tetrisd` has finished tearing down. |
+  | **Return** | • `200 OK` (shutdown complete, daemon has exited)<br>• `500` |
 
   **Main Success Scenario**
   1. Operator runs `tetrisctl shutdown` (works even while the public TCP port is flooded, because the control listener is a separate thread).
-  2. `tetrisctl` sends `SHUTDOWN /admin`; `tetrisd` replies `202 Accepted`.
+  2. `tetrisctl` sends `SHUTDOWN /admin` and blocks, awaiting a response.
   3. `tetrisd` stops accepting new TCP connections and stops room tickers.
   4. In-flight rooms are ended/notified; pending log records are shipped to `tetrislogd`.
   5. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
-  6. `tetrisd` frees resources, closes the control socket, and exits.
+  6. `tetrisd` frees resources; the control listener replies `200 OK`, then `tetrisd` closes the control socket and exits.
+  7. `tetrisctl` receives `200 OK`, prints confirmation that the server has shut down, and exits.
 
   **Extensions / Alternate Flows**
   - **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
@@ -1231,9 +1232,9 @@ The four selected characters retain their complete, four-level ability sets from
   HTTTP/1.0 200 OK
   Date: Tue, 21 Jul 2026 09:15:44 GMT
   Content-Type: application/json
-  Content-Length: 24
+  Content-Length: 18
 
-  {"shutting_down":true}
+  {"shutdown":true}
   ```
 
   ---
