@@ -862,9 +862,8 @@ sequenceDiagram
     participant AC as :AuthController
     participant DB as :Db
 
-    Guest->>UI: enter(username, password, serverId)
+    Guest->>UI: enter(username, password, serverId) + pressLogin()
     activate UI
-    Guest->>UI: pressLogin()
     UI->>C: login(username, password, serverId)
     activate C
 
@@ -1001,13 +1000,12 @@ sequenceDiagram
     P->>UI: pressCreate()
     activate UI
     UI-->>P: show(Create Room modal: [1] Double, [2] Battle Royale)
-    P->>UI: selectMode(mode)
 
     alt [ESC] cancel  (ext 3a)
         P->>UI: pressEsc()
         UI-->>P: show(Lobby)
     else [ENTER] confirm
-        P->>UI: pressEnter()
+        P->>UI: selectMode(mode)
         UI->>C: createRoom(playerId, mode)
         activate C
         C->>RC: JOIN /room/<newId>  Mode: <mode>  [Player-Id]
@@ -1088,9 +1086,8 @@ sequenceDiagram
     participant Sn as :Slot[n]
     participant M as :Membership
 
-    P->>UI: highlightRoom(roomId)
+    P->>UI: highlightRoom(roomId) + pressEnter()
     activate UI
-    P->>UI: pressEnter()
     UI->>C: joinRoom(playerId, roomId)
     activate C
     C->>RC: JOIN /room/<id>  [Player-Id]
@@ -1172,9 +1169,8 @@ sequenceDiagram
     participant L as :Lobby
     participant R as :Room
 
-    P->>UI: typeRoomId(text)
+    P->>UI: typeRoomId(text) + pressEnter()
     activate UI
-    P->>UI: pressEnter()
     UI->>UI: tfd = roomId
     UI->>C: joinRoom(playerId, roomId)
     activate C
