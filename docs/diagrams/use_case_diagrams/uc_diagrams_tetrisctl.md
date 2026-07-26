@@ -63,13 +63,13 @@ classDiagram
     }
 
     tetrisctl ..> CtlSocket : 1. connects to control socket
-    CtlSocket ..> CtlListenerThread : STATUS /admin HTTTP/1.0
+    CtlSocket ..> CtlListenerThread : 2. STATUS /admin HTTTP/1.0
     CtlListenerThread ..> tetrisd : 3. gathers snapshot
     tetrisd ..> StatusSnapshot : 3. assembles
     CtlListenerThread ..> AuditLog : 4. logs the query
     CtlListenerThread ..> HtttpStatus : returns 200 OK
-    CtlListenerThread ..> CtlSocket : 3. 200 OK + body
-    CtlSocket ..> tetrisctl : 4. prints snapshot, exits
+    CtlListenerThread ..> CtlSocket : 5. 200 OK + body
+    CtlSocket ..> tetrisctl : 6. prints snapshot, exits
 ```
 
 **Actors & roles**
@@ -142,17 +142,17 @@ classDiagram
     }
 
     tetrisctl ..> CtlSocket : 1. connects to control socket
-    CtlSocket ..> CtlListenerThread : SHUTDOWN /admin HTTTP/1.0
-    CtlListenerThread ..> tetrisd : 3. initiates shutdown sequence
-    CtlListenerThread ..> CtlSocket : 2. 202 Accepted
-    CtlSocket ..> tetrisctl : 2. prints confirmation, exits
-    tetrisd ..> tetrisd : 3. stopAccepting → stopTickers
-    tetrisd ..> tetrisd : 4. endInFlightRooms (no db_record_game)
-    tetrisd ..> tetrislogd : 4. flushLogsToLogd (pending records)
-    tetrisd ..> Db : 5. db_close
-    Db ..> Flusher : 5. stop → finalFsync
+    CtlSocket ..> CtlListenerThread : 2. SHUTDOWN /admin HTTTP/1.0
+    CtlListenerThread ..> tetrisd : 4. initiates shutdown sequence
+    CtlListenerThread ..> CtlSocket : 3. 202 Accepted
+    CtlSocket ..> tetrisctl : 3. prints confirmation, exits
+    tetrisd ..> tetrisd : 4. stopAccepting → stopTickers
+    tetrisd ..> tetrisd : 5. endInFlightRooms (no db_record_game)
+    tetrisd ..> tetrislogd : 5. flushLogsToLogd (pending records)
+    tetrisd ..> Db : 6. db_close
+    Db ..> Flusher : 6. stop → finalFsync
     tetrisd ..> AuditLog : logs shutdown event
-    tetrisd ..> tetrisd : 6. freeResources → close socket → exit
+    tetrisd ..> tetrisd : 7. freeResources → close socket → exit
     CtlListenerThread ..> HtttpStatus : returns 202 Accepted
 ```
 
@@ -356,6 +356,7 @@ classDiagram
     }
     class GameMode {
         <<enum>>
+        SINGLE
         DOUBLE
         BATTLE_ROYALE
     }
@@ -531,8 +532,7 @@ classDiagram
     CtlSocket ..> CtlListenerThread : DROPPED-LOGS /admin HTTTP/1.0
     CtlListenerThread ..> tetrisd : 2. getLocalDropCount
     CtlListenerThread ..> LogIpcChannel : 2. queryDroppedCount
-    LogIpcChannel ..> tetrislogd : IPC query
-    tetrislogd ..> LogIpcChannel : returns droppedRecords
+    LogIpcChannel ..> tetrislogd : IPC request → droppedRecords
     LogIpcChannel ..> CtlListenerThread : logd count
     CtlListenerThread ..> DroppedLogCount : 3. assembles total
     CtlListenerThread ..> AuditLog : 4. logs the query
