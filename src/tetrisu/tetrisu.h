@@ -55,6 +55,8 @@
 # define DEFAULT_MIRURUN_PATH	ASSET_DIR "/default_theme/default_mirurun.png"
 # define VOLUME_NOTIFICATION_PATH \
 	ASSET_DIR "/default_theme/volume_notification.png"
+# define ABILITY_POPOVER_PATH \
+	ASSET_DIR "/default_theme/ability_popover.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
@@ -69,6 +71,7 @@
 # define SOLO_POPOVER_FADE_OUT_MS	180
 # define SOLO_POPOVER_ROWS	5
 # define SOLO_POPOVER_COLS	38
+# define SOLO_POPOVER_ART_COLS	9
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
@@ -446,6 +449,7 @@ typedef struct s_solo_render
 	struct ncplane	*score_event_plane;
 	struct ncplane	*compatibility_score_plane;
 	struct ncplane	*compatibility_overlay_plane;
+	struct ncplane	*ability_popover_art_plane;
 	struct ncplane	*ability_popover_plane;
 	struct ncplane	*controls_plane;
 	struct ncplane	*board_overlay_plane;

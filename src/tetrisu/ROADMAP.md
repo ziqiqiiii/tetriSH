@@ -45,6 +45,9 @@ effects in item 10.
   music card. Music changes show a crisp live percentage and 16-step crystal
   bar on Home and Solo, including compatibility mode and builds without SDL
   audio.
+- Item 9 keeps ability help and results readable in native terminal text.
+  Reliable Kitty pixel rendering adds a small Mirurun-and-crystals pixel-art
+  badge, while compatibility mode retains the compact terminal-only card.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -137,8 +140,9 @@ effects in item 10.
    - Activation and rejection feedback take full-opacity priority for the
      existing one-second game deadline, then return to hovered help or fade.
    - Mouse and keyboard activation use the same feedback card.
-   - Kitty's pixel renderer and WezTerm compatibility mode share the same
-     crisp native-text plane; score events remain independent underneath.
+   - Kitty's pixel renderer adds a generated Mirurun-and-crystals pixel-art
+     badge beside the crisp native-text card. WezTerm compatibility mode keeps
+     the terminal-only fallback; score events remain independent underneath.
 
 10. **Add event-driven retro sound effects**
 

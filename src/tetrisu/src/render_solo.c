@@ -50,12 +50,17 @@ static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
 static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
+static struct ncplane	*create_ability_popover_art(render_ctx_t *ctx,
+	int y, int x, int rows, int cols, int opacity);
+static void	fade_ability_popover_art(struct ncvisual *visual, int opacity);
 static uint64_t	ability_popover_signature(const solo_render_t *solo,
 	const solo_game_t *game);
 static bool	draw_ability_popover(struct ncplane *plane,
-	const solo_render_t *solo, const solo_game_t *game, int opacity);
+	const solo_render_t *solo, const solo_game_t *game, int opacity,
+	int art_cols);
 static bool	popover_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, int opacity, bool bold);
+	const char *text, color_t color, int opacity, bool bold,
+	int region_x, int region_width);
 static color_t	popover_faded_color(color_t color, int opacity);
 static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
 	const solo_game_t *game);
@@ -1031,13 +1036,17 @@ static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
 	int				y;
 	int				x;
 	bool			changed;
+	bool			want_art;
+	int				art_cols;
 
 	ability = solo_popover_displayed_ability(solo, game);
 	opacity = solo_popover_displayed_opacity(solo, game);
 	if (ability == SOLO_ABILITY_NONE || opacity <= 0)
 	{
-		if (solo->ability_popover_plane == NULL)
+		if (solo->ability_popover_plane == NULL
+			&& solo->ability_popover_art_plane == NULL)
 			return (0);
+		destroy_plane(&solo->ability_popover_art_plane);
 		destroy_plane(&solo->ability_popover_plane);
 		solo->popover_signature = UINT64_MAX;
 		return (1);
@@ -1070,13 +1079,106 @@ static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
 	changed = signature != solo->popover_signature;
 	if (changed)
 	{
+		want_art = !render_compatibility_mode(ctx)
+			&& render_pixel_planes_reliable(ctx);
+		art_cols = 0;
+		destroy_plane(&solo->ability_popover_art_plane);
+		if (want_art)
+		{
+			art_cols = SOLO_POPOVER_ART_COLS;
+			if (art_cols > cols - 18)
+				art_cols = cols - 18;
+			if (art_cols > 0)
+				solo->ability_popover_art_plane
+					= create_ability_popover_art(ctx,
+						y, x, rows, art_cols, opacity);
+			if (solo->ability_popover_art_plane == NULL)
+				art_cols = 0;
+		}
 		if (!draw_ability_popover(solo->ability_popover_plane,
-				solo, game, opacity))
+				solo, game, opacity, art_cols))
 			return (-1);
 		solo->popover_signature = signature;
 	}
+	if (solo->ability_popover_art_plane != NULL)
+		ncplane_move_top(solo->ability_popover_art_plane);
 	ncplane_move_top(solo->ability_popover_plane);
 	return (changed ? 1 : 0);
+}
+
+/**
+ * @brief Creates the generated pixel-art badge beside native popover text.
+ *
+ * Only terminals with reliably movable pixel planes use this layer. Cell and
+ * stationary renderers fall back to the terminal-drawn card automatically.
+ */
+static struct ncplane	*create_ability_popover_art(render_ctx_t *ctx,
+	int y, int x, int rows, int cols, int opacity)
+{
+	struct ncvisual			*visual;
+	struct ncvisual_options	options;
+	struct ncplane			*plane;
+	int						pixel_rows;
+	int						pixel_cols;
+
+	if (ctx->cell_px_y <= 0 || ctx->cell_px_x <= 0)
+		return (NULL);
+	visual = ncvisual_from_file(ABILITY_POPOVER_PATH);
+	if (visual == NULL)
+		return (NULL);
+	pixel_rows = rows * ctx->cell_px_y;
+	pixel_cols = cols * ctx->cell_px_x;
+	if (ncvisual_resize_noninterpolative(visual,
+			pixel_rows, pixel_cols) != 0)
+	{
+		ncvisual_destroy(visual);
+		return (NULL);
+	}
+	if (opacity < 255)
+		fade_ability_popover_art(visual, opacity);
+	memset(&options, 0, sizeof(options));
+	options.n = ctx->std;
+	options.y = y;
+	options.x = x;
+	options.scaling = NCSCALE_NONE;
+	options.blitter = NCBLIT_PIXEL;
+	options.flags = NCVISUAL_OPTION_CHILDPLANE
+		| NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
+	plane = ncvisual_blit(ctx->nc, visual, &options);
+	ncvisual_destroy(visual);
+	return (plane);
+}
+
+/**
+ * @brief Multiplies generated-art alpha by the current hover fade.
+ */
+static void	fade_ability_popover_art(struct ncvisual *visual, int opacity)
+{
+	ncvgeom		geometry;
+	uint32_t	pixel;
+	unsigned	alpha;
+	unsigned	y;
+	unsigned	x;
+
+	memset(&geometry, 0, sizeof(geometry));
+	if (ncvisual_geom(NULL, visual, NULL, &geometry) < 0)
+		return ;
+	y = 0;
+	while (y < geometry.pixy)
+	{
+		x = 0;
+		while (x < geometry.pixx)
+		{
+			if (ncvisual_at_yx(visual, y, x, &pixel) == 0)
+			{
+				alpha = ncpixel_a(pixel);
+				ncpixel_set_a(&pixel, alpha * (unsigned)opacity / 255u);
+				(void)ncvisual_set_yx(visual, y, x, pixel);
+			}
+			x++;
+		}
+		y++;
+	}
 }
 
 /**
@@ -1100,7 +1202,8 @@ static uint64_t	ability_popover_signature(const solo_render_t *solo,
  * @brief Draws a compact dark terminal-font card for help or feedback.
  */
 static bool	draw_ability_popover(struct ncplane *plane,
-	const solo_render_t *solo, const solo_game_t *game, int opacity)
+	const solo_render_t *solo, const solo_game_t *game, int opacity,
+	int art_cols)
 {
 	char			border[SOLO_POPOVER_COLS + 1];
 	char			middle[SOLO_POPOVER_COLS + 1];
@@ -1119,31 +1222,20 @@ static bool	draw_ability_popover(struct ncplane *plane,
 	unsigned		cols;
 	unsigned		background_alpha;
 	int				index;
+	int				text_x;
+	int				text_width;
 
 	ability = solo_popover_displayed_ability(solo, game);
 	ncplane_dim_yx(plane, &rows, &cols);
 	if (rows < SOLO_POPOVER_ROWS || cols < 18)
 		return (false);
-	index = 0;
-	while (index < (int)cols)
-	{
-		border[index] = '-';
-		middle[index] = ' ';
-		index++;
-	}
-	border[0] = '+';
-	border[cols - 1] = '+';
-	border[cols] = '\0';
-	middle[0] = '|';
-	middle[cols - 1] = '|';
-	middle[cols] = '\0';
 	pink = (color_t){255, 98, 186};
 	white = (color_t){255, 236, 248};
 	gold = (color_t){255, 206, 92};
 	purple = (color_t){181, 117, 216};
 	dark = popover_faded_color((color_t){24, 11, 32}, opacity);
 	background_alpha = NCALPHA_OPAQUE;
-	if (opacity < 56)
+	if (art_cols > 0 || opacity < 56)
 		background_alpha = NCALPHA_TRANSPARENT;
 	else if (opacity < 208)
 		background_alpha = NCALPHA_BLEND;
@@ -1158,6 +1250,26 @@ static bool	draw_ability_popover(struct ncplane *plane,
 	ncplane_erase(plane);
 	(void)ncplane_set_bg_rgb8(plane, dark.r, dark.g, dark.b);
 	(void)ncplane_set_bg_alpha(plane, background_alpha);
+	text_x = 0;
+	text_width = (int)cols;
+	if (art_cols > 0)
+	{
+		text_x = art_cols;
+		text_width = (int)cols - text_x;
+	}
+	index = 0;
+	while (index < text_width)
+	{
+		border[index] = '-';
+		middle[index] = ' ';
+		index++;
+	}
+	border[0] = '+';
+	border[text_width - 1] = '+';
+	border[text_width] = '\0';
+	middle[0] = '|';
+	middle[text_width - 1] = '|';
+	middle[text_width] = '\0';
 	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
 	{
 		snprintf(title, sizeof(title), "%s  [%d]",
@@ -1210,22 +1322,38 @@ static bool	draw_ability_popover(struct ncplane *plane,
 		else
 			snprintf(hint, sizeof(hint), "TRY AGAIN IN PLAY");
 	}
-	return (popover_put_centered(plane, 0, border, pink, opacity, true)
-		&& popover_put_centered(plane, 0, title, white, opacity, true)
-		&& popover_put_centered(plane, 1, middle, pink, opacity, true)
-		&& popover_put_centered(plane, 2, middle, pink, opacity, true)
-		&& popover_put_centered(plane, 3, middle, pink, opacity, true)
-		&& popover_put_centered(plane, 1, cost, gold, opacity, true)
-		&& popover_put_centered(plane, 2, detail, white, opacity, false)
-		&& popover_put_centered(plane, 3, hint, purple, opacity, false)
-		&& popover_put_centered(plane, 4, border, pink, opacity, true));
+	if (art_cols > 0)
+	{
+		(void)ncplane_set_bg_rgb8(plane, dark.r, dark.g, dark.b);
+		(void)ncplane_set_bg_alpha(plane, NCALPHA_OPAQUE);
+	}
+	if (!popover_put_centered(plane, 0, border, pink, opacity, true,
+				text_x, text_width)
+			|| !popover_put_centered(plane, 1, middle, pink, opacity, true,
+				text_x, text_width)
+			|| !popover_put_centered(plane, 2, middle, pink, opacity, true,
+				text_x, text_width)
+			|| !popover_put_centered(plane, 3, middle, pink, opacity, true,
+				text_x, text_width)
+			|| !popover_put_centered(plane, 4, border, pink, opacity, true,
+				text_x, text_width))
+		return (false);
+	return (popover_put_centered(plane, 0, title, white, opacity, true,
+			text_x, text_width)
+		&& popover_put_centered(plane, 1, cost, gold, opacity, true,
+			text_x, text_width)
+		&& popover_put_centered(plane, 2, detail, white, opacity, false,
+			text_x, text_width)
+		&& popover_put_centered(plane, 3, hint, purple, opacity, false,
+			text_x, text_width));
 }
 
 /**
  * @brief Centers one clipped popover line using native terminal glyphs.
  */
 static bool	popover_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, int opacity, bool bold)
+	const char *text, color_t color, int opacity, bool bold,
+	int region_x, int region_width)
 {
 	char		clipped[SOLO_POPOVER_COLS + 1];
 	color_t		faded;
@@ -1238,9 +1366,13 @@ static bool	popover_put_centered(struct ncplane *plane, int row,
 	ncplane_dim_yx(plane, &rows, &cols);
 	if (row < 0 || row >= (int)rows || cols == 0)
 		return (true);
-	limit = (int)cols;
+	if (region_x < 0)
+		region_x = 0;
+	if (region_width < 1 || region_x + region_width > (int)cols)
+		region_width = (int)cols - region_x;
+	limit = region_width;
 	snprintf(clipped, sizeof(clipped), "%.*s", limit, text);
-	x = ((int)cols - (int)strlen(clipped)) / 2;
+	x = region_x + (region_width - (int)strlen(clipped)) / 2;
 	faded = popover_faded_color(color, opacity);
 	(void)ncplane_set_fg_rgb8(plane, faded.r, faded.g, faded.b);
 	if (bold)
@@ -2648,6 +2780,7 @@ static void	destroy_solo_planes(solo_render_t *solo)
 	destroy_plane(&solo->status_plane);
 	destroy_board_planes(solo);
 	destroy_plane(&solo->controls_plane);
+	destroy_plane(&solo->ability_popover_art_plane);
 	destroy_plane(&solo->ability_popover_plane);
 	destroy_plane(&solo->compatibility_overlay_plane);
 	destroy_plane(&solo->compatibility_score_plane);
