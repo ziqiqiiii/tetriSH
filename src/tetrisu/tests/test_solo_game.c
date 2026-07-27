@@ -22,6 +22,7 @@ static void	test_level_seven_clear_splits_at_midpoint(void);
 static void	test_clear_animation_wakes_at_visual_boundaries(void);
 static void	test_pause_freezes_active_and_clear_timers(void);
 static void	test_clear_animation_then_level_and_meter_update(void);
+static void	test_danger_state_has_stable_exit_hysteresis(void);
 static void	test_rotation_stress_preserves_valid_state(void);
 static int	filled_cells(const t_board *board);
 static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed);
@@ -56,6 +57,7 @@ int	main(void)
 	test_clear_animation_wakes_at_visual_boundaries();
 	test_pause_freezes_active_and_clear_timers();
 	test_clear_animation_then_level_and_meter_update();
+	test_danger_state_has_stable_exit_hysteresis();
 	test_rotation_stress_preserves_valid_state();
 	return (0);
 }
@@ -655,6 +657,41 @@ static void	test_rotation_stress_preserves_valid_state(void)
 		index++;
 	}
 	printf("PASS test_rotation_stress_preserves_valid_state\n");
+}
+
+/**
+ * @brief Exercises immediate danger entry and the delayed safe-stack exit.
+ */
+static void	test_danger_state_has_stable_exit_hysteresis(void)
+{
+	solo_game_t	game;
+
+	solo_game_init(&game, 799u);
+	board_set(&game.board, 0, SOLO_DANGER_ENTER_ROW,
+		(t_cell){CELL_FILLED, PIECE_T});
+	assert(solo_game_update_danger(&game, 0));
+	assert(game.danger_active);
+	board_set(&game.board, 0, SOLO_DANGER_ENTER_ROW,
+		(t_cell){CELL_EMPTY, 0});
+	board_set(&game.board, 0, SOLO_DANGER_EXIT_ROW - 1,
+		(t_cell){CELL_FILLED, PIECE_T});
+	assert(!solo_game_update_danger(&game, SOLO_DANGER_EXIT_HOLD_MS));
+	assert(game.danger_active);
+	board_set(&game.board, 0, SOLO_DANGER_EXIT_ROW - 1,
+		(t_cell){CELL_EMPTY, 0});
+	board_set(&game.board, 0, SOLO_DANGER_EXIT_ROW,
+		(t_cell){CELL_FILLED, PIECE_T});
+	assert(!solo_game_update_danger(&game,
+			SOLO_DANGER_EXIT_HOLD_MS - 1));
+	assert(game.danger_active);
+	game.paused = true;
+	assert(!solo_game_update_danger(&game, 1));
+	assert(game.danger_active
+		&& game.danger_safe_elapsed_ms == SOLO_DANGER_EXIT_HOLD_MS - 1);
+	game.paused = false;
+	assert(solo_game_update_danger(&game, 1));
+	assert(!game.danger_active);
+	printf("PASS test_danger_state_has_stable_exit_hysteresis\n");
 }
 
 /**

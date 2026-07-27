@@ -48,6 +48,9 @@ effects in item 10.
 - Item 9 keeps ability help and results readable in native terminal text.
   Reliable Kitty pixel rendering adds a small Mirurun-and-crystals pixel-art
   badge, while compatibility mode retains the compact terminal-only card.
+- Normal music now uses the supplied techno track. Settled blocks reaching
+  rows 0–3 transition into the supplied phonk danger track; returning below
+  row 5 for 1.5 seconds restores techno through a non-blocking 300 ms fade.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -168,16 +171,19 @@ effects in item 10.
 
 13. **Add no-glow danger presentation**
 
-    - Enter when locked blocks reach rows 0–3.
-    - Exit only after the highest locked block remains below row 5 for 1.5 s.
+    - Music-state detection already enters when locked blocks reach rows 0–3.
+    - It exits only after the highest locked block remains below row 5 for
+      1.5 s.
     - Fade the surrounding environment darker over 300 ms while preserving a
       readable, emphasized board.
     - Do not shake, scale, move, or glow the board.
 
-14. **Add authored danger-music transition** — asset-gated
+14. **Add authored danger-music transition** — complete
 
-    - Cross-fade normal and supplied high-intensity tracks over 300 ms.
-    - If the intense track is absent, retain normal music silently.
+    - The supplied techno version is the normal Home and Solo loop.
+    - The supplied phonk version is the high-stack danger loop.
+    - Fade out and fade in over a non-blocking 300 ms transition.
+    - Missing or unavailable audio retains the existing silent fallback.
     - Do not add `audio-stretch`; an authored second track is safer and cleaner
       than a custom SDL streaming/time-scaling path.
 

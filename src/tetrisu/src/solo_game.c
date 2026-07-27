@@ -158,6 +158,73 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 }
 
 /**
+ * @brief Updates the high-stack danger state with exit hysteresis.
+ *
+ * Settled blocks in rows 0–3 enter danger immediately. Danger remains active
+ * until every settled block stays below row 4 for 1.5 seconds, avoiding rapid
+ * music changes while the stack moves around the threshold.
+ *
+ * @param game Pointer to the Solo state.
+ * @param elapsed_ms Elapsed active-play time in milliseconds.
+ * @return true only when danger was entered or exited.
+ */
+bool	solo_game_update_danger(solo_game_t *game, int elapsed_ms)
+{
+	int	highest_row;
+	int	row;
+	int	col;
+
+	if (game == NULL || elapsed_ms < 0)
+		return (false);
+	highest_row = BOARD_HEIGHT;
+	row = 0;
+	while (row < BOARD_HEIGHT && highest_row == BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (board_get(&game->board, col, row).type != CELL_EMPTY)
+			{
+				highest_row = row;
+				break ;
+			}
+			col++;
+		}
+		row++;
+	}
+	if (highest_row <= SOLO_DANGER_ENTER_ROW)
+	{
+		game->danger_safe_elapsed_ms = 0;
+		if (game->danger_active)
+			return (false);
+		game->danger_active = true;
+		return (true);
+	}
+	if (!game->danger_active)
+	{
+		game->danger_safe_elapsed_ms = 0;
+		return (false);
+	}
+	if (highest_row < SOLO_DANGER_EXIT_ROW)
+	{
+		game->danger_safe_elapsed_ms = 0;
+		return (false);
+	}
+	if (game->paused)
+		return (false);
+	if (elapsed_ms > SOLO_DANGER_EXIT_HOLD_MS
+		- game->danger_safe_elapsed_ms)
+		game->danger_safe_elapsed_ms = SOLO_DANGER_EXIT_HOLD_MS;
+	else
+		game->danger_safe_elapsed_ms += elapsed_ms;
+	if (game->danger_safe_elapsed_ms < SOLO_DANGER_EXIT_HOLD_MS)
+		return (false);
+	game->danger_safe_elapsed_ms = 0;
+	game->danger_active = false;
+	return (true);
+}
+
+/**
  * @brief Calculates the next state-timer deadline.
  *
  * The renderer can sleep until this value instead of polling gravity or lock

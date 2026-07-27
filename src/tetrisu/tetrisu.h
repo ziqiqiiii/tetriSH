@@ -47,6 +47,7 @@
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
 # define INTRO_AUDIO_PATH	ASSET_DIR "/intro.mp3"
 # define HOME_BGM_PATH		ASSET_DIR "/tetris_theme.mp3"
+# define DANGER_BGM_PATH	ASSET_DIR "/tetris_danger.mp3"
 # define HOME_BGM_START_VOLUME	48
 # define SOLO_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/default_background_4x3.png"
@@ -72,6 +73,9 @@
 # define SOLO_POPOVER_ROWS	5
 # define SOLO_POPOVER_COLS	38
 # define SOLO_POPOVER_ART_COLS	9
+# define SOLO_DANGER_ENTER_ROW	3
+# define SOLO_DANGER_EXIT_ROW	5
+# define SOLO_DANGER_EXIT_HOLD_MS	1500
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
@@ -84,6 +88,8 @@
 # define AUDIO_DEFAULT_VOLUME	96
 # define AUDIO_VOLUME_STEP		8
 # define AUDIO_MAX_VOLUME		128
+# define AUDIO_MUSIC_TRANSITION_MS	300
+# define AUDIO_PATH_MAX			512
 
 /* UI_NOTIFICATION.C */
 # define UI_NOTIFICATION_STACK_MAX	3
@@ -251,9 +257,14 @@ typedef struct
 {
 	int		enabled;
 	int		music_volume;
+	int		music_transition_phase;
+	int		music_transition_elapsed_ms;
+	int		music_transition_duration_ms;
 	void	*music;
 	void	*menu_move_sfx;
 	void	*menu_select_sfx;
+	char	music_path[AUDIO_PATH_MAX];
+	char	pending_music_path[AUDIO_PATH_MAX];
 }	audio_ctx_t;
 
 typedef struct s_ui_notification
@@ -428,6 +439,7 @@ typedef struct s_solo_game
 	int				lock_elapsed_ms;
 	int				clear_elapsed_ms;
 	int				top_out_elapsed_ms;
+	int				danger_safe_elapsed_ms;
 	int				lock_resets;
 	int				last_kick_index;
 	bool			last_action_was_rotation;
@@ -435,6 +447,7 @@ typedef struct s_solo_game
 	bool			has_hold;
 	bool			hold_used;
 	bool			paused;
+	bool			danger_active;
 }	solo_game_t;
 
 typedef struct s_solo_render
@@ -572,6 +585,10 @@ int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
 /* AUDIO.C */
 int				audio_init(audio_ctx_t *audio);
 void			audio_play_music(audio_ctx_t *audio, const char *path);
+void			audio_transition_music(audio_ctx_t *audio, const char *path,
+					int duration_ms);
+bool			audio_update(audio_ctx_t *audio, int elapsed_ms);
+int				audio_next_wake_ms(const audio_ctx_t *audio);
 void			audio_play_once(audio_ctx_t *audio, const char *path);
 void			audio_stop_music(audio_ctx_t *audio);
 void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
@@ -587,6 +604,7 @@ void			audio_teardown(audio_ctx_t *audio);
 void			solo_game_init(solo_game_t *game, uint32_t seed);
 bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
 bool			solo_game_update(solo_game_t *game, int elapsed_ms);
+bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
 int				solo_game_next_wake_ms(const solo_game_t *game);
 int				solo_clear_duration_ms(int level);
 t_piece			solo_game_ghost(const solo_game_t *game);

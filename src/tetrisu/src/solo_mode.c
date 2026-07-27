@@ -54,6 +54,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	int				handling_wake_ms;
 	int				notification_wake_ms;
 	int				popover_wake_ms;
+	int				audio_wake_ms;
 	bool			leave;
 	bool			resize_pending;
 	bool			display_ready;
@@ -103,6 +104,10 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		if (wake_ms < 0 || (popover_wake_ms >= 0
 				&& popover_wake_ms < wake_ms))
 			wake_ms = popover_wake_ms;
+		audio_wake_ms = audio_next_wake_ms(audio);
+		if (wake_ms < 0 || (audio_wake_ms >= 0
+				&& audio_wake_ms < wake_ms))
+			wake_ms = audio_wake_ms;
 		wait_ms = wake_ms;
 		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
 			wait_ms = RENDER_RESIZE_POLL_MS;
@@ -131,10 +136,21 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		else
 			elapsed_ms = (int)(now_ms - previous_ms);
 		previous_ms = now_ms;
+		(void)audio_update(audio, elapsed_ms);
 		needs_draw = false;
 		force_render = false;
 		if (display_ready)
 			needs_draw = solo_game_update(&game, elapsed_ms);
+		if (display_ready && solo_game_update_danger(&game, elapsed_ms))
+		{
+			if (game.danger_active)
+				audio_transition_music(audio, DANGER_BGM_PATH,
+					AUDIO_MUSIC_TRANSITION_MS);
+			else
+				audio_transition_music(audio, HOME_BGM_PATH,
+					AUDIO_MUSIC_TRANSITION_MS);
+			needs_draw = true;
+		}
 		needs_draw = solo_popover_update(&solo, &game, elapsed_ms)
 			|| needs_draw;
 		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
@@ -201,6 +217,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	if (mouse_enabled)
 		(void)notcurses_mice_disable(ctx->nc);
 	render_solo_destroy(&solo);
+	audio_transition_music(audio, HOME_BGM_PATH, 0);
 	return (restore_home(ctx));
 }
 
@@ -389,6 +406,8 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
 	{
 		solo_game_init(game, new_game_seed());
+		audio_transition_music(audio, HOME_BGM_PATH,
+			AUDIO_MUSIC_TRANSITION_MS);
 		solo_handling_reset(handling);
 		*state_changed = true;
 		return (false);

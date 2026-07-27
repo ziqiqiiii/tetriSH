@@ -5,6 +5,8 @@
 // Static Functions
 static void	log_mix_error(const char *context);
 static void	free_music(audio_ctx_t *audio);
+static bool	start_looping_music(audio_ctx_t *audio, const char *path,
+				int fade_ms);
 static void	free_chunk(void **chunk);
 static void	play_chunk(void *chunk);
 
@@ -60,21 +62,137 @@ void	audio_play_music(audio_ctx_t *audio, const char *path)
 		return ;
 #if TETRISU_ENABLE_AUDIO
 	free_music(audio);
-	audio->music = Mix_LoadMUS(path);
-	if (audio->music == NULL)
-	{
-		log_mix_error("Mix_LoadMUS failed");
-		return ;
-	}
-	Mix_VolumeMusic(audio->music_volume);
-	if (Mix_PlayMusic((Mix_Music *)audio->music, -1) != 0)
-	{
-		log_mix_error("Mix_PlayMusic failed");
-		free_music(audio);
-	}
+	audio->music_transition_phase = 0;
+	audio->music_transition_elapsed_ms = 0;
+	audio->music_transition_duration_ms = 0;
+	audio->pending_music_path[0] = '\0';
+	if (!start_looping_music(audio, path, 0))
+		audio->music_path[0] = '\0';
 #else
 	(void)path;
 #endif
+}
+
+/**
+ * @brief Fades from the current loop into another without blocking gameplay.
+ *
+ * SDL_mixer exposes one streamed music channel, so the transition uses equal
+ * fade-out and fade-in halves. Repeated requests for the active or pending
+ * track are ignored.
+ *
+ * @param audio Audio context returned by audio_init().
+ * @param path Music asset that should loop after the transition.
+ * @param duration_ms Total transition duration in milliseconds.
+ */
+void	audio_transition_music(audio_ctx_t *audio, const char *path,
+	int duration_ms)
+{
+	if (audio == NULL || !audio->enabled || path == NULL)
+		return ;
+#if TETRISU_ENABLE_AUDIO
+	if ((audio->music_transition_phase == 0
+			&& audio->music != NULL
+			&& strcmp(audio->music_path, path) == 0)
+		|| (duration_ms > 0 && audio->music_transition_phase != 0
+			&& strcmp(audio->pending_music_path, path) == 0))
+		return ;
+	if (duration_ms <= 0 || audio->music == NULL)
+	{
+		audio_play_music(audio, path);
+		return ;
+	}
+	snprintf(audio->pending_music_path,
+		sizeof(audio->pending_music_path), "%s", path);
+	audio->music_transition_elapsed_ms = 0;
+	audio->music_transition_duration_ms = duration_ms;
+	audio->music_transition_phase = 1;
+	if (Mix_FadeOutMusic((duration_ms + 1) / 2) == 0)
+		audio_play_music(audio, path);
+#else
+	(void)duration_ms;
+#endif
+}
+
+/**
+ * @brief Advances a scheduled music transition.
+ *
+ * @param audio Audio context returned by audio_init().
+ * @param elapsed_ms Elapsed monotonic time in milliseconds.
+ * @return true when a transition boundary was processed.
+ */
+bool	audio_update(audio_ctx_t *audio, int elapsed_ms)
+{
+#if TETRISU_ENABLE_AUDIO
+	int	midpoint_ms;
+	int	fade_in_ms;
+
+	if (audio == NULL || !audio->enabled || elapsed_ms < 0
+		|| audio->music_transition_phase == 0)
+		return (false);
+	if (elapsed_ms > audio->music_transition_duration_ms
+		- audio->music_transition_elapsed_ms)
+		audio->music_transition_elapsed_ms
+			= audio->music_transition_duration_ms;
+	else
+		audio->music_transition_elapsed_ms += elapsed_ms;
+	midpoint_ms = (audio->music_transition_duration_ms + 1) / 2;
+	if (audio->music_transition_phase == 1
+		&& audio->music_transition_elapsed_ms >= midpoint_ms)
+	{
+		free_music(audio);
+		fade_in_ms = audio->music_transition_duration_ms - midpoint_ms;
+		if (!start_looping_music(audio,
+				audio->pending_music_path, fade_in_ms))
+		{
+			audio->music_transition_phase = 0;
+			audio->pending_music_path[0] = '\0';
+			return (true);
+		}
+		audio->pending_music_path[0] = '\0';
+		audio->music_transition_phase = 2;
+		if (audio->music_transition_elapsed_ms
+			< audio->music_transition_duration_ms)
+			return (true);
+	}
+	if (audio->music_transition_phase == 2
+		&& audio->music_transition_elapsed_ms
+			>= audio->music_transition_duration_ms)
+	{
+		audio->music_transition_phase = 0;
+		audio->music_transition_elapsed_ms = 0;
+		audio->music_transition_duration_ms = 0;
+		return (true);
+	}
+	return (false);
+#else
+	(void)audio;
+	(void)elapsed_ms;
+	return (false);
+#endif
+}
+
+/**
+ * @brief Returns the next non-blocking music transition boundary.
+ *
+ * @param audio Audio context returned by audio_init().
+ * @return Milliseconds until work is due, or -1 when music is stable.
+ */
+int	audio_next_wake_ms(const audio_ctx_t *audio)
+{
+	int	wake_ms;
+
+	if (audio == NULL || !audio->enabled
+		|| audio->music_transition_phase == 0)
+		return (-1);
+	if (audio->music_transition_phase == 1)
+		wake_ms = (audio->music_transition_duration_ms + 1) / 2
+			- audio->music_transition_elapsed_ms;
+	else
+		wake_ms = audio->music_transition_duration_ms
+			- audio->music_transition_elapsed_ms;
+	if (wake_ms < 0)
+		return (0);
+	return (wake_ms);
 }
 
 /**
@@ -89,6 +207,11 @@ void	audio_play_once(audio_ctx_t *audio, const char *path)
 		return ;
 #if TETRISU_ENABLE_AUDIO
 	free_music(audio);
+	audio->music_transition_phase = 0;
+	audio->music_transition_elapsed_ms = 0;
+	audio->music_transition_duration_ms = 0;
+	audio->music_path[0] = '\0';
+	audio->pending_music_path[0] = '\0';
 	audio->music = Mix_LoadMUS(path);
 	if (audio->music == NULL)
 	{
@@ -101,6 +224,8 @@ void	audio_play_once(audio_ctx_t *audio, const char *path)
 		log_mix_error("Mix_PlayMusic failed");
 		free_music(audio);
 	}
+	else
+		snprintf(audio->music_path, sizeof(audio->music_path), "%s", path);
 #else
 	(void)path;
 #endif
@@ -117,6 +242,11 @@ void	audio_stop_music(audio_ctx_t *audio)
 		return ;
 #if TETRISU_ENABLE_AUDIO
 	free_music(audio);
+	audio->music_path[0] = '\0';
+	audio->pending_music_path[0] = '\0';
+	audio->music_transition_phase = 0;
+	audio->music_transition_elapsed_ms = 0;
+	audio->music_transition_duration_ms = 0;
 #endif
 }
 
@@ -278,6 +408,40 @@ static void	free_music(audio_ctx_t *audio)
 		Mix_FreeMusic((Mix_Music *)audio->music);
 		audio->music = NULL;
 	}
+}
+
+/**
+ * @brief Loads one looping music stream, optionally fading it in.
+ *
+ * @param audio Audio context that owns the stream.
+ * @param path Music asset path.
+ * @param fade_ms Fade-in duration; zero starts immediately.
+ * @return true when the stream loaded and started.
+ */
+static bool	start_looping_music(audio_ctx_t *audio, const char *path,
+	int fade_ms)
+{
+	int	result;
+
+	audio->music = Mix_LoadMUS(path);
+	if (audio->music == NULL)
+	{
+		log_mix_error("Mix_LoadMUS failed");
+		return (false);
+	}
+	Mix_VolumeMusic(audio->music_volume);
+	if (fade_ms > 0)
+		result = Mix_FadeInMusic((Mix_Music *)audio->music, -1, fade_ms);
+	else
+		result = Mix_PlayMusic((Mix_Music *)audio->music, -1);
+	if (result != 0)
+	{
+		log_mix_error("Mix_PlayMusic failed");
+		free_music(audio);
+		return (false);
+	}
+	snprintf(audio->music_path, sizeof(audio->music_path), "%s", path);
+	return (true);
 }
 
 /**
