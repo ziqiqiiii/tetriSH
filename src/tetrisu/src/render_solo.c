@@ -816,6 +816,7 @@ static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	const char	*action;
 	color_t		white;
 	color_t		pink;
+	unsigned	best_opacity;
 	uint64_t	channels;
 	int			y;
 	int			x;
@@ -852,15 +853,23 @@ static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	{
 		title = "TOP OUT";
 		action = "R  RESTART";
+		best_opacity = solo_game_personal_best_opacity(game);
 	}
 	else
 	{
 		title = "PAUSED";
 		action = "P  RESUME";
+		best_opacity = 0;
 	}
 	if (!compatibility_put_overlay_line(solo->compatibility_overlay_plane,
-			rows / 6, title, pink, true)
-		|| !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
+			rows / 6, title, pink, true))
+		return (false);
+	if (best_opacity > 0
+		&& !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
+			rows / 3, "NEW PERSONAL BEST",
+			popover_faded_color(pink, (int)best_opacity), true))
+		return (false);
+	if (!compatibility_put_overlay_line(solo->compatibility_overlay_plane,
 			rows / 2, action, white, true)
 		|| !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
 			rows - 1, "ESC  HOME", white, false))
@@ -2004,6 +2013,7 @@ static uint64_t	board_overlay_signature(const solo_game_t *game)
 	hash = hash_value(hash, (uint64_t)(game->active.rotation + 1));
 	hash = hash_value(hash, (uint64_t)(game->active.col + BOARD_WIDTH));
 	hash = hash_value(hash, (uint64_t)(game->active.row + BOARD_HEIGHT));
+	hash = hash_value(hash, solo_game_personal_best_opacity(game));
 	return (hash);
 }
 

@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 continues with persistent offline
-personal bests in item 11.
+Phases 1 and 2 are complete. Phase 3 continues with restrained event
+animation in item 12.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -53,7 +53,11 @@ personal bests in item 11.
   row 5 for 1.5 seconds restores techno through a non-blocking 300 ms fade.
 - Item 10 maps the supplied General Sounds WAV bank through one-shot gameplay
   events. Single, double, triple, Tetris, perfect clear, movement, drops, HOLD,
-  abilities, pause, level-up, and top-out each have distinct restrained cues.
+  abilities, pause, and level-up each have distinct restrained cues. Top-out
+  remains silent by design.
+- Item 11 persists only completed Solo top-out best scores in a versioned,
+  atomically replaced local state file. A new best gets a brief terminal-safe
+  pulse/fade and its own achievement cue.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -154,20 +158,23 @@ personal bests in item 11.
 
     - Dedicated supplied WAVs cover movement, rotation, drops, landing, HOLD,
       single, double, triple, Tetris, perfect clear, ability ready, activated,
-      rejected, pause, level-up, and top-out.
+      rejected, pause, and level-up. Top-out intentionally has no sound.
     - Countdown tick/go and personal-best clips are preloaded for their future
       screens and events.
     - One-shot gameplay event bits prevent polling and duplicate playback.
     - Frequent movement cues use a quieter mix than clears and achievements.
     - SDL audio remains optional; missing audio retains the silent fallback.
 
-11. **Add persistent offline personal bests**
+11. **Add persistent offline personal bests** — complete
 
     - Store only the Solo best score in a versioned state file under
       `XDG_STATE_HOME` with the standard local-state fallback.
     - Write atomically; failures never interrupt play.
     - Record completed top-out games only, and show `NEW PERSONAL BEST` with a
       short pulse/fade.
+    - Restarting Solo carries the loaded best forward without rereading disk;
+      corrupt, missing, or unwritable state safely behaves like an empty
+      profile.
 
 12. **Add restrained event animation**
 

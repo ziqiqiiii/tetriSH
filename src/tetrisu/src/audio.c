@@ -530,7 +530,6 @@ static const char	*game_sfx_path(audio_sfx_t sfx)
 		GENERAL_SFX_DIR "/me_game_start2.wav",
 		GENERAL_SFX_DIR "/se_game_pause.wav",
 		GENERAL_SFX_DIR "/me_game_plvup.wav",
-		GENERAL_SFX_DIR "/me_game_gameover.wav",
 		GENERAL_SFX_DIR "/me_game_iget.wav"
 	};
 

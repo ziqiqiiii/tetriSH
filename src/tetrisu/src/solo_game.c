@@ -17,6 +17,7 @@ static void	spawn_queued_piece(solo_game_t *game);
 static bool	process_due_event(solo_game_t *game);
 static void	finish_line_clear(solo_game_t *game);
 static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms);
+static bool	advance_personal_best(solo_game_t *game, int elapsed_ms);
 static int	gameplay_next_wake_ms(const solo_game_t *game);
 static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms);
 static int	min_int(int left, int right);
@@ -122,6 +123,7 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 		return (false);
 	remaining_ms = elapsed_ms;
 	changed = advance_ability_feedback(game, elapsed_ms);
+	changed = advance_personal_best(game, elapsed_ms) || changed;
 	if (game->paused)
 		return (changed);
 	if (game->phase == SOLO_GAME_OVER)
@@ -244,6 +246,71 @@ uint32_t	solo_game_take_events(solo_game_t *game)
 }
 
 /**
+ * @brief Copies the locally loaded best score into a fresh Solo game.
+ *
+ * @param game Pointer to the Solo state.
+ * @param score Previously persisted best score.
+ */
+void	solo_game_set_personal_best(solo_game_t *game, uint64_t score)
+{
+	if (game != NULL)
+		game->personal_best = score;
+}
+
+/**
+ * @brief Finalizes one completed top-out score against the local best.
+ *
+ * The one-shot guard ensures the same game-over frame can be processed more
+ *   than once without rewriting state or replaying its achievement cue.
+ *
+ * @param game Pointer to the Solo state.
+ * @return true only when this completed game established a new best.
+ */
+bool	solo_game_finish_personal_best(solo_game_t *game)
+{
+	if (game == NULL || game->phase != SOLO_GAME_OVER
+		|| game->personal_best_checked)
+		return (false);
+	game->personal_best_checked = true;
+	if (game->scoring.total <= game->personal_best)
+		return (false);
+	game->personal_best = game->scoring.total;
+	game->new_personal_best = true;
+	game->personal_best_elapsed_ms = 0;
+	game->pending_events |= SOLO_EVENT_PERSONAL_BEST;
+	return (true);
+}
+
+/**
+ * @brief Calculates the pulsing then fading best-score banner opacity.
+ *
+ * @param game Pointer to the Solo state.
+ * @return Alpha from 0 through 255.
+ */
+unsigned	solo_game_personal_best_opacity(const solo_game_t *game)
+{
+	int	elapsed;
+	int	phase;
+	int	remaining;
+
+	if (game == NULL || !game->new_personal_best)
+		return (0);
+	elapsed = game->personal_best_elapsed_ms;
+	if (elapsed >= SOLO_PERSONAL_BEST_PULSE_MS)
+	{
+		remaining = SOLO_PERSONAL_BEST_PULSE_MS
+			+ SOLO_PERSONAL_BEST_FADE_MS - elapsed;
+		if (remaining <= 0)
+			return (0);
+		return ((unsigned)(255 * remaining / SOLO_PERSONAL_BEST_FADE_MS));
+	}
+	phase = elapsed % (SOLO_PERSONAL_BEST_PULSE_MS / 2);
+	if (phase > SOLO_PERSONAL_BEST_PULSE_MS / 4)
+		phase = SOLO_PERSONAL_BEST_PULSE_MS / 2 - phase;
+	return ((unsigned)(255 - 60 * phase / (SOLO_PERSONAL_BEST_PULSE_MS / 4)));
+}
+
+/**
  * @brief Calculates the next state-timer deadline.
  *
  * The renderer can sleep until this value instead of polling gravity or lock
@@ -256,19 +323,28 @@ uint32_t	solo_game_take_events(solo_game_t *game)
 int	solo_game_next_wake_ms(const solo_game_t *game)
 {
 	int	feedback_ms;
+	int	frame_ms;
+	int	personal_best_ms;
 	int	wake_ms;
 
 	wake_ms = -1;
 	if (!game->paused)
 		wake_ms = gameplay_next_wake_ms(game);
 	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
-		return (wake_ms);
-	feedback_ms = SOLO_ABILITY_FEEDBACK_MS
-		- game->ability_feedback_elapsed_ms;
-	if (feedback_ms < 0)
-		feedback_ms = 0;
-	if (wake_ms < 0 || feedback_ms < wake_ms)
-		return (feedback_ms);
+		feedback_ms = -1;
+	else
+		feedback_ms = SOLO_ABILITY_FEEDBACK_MS
+			- game->ability_feedback_elapsed_ms;
+	if (feedback_ms >= 0 && (wake_ms < 0 || feedback_ms < wake_ms))
+		wake_ms = feedback_ms;
+	personal_best_ms = SOLO_PERSONAL_BEST_PULSE_MS
+		+ SOLO_PERSONAL_BEST_FADE_MS - game->personal_best_elapsed_ms;
+	frame_ms = SOLO_PERSONAL_BEST_FRAME_MS;
+	if (personal_best_ms < frame_ms)
+		frame_ms = personal_best_ms;
+	if (game->new_personal_best && frame_ms > 0
+		&& (wake_ms < 0 || frame_ms < wake_ms))
+		wake_ms = frame_ms;
 	return (wake_ms);
 }
 
@@ -612,7 +688,6 @@ static void	begin_top_out_reveal(solo_game_t *game)
 {
 	game->top_out_elapsed_ms = 0;
 	game->phase = SOLO_TOP_OUT_REVEAL;
-	game->pending_events |= SOLO_EVENT_TOP_OUT;
 }
 
 /**
@@ -827,6 +902,28 @@ static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms)
 	game->ability_result = SOLO_ABILITY_RESULT_NONE;
 	game->last_ability = SOLO_ABILITY_NONE;
 	return (true);
+}
+
+/**
+ * @brief Advances the short new-best pulse and fade on the shared loop clock.
+ *
+ * @param game Pointer to the Solo state.
+ * @param elapsed_ms Elapsed monotonic milliseconds.
+ * @return true while the visible banner opacity may have changed.
+ */
+static bool	advance_personal_best(solo_game_t *game, int elapsed_ms)
+{
+	int	total_ms;
+
+	if (!game->new_personal_best)
+		return (false);
+	total_ms = SOLO_PERSONAL_BEST_PULSE_MS + SOLO_PERSONAL_BEST_FADE_MS;
+	if (game->personal_best_elapsed_ms >= total_ms)
+		return (false);
+	game->personal_best_elapsed_ms += elapsed_ms;
+	if (game->personal_best_elapsed_ms > total_ms)
+		game->personal_best_elapsed_ms = total_ms;
+	return (elapsed_ms > 0);
 }
 
 /**

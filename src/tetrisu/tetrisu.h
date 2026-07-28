@@ -78,6 +78,9 @@
 # define SOLO_DANGER_EXIT_ROW	5
 # define SOLO_DANGER_EXIT_HOLD_MS	1500
 # define SOLO_TOP_OUT_REVEAL_MS	350
+# define SOLO_PERSONAL_BEST_PULSE_MS	720
+# define SOLO_PERSONAL_BEST_FADE_MS	300
+# define SOLO_PERSONAL_BEST_FRAME_MS	33
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
 # define SOLO_DEFAULT_DAS_MS	167
@@ -276,7 +279,6 @@ typedef enum e_audio_sfx
 	AUDIO_SFX_COUNTDOWN_GO,
 	AUDIO_SFX_PAUSE,
 	AUDIO_SFX_LEVEL_UP,
-	AUDIO_SFX_TOP_OUT,
 	AUDIO_SFX_PERSONAL_BEST,
 	AUDIO_SFX_COUNT
 }	audio_sfx_t;
@@ -413,7 +415,7 @@ typedef enum e_solo_event
 	SOLO_EVENT_ABILITY_REJECTED = 1u << 13,
 	SOLO_EVENT_PAUSE = 1u << 14,
 	SOLO_EVENT_LEVEL_UP = 1u << 15,
-	SOLO_EVENT_TOP_OUT = 1u << 16
+	SOLO_EVENT_PERSONAL_BEST = 1u << 16
 }	solo_event_t;
 
 typedef struct s_solo_handling_config
@@ -472,6 +474,7 @@ typedef struct s_solo_game
 	t_piece_bag	bag;
 	t_score_state	scoring;
 	t_score_result	last_score;
+	uint64_t		personal_best;
 	solo_phase_t	phase;
 	t_spin_type	pending_spin;
 	t_spin_type	last_spin;
@@ -489,6 +492,7 @@ typedef struct s_solo_game
 	int				lock_elapsed_ms;
 	int				clear_elapsed_ms;
 	int				top_out_elapsed_ms;
+	int				personal_best_elapsed_ms;
 	int				danger_safe_elapsed_ms;
 	uint32_t		pending_events;
 	int				lock_resets;
@@ -499,6 +503,8 @@ typedef struct s_solo_game
 	bool			hold_used;
 	bool			paused;
 	bool			danger_active;
+	bool			personal_best_checked;
+	bool			new_personal_best;
 }	solo_game_t;
 
 typedef struct s_solo_render
@@ -659,11 +665,19 @@ bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
 bool			solo_game_update(solo_game_t *game, int elapsed_ms);
 bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
 uint32_t		solo_game_take_events(solo_game_t *game);
+void			solo_game_set_personal_best(solo_game_t *game,
+					uint64_t score);
+bool			solo_game_finish_personal_best(solo_game_t *game);
+unsigned		solo_game_personal_best_opacity(const solo_game_t *game);
 int				solo_game_next_wake_ms(const solo_game_t *game);
 int				solo_clear_duration_ms(int level);
 t_piece			solo_game_ghost(const solo_game_t *game);
 bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
 void			solo_game_toggle_pause(solo_game_t *game);
+
+/* SOLO_PERSISTENCE.C */
+uint64_t		solo_best_load(void);
+bool			solo_best_store(uint64_t score);
 
 /* SOLO_HANDLING.C — terminal-aware DAS, ARR, and soft-drop timing */
 solo_handling_config_t	solo_handling_default_config(void);

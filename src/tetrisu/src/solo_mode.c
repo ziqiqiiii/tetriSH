@@ -74,6 +74,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		return (-1);
 	}
 	solo_game_init(&game, new_game_seed());
+	solo_game_set_personal_best(&game, solo_best_load());
 	handling_config = solo_handling_default_config();
 	solo_handling_reset(&handling);
 	render_solo_create(ctx, &solo);
@@ -142,6 +143,11 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		force_render = false;
 		if (display_ready)
 			needs_draw = solo_game_update(&game, elapsed_ms);
+		if (display_ready && solo_game_finish_personal_best(&game))
+		{
+			(void)solo_best_store(game.personal_best);
+			needs_draw = true;
+		}
 		if (display_ready && solo_game_update_danger(&game, elapsed_ms))
 		{
 			if (game.danger_active)
@@ -407,7 +413,11 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
 	{
+		uint64_t	personal_best;
+
+		personal_best = game->personal_best;
 		solo_game_init(game, new_game_seed());
+		solo_game_set_personal_best(game, personal_best);
 		audio_transition_music(audio, HOME_BGM_PATH,
 			AUDIO_MUSIC_TRANSITION_MS);
 		solo_handling_reset(handling);
@@ -570,6 +580,6 @@ static void	play_solo_events(audio_ctx_t *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_PAUSE);
 	if ((events & SOLO_EVENT_LEVEL_UP) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_LEVEL_UP);
-	if ((events & SOLO_EVENT_TOP_OUT) != 0)
-		audio_play_sfx(audio, AUDIO_SFX_TOP_OUT);
+	if ((events & SOLO_EVENT_PERSONAL_BEST) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_PERSONAL_BEST);
 }

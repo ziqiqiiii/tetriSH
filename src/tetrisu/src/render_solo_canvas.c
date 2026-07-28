@@ -50,6 +50,10 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint);
+static void	draw_text_centered_opacity(uint32_t *canvas,
+	const solo_render_t *solo, const char *text, int center_x, int y,
+	int glyph_width, int glyph_height, int spacing, color_t tint,
+	unsigned opacity);
 static int	text_width(const char *text, int glyph_width, int spacing);
 static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
@@ -1204,6 +1208,23 @@ static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
 }
 
 /**
+ * @brief Centers masked text with a shadow at a caller-controlled opacity.
+ */
+static void	draw_text_centered_opacity(uint32_t *canvas,
+	const solo_render_t *solo, const char *text, int center_x, int y,
+	int glyph_width, int glyph_height, int spacing, color_t tint,
+	unsigned opacity)
+{
+	int	width;
+
+	width = text_width(text, glyph_width, spacing);
+	draw_text(canvas, solo, text, center_x - width / 2 + 1, y + 1,
+		glyph_width, glyph_height, spacing, g_dark, opacity * 190u / 255u);
+	draw_text(canvas, solo, text, center_x - width / 2, y,
+		glyph_width, glyph_height, spacing, tint, opacity);
+}
+
+/**
  * @brief Calculates the rendered width of a fixed-size glyph string.
  *
  * Spacing is included between glyphs but never after the final character.
@@ -1669,6 +1690,7 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 {
 	const char	*title;
 	const char	*help;
+	unsigned	best_opacity;
 	int			x;
 	int			y;
 
@@ -1684,18 +1706,23 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 	{
 		title = "TOP OUT";
 		help = "R RESTART";
+		best_opacity = solo_game_personal_best_opacity(game);
 	}
 	else
 	{
 		title = "PAUSED";
 		help = "P RESUME";
+		best_opacity = 0;
 	}
-	draw_text_centered(canvas, solo, title, x + 64, y + 8,
+	draw_text_centered(canvas, solo, title, x + 64, y + 6,
 		16, 16, 1, g_pink);
-	draw_text_centered(canvas, solo, help, x + 64, y + 32,
+	if (best_opacity > 0)
+		draw_text_centered_opacity(canvas, solo, "NEW PERSONAL BEST",
+			x + 64, y + 25, 5, 7, 1, g_pink, best_opacity);
+	draw_text_centered(canvas, solo, help, x + 64, y + 38,
 		8, 8, 1, g_white);
 	/* Home lives here, not in the gameplay legend (roadmap item 4). */
-	draw_text_centered(canvas, solo, "ESC HOME", x + 64, y + 46,
+	draw_text_centered(canvas, solo, "ESC HOME", x + 64, y + 51,
 		8, 8, 1, g_white);
 }
 
