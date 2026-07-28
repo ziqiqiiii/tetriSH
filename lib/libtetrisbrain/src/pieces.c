@@ -81,7 +81,10 @@ static const t_piece SPAWN[7] = {
     [PIECE_L] = {PIECE_L, 3, 0, 0},
 };
 
-t_piece piece_spawn(t_piece_type type) { return SPAWN[type]; }
+t_piece piece_spawn(t_piece_type type) {
+  if (type < PIECE_I || type > PIECE_L) return SPAWN[PIECE_I];
+  return SPAWN[type];
+}
 
 // A corrupted t_piece (e.g. from a malformed network message) could carry a
 // type/rotation outside the SHAPES/KICK_TRANSITION tables; guard every entry
@@ -89,6 +92,15 @@ t_piece piece_spawn(t_piece_type type) { return SPAWN[type]; }
 static bool piece_shape_in_range(const t_piece *p) {
   return p->type >= PIECE_I && p->type <= PIECE_L && p->rotation >= 0 &&
          p->rotation < 4;
+}
+
+bool piece_cells(const t_piece *p, int cols[4], int rows[4]) {
+  if (!piece_shape_in_range(p)) return false;
+  for (int i = 0; i < 4; i++) {
+    cols[i] = p->col + SHAPES[p->type][p->rotation][i].dcol;
+    rows[i] = p->row + SHAPES[p->type][p->rotation][i].drow;
+  }
+  return true;
 }
 
 bool piece_is_valid(const t_board *b, const t_piece *p) {
@@ -148,8 +160,11 @@ static const cell_offset_t I_KICKS[8][5] = {
 
 // dir: +1 rotates clockwise, -1 rotates counter-clockwise. Adding 3 (instead
 // of subtracting 1) keeps the result non-negative before the % 4.
-t_brain_result piece_rotate(const t_board *b, t_piece *p, int dir) {
-  if (!piece_shape_in_range(p)) return BRAIN_BLOCKED;
+t_brain_result piece_rotate_with_kick(const t_board *b, t_piece *p, int dir,
+                                     int *kick_index) {
+  if (kick_index != NULL) *kick_index = -1;
+  if (!piece_shape_in_range(p) || (dir != 1 && dir != -1))
+    return BRAIN_BLOCKED;
 
   int to = (p->rotation + (dir == 1 ? 1 : 3)) % 4;
 
@@ -157,6 +172,7 @@ t_brain_result piece_rotate(const t_board *b, t_piece *p, int dir) {
   // position is valid, it stays valid after relabeling the rotation.
   if (p->type == PIECE_O) {
     p->rotation = to;
+    if (kick_index != NULL) *kick_index = 0;
     return BRAIN_OK;
   }
 
@@ -171,10 +187,47 @@ t_brain_result piece_rotate(const t_board *b, t_piece *p, int dir) {
     cand.row += kicks[i].drow;
     if (piece_is_valid(b, &cand)) {
       *p = cand;
+      if (kick_index != NULL) *kick_index = i;
       return BRAIN_OK;
     }
   }
   return BRAIN_BLOCKED;
+}
+
+t_brain_result piece_rotate(const t_board *b, t_piece *p, int dir) {
+  return piece_rotate_with_kick(b, p, dir, NULL);
+}
+
+static bool corner_occupied(const t_board *b, int col, int row) {
+  return board_get(b, col, row).type != CELL_EMPTY;
+}
+
+/* AI-assisted: classifies a rotated T with the Guideline three-corner rule;
+ * the fifth SRS kick upgrades a mini because that kick enables full triples. */
+t_spin_type piece_t_spin_type(const t_board *b, const t_piece *p,
+                              int kick_index) {
+  bool corners[4];
+  int occupied;
+  int front;
+  int center_col;
+  int center_row;
+
+  if (!piece_shape_in_range(p) || p->type != PIECE_T) return T_SPIN_NONE;
+  center_col = p->col + 1;
+  center_row = p->row + 1;
+  corners[0] = corner_occupied(b, center_col - 1, center_row - 1);
+  corners[1] = corner_occupied(b, center_col + 1, center_row - 1);
+  corners[2] = corner_occupied(b, center_col - 1, center_row + 1);
+  corners[3] = corner_occupied(b, center_col + 1, center_row + 1);
+  occupied = (int)corners[0] + (int)corners[1] +
+             (int)corners[2] + (int)corners[3];
+  if (occupied < 3) return T_SPIN_NONE;
+  if (p->rotation == 0) front = (int)corners[0] + (int)corners[1];
+  else if (p->rotation == 1) front = (int)corners[1] + (int)corners[3];
+  else if (p->rotation == 2) front = (int)corners[2] + (int)corners[3];
+  else front = (int)corners[0] + (int)corners[2];
+  if (front == 2 || kick_index == 4) return T_SPIN_FULL;
+  return T_SPIN_MINI;
 }
 
 t_brain_result piece_move(const t_board *b, t_piece *p, int dcol, int drow) {

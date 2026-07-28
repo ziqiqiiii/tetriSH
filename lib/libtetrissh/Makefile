@@ -20,9 +20,17 @@ FLAGS			:= -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pedantic
 AR				:= ar
 ARFLAGS			:= rcs
 RM				:= rm -rf
+PKG_CONFIG		?= pkg-config
 
-INC				:= -Iinclude
-LDLIBS			:= -lssl -lcrypto
+# OpenSSL is keg-only under Homebrew, so standalone and umbrella builds must
+# consume its pkg-config include and linker paths instead of assuming /usr.
+OPENSSL_CFLAGS	:= $(shell $(PKG_CONFIG) --cflags openssl 2>/dev/null)
+OPENSSL_LIBS	:= $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null)
+ifeq ($(strip $(OPENSSL_LIBS)),)
+OPENSSL_LIBS	:= -lssl -lcrypto
+endif
+INC				:= -Iinclude $(OPENSSL_CFLAGS)
+LDLIBS			:= $(OPENSSL_LIBS)
 
 # common.c is the frozen course-provided crypto helper; it is built without
 # -Werror -pedantic so its warnings do not fail this library's strict build.

@@ -185,7 +185,7 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 		goto cleanup;
 	sess->established = 1;
 	ok = 0;
-	
+
 	cleanup:
 		EVP_PKEY_free(pub);
 		X509_free(cert);

@@ -4,7 +4,7 @@
 # are the umbrella Makefile's job; this script owns only the client-only packages.
 #
 # Environment:
-#   AUTO_INSTALL_DEPS              (unused here; gating lives in the Makefile)
+#   AUTO_INSTALL_DEPS              (unused here; gating lives in deps.sh)
 #   INSTALL_NOTCURSES_FROM_SOURCE  1 to build notcurses from source when no
 #                                  distro development package is available (Linux)
 #   NOTCURSES_VERSION              git tag to build when falling back to source
@@ -90,7 +90,10 @@ install_linux() {
             exit 1
         }
     elif command -v pacman >/dev/null 2>&1; then
-        $SUDO pacman -S --needed --noconfirm pkgconf notcurses sdl2 sdl2_mixer
+        # sdl2-compat (common on Arch, pulled in by ffmpeg/wine/etc.) provides
+        # sdl2 and conflicts with the real sdl2 package; don't force sdl2
+        # explicitly, let whichever provider is already installed satisfy it.
+        $SUDO pacman -S --needed --noconfirm pkgconf notcurses sdl2_mixer
     elif command -v zypper >/dev/null 2>&1; then
         $SUDO zypper --non-interactive install pkg-config \
             notcurses-devel libSDL2-devel libSDL2_mixer-devel || {

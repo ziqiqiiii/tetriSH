@@ -1,6 +1,9 @@
 # libtetrisbrain
 
-The pure game-logic library for tetriSH, implemented in C. Provides the board model, tetromino spawning/movement/rotation (SRS with wall kicks), gravity, line clearing, NES-style scoring, and the Battle Royale ability transforms — with no I/O, no networking, and no side effects.
+The pure game-logic library for tetriSH, implemented in C. Provides the board
+model, seven-bag generation, tetromino spawning/movement/rotation (SRS with wall
+kicks), ghost/drop projection, gravity, line clearing, modern Guideline-style
+scoring, and Battle Royale board transforms — with no I/O or networking.
 
 ---
 
@@ -28,7 +31,10 @@ The pure game-logic library for tetriSH, implemented in C. Provides the board mo
 - All 7 tetrominoes with SRS rotation states and JLSTZ / I wall-kick tables
 - Collision, movement, soft drop, hard drop, and gravity tick
 - Line clearing with bottom-up compaction, returning `0–4` cleared
-- NES-style scoring, level progression, and a gravity-interval ramp
+- Modern Single/Double/Triple/Tetris, T-Spin, combo, back-to-back,
+  perfect-clear, soft-drop, and hard-drop scoring
+- Level progression every ten lines and a Tetris Worlds-style gravity curve
+- Caller-owned deterministic seven-bag state with no global RNG
 - Six Battle Royale ability transforms (Tetris Battle Gaiden character specials)
 - Pure functions only — no `malloc`, no globals, no I/O; every board is a caller-owned value
 
@@ -71,6 +77,8 @@ Then include the single public header and drive the board through a game step:
 
 t_board board;
 board_init(&board);
+t_score_state scoring;
+score_state_init(&scoring);
 
 t_piece p = piece_spawn(PIECE_T);
 piece_move(&board, &p, -1, 0);          // shift left
@@ -79,7 +87,8 @@ piece_rotate(&board, &p, 1);            // rotate clockwise (with wall kick)
 if (gravity_tick(&board, &p) == BRAIN_LOCKED) {
     piece_stamp(&board, &p);            // lock the piece into the board
     int lines = board_clear_lines(&board);
-    int gained = score_on_clear(lines, level_from_lines(total_lines));
+    t_score_result gained = score_apply_clear(&scoring, lines,
+        level_from_lines(total_lines), T_SPIN_NONE, board_is_empty(&board));
 }
 ```
 
@@ -271,6 +280,8 @@ classDiagram
 | `board_in_bounds(col, row)` | Test whether a coordinate lies on the board |
 | `board_inject_garbage(b, lines, hole_col)` | Shift the stack up and add `lines` garbage rows with a gap at `hole_col` |
 | `board_copy(dst, src)` | Copy one board over another |
+| `board_find_full_lines(b, rows)` | Return full-row indices without mutating the board, for clear animation |
+| `board_is_empty(b)` | Detect a perfect-clear board |
 
 ### Pieces (`pieces.c`)
 
@@ -278,9 +289,19 @@ classDiagram
 |---|---|
 | `piece_spawn(type)` | Return a piece at its centered spawn position and rotation |
 | `piece_is_valid(b, p)` | Test whether a piece's four cells are all empty and in range |
+| `piece_cells(p, cols, rows)` | Export four occupied coordinates for rendering |
 | `piece_move(b, p, dcol, drow)` | Translate the piece; `BRAIN_BLOCKED` if it would collide |
 | `piece_rotate(b, p, dir)` | Rotate `dir` (`+1` CW / `-1` CCW) with SRS wall kicks; `BRAIN_BLOCKED` if no kick fits |
+| `piece_rotate_with_kick(...)` | Rotate and report the successful SRS kick test for T-Spin classification |
+| `piece_t_spin_type(...)` | Apply the three-corner/pointing-side T-Spin rule |
 | `piece_stamp(b, p)` | Write the piece's four cells into the board as `CELL_FILLED` |
+
+### Random generator (`bag.c`)
+
+| Function | Description |
+|---|---|
+| `piece_bag_init(bag, seed)` | Initialise deterministic caller-owned seven-bag state |
+| `piece_bag_next(bag)` | Deal one type; shuffle one of each type when the bag empties |
 
 ### Gravity (`gravity.c`)
 
@@ -289,6 +310,7 @@ classDiagram
 | `gravity_tick(b, p)` | Fall one row; `BRAIN_LOCKED` when it lands |
 | `piece_soft_drop(b, p)` | Player-triggered fall-by-one; same rule as `gravity_tick` |
 | `piece_hard_drop(b, p)` | Fall until it lands |
+| `piece_drop_distance(b, p)` | Project landing distance without mutating the piece |
 
 ### Line Clear (`lineclear.c`)
 
@@ -300,9 +322,12 @@ classDiagram
 
 | Function | Description |
 |---|---|
-| `score_on_clear(lines_cleared, level)` | NES base points (`40 / 100 / 300 / 1200`) × `(level + 1)` |
-| `level_from_lines(total_lines)` | Level is `total_lines / 10` |
-| `gravity_interval_ms(level)` | Tick interval, ramping `1000 ms` down `50 ms`/level, floored at `100 ms` |
+| `score_state_init(state)` | Start score at zero, combo inactive, and back-to-back inactive |
+| `score_apply_clear(...)` | Apply modern clear/T-Spin, combo, back-to-back, and perfect-clear points |
+| `score_add_drop(state, cells, hard)` | Add 1 point/cell for soft drop or 2 points/cell for hard drop |
+| `score_on_clear(lines_cleared, level)` | Convenience normal-clear table (`100 / 300 / 500 / 800`) × displayed level |
+| `level_from_lines(total_lines)` | Displayed level starts at 1 and rises every ten lines |
+| `gravity_interval_ms(level)` | Tetris Worlds-style interval; `0` means caller-applied 20G at level 19+ |
 
 ### Abilities (`abilities.c`)
 
@@ -330,7 +355,7 @@ Functions that can succeed or be rejected return `t_brain_result`:
 
 ## Design Constraints
 
-- **No I/O, no side effects.** Every function is pure logic over caller-owned boards and pieces — no `malloc`, no globals, no syscalls.
+- **No I/O or hidden mutable state.** Every function operates on caller-owned values — no `malloc`, mutable globals, or syscalls.
 - **Out-of-bounds is solid.** `board_get` returns `CELL_FILLED` off the board, so collision logic treats walls and floor uniformly.
 - **Corrupt input is safe.** A piece with an out-of-range `type`/`rotation` (e.g. from a malformed network message) fails validation instead of indexing the shape tables out of bounds.
 - **Coordinate convention is fixed.** Row-down throughout; SRS guideline kick tables are pre-converted (`drow = -dy`).
@@ -355,10 +380,13 @@ gravity_tick               fall one row; BRAIN_LOCKED on landing
 piece_stamp                write the locked piece into the board
      │
      ▼
+board_find_full_lines      expose rows for a caller-owned animation phase
+     │
+     ▼
 board_clear_lines          remove full rows (0–4) and compact downward
      │
      ▼
-score_on_clear             award points from lines cleared and level
+score_apply_clear          update scoring state and award all bonuses
 ```
 
 Ability transforms (`abilities.c`) are applied out of band, whenever the server resolves a Battle Royale special against a target board.
@@ -373,6 +401,7 @@ libtetrisbrain/
 │   └── tetrisbrain.h       Public header — the whole API (-I include)
 ├── src/
 │   ├── board.c             Board model, cell access, garbage injection
+│   ├── bag.c               Caller-owned deterministic seven-bag randomizer
 │   ├── pieces.c            Tetromino shapes, SRS rotation, wall kicks
 │   ├── gravity.c           Gravity tick, soft drop, hard drop
 │   ├── lineclear.c         Full-row detection and compaction

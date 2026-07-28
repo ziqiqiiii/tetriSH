@@ -75,7 +75,7 @@ Two distinct state systems back these use cases, and their status/result codes m
     - post-game record
     - profile
     - leaderboard.
-  - These use cases call the DB, which returns a `t_db_result` 
+  - These use cases call the DB, which returns a `t_db_result`
     - `DB_OK`
     - `DB_EXISTS`
     - `DB_BAD_CREDS`
@@ -96,7 +96,7 @@ Two distinct state systems back these use cases, and their status/result codes m
 
 Every use case's wire request and the status codes it can return. Two transports are in play; the **Transport** column says which:
 
-- **HTTTP → tetrisd** 
+- **HTTTP → tetrisd**
     - the fixed game protocol (`METHOD PATH HTTTP/1.0`) over the authenticated TCP session. `tetrisd` serves every client-facing method — gameplay, chat, abilities, and the marketplace/profile/leaderboard calls — over this one session.
 - **tetrisctl → HTTTP → tetrisd (control socket)**
     - `tetrisctl`'s admin channel: same wire format, over a local-only Unix control socket instead of the public TCP port.
@@ -216,25 +216,25 @@ Rooms, slots, and player roles are **runtime-only** state held in `tetrisd` memo
 
 ```
 PLAYER_STATUS
-{ 
+{
   OWNER,
-  PLAYER 
+  PLAYER
 } // role within a room
 
-GAME_ROOM_STATUS  
-{ 
-  WAITING, 
-  READY, 
-  IN_GAME, 
-  FINISHED 
+GAME_ROOM_STATUS
+{
+  WAITING,
+  READY,
+  IN_GAME,
+  FINISHED
 }
 
-SLOT_STATUS 
-{ 
-  WAITING, 
-  JOINING, 
-  LEAVING, 
-  READY 
+SLOT_STATUS
+{
+  WAITING,
+  JOINING,
+  LEAVING,
+  READY
 } // one per slot
 ```
 
@@ -338,11 +338,11 @@ stateDiagram-v2
 **Main Success Scenario**
 1. Player enters the Lobby.
 2. System requests the current room directory from the Game Server.
-3. System renders each room row: 
+3. System renders each room row:
     - ID
-    - Mode (D / BR) 
-    - Players (e.g. 1/2, 8/8) 
-    - State (WAITING / IN-GAME) 
+    - Mode (D / BR)
+    - Players (e.g. 1/2, 8/8)
+    - State (WAITING / IN-GAME)
     - Owner
 4. System renders the header with the Player's username, leaderboard score, and ranking.
 
@@ -496,7 +496,7 @@ stateDiagram-v2
 4. System returns the Player to the Lobby. Server narrates to the room: `PLAYER <name> left the room <id>`.
 
 **Extensions / Alternate Flows**
-- **3a. Leaving Player is the Owner and others remain:** 
+- **3a. Leaving Player is the Owner and others remain:**
     - Ownership is transferred **before** the old Owner's slot is freed → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
 - **3b. Last player leaves:** Server destroys the room (ROOM_DESTROYED); all slots and player data are cleared; chat room is torn down.
 
@@ -656,8 +656,8 @@ stateDiagram-v2
 3. Player controls pieces (`MOVE` left/right, `ROTATE` cw/ccw, `DROP` soft/hard) — `«include»` **UC-13 Control Falling Piece**.
 4. System clears completed lines and updates the score.
 5. Loop steps 2–4 until the board tops out (game over).
-6. System shows the final score, then makes the **one** persisted call of this use case (this specific user): 
-    - `db_record_game(id, score_delta, points_delta, won=true)`, which updates 
+6. System shows the final score, then makes the **one** persisted call of this use case (this specific user):
+    - `db_record_game(id, score_delta, points_delta, won=true)`, which updates
       - `leaderboard_score`
       - credits `wallet_points`
       - increments `games_played`
@@ -688,7 +688,7 @@ stateDiagram-v2
 | **DB Mapping** | Post-game, **each** player is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` for the winner, `false` for the loser. |
 
 **Main Success Scenario**
-1. System renders the split screen: 
+1. System renders the split screen:
     - own **Board** with piece queue and hold column on the left
     - **Opponent Board** on the right
     - both usernames with live point totals below.
@@ -699,7 +699,7 @@ stateDiagram-v2
 
 **Extensions / Alternate Flows**
 - **2a. A Player activates an equipped ability:** → UC-14 Activate Gaiden Ability (`«extend»`).
-- **5a. A Player quits/disconnects mid-game:** 
+- **5a. A Player quits/disconnects mid-game:**
     - Only one Player remains, so the match ends immediately.
     - If the departing Player owns the room, ownership is transferred to the remaining Player → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
     - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default and **is** recorded (`won=true`).
@@ -739,7 +739,7 @@ stateDiagram-v2
     - UC-14 Activate Gaiden Ability (`«extend»`).
 - **5a. Player is KO'd:**
     - Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
-- **5b. Player quits/disconnects mid-game:** 
+- **5b. Player quits/disconnects mid-game:**
     - Server removes them from the match; remaining players play on.
     - If the departing Player owns the room, ownership is transferred and the remaining players are notified → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
     - The quitter is **not recorded** (`db_record_game` is not called for them). Each remaining player is recorded normally at game-over.
@@ -772,7 +772,7 @@ stateDiagram-v2
 3. Server applies the move and pushes updated `STATE`.
 
 **Extensions / Alternate Flows**
-- **2a. Illegal move (collision):** 
+- **2a. Illegal move (collision):**
   - Server responds `409 INVALID_MOVE` with the authoritative position
   - client corrects to it.
 
@@ -861,9 +861,9 @@ The four selected characters retain their complete, four-level ability sets from
 5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Character Button State**).
 
 **Extensions / Alternate Flows**
-- **4a. Already owned (`DB_EXISTS` → 200, no-op):** 
+- **4a. Already owned (`DB_EXISTS` → 200, no-op):**
   - No debit, no change.
-- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):** 
+- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):**
   - Refused, wallet unchanged.
   - Display error message at tetrisu: `Error: Insufficient points`.
 - **4c. Inventory full (`DB_FULL` → 409)** (It won't really trigger this) **:**
@@ -1087,7 +1087,7 @@ The four selected characters retain their complete, four-level ability sets from
 **Main Success Scenario**
 1. Player opens Settings.
 2. Server reads the profile with `db_get_player(id, ...)` and the rank with `db_rank(id, ...)`.
-3. System displays: 
+3. System displays:
     - Username
     - profile picture of current default character, - Default Character (+ Change btn)
     - Character List (with current default marked), - Current Theme (+ Change btn)

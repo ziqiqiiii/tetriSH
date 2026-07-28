@@ -66,10 +66,25 @@ void test_hard_drop_moves_to_floor(void) {
   printf("PASS test_hard_drop_moves_to_floor\n");
 }
 
+void test_drop_distance_does_not_mutate_piece(void) {
+  t_board b;
+  t_piece p;
+  t_piece before;
+
+  board_init(&b);
+  p = piece_spawn(PIECE_O);
+  before = p;
+  assert(piece_drop_distance(&b, &p) == 18);
+  assert(p.col == before.col && p.row == before.row &&
+         p.rotation == before.rotation && p.type == before.type);
+  printf("PASS test_drop_distance_does_not_mutate_piece\n");
+}
+
 int main(void) {
   test_gravity_tick_moves_down();
   test_gravity_tick_locks_at_floor();
   test_soft_drop_moves_then_locks();
   test_hard_drop_moves_to_floor();
+  test_drop_distance_does_not_mutate_piece();
   return 0;
 }

@@ -80,7 +80,9 @@ static void	test_oversized_certificate_rejected_before_body(void)
 	assert(pthread_create(&thread, NULL, oversized_cert_peer, &peer) == 0);
 	assert(session_handshake_client(fds[0], &sess, "unused-ca") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[0], &leftover, 1, MSG_DONTWAIT) == 1);
+	/* The peer has joined and shut down its write side, so this cannot block;
+	 * flags=0 keeps the test portable where MSG_DONTWAIT is not exposed. */
+	assert(recv(fds[0], &leftover, 1, 0) == 1);
 	assert(leftover == 'C');
 	assert_session_reset(&sess);
 	close(fds[0]);
@@ -144,7 +146,7 @@ static void	test_wrong_signature_length_rejected_before_body(void)
 	assert(session_handshake_client(fds[0], &sess,
 		"tests/tmp/certs/ca.crt") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[0], &leftover, 1, MSG_DONTWAIT) == 1);
+	assert(recv(fds[0], &leftover, 1, 0) == 1);
 	assert(leftover == 'S');
 	assert_session_reset(&sess);
 	close(fds[0]);
@@ -196,7 +198,7 @@ static void	test_wrong_wrapped_length_rejected_before_body(void)
 	assert(session_handshake_server(fds[1], &sess,
 		"tests/tmp/certs/server.crt", "tests/tmp/certs/server.key") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[1], &leftover, 1, MSG_DONTWAIT) == 1);
+	assert(recv(fds[1], &leftover, 1, 0) == 1);
 	assert(leftover == 'W');
 	assert_session_reset(&sess);
 	close(fds[0]);
