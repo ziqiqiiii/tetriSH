@@ -1,0 +1,11 @@
+# clangd config for tetrisu — teaches the language server where tetrisu.h lives.
+# Unlike the libs, the header sits at the tetrisu root (tetrisu.h), while the .c
+# files live one level down in src/. Without a hint clangd reports "file not
+# found" on #include "tetrisu.h". The Makefile compiles from the tetrisu root
+# with -I., but clangd has no compile_commands database here, so it runs a
+# generic fallback whose working directory is the *source file's own directory*
+# (src/). -I.. resolves to the tetrisu root for every .c under src/, matching the
+# build's -I.. Build flags are unchanged; this only affects the editor.
+CompileFlags:
+  Add:
+    - -I..
