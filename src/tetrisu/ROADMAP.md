@@ -72,11 +72,15 @@ routing in item 17.
   leaderboard, lobby, room, and match models sit behind a provider interface;
   deterministic fixture-backed scaffolds are visibly marked
   `LOCAL UI PREVIEW`.
-- Item 16 makes Login the first interactive screen after the splash. A
-  character-free pixel-art frame keeps username, masked password, domain, and
-  confirmation copy as sharp terminal text; keyboard/mouse focus, UTF-8
-  editing, validation, loading/error/success states, sign-up return, offline
-  entry, resize, and a pure cell-mode fallback share one form state machine.
+- Item 16 makes Login the first interactive screen after the splash. Reliable
+  Kitty rendering now combines the character-free pixel-art frame with the
+  shared high-resolution pixel font for every heading, label, status, and
+  action; only editable values remain native terminal text. Login and account
+  creation stay visibly disabled through unverified, checking, and offline
+  server states, while the future network seam is isolated behind one semantic
+  check action. The current no-server fixture resolves checks to offline and
+  leaves Play Offline available. WezTerm compatibility mode retains the compact
+  high-contrast terminal-only form.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -246,8 +250,13 @@ routing in item 17.
       error, back, and resize support.
     - Login accepts username, password, and domain/server; Sign Up adds
       password confirmation and returns to Login after account creation.
-    - Kitty-capable terminals use a character-free authored pixel frame with
-      native terminal text. Compatibility mode keeps the same controls in a
+    - Kitty-capable terminals use a character-free authored pixel frame and
+      the shared high-resolution game font for static copy, while editable
+      values stay crisp native terminal text.
+    - Server availability is explicit: unverified, checking, online, and
+      offline states drive the status row and disable server-backed primary
+      actions until online. The current network stub resolves to offline.
+    - Compatibility mode keeps the same controls and disabled states in a
       compact high-contrast terminal-only frame.
 
 17. **Route all five home actions**

@@ -511,9 +511,18 @@ typedef enum e_auth_feedback
 	AUTH_FEEDBACK_ERROR
 }	auth_feedback_t;
 
+typedef enum e_auth_server_state
+{
+	AUTH_SERVER_UNVERIFIED,
+	AUTH_SERVER_CHECKING,
+	AUTH_SERVER_ONLINE,
+	AUTH_SERVER_OFFLINE
+}	auth_server_state_t;
+
 typedef enum e_auth_action
 {
 	AUTH_ACTION_NONE,
+	AUTH_ACTION_CHECK_SERVER,
 	AUTH_ACTION_SUBMIT_LOGIN,
 	AUTH_ACTION_SUBMIT_SIGN_UP,
 	AUTH_ACTION_OPEN_LOGIN,
@@ -527,6 +536,7 @@ typedef struct s_auth_form
 	auth_form_mode_t	mode;
 	auth_focus_t		focus;
 	auth_feedback_t	feedback;
+	auth_server_state_t	server_state;
 	char				username[AUTH_FIELD_MAX];
 	char				password[AUTH_FIELD_MAX];
 	char				confirm[AUTH_FIELD_MAX];
@@ -596,6 +606,7 @@ typedef struct
 	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
+	struct ncplane		*auth_labels_plane;
 	struct ncplane		*screen_plane;
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
@@ -613,6 +624,7 @@ typedef struct
 	int					menu_col;
 	int					bunny_rows;
 	int					bunny_cols;
+	uint64_t			auth_labels_signature;
 	tetrisu_pixel_policy_t	pixels;
 }	render_ctx_t;
 
@@ -884,6 +896,9 @@ void			auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode);
 void			auth_form_focus_next(auth_form_t *form);
 void			auth_form_focus_previous(auth_form_t *form);
 auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key);
+bool			auth_form_begin_server_check(auth_form_t *form);
+void			auth_form_finish_server_check(auth_form_t *form, bool online);
+bool			auth_form_online_enabled(const auth_form_t *form);
 bool			auth_form_validate(auth_form_t *form);
 app_provider_result_t	auth_form_submit(auth_form_t *form,
 					const app_data_provider_t *provider,
@@ -962,6 +977,9 @@ bool			render_auth_hit_test(const render_ctx_t *ctx,
 					const auth_form_t *form, const ncinput *input,
 					auth_focus_t *focus);
 void			render_auth_destroy(render_ctx_t *ctx);
+bool			render_auth_pixel_labels_refresh(render_ctx_t *ctx,
+					const auth_form_t *form, bool force);
+void			render_auth_pixel_labels_destroy(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,

@@ -225,6 +225,19 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 	app_auth_view_model_t	view;
 	app_provider_result_t	result;
 
+	if (action == AUTH_ACTION_CHECK_SERVER)
+	{
+		audio_play_menu_select(audio);
+		if (!render_auth_show(ctx, form, false))
+			return (false);
+		/*
+		 * The network adapter is intentionally not connected yet. Keeping the
+		 * check as a semantic action lets it become asynchronous later without
+		 * changing the form, focus, or rendering contract.
+		 */
+		auth_form_finish_server_check(form, false);
+		return (true);
+	}
 	if (action == AUTH_ACTION_SUBMIT_LOGIN
 		|| action == AUTH_ACTION_SUBMIT_SIGN_UP)
 	{

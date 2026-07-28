@@ -3,6 +3,7 @@
 static void	test_login_focus_order(void);
 static void	test_sign_up_focus_order(void);
 static void	test_utf8_editing_and_masking(void);
+static void	test_server_check_state(void);
 static void	test_validation_and_submission(void);
 static void	test_secondary_actions(void);
 
@@ -11,6 +12,7 @@ int	main(void)
 	test_login_focus_order();
 	test_sign_up_focus_order();
 	test_utf8_editing_and_masking();
+	test_server_check_state();
 	test_validation_and_submission();
 	test_secondary_actions();
 	return (0);
@@ -73,6 +75,35 @@ static void	test_utf8_editing_and_masking(void)
 	printf("PASS test_utf8_editing_and_masking\n");
 }
 
+static void	test_server_check_state(void)
+{
+	auth_form_t	form;
+
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	assert(form.server_state == AUTH_SERVER_UNVERIFIED);
+	assert(!auth_form_online_enabled(&form));
+	form.focus = AUTH_FOCUS_DOMAIN;
+	snprintf(form.domain, sizeof(form.domain), "play.example.com");
+	assert(auth_form_handle_key(&form, NCKEY_ENTER)
+		== AUTH_ACTION_CHECK_SERVER);
+	assert(form.server_state == AUTH_SERVER_CHECKING);
+	assert(form.feedback == AUTH_FEEDBACK_LOADING);
+	auth_form_finish_server_check(&form, false);
+	assert(form.server_state == AUTH_SERVER_OFFLINE);
+	assert(strstr(form.status, "OFFLINE") != NULL);
+	form.focus = AUTH_FOCUS_PRIMARY;
+	assert(auth_form_handle_key(&form, NCKEY_ENTER) == AUTH_ACTION_NONE);
+	assert(strstr(form.status, "OFFLINE") != NULL);
+	form.focus = AUTH_FOCUS_DOMAIN;
+	(void)auth_form_handle_key(&form, 'x');
+	assert(form.server_state == AUTH_SERVER_UNVERIFIED);
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, true);
+	assert(auth_form_online_enabled(&form));
+	assert(strstr(form.status, "READY") != NULL);
+	printf("PASS test_server_check_state\n");
+}
+
 static void	test_validation_and_submission(void)
 {
 	app_data_provider_t		provider;
@@ -84,6 +115,8 @@ static void	test_validation_and_submission(void)
 	snprintf(form.password, sizeof(form.password), "cute-pass");
 	snprintf(form.confirm, sizeof(form.confirm), "different");
 	snprintf(form.domain, sizeof(form.domain), "play.example.com");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, true);
 	assert(!auth_form_validate(&form));
 	assert(form.feedback == AUTH_FEEDBACK_ERROR);
 	assert(strstr(form.status, "DO NOT MATCH") != NULL);

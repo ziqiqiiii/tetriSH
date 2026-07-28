@@ -10,6 +10,8 @@ static bool			next_codepoint(const unsigned char **cursor,
 						uint32_t *codepoint);
 static bool			codepoint_is_space(uint32_t codepoint);
 static auth_action_t	activate_focus(auth_form_t *form);
+static void			reset_server_state(auth_form_t *form);
+static void			restore_server_status(auth_form_t *form);
 static void			set_status(auth_form_t *form, auth_feedback_t feedback,
 						const char *message);
 
@@ -23,12 +25,7 @@ void	auth_form_init(auth_form_t *form, auth_form_mode_t mode)
 	memset(form, 0, sizeof(*form));
 	form->mode = mode;
 	form->focus = AUTH_FOCUS_USERNAME;
-	if (mode == AUTH_FORM_SIGN_UP)
-		snprintf(form->status, sizeof(form->status),
-			"CREATE YOUR TETRISU ACCOUNT");
-	else
-		snprintf(form->status, sizeof(form->status),
-			"ENTER YOUR ACCOUNT DETAILS");
+	reset_server_state(form);
 }
 
 /**
@@ -42,13 +39,7 @@ void	auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode)
 	form->focus = AUTH_FOCUS_USERNAME;
 	form->password[0] = '\0';
 	form->confirm[0] = '\0';
-	form->feedback = AUTH_FEEDBACK_IDLE;
-	if (mode == AUTH_FORM_SIGN_UP)
-		snprintf(form->status, sizeof(form->status),
-			"CREATE YOUR TETRISU ACCOUNT");
-	else
-		snprintf(form->status, sizeof(form->status),
-			"ENTER YOUR ACCOUNT DETAILS");
+	restore_server_status(form);
 }
 
 /**
@@ -136,9 +127,58 @@ auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key)
 			(void)append_codepoint(buffer, AUTH_FIELD_MAX, key);
 		else
 			return (AUTH_ACTION_NONE);
-		set_status(form, AUTH_FEEDBACK_IDLE, "READY");
+		if (form->focus == AUTH_FOCUS_DOMAIN)
+			reset_server_state(form);
+		else
+			restore_server_status(form);
 	}
 	return (AUTH_ACTION_NONE);
+}
+
+/**
+ * @brief Starts a server availability check for the entered domain.
+ */
+bool	auth_form_begin_server_check(auth_form_t *form)
+{
+	if (form == NULL)
+		return (false);
+	if (!domain_is_valid(form->domain))
+	{
+		set_status(form, AUTH_FEEDBACK_ERROR,
+			"ENTER A DOMAIN WITHOUT SPACES");
+		return (false);
+	}
+	form->server_state = AUTH_SERVER_CHECKING;
+	set_status(form, AUTH_FEEDBACK_LOADING, "CHECKING SERVER...");
+	return (true);
+}
+
+/**
+ * @brief Completes the server availability check.
+ */
+void	auth_form_finish_server_check(auth_form_t *form, bool online)
+{
+	if (form == NULL || form->server_state != AUTH_SERVER_CHECKING)
+		return ;
+	if (online)
+	{
+		form->server_state = AUTH_SERVER_ONLINE;
+		set_status(form, AUTH_FEEDBACK_SUCCESS, "SERVER ONLINE - READY");
+	}
+	else
+	{
+		form->server_state = AUTH_SERVER_OFFLINE;
+		set_status(form, AUTH_FEEDBACK_ERROR,
+			"SERVER OFFLINE - PLAY OFFLINE");
+	}
+}
+
+/**
+ * @brief Reports whether server-backed primary actions may be selected.
+ */
+bool	auth_form_online_enabled(const auth_form_t *form)
+{
+	return (form != NULL && form->server_state == AUTH_SERVER_ONLINE);
 }
 
 /**
@@ -148,6 +188,11 @@ bool	auth_form_validate(auth_form_t *form)
 {
 	if (form == NULL)
 		return (false);
+	if (!auth_form_online_enabled(form))
+	{
+		restore_server_status(form);
+		return (false);
+	}
 	if (form->username[0] == '\0')
 		set_status(form, AUTH_FEEDBACK_ERROR, "USERNAME IS REQUIRED");
 	else if (codepoint_count(form->password) < AUTH_PASSWORD_MIN)
@@ -179,6 +224,11 @@ app_provider_result_t	auth_form_submit(auth_form_t *form,
 
 	if (form == NULL || view == NULL)
 		return (APP_PROVIDER_INVALID);
+	if (!auth_form_online_enabled(form))
+	{
+		restore_server_status(form);
+		return (APP_PROVIDER_UNAVAILABLE);
+	}
 	if (form->feedback != AUTH_FEEDBACK_LOADING && !auth_form_validate(form))
 		return (APP_PROVIDER_INVALID);
 	if (provider == NULL)
@@ -380,10 +430,15 @@ static bool	codepoint_is_space(uint32_t codepoint)
 
 static auth_action_t	activate_focus(auth_form_t *form)
 {
+	if (form->focus == AUTH_FOCUS_DOMAIN)
+	{
+		if (auth_form_begin_server_check(form))
+			return (AUTH_ACTION_CHECK_SERVER);
+		return (AUTH_ACTION_NONE);
+	}
 	if (form->focus == AUTH_FOCUS_USERNAME
 		|| form->focus == AUTH_FOCUS_PASSWORD
-		|| form->focus == AUTH_FOCUS_CONFIRM
-		|| form->focus == AUTH_FOCUS_DOMAIN)
+		|| form->focus == AUTH_FOCUS_CONFIRM)
 	{
 		auth_form_focus_next(form);
 		return (AUTH_ACTION_NONE);
@@ -405,6 +460,25 @@ static auth_action_t	activate_focus(auth_form_t *form)
 	if (form->focus == AUTH_FOCUS_OFFLINE)
 		return (AUTH_ACTION_PLAY_OFFLINE);
 	return (AUTH_ACTION_NONE);
+}
+
+static void	reset_server_state(auth_form_t *form)
+{
+	form->server_state = AUTH_SERVER_UNVERIFIED;
+	set_status(form, AUTH_FEEDBACK_IDLE, "ENTER SERVER ID TO CHECK");
+}
+
+static void	restore_server_status(auth_form_t *form)
+{
+	if (form->server_state == AUTH_SERVER_CHECKING)
+		set_status(form, AUTH_FEEDBACK_LOADING, "CHECKING SERVER...");
+	else if (form->server_state == AUTH_SERVER_ONLINE)
+		set_status(form, AUTH_FEEDBACK_SUCCESS, "SERVER ONLINE - READY");
+	else if (form->server_state == AUTH_SERVER_OFFLINE)
+		set_status(form, AUTH_FEEDBACK_ERROR,
+			"SERVER OFFLINE - PLAY OFFLINE");
+	else
+		set_status(form, AUTH_FEEDBACK_IDLE, "ENTER SERVER ID TO CHECK");
 }
 
 static void	set_status(auth_form_t *form, auth_feedback_t feedback,

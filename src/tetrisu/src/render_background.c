@@ -402,6 +402,7 @@ void	render_teardown(render_ctx_t *ctx)
 		ctx->bg_plane = NULL;
 		ctx->menu_plane = NULL;
 		ctx->menu_labels_plane = NULL;
+		ctx->auth_labels_plane = NULL;
 		ctx->bunny_plane = NULL;
 		ctx->pixels = TETRISU_PIXELS_NONE;
 	}
