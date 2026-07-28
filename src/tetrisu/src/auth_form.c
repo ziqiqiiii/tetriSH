@@ -121,7 +121,8 @@ auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key)
 		buffer = focused_buffer(form);
 		if (buffer == NULL)
 			return (AUTH_ACTION_NONE);
-		if (key == NCKEY_BACKSPACE || key == 127u || key == 8u)
+		if (key == NCKEY_BACKSPACE || key == NCKEY_DEL
+			|| key == 127u || key == 8u)
 			remove_codepoint(buffer);
 		else if (key >= 32u && key <= 0x10ffffu)
 			(void)append_codepoint(buffer, AUTH_FIELD_MAX, key);

@@ -159,7 +159,6 @@ static uint64_t	form_signature(const auth_form_t *form)
 
 	hash = 1469598103934665603ull;
 	hash = (hash ^ (uint64_t)form->mode) * 1099511628211ull;
-	hash = (hash ^ (uint64_t)form->focus) * 1099511628211ull;
 	hash = (hash ^ (uint64_t)form->feedback) * 1099511628211ull;
 	hash = (hash ^ (uint64_t)form->server_state) * 1099511628211ull;
 	cursor = (const unsigned char *)form->status;
@@ -236,26 +235,14 @@ static bool	compose_auth_pixels(const pixel_asset_t *font,
 	index = 0;
 	while (index < field_count)
 	{
-		color_t	color;
-
-		color = g_auth_pink;
-		if ((index == 0 && form->focus == AUTH_FOCUS_USERNAME)
-			|| (index == 1 && form->focus == AUTH_FOCUS_PASSWORD)
-			|| (index == 2 && form->mode == AUTH_FORM_SIGN_UP
-				&& form->focus == AUTH_FOCUS_CONFIRM)
-			|| ((index == 2 || index == 3)
-				&& form->focus == AUTH_FOCUS_DOMAIN))
-			color = g_auth_gold;
 		draw_auth_text_right(*pixels, width, height, font, labels[index],
 			percent_of(width, 49), percent_of(height, field_y[index])
-			- label_size / 2, label_size, spacing, color);
+			- label_size / 2, label_size, spacing, g_auth_pink);
 		index++;
 	}
 	primary = form->mode == AUTH_FORM_SIGN_UP ? "SIGN UP" : "LOGIN";
 	if (!auth_form_online_enabled(form))
 		primary_color = g_auth_disabled;
-	else if (form->focus == AUTH_FOCUS_PRIMARY)
-		primary_color = g_auth_gold;
 	else
 		primary_color = g_auth_green;
 	draw_auth_text_centered(*pixels, width, height, font, primary,
@@ -271,12 +258,10 @@ static bool	compose_auth_pixels(const pixel_asset_t *font,
 		? "BACK TO LOGIN" : "SIGN UP";
 	draw_auth_text_centered(*pixels, width, height, font, secondary,
 		percent_of(width, 38), percent_of(height, 82) - button_size / 2,
-		button_size, 1, form->focus == AUTH_FOCUS_SECONDARY
-		? g_auth_gold : g_auth_lavender);
+		button_size, 1, g_auth_lavender);
 	draw_auth_text_centered(*pixels, width, height, font, "PLAY OFFLINE",
 		percent_of(width, 62), percent_of(height, 82) - button_size / 2,
-		button_size, 1, form->focus == AUTH_FOCUS_OFFLINE
-		? g_auth_gold : g_auth_blue);
+		button_size, 1, g_auth_blue);
 	draw_auth_text_centered(*pixels, width, height, font,
 		"ENTER ON SERVER ID TO CHECK", width / 2,
 		percent_of(height, 94) - footer_size / 2,

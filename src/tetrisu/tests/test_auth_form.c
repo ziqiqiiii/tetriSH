@@ -70,7 +70,9 @@ static void	test_utf8_editing_and_masking(void)
 	assert(strcmp(masked, "**") == 0);
 	(void)auth_form_handle_key(&form, NCKEY_BACKSPACE);
 	assert(strcmp(form.password, "A") == 0);
-	(void)auth_form_handle_key(&form, 127u);
+	(void)auth_form_handle_key(&form, NCKEY_DEL);
+	assert(form.password[0] == '\0');
+	assert(auth_form_handle_key(&form, NCKEY_DEL) == AUTH_ACTION_NONE);
 	assert(form.password[0] == '\0');
 	printf("PASS test_utf8_editing_and_masking\n");
 }

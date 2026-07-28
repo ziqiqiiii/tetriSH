@@ -27,6 +27,9 @@ static void			put_centered(struct ncplane *plane, int row,
 static void			put_box_text(struct ncplane *plane, int row, int x,
 						int width, const char *text, bool focused,
 						bool disabled);
+static void			put_left_box_text(struct ncplane *plane, int row, int x,
+						int width, const char *text, bool focused,
+						bool placeholder);
 static void			clip_utf8_bytes(const char *text, size_t limit,
 						char *output, size_t capacity);
 static void			draw_field(struct ncplane *plane, const auth_form_t *form,
@@ -46,6 +49,11 @@ static void			draw_supported_value(struct ncplane *plane,
 						const auth_form_t *form, auth_focus_t focus,
 						int row, int x, int width, const char *value,
 						const char *placeholder, bool password);
+static void			draw_supported_button_focus(struct ncplane *plane,
+						const auth_form_t *form,
+						const auth_layout_t *layout);
+static void			put_focus_brackets(struct ncplane *plane, int row, int x,
+						int width, bool focused, bool disabled);
 static bool			point_in_row(const ncinput *input, int row, int x,
 						int width);
 
@@ -60,13 +68,15 @@ bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
 	uint64_t		channels;
 	unsigned		rows;
 	unsigned		cols;
+	unsigned		plane_rows;
+	unsigned		plane_cols;
 	bool			pixel_labels;
 
 	if (ctx == NULL || ctx->std == NULL || form == NULL)
 		return (false);
-	render_menu_destroy(ctx);
 	if (rebuild_background)
 	{
+		render_menu_destroy(ctx);
 		render_screen_destroy(ctx);
 		render_auth_pixel_labels_destroy(ctx);
 		if (auth_art_available(ctx))
@@ -77,15 +87,22 @@ bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
 		else
 			render_background_destroy(ctx);
 	}
-	else
-		render_screen_destroy(ctx);
 	ncplane_dim_yx(ctx->std, &rows, &cols);
 	if (rows < 12 || cols < 38)
 		return (false);
-	memset(&options, 0, sizeof(options));
-	options.rows = (int)rows;
-	options.cols = (int)cols;
-	ctx->screen_plane = ncplane_create(ctx->std, &options);
+	if (ctx->screen_plane != NULL)
+	{
+		ncplane_dim_yx(ctx->screen_plane, &plane_rows, &plane_cols);
+		if (plane_rows != rows || plane_cols != cols)
+			render_screen_destroy(ctx);
+	}
+	if (ctx->screen_plane == NULL)
+	{
+		memset(&options, 0, sizeof(options));
+		options.rows = (int)rows;
+		options.cols = (int)cols;
+		ctx->screen_plane = ncplane_create(ctx->std, &options);
+	}
 	if (ctx->screen_plane == NULL)
 		return (false);
 	layout = auth_layout(ctx);
@@ -110,7 +127,11 @@ bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
 	else
 		draw_form(ctx->screen_plane, form, &layout);
 	ncplane_move_top(ctx->screen_plane);
-	render_compatibility_badge_refresh(ctx);
+	if (rebuild_background || (render_compatibility_mode(ctx)
+			&& ctx->compatibility_plane == NULL))
+		render_compatibility_badge_refresh(ctx);
+	else if (ctx->compatibility_plane != NULL)
+		ncplane_move_top(ctx->compatibility_plane);
 	render_notification_raise(ctx);
 	return (notcurses_render(ctx->nc) == 0);
 }
@@ -307,6 +328,22 @@ static void	put_box_text(struct ncplane *plane, int row, int x, int width,
 		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
 }
 
+static void	put_left_box_text(struct ncplane *plane, int row, int x,
+	int width, const char *text, bool focused, bool placeholder)
+{
+	char	clipped[AUTH_FIELD_MAX + 40];
+
+	fill_line(plane, row, x, width, focused);
+	clip_utf8_bytes(text, (size_t)(width - 4), clipped, sizeof(clipped));
+	if (placeholder)
+		set_color(plane, 128, 124, 151);
+	else if (focused)
+		set_color(plane, 255, 219, 238);
+	else
+		set_color(plane, 238, 223, 242);
+	(void)ncplane_putstr_yx(plane, row, x + 2, clipped);
+}
+
 static void	clip_utf8_bytes(const char *text, size_t limit, char *output,
 	size_t capacity)
 {
@@ -344,17 +381,20 @@ static void	draw_field(struct ncplane *plane, const auth_form_t *form,
 	char	display[AUTH_FIELD_MAX];
 	char	line[AUTH_FIELD_MAX + 40];
 	bool	active;
+	bool	show_placeholder;
 
 	active = form->focus == focus;
 	if (password)
 		(void)auth_form_mask_password(value, display, sizeof(display));
 	else
 		snprintf(display, sizeof(display), "%s", value);
-	if (display[0] == '\0')
+	show_placeholder = display[0] == '\0' && !active;
+	if (show_placeholder)
 		snprintf(display, sizeof(display), "%s", placeholder);
 	snprintf(line, sizeof(line), "%c %-15s : %s%s",
 		active ? '>' : ' ', label, display, active ? "_" : "");
-	put_box_text(plane, row, x, width, line, active, false);
+	put_left_box_text(plane, row, x, width, line, active,
+		show_placeholder);
 }
 
 static void	draw_status(struct ncplane *plane, const auth_form_t *form,
@@ -498,6 +538,7 @@ static void	draw_supported_values(struct ncplane *plane,
 		draw_supported_value(plane, form, AUTH_FOCUS_DOMAIN,
 			layout->field_rows[2], value_x, value_width, form->domain,
 			"server id", false);
+	draw_supported_button_focus(plane, form, layout);
 }
 
 static void	draw_supported_value(struct ncplane *plane,
@@ -507,16 +548,46 @@ static void	draw_supported_value(struct ncplane *plane,
 	char	display[AUTH_FIELD_MAX];
 	char	line[AUTH_FIELD_MAX + 4];
 	bool	active;
+	bool	show_placeholder;
 
 	active = form->focus == focus;
 	if (password)
 		(void)auth_form_mask_password(value, display, sizeof(display));
 	else
 		snprintf(display, sizeof(display), "%s", value);
-	if (display[0] == '\0')
+	show_placeholder = display[0] == '\0' && !active;
+	if (show_placeholder)
 		snprintf(display, sizeof(display), "%s", placeholder);
 	snprintf(line, sizeof(line), "%s%s", display, active ? "_" : "");
-	put_box_text(plane, row, x, width, line, active, false);
+	put_left_box_text(plane, row, x, width, line, active,
+		show_placeholder);
+}
+
+static void	draw_supported_button_focus(struct ncplane *plane,
+	const auth_form_t *form, const auth_layout_t *layout)
+{
+	put_focus_brackets(plane, layout->primary_row, layout->field_x,
+		layout->field_width, form->focus == AUTH_FOCUS_PRIMARY,
+		!auth_form_online_enabled(form));
+	put_focus_brackets(plane, layout->secondary_row, layout->left_button_x,
+		layout->button_width, form->focus == AUTH_FOCUS_SECONDARY, false);
+	put_focus_brackets(plane, layout->secondary_row, layout->right_button_x,
+		layout->button_width, form->focus == AUTH_FOCUS_OFFLINE, false);
+}
+
+static void	put_focus_brackets(struct ncplane *plane, int row, int x,
+	int width, bool focused, bool disabled)
+{
+	if (!focused || width < 6)
+		return ;
+	if (disabled)
+		set_color(plane, 116, 111, 132);
+	else
+		set_color(plane, 255, 206, 104);
+	(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
+	(void)ncplane_putchar_yx(plane, row, x + 2, '>');
+	(void)ncplane_putchar_yx(plane, row, x + width - 3, '<');
+	(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
 }
 
 static bool	point_in_row(const ncinput *input, int row, int x, int width)

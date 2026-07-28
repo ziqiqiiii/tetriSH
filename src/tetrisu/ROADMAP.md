@@ -80,7 +80,10 @@ routing in item 17.
   server states, while the future network seam is isolated behind one semantic
   check action. The current no-server fixture resolves checks to offline and
   leaves Play Offline available. WezTerm compatibility mode retains the compact
-  high-contrast terminal-only form.
+  high-contrast terminal-only form. The large Kitty typography surface is
+  cached across typing and focus changes, and the native input plane is reused
+  in place; focused empty fields show only a fixed left-edge caret instead of
+  presenting placeholder copy as editable text.
 
 ## Phase 1 — fix the currently broken experience
 
