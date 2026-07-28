@@ -73,20 +73,21 @@ routing in item 17.
   deterministic fixture-backed scaffolds are visibly marked
   `LOCAL UI PREVIEW`.
 - Item 16 makes Login the first interactive screen after the splash. Reliable
-  Kitty rendering now combines the character-free pixel-art frame with the
-  shared high-resolution pixel font for every heading, label, status, and
-  action; only editable values remain native terminal text. Login and account
+  Kitty rendering uses authored pixel artwork with real bold Mononoki
+  typography for headings, labels, and actions. Editable values, live status,
+  and focus marks use small reusable pixel sprites from the same generated font
+  atlas, so every visible word stays sharp without repainting the full screen.
+  Login and account
   creation stay visibly disabled through unverified, checking, and offline
   server states, while the future network seam is isolated behind one semantic
   check action. The current no-server fixture resolves checks to offline and
   leaves Play Offline available. WezTerm compatibility mode retains the compact
-  high-contrast terminal-only form. Kitty composes the authored background and
-  all static typography once at the exact 1448 x 1086 source resolution in one
-  bitmap plane, avoiding the oversized transparent overlay and multi-sprixel
-  interaction discouraged by notcurses. The native value/status plane is
-  reused in place with transparent cell backgrounds; supported-mode fields
-  show no placeholder copy and display only a fixed left-edge caret when empty
-  and focused.
+  high-contrast terminal-only form. Kitty loads precomposed Login and Sign Up
+  PNGs at the exact 1448 x 1086 source resolution in one background bitmap
+  plane. Persistent compact overlay planes update only changed text, avoiding
+  the incomplete rows and input lag caused by rebuilding a full-screen RGBA
+  visual per key. Supported-mode fields show no placeholder copy and display
+  only a fixed left-edge caret when empty and focused.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -256,10 +257,10 @@ routing in item 17.
       error, back, and resize support.
     - Login accepts username, password, and domain/server; Sign Up adds
       password confirmation and returns to Login after account creation.
-    - Kitty-capable terminals use a character-free authored pixel frame and
-      the shared high-resolution game font for static copy in one exact-size
-      composite, while editable values and dynamic server status stay crisp
-      native terminal text without painting cell bars over the artwork.
+    - Kitty-capable terminals load exact-size authored Login and Sign Up PNGs
+      with bold Mononoki copy. Editable values, dynamic server status, and focus
+      marks use reusable pixel-font sprites without painting cell bars over the
+      artwork.
     - Server availability is explicit: unverified, checking, online, and
       offline states drive the status row and disable server-backed primary
       actions until online. The current network stub resolves to offline.

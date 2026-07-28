@@ -150,6 +150,7 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 	uint32_t		key;
 	auth_action_t	action;
 	bool			rebuild;
+	int				drained;
 
 	if (navigation->current == APP_SCREEN_SIGN_UP
 		&& form->mode != AUTH_FORM_SIGN_UP)
@@ -179,6 +180,33 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 			action = auth_pointer_action(ctx, audio, form, &input, key);
 		else
 			action = auth_form_handle_key(form, key);
+		drained = 0;
+		while (action == AUTH_ACTION_NONE && !rebuild && drained < 64)
+		{
+			memset(&input, 0, sizeof(input));
+			key = notcurses_get_nblock(ctx->nc, &input);
+			if (key == 0)
+				break ;
+			if (key == (uint32_t)-1)
+				action = AUTH_ACTION_QUIT;
+			else if (input.evtype == NCTYPE_RELEASE
+				&& !nckey_mouse_p(key))
+			{
+				drained++;
+				continue ;
+			}
+			else if (key == NCKEY_RESIZE || key == 12u)
+			{
+				if (render_geometry_refresh(ctx, true) < 0)
+					return (-1);
+				rebuild = true;
+			}
+			else if (nckey_mouse_p(key))
+				action = auth_pointer_action(ctx, audio, form, &input, key);
+			else
+				action = auth_form_handle_key(form, key);
+			drained++;
+		}
 		if (action != AUTH_ACTION_NONE
 			&& !apply_auth_action(ctx, audio, provider, navigation,
 				form, action))

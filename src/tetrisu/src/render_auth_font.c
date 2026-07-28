@@ -1,65 +1,60 @@
 #include "tetrisu.h"
 
-# define AUTH_TITLE_SIZE		24
-# define AUTH_LABEL_SIZE		16
-# define AUTH_BUTTON_SIZE		18
-# define AUTH_FOOTER_SIZE		9
-# define AUTH_MIN_GLYPH		7
+# define AUTH_ATLAS_COLUMNS		16
+# define AUTH_ATLAS_ROWS		6
+# define AUTH_ATLAS_GLYPH_WIDTH	20
+# define AUTH_ATLAS_GLYPH_HEIGHT	40
+# define AUTH_TEXT_CELL_COLS		2
+# define AUTH_TEXT_CELL_ROWS		2
+# define AUTH_TEXT_ADVANCE_NUM		3
+# define AUTH_TEXT_ADVANCE_DEN		2
 
-static const color_t	g_auth_gold = {255, 205, 93};
-static const color_t	g_auth_pink = {255, 137, 201};
-static const color_t	g_auth_lavender = {196, 158, 244};
-static const color_t	g_auth_blue = {105, 202, 255};
-static const color_t	g_auth_green = {116, 235, 157};
-static const color_t	g_auth_disabled = {113, 109, 130};
-static const color_t	g_auth_shadow = {17, 6, 29};
+static const color_t	g_auth_value = {238, 223, 242};
+static const color_t	g_auth_focus = {255, 229, 244};
+static const color_t	g_auth_gold = {255, 206, 104};
+static const color_t	g_auth_lavender = {190, 156, 230};
+static const color_t	g_auth_red = {255, 111, 142};
+static const color_t	g_auth_green = {112, 224, 174};
+static const color_t	g_auth_disabled = {116, 111, 132};
 
-static bool				load_font_mask(pixel_asset_t *font);
-static void				font_mask_destroy(pixel_asset_t *font);
 static uint64_t			form_signature(const auth_form_t *form);
-static bool				compose_auth_visual(const pixel_asset_t *font,
-							const auth_form_t *form, struct ncvisual *canvas,
-							int canvas_width, int canvas_height);
-static void				draw_auth_text(struct ncvisual *canvas,
-							int canvas_width,
-							int canvas_height, const pixel_asset_t *font,
-							const char *text, int x, int y, int glyph_size,
-							int spacing, color_t tint, unsigned opacity);
-static void				draw_auth_text_centered(struct ncvisual *canvas,
-							int canvas_width, int canvas_height,
-							const pixel_asset_t *font, const char *text,
-							int center_x, int y, int glyph_size, int spacing,
-							color_t tint);
-static void				draw_auth_text_right(struct ncvisual *canvas,
-							int canvas_width, int canvas_height,
-							const pixel_asset_t *font, const char *text,
-							int right_x, int y, int glyph_size, int spacing,
-							color_t tint);
-static int				auth_text_width(const char *text, int glyph_size,
-							int spacing);
-static void				draw_auth_glyph(struct ncvisual *canvas,
-							int canvas_width,
-							int canvas_height, const pixel_asset_t *font,
-							int glyph, int dest_x, int dest_y, int glyph_size,
-							color_t tint, unsigned opacity);
-static void				put_auth_pixel(struct ncvisual *canvas,
-							int canvas_width,
-							int canvas_height, int x, int y, color_t tint,
-							unsigned alpha);
-static int				scaled_size(int base, double scale);
-static int				percent_of(int total, int percent);
+static bool				ensure_font_atlas(render_ctx_t *ctx);
+static bool				add_value_sprite(render_ctx_t *ctx,
+							const auth_form_t *form, auth_focus_t focus,
+							int row, int x, int width, const char *value,
+							bool password);
+static bool				add_status_sprite(render_ctx_t *ctx,
+							const auth_form_t *form, int row, int center_x,
+							int width);
+static bool				add_empty_slot(render_ctx_t *ctx);
+static bool				add_focus_sprites(render_ctx_t *ctx,
+							int row, int x, int width, bool focused,
+							bool disabled);
+static bool				add_text_sprite(render_ctx_t *ctx, const char *text,
+							int row, int x, int plane_width, color_t tint,
+							bool centered);
+static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
+							struct ncplane *plane, const char *text,
+							int row, int x, int plane_width, color_t tint,
+							bool centered);
+static void				set_transparent_base(struct ncplane *plane);
+static size_t			visible_ascii(char *output, size_t capacity,
+							const char *text, int max_width);
+static uint64_t			sprite_signature(const char *text, int row, int x,
+							int width, color_t tint, bool centered);
 
 /**
- * @brief Refreshes one native-resolution background and typography composite.
+ * @brief Loads the authored auth screen for the active form.
+ *
+ * Static artwork is transferred as one exact-size Kitty bitmap. Live values,
+ * status, and focus use separate small font sprites so they stay above the
+ * background without repainting a full-screen image for every key press.
  */
 bool	render_auth_pixel_background_refresh(render_ctx_t *ctx,
 	const auth_form_t *form, bool force)
 {
-	pixel_asset_t		font;
-	struct ncvisual		*ncv;
-	ncvgeom				geom;
-	uint64_t			signature;
-	int					result;
+	const char	*path;
+	uint64_t	signature;
 
 	if (ctx == NULL || form == NULL || !render_pixel_planes_reliable(ctx)
 		|| !notcurses_canpixel(ctx->nc))
@@ -68,32 +63,114 @@ bool	render_auth_pixel_background_refresh(render_ctx_t *ctx,
 	if (!force && ctx->bg_plane != NULL
 		&& ctx->auth_background_signature == signature)
 		return (true);
-	if (!load_font_mask(&font))
-		return (false);
-	ncv = ncvisual_from_file(AUTH_BACKGROUND_PATH);
-	memset(&geom, 0, sizeof(geom));
-	if (ncv == NULL || ncvisual_geom(NULL, ncv, NULL, &geom) != 0
-		|| geom.pixx != BACKGROUND_SOURCE_PIXELS_X
-		|| geom.pixy != BACKGROUND_SOURCE_PIXELS_Y
-		|| !compose_auth_visual(&font, form, ncv,
-			(int)geom.pixx, (int)geom.pixy))
-	{
-		font_mask_destroy(&font);
-		if (ncv != NULL)
-			ncvisual_destroy(ncv);
-		return (false);
-	}
-	result = render_background_replace_visual(ctx, ncv, false);
-	ncvisual_destroy(ncv);
-	font_mask_destroy(&font);
-	if (result < 0)
+	if (form->mode == AUTH_FORM_SIGN_UP)
+		path = AUTH_SIGNUP_BACKGROUND_PATH;
+	else
+		path = AUTH_LOGIN_BACKGROUND_PATH;
+	if (render_background_replace_exact(ctx, path, false) < 0)
 		return (false);
 	ctx->auth_background_signature = signature;
 	return (true);
 }
 
 /**
- * @brief Invalidates the cached auth composite signature.
+ * @brief Rebuilds small dynamic text sprites over the static auth bitmap.
+ */
+bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
+	const auth_form_t *form)
+{
+	int	field_x;
+	int	field_width;
+	int	value_x;
+	int	value_width;
+	int	center;
+	int	status_width;
+
+	if (ctx == NULL || form == NULL || !ensure_font_atlas(ctx))
+		return (false);
+	ctx->auth_overlay_count = 0;
+	center = ctx->bg_col + ctx->bg_cols / 2;
+	field_width = (ctx->bg_cols * 48) / 100;
+	if (field_width < 30)
+		field_width = 30;
+	field_x = center - field_width / 2;
+	value_x = field_x + (field_width * 56) / 100;
+	value_width = field_x + field_width - value_x - 2;
+	if (value_width < 8)
+		value_width = 8;
+	if (!add_value_sprite(ctx, form, AUTH_FOCUS_USERNAME,
+			ctx->bg_row + (ctx->bg_rows * 21) / 100, value_x, value_width,
+			form->username, false)
+		|| !add_value_sprite(ctx, form, AUTH_FOCUS_PASSWORD,
+			ctx->bg_row + (ctx->bg_rows * 31) / 100, value_x, value_width,
+			form->password, true))
+		return (false);
+	if (form->mode == AUTH_FORM_SIGN_UP)
+	{
+		if (!add_value_sprite(ctx, form, AUTH_FOCUS_CONFIRM,
+				ctx->bg_row + (ctx->bg_rows * 42) / 100,
+				value_x, value_width, form->confirm, true)
+			|| !add_value_sprite(ctx, form, AUTH_FOCUS_DOMAIN,
+				ctx->bg_row + (ctx->bg_rows * 52) / 100,
+				value_x, value_width, form->domain, false))
+			return (false);
+	}
+	else
+	{
+		if (!add_empty_slot(ctx)
+			|| !add_value_sprite(ctx, form, AUTH_FOCUS_DOMAIN,
+				ctx->bg_row + (ctx->bg_rows * 42) / 100,
+				value_x, value_width, form->domain, false))
+			return (false);
+	}
+	status_width = (field_width * 62) / 100;
+	if (!add_status_sprite(ctx, form,
+			ctx->bg_row + (ctx->bg_rows
+				* (form->mode == AUTH_FORM_SIGN_UP ? 73 : 52)) / 100,
+			center, status_width))
+		return (false);
+	if (!add_focus_sprites(ctx,
+			ctx->bg_row + (ctx->bg_rows * 65) / 100,
+			field_x, field_width, form->focus == AUTH_FOCUS_PRIMARY,
+			!auth_form_online_enabled(form)))
+		return (false);
+	field_width = (ctx->bg_cols * 29) / 100;
+	if (!add_focus_sprites(ctx,
+			ctx->bg_row + (ctx->bg_rows * 82) / 100,
+			center - field_width - 1, field_width,
+			form->focus == AUTH_FOCUS_SECONDARY, false))
+		return (false);
+	if (!add_focus_sprites(ctx,
+			ctx->bg_row + (ctx->bg_rows * 82) / 100,
+			center + 1, field_width, form->focus == AUTH_FOCUS_OFFLINE,
+			false))
+		return (false);
+	return (true);
+}
+
+/**
+ * @brief Removes all dynamic auth sprites.
+ */
+void	render_auth_pixel_overlay_destroy(render_ctx_t *ctx)
+{
+	int	index;
+
+	if (ctx == NULL)
+		return ;
+	index = 0;
+	while (index < AUTH_OVERLAY_PLANE_MAX)
+	{
+		if (ctx->auth_overlay_planes[index] != NULL)
+			ncplane_destroy(ctx->auth_overlay_planes[index]);
+		ctx->auth_overlay_planes[index] = NULL;
+		ctx->auth_overlay_signatures[index] = 0;
+		index++;
+	}
+	ctx->auth_overlay_count = 0;
+}
+
+/**
+ * @brief Invalidates the cached auth artwork signature.
  */
 void	render_auth_pixel_background_reset(render_ctx_t *ctx)
 {
@@ -102,273 +179,371 @@ void	render_auth_pixel_background_reset(render_ctx_t *ctx)
 	ctx->auth_background_signature = 0;
 }
 
-static bool	load_font_mask(pixel_asset_t *font)
-{
-	struct ncvisual	*ncv;
-	ncvgeom			geom;
-	size_t			count;
-	int				y;
-	int				x;
-
-	memset(font, 0, sizeof(*font));
-	ncv = ncvisual_from_file(SHARED_FONT_MASK_PATH);
-	if (ncv == NULL)
-		return (false);
-	memset(&geom, 0, sizeof(geom));
-	if (ncvisual_geom(NULL, ncv, NULL, &geom) != 0
-		|| geom.pixx != FONT_COLUMNS * FONT_GLYPH_WIDTH
-		|| geom.pixy != FONT_ROWS * FONT_GLYPH_HEIGHT)
-	{
-		ncvisual_destroy(ncv);
-		return (false);
-	}
-	font->width = (int)geom.pixx;
-	font->height = (int)geom.pixy;
-	count = (size_t)font->width * font->height;
-	font->pixels = malloc(count * sizeof(*font->pixels));
-	if (font->pixels == NULL)
-	{
-		ncvisual_destroy(ncv);
-		return (false);
-	}
-	y = 0;
-	while (y < font->height)
-	{
-		x = 0;
-		while (x < font->width)
-		{
-			if (ncvisual_at_yx(ncv, (unsigned)y, (unsigned)x,
-					&font->pixels[(size_t)y * font->width + x]) < 0)
-			{
-				font_mask_destroy(font);
-				ncvisual_destroy(ncv);
-				return (false);
-			}
-			x++;
-		}
-		y++;
-	}
-	ncvisual_destroy(ncv);
-	return (true);
-}
-
-static void	font_mask_destroy(pixel_asset_t *font)
-{
-	free(font->pixels);
-	memset(font, 0, sizeof(*font));
-}
-
 static uint64_t	form_signature(const auth_form_t *form)
 {
 	uint64_t	hash;
 
 	hash = 1469598103934665603ull;
 	hash = (hash ^ (uint64_t)form->mode) * 1099511628211ull;
-	hash = (hash ^ (uint64_t)auth_form_online_enabled(form))
-		* 1099511628211ull;
 	return (hash);
 }
 
-static bool	compose_auth_visual(const pixel_asset_t *font,
-	const auth_form_t *form, struct ncvisual *canvas,
-	int canvas_width, int canvas_height)
+static bool	ensure_font_atlas(render_ctx_t *ctx)
 {
-	const char	*labels[4];
-	const char	*title;
-	const char	*primary;
-	const char	*secondary;
-	color_t		primary_color;
-	double		scale;
-	double		scale_x;
-	double		scale_y;
-	int			field_count;
-	int			field_y[4];
-	int			label_size;
-	int			button_size;
-	int			footer_size;
-	int			spacing;
-	int			shadow;
-	int			index;
-	if (canvas == NULL || canvas_width <= 0 || canvas_height <= 0)
+	ncvgeom	geom;
+
+	if (ctx->auth_font_visual != NULL)
+		return (true);
+	ctx->auth_font_visual = ncvisual_from_file(AUTH_FONT_ATLAS_PATH);
+	if (ctx->auth_font_visual == NULL)
 		return (false);
-	scale_x = (double)canvas_width / BACKGROUND_SOURCE_PIXELS_X;
-	scale_y = (double)canvas_height / BACKGROUND_SOURCE_PIXELS_Y;
-	scale = scale_x < scale_y ? scale_x : scale_y;
-	label_size = scaled_size(AUTH_LABEL_SIZE, scale);
-	button_size = scaled_size(AUTH_BUTTON_SIZE, scale);
-	footer_size = scaled_size(AUTH_FOOTER_SIZE, scale);
-	spacing = label_size / 7;
-	if (spacing < 1)
-		spacing = 1;
-	shadow = label_size / 7;
-	if (shadow < 1)
-		shadow = 1;
-	title = form->mode == AUTH_FORM_SIGN_UP
-		? "CREATE ACCOUNT" : "WELCOME TO TETRISU";
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font, title,
-		canvas_width / 2 + shadow, percent_of(canvas_height, 10) + shadow,
-		scaled_size(AUTH_TITLE_SIZE, scale), spacing, g_auth_shadow);
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font, title,
-		canvas_width / 2, percent_of(canvas_height, 10),
-		scaled_size(AUTH_TITLE_SIZE, scale), spacing, g_auth_gold);
-	labels[0] = "USERNAME";
-	labels[1] = "PASSWORD";
-	labels[2] = form->mode == AUTH_FORM_SIGN_UP
-		? "RE-ENTER PASSWORD" : "SERVER ID";
-	labels[3] = "SERVER ID";
-	field_y[0] = 21;
-	field_y[1] = 31;
-	field_y[2] = 42;
-	field_y[3] = 52;
-	field_count = form->mode == AUTH_FORM_SIGN_UP ? 4 : 3;
-	index = 0;
-	while (index < field_count)
+	memset(&geom, 0, sizeof(geom));
+	if (ncvisual_geom(NULL, ctx->auth_font_visual, NULL, &geom) != 0
+		|| geom.pixx != AUTH_ATLAS_COLUMNS * AUTH_ATLAS_GLYPH_WIDTH
+		|| geom.pixy != AUTH_ATLAS_ROWS * AUTH_ATLAS_GLYPH_HEIGHT)
 	{
-		draw_auth_text_right(canvas, canvas_width, canvas_height, font,
-			labels[index], percent_of(canvas_width, 49),
-			percent_of(canvas_height, field_y[index])
-			- label_size / 2, label_size, spacing, g_auth_pink);
-		index++;
+		ncvisual_destroy(ctx->auth_font_visual);
+		ctx->auth_font_visual = NULL;
+		return (false);
 	}
-	primary = form->mode == AUTH_FORM_SIGN_UP ? "SIGN UP" : "LOGIN";
-	if (!auth_form_online_enabled(form))
-		primary_color = g_auth_disabled;
-	else
-		primary_color = g_auth_green;
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font, primary,
-		canvas_width / 2, percent_of(canvas_height, 65) - button_size / 2,
-		button_size, spacing, primary_color);
-	secondary = form->mode == AUTH_FORM_SIGN_UP
-		? "BACK TO LOGIN" : "SIGN UP";
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font, secondary,
-		percent_of(canvas_width, 38),
-		percent_of(canvas_height, 82) - button_size / 2,
-		button_size, 1, g_auth_lavender);
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font,
-		"PLAY OFFLINE", percent_of(canvas_width, 62),
-		percent_of(canvas_height, 82) - button_size / 2,
-		button_size, 1, g_auth_blue);
-	draw_auth_text_centered(canvas, canvas_width, canvas_height, font,
-		"ENTER ON SERVER ID TO CHECK", canvas_width / 2,
-		percent_of(canvas_height, 94) - footer_size / 2,
-		footer_size, 1, g_auth_lavender);
 	return (true);
 }
 
-static void	draw_auth_text(struct ncvisual *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, const char *text,
-	int x, int y, int glyph_size, int spacing, color_t tint, unsigned opacity)
+static bool	add_value_sprite(render_ctx_t *ctx, const auth_form_t *form,
+	auth_focus_t focus, int row, int x, int width, const char *value,
+	bool password)
 {
-	unsigned	codepoint;
-	int			glyph;
+	char	display[AUTH_FIELD_MAX];
+	char	line[AUTH_FIELD_MAX + 4];
+	bool	active;
 
-	while (*text != '\0')
+	active = form->focus == focus;
+	if (password)
+		(void)auth_form_mask_password(value, display, sizeof(display));
+	else
+		snprintf(display, sizeof(display), "%s", value);
+	snprintf(line, sizeof(line), "%s%s", display, active ? "_" : "");
+	return (add_text_sprite(ctx, line, row, x + 1, width - 1,
+			active ? g_auth_focus : g_auth_value, false));
+}
+
+static bool	add_status_sprite(render_ctx_t *ctx, const auth_form_t *form,
+	int row, int center_x, int width)
+{
+	color_t	tint;
+	int		length;
+	int		x;
+
+	if (form->feedback == AUTH_FEEDBACK_ERROR)
+		tint = g_auth_red;
+	else if (form->feedback == AUTH_FEEDBACK_SUCCESS)
+		tint = g_auth_green;
+	else if (form->feedback == AUTH_FEEDBACK_LOADING)
+		tint = g_auth_gold;
+	else
+		tint = g_auth_lavender;
+	length = width;
+	x = center_x - length / 2;
+	return (add_text_sprite(ctx, form->status, row, x, width, tint, true));
+}
+
+static bool	add_empty_slot(render_ctx_t *ctx)
+{
+	int	slot;
+
+	if (ctx->auth_overlay_count >= AUTH_OVERLAY_PLANE_MAX)
+		return (false);
+	slot = ctx->auth_overlay_count++;
+	if (ctx->auth_overlay_planes[slot] != NULL)
+		ncplane_destroy(ctx->auth_overlay_planes[slot]);
+	ctx->auth_overlay_planes[slot] = NULL;
+	ctx->auth_overlay_signatures[slot] = 0;
+	return (true);
+}
+
+static bool	add_focus_sprites(render_ctx_t *ctx, int row, int x,
+	int width, bool focused, bool disabled)
+{
+	color_t	tint;
+
+	if (disabled)
+		tint = g_auth_disabled;
+	else
+		tint = g_auth_gold;
+	return (add_text_sprite(ctx, focused ? ">" : "", row, x + 2,
+			AUTH_TEXT_CELL_COLS, tint, false)
+		&& add_text_sprite(ctx, focused ? "<" : "", row, x + width - 4,
+			AUTH_TEXT_CELL_COLS, tint, false));
+}
+
+static bool	add_text_sprite(render_ctx_t *ctx, const char *text,
+	int row, int x, int plane_width, color_t tint, bool centered)
+{
+	char			visible[AUTH_FIELD_MAX + 4];
+	struct ncplane	*plane;
+	int				slot;
+	int				max_chars;
+	uint64_t		signature;
+
+	if (ctx->auth_overlay_count >= AUTH_OVERLAY_PLANE_MAX)
+		return (false);
+	slot = ctx->auth_overlay_count;
+	max_chars = (plane_width * AUTH_TEXT_ADVANCE_DEN)
+		/ AUTH_TEXT_ADVANCE_NUM;
+	if (visible_ascii(visible, sizeof(visible), text,
+			max_chars) == 0)
+		visible[0] = '\0';
+	signature = sprite_signature(visible, row, x, plane_width, tint,
+			centered);
+	if (ctx->auth_overlay_planes[slot] != NULL
+		&& ctx->auth_overlay_signatures[slot] == signature)
 	{
-		codepoint = (unsigned char)*text;
-		if (codepoint < 32 || codepoint >= 32 + FONT_COLUMNS * FONT_ROWS)
-			codepoint = '?';
-		glyph = (int)codepoint - 32;
-		draw_auth_glyph(canvas, canvas_width, canvas_height, font, glyph,
-			x, y, glyph_size, tint, opacity);
-		x += glyph_size + spacing;
-		text++;
+		if (ctx->bg_plane != NULL)
+			(void)ncplane_move_above(ctx->auth_overlay_planes[slot],
+				ctx->bg_plane);
+		ctx->auth_overlay_count++;
+		return (true);
 	}
+	if (ctx->auth_overlay_planes[slot] != NULL)
+	{
+		unsigned	rows;
+		unsigned	cols;
+
+		ncplane_dim_yx(ctx->auth_overlay_planes[slot], &rows, &cols);
+		if (rows != AUTH_TEXT_CELL_ROWS
+			|| cols != (unsigned)plane_width)
+		{
+			ncplane_destroy(ctx->auth_overlay_planes[slot]);
+			ctx->auth_overlay_planes[slot] = NULL;
+			ctx->auth_overlay_signatures[slot] = 0;
+		}
+	}
+	plane = create_text_sprite(ctx, ctx->auth_overlay_planes[slot],
+			visible, row, x, plane_width, tint, centered);
+	if (plane == NULL)
+		return (false);
+	ctx->auth_overlay_planes[slot] = plane;
+	ctx->auth_overlay_signatures[slot] = signature;
+	if (ctx->bg_plane != NULL)
+		(void)ncplane_move_above(plane, ctx->bg_plane);
+	ctx->auth_overlay_count++;
+	return (true);
 }
 
-static void	draw_auth_text_centered(struct ncvisual *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, const char *text,
-	int center_x, int y, int glyph_size, int spacing, color_t tint)
+static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
+	struct ncplane *plane, const char *text, int row, int x,
+	int plane_width, color_t tint, bool centered)
 {
-	draw_auth_text(canvas, canvas_width, canvas_height, font, text,
-		center_x - auth_text_width(text, glyph_size, spacing) / 2,
-		y, glyph_size, spacing, tint, 255u);
-}
-
-static void	draw_auth_text_right(struct ncvisual *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, const char *text,
-	int right_x, int y, int glyph_size, int spacing, color_t tint)
-{
-	draw_auth_text(canvas, canvas_width, canvas_height, font, text,
-		right_x - auth_text_width(text, glyph_size, spacing),
-		y, glyph_size, spacing, tint, 255u);
-}
-
-static int	auth_text_width(const char *text, int glyph_size, int spacing)
-{
-	size_t	length;
+	struct ncvisual_options	vopts;
+	ncplane_options			opts;
+	struct ncvisual			*ncv;
+	uint32_t				*pixels;
+	uint32_t				source;
+	size_t					length;
+	size_t					count;
+	unsigned				alpha;
+	unsigned				codepoint;
+	bool					created;
+	int						source_x;
+	int						source_y;
+	int						width;
+	int						glyph_width;
+	int						glyph_x;
+	int						glyph;
+	int						advance;
+	int						text_offset;
+	int						text_width;
+	int						pixel_rows;
+	int						y;
+	int						px;
 
 	length = strlen(text);
-	if (length == 0)
-		return (0);
-	return ((int)length * glyph_size + ((int)length - 1) * spacing);
-}
-
-static void	draw_auth_glyph(struct ncvisual *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, int glyph,
-	int dest_x, int dest_y, int glyph_size, color_t tint, unsigned opacity)
-{
-	int			source_x;
-	int			source_y;
-	unsigned	alpha;
-	int			y;
-	int			x;
-
+	if (ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
+		|| ctx->cell_px_y > INT_MAX / AUTH_TEXT_CELL_ROWS
+		|| plane_width <= 0 || plane_width > INT_MAX / ctx->cell_px_x)
+		return (NULL);
+	width = plane_width * ctx->cell_px_x;
+	pixel_rows = ctx->cell_px_y * AUTH_TEXT_CELL_ROWS;
+	if ((size_t)width > SIZE_MAX / (size_t)pixel_rows)
+		return (NULL);
+	count = (size_t)width * (size_t)pixel_rows;
+	if (count > SIZE_MAX / sizeof(*pixels))
+		return (NULL);
+	glyph_width = ctx->cell_px_x * AUTH_TEXT_CELL_COLS;
+	advance = (ctx->cell_px_x * AUTH_TEXT_ADVANCE_NUM
+			+ AUTH_TEXT_ADVANCE_DEN - 1) / AUTH_TEXT_ADVANCE_DEN;
+	text_width = 0;
+	if (length > 0)
+		text_width = ((int)length - 1) * advance + glyph_width;
+	text_offset = 0;
+	if (centered && text_width < width)
+		text_offset = (width - text_width) / 2;
+	pixels = calloc(count, sizeof(*pixels));
+	if (pixels == NULL)
+		return (NULL);
 	y = 0;
-	while (y < glyph_size)
+	while (y < ctx->cell_px_y * AUTH_TEXT_CELL_ROWS)
 	{
-		source_y = (glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_Y
-			+ y * FONT_INK_HEIGHT / glyph_size;
-		x = 0;
-		while (x < glyph_size)
+		glyph = 0;
+		while (glyph < (int)length)
 		{
-			source_x = (glyph % FONT_COLUMNS) * FONT_GLYPH_WIDTH
-				+ x * FONT_GLYPH_WIDTH / glyph_size;
-			alpha = ncpixel_a(font->pixels[(size_t)source_y
-					* font->width + source_x]);
-			alpha = (alpha * opacity + 127u) / 255u;
-			if (alpha != 0)
-				put_auth_pixel(canvas, canvas_width, canvas_height,
-					dest_x + x, dest_y + y, tint, alpha);
-			x++;
+			codepoint = (unsigned char)text[glyph];
+			if (codepoint < 32 || codepoint >= 32
+				+ AUTH_ATLAS_COLUMNS * AUTH_ATLAS_ROWS)
+				codepoint = '?';
+			glyph_x = 0;
+			while (glyph_x < glyph_width)
+			{
+				px = text_offset + glyph * advance + glyph_x;
+				if (px >= 0 && px < width)
+				{
+					source_x = ((int)(codepoint - 32)
+							% AUTH_ATLAS_COLUMNS)
+						* AUTH_ATLAS_GLYPH_WIDTH;
+					source_x += glyph_x * AUTH_ATLAS_GLYPH_WIDTH
+						/ glyph_width;
+					source_y = ((int)(codepoint - 32)
+							/ AUTH_ATLAS_COLUMNS)
+						* AUTH_ATLAS_GLYPH_HEIGHT;
+					source_y += y * AUTH_ATLAS_GLYPH_HEIGHT
+						/ (ctx->cell_px_y * AUTH_TEXT_CELL_ROWS);
+					if (ncvisual_at_yx(ctx->auth_font_visual,
+							(unsigned)source_y, (unsigned)source_x,
+							&source) < 0)
+					{
+						free(pixels);
+						return (NULL);
+					}
+					alpha = ncpixel_a(source);
+					if (alpha != 0)
+					{
+						pixels[(size_t)y * width + px]
+							= ncpixel(tint.r, tint.g, tint.b);
+						ncpixel_set_a(&pixels[(size_t)y * width + px],
+							alpha);
+					}
+				}
+				glyph_x++;
+			}
+			glyph++;
 		}
 		y++;
 	}
+	memset(&opts, 0, sizeof(opts));
+	opts.y = row - 1;
+	opts.x = x;
+	opts.rows = AUTH_TEXT_CELL_ROWS;
+	opts.cols = plane_width;
+	created = false;
+	if (plane != NULL)
+	{
+		unsigned	plane_rows;
+		unsigned	plane_cols;
+
+		ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+		if (plane_rows != AUTH_TEXT_CELL_ROWS
+			|| plane_cols != (unsigned)plane_width)
+		{
+			free(pixels);
+			return (NULL);
+		}
+		else
+			(void)ncplane_move_yx(plane, opts.y, opts.x);
+	}
+	if (plane == NULL)
+	{
+		plane = ncplane_create(ctx->std, &opts);
+		created = true;
+	}
+	if (plane == NULL)
+	{
+		free(pixels);
+		return (NULL);
+	}
+	if (created)
+		set_transparent_base(plane);
+	ncv = ncvisual_from_rgba(pixels,
+			ctx->cell_px_y * AUTH_TEXT_CELL_ROWS,
+			width * (int)sizeof(*pixels), width);
+	free(pixels);
+	if (ncv == NULL)
+	{
+		if (created)
+			ncplane_destroy(plane);
+		return (NULL);
+	}
+	memset(&vopts, 0, sizeof(vopts));
+	vopts.n = plane;
+	vopts.scaling = NCSCALE_NONE;
+	vopts.blitter = NCBLIT_PIXEL;
+	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
+	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
+	{
+		ncvisual_destroy(ncv);
+		if (created)
+			ncplane_destroy(plane);
+		return (NULL);
+	}
+	ncvisual_destroy(ncv);
+	return (plane);
 }
 
-static void	put_auth_pixel(struct ncvisual *canvas, int canvas_width,
-	int canvas_height, int x, int y, color_t tint, unsigned alpha)
+static void	set_transparent_base(struct ncplane *plane)
 {
-	uint32_t	current;
-	uint32_t	pixel;
-	unsigned	inverse;
-	unsigned	red;
-	unsigned	green;
-	unsigned	blue;
+	nccell	base;
 
-	if (x < 0 || x >= canvas_width || y < 0 || y >= canvas_height)
-		return ;
-	if (ncvisual_at_yx(canvas, (unsigned)y, (unsigned)x, &current) < 0)
-		return ;
-	inverse = 255u - alpha;
-	red = (tint.r * alpha + ncpixel_r(current) * inverse + 127u) / 255u;
-	green = (tint.g * alpha + ncpixel_g(current) * inverse + 127u) / 255u;
-	blue = (tint.b * alpha + ncpixel_b(current) * inverse + 127u) / 255u;
-	pixel = ncpixel(red, green, blue);
-	ncpixel_set_a(&pixel, 255u);
-	(void)ncvisual_set_yx(canvas, y, x, pixel);
+	nccell_init(&base);
+	if (nccell_load(plane, &base, " ") >= 0)
+	{
+		nccell_set_fg_alpha(&base, NCALPHA_TRANSPARENT);
+		nccell_set_bg_alpha(&base, NCALPHA_TRANSPARENT);
+		ncplane_set_base_cell(plane, &base);
+		nccell_release(plane, &base);
+	}
+	ncplane_erase(plane);
 }
 
-static int	scaled_size(int base, double scale)
+static size_t	visible_ascii(char *output, size_t capacity,
+	const char *text, int max_width)
 {
-	int	result;
+	size_t	length;
 
-	result = (int)(base * scale + 0.5);
-	if (result < AUTH_MIN_GLYPH)
-		result = AUTH_MIN_GLYPH;
-	return (result);
+	if (capacity == 0 || max_width <= 0)
+		return (0);
+	length = 0;
+	while (text[length] != '\0' && length < (size_t)max_width
+		&& length + 1 < capacity)
+	{
+		if ((unsigned char)text[length] < 32
+			|| (unsigned char)text[length] >= 127)
+			output[length] = '?';
+		else
+			output[length] = text[length];
+		length++;
+	}
+	output[length] = '\0';
+	return (length);
 }
 
-static int	percent_of(int total, int percent)
+static uint64_t	sprite_signature(const char *text, int row, int x,
+	int width, color_t tint, bool centered)
 {
-	return ((total * percent) / 100);
+	const unsigned char	*cursor;
+	uint64_t			hash;
+
+	hash = 1469598103934665603ull;
+	cursor = (const unsigned char *)text;
+	while (*cursor != '\0')
+	{
+		hash = (hash ^ *cursor) * 1099511628211ull;
+		cursor++;
+	}
+	hash = (hash ^ (uint64_t)(unsigned)row) * 1099511628211ull;
+	hash = (hash ^ (uint64_t)(unsigned)x) * 1099511628211ull;
+	hash = (hash ^ (uint64_t)(unsigned)width) * 1099511628211ull;
+	hash = (hash ^ tint.r) * 1099511628211ull;
+	hash = (hash ^ tint.g) * 1099511628211ull;
+	hash = (hash ^ tint.b) * 1099511628211ull;
+	hash = (hash ^ (uint64_t)centered) * 1099511628211ull;
+	return (hash);
 }

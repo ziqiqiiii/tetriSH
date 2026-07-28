@@ -9,6 +9,9 @@ static int	max_int(int a, int b);
 static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
 	int rows, int cols);
 static void	set_opaque_backdrop(struct ncplane *plane);
+static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
+				bool stretch, ncscale_e scaling, ncblitter_e blitter,
+				uint64_t flags);
 
 /**
  * @brief Starts notcurses and renders the initial background image.
@@ -248,6 +251,66 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 }
 
 /**
+ * @brief Replaces the background through an exact-size bitmap plane.
+ *
+ * Auth screens contain small static lettering that cannot survive conversion
+ * to a 4x2 terminal-cell mosaic. The visual is resized once to the physical
+ * pixel geometry of its fitted plane, then transferred without another scale.
+ * NODEGRADE keeps this path honest: unsupported terminals fall back through
+ * the caller's native renderer instead of quietly degrading the artwork.
+ *
+ * @param ctx Active render context.
+ * @param image_path Image to load into the replacement plane.
+ * @param stretch Whether to fill the terminal instead of letterboxing.
+ * @return 0 on success, -1 when exact bitmap rendering is unavailable.
+ */
+int	render_background_replace_exact(render_ctx_t *ctx,
+	const char *image_path, bool stretch)
+{
+	struct ncvisual	*ncv;
+	unsigned		std_rows;
+	unsigned		std_cols;
+	int				pixel_rows;
+	int				pixel_cols;
+	int				result;
+
+	if (ctx == NULL || image_path == NULL || !render_pixel_planes_reliable(ctx))
+		return (-1);
+	ncv = ncvisual_from_file(image_path);
+	if (ncv == NULL)
+		return (-1);
+	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
+	refresh_cell_geometry(ctx);
+	if (stretch)
+	{
+		ctx->bg_row = 0;
+		ctx->bg_col = 0;
+		ctx->bg_rows = (int)std_rows;
+		ctx->bg_cols = (int)std_cols;
+	}
+	else
+		fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
+	if (ctx->cell_px_y <= 0 || ctx->cell_px_x <= 0
+		|| ctx->bg_rows > INT_MAX / ctx->cell_px_y
+		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x)
+	{
+		ncvisual_destroy(ncv);
+		return (-1);
+	}
+	pixel_rows = ctx->bg_rows * ctx->cell_px_y;
+	pixel_cols = ctx->bg_cols * ctx->cell_px_x;
+	if (ncvisual_resize(ncv, pixel_rows, pixel_cols) != 0)
+	{
+		ncvisual_destroy(ncv);
+		return (-1);
+	}
+	result = replace_visual_scaled(ctx, ncv, stretch, NCSCALE_NONE,
+			NCBLIT_PIXEL, NCVISUAL_OPTION_NODEGRADE);
+	ncvisual_destroy(ncv);
+	return (result);
+}
+
+/**
  * @brief Replaces the background with an already composed visual.
  *
  * The caller retains ownership of ncv. Keeping the sizing and replacement
@@ -256,6 +319,13 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
  */
 int	render_background_replace_visual(render_ctx_t *ctx,
 	struct ncvisual *ncv, bool stretch)
+{
+	return (replace_visual_scaled(ctx, ncv, stretch, NCSCALE_STRETCH,
+			preferred_blitter(ctx, 0, 0), NCVISUAL_OPTION_NOINTERPOLATE));
+}
+
+static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
+	bool stretch, ncscale_e scaling, ncblitter_e blitter, uint64_t flags)
 {
 	struct ncvisual_options	vopts;
 	ncplane_options			bg_opts;
@@ -287,9 +357,9 @@ int	render_background_replace_visual(render_ctx_t *ctx,
 		return (-1);
 	memset(&vopts, 0, sizeof(vopts));
 	vopts.n = new_plane;
-	vopts.scaling = NCSCALE_STRETCH;
-	vopts.blitter = preferred_blitter(ctx, ctx->bg_rows, ctx->bg_cols);
-	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
+	vopts.scaling = scaling;
+	vopts.blitter = blitter;
+	vopts.flags = flags;
 	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
 	{
 		ncplane_destroy(new_plane);
@@ -407,6 +477,12 @@ void	render_teardown(render_ctx_t *ctx)
 	{
 		render_notification_destroy(ctx);
 		render_compatibility_badge_hide(ctx);
+		render_auth_pixel_overlay_destroy(ctx);
+		if (ctx->auth_font_visual != NULL)
+		{
+			ncvisual_destroy(ctx->auth_font_visual);
+			ctx->auth_font_visual = NULL;
+		}
 		/* Runs before notcurses_stop() because the menu owns a decoded sprite
 		 * that no plane teardown would release. */
 		render_menu_destroy(ctx);

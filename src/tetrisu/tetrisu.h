@@ -5,6 +5,7 @@
 # include <ctype.h>
 # include <errno.h>
 # include <inttypes.h>
+# include <limits.h>
 # include <poll.h>
 # include <stdint.h>
 # include <stdio.h>
@@ -44,6 +45,12 @@
 # define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
 # define AUTH_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/auth_screen.png"
+# define AUTH_LOGIN_BACKGROUND_PATH \
+	ASSET_DIR "/default_theme/auth_login.png"
+# define AUTH_SIGNUP_BACKGROUND_PATH \
+	ASSET_DIR "/default_theme/auth_signup.png"
+# define AUTH_FONT_ATLAS_PATH \
+	ASSET_DIR "/default_theme/auth_font_atlas.png"
 # define BUNNY_ASSET_PATH \
 	ASSET_DIR "/default_theme/default_bunny_ghost_pointer.png"
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
@@ -71,6 +78,7 @@
 # define APP_TEXT_MAX	64
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
+# define AUTH_OVERLAY_PLANE_MAX	12
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
@@ -607,8 +615,10 @@ typedef struct
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
+	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
+	struct ncvisual		*auth_font_visual;
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
@@ -624,6 +634,8 @@ typedef struct
 	int					bunny_rows;
 	int					bunny_cols;
 	uint64_t			auth_background_signature;
+	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
+	int					auth_overlay_count;
 	tetrisu_pixel_policy_t	pixels;
 }	render_ctx_t;
 
@@ -925,6 +937,8 @@ uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
 void			render_teardown(render_ctx_t *ctx);
 int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
+int				render_background_replace_exact(render_ctx_t *ctx,
+					const char *image_path, bool stretch);
 int				render_background_replace_visual(render_ctx_t *ctx,
 					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(render_ctx_t *ctx);
@@ -981,6 +995,9 @@ void			render_auth_destroy(render_ctx_t *ctx);
 bool			render_auth_pixel_background_refresh(render_ctx_t *ctx,
 					const auth_form_t *form, bool force);
 void			render_auth_pixel_background_reset(render_ctx_t *ctx);
+bool			render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
+					const auth_form_t *form);
+void			render_auth_pixel_overlay_destroy(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
