@@ -7,6 +7,8 @@ static void	log_mix_error(const char *context);
 static void	free_music(audio_ctx_t *audio);
 static bool	start_looping_music(audio_ctx_t *audio, const char *path,
 				int fade_ms);
+static const char	*game_sfx_path(audio_sfx_t sfx);
+static int	game_sfx_volume(audio_sfx_t sfx);
 static void	free_chunk(void **chunk);
 static void	play_chunk(void *chunk);
 
@@ -41,7 +43,7 @@ int	audio_init(audio_ctx_t *audio)
 	}
 	if ((Mix_Init(MIX_INIT_MP3) & MIX_INIT_MP3) == 0)
 		log_mix_error("MP3 decoder init failed");
-	Mix_AllocateChannels(8);
+	Mix_AllocateChannels(16);
 	audio->enabled = 1;
 	Mix_VolumeMusic(audio->music_volume);
 	return (1);
@@ -276,6 +278,55 @@ void	audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
 }
 
 /**
+ * @brief Loads the neutral gameplay clips supplied in General Sounds.
+ *
+ * Localized voice variants and long menu jingles remain available as assets
+ * but are not loaded into the latency-sensitive gameplay bank.
+ *
+ * @param audio Audio context returned by audio_init().
+ */
+void	audio_load_game_sfx(audio_ctx_t *audio)
+{
+#if TETRISU_ENABLE_AUDIO
+	const char	*path;
+	int			index;
+
+	if (audio == NULL || !audio->enabled)
+		return ;
+	index = 0;
+	while (index < AUDIO_SFX_COUNT)
+	{
+		free_chunk(&audio->game_sfx[index]);
+		path = game_sfx_path((audio_sfx_t)index);
+		if (path != NULL)
+			audio->game_sfx[index] = Mix_LoadWAV(path);
+		if (audio->game_sfx[index] != NULL)
+			Mix_VolumeChunk((Mix_Chunk *)audio->game_sfx[index],
+				game_sfx_volume((audio_sfx_t)index));
+		index++;
+	}
+#else
+	(void)audio;
+#endif
+}
+
+/**
+ * @brief Plays one preloaded gameplay effect on a free mixer channel.
+ *
+ * @param audio Audio context returned by audio_init().
+ * @param sfx Effect identifier to play.
+ */
+void	audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx)
+{
+	if (audio == NULL || !audio->enabled
+		|| sfx < 0 || sfx >= AUDIO_SFX_COUNT)
+		return ;
+#if TETRISU_ENABLE_AUDIO
+	play_chunk(audio->game_sfx[sfx]);
+#endif
+}
+
+/**
  * @brief Plays the menu movement sound effect if loaded.
  *
  * @param audio Audio context returned by audio_init().
@@ -372,9 +423,17 @@ void	audio_teardown(audio_ctx_t *audio)
 #if TETRISU_ENABLE_AUDIO
 	if (audio->enabled)
 	{
+		int	index;
+
 		free_music(audio);
 		free_chunk(&audio->menu_move_sfx);
 		free_chunk(&audio->menu_select_sfx);
+		index = 0;
+		while (index < AUDIO_SFX_COUNT)
+		{
+			free_chunk(&audio->game_sfx[index]);
+			index++;
+		}
 		Mix_CloseAudio();
 		Mix_Quit();
 		SDL_Quit();
@@ -442,6 +501,59 @@ static bool	start_looping_music(audio_ctx_t *audio, const char *path,
 	}
 	snprintf(audio->music_path, sizeof(audio->music_path), "%s", path);
 	return (true);
+}
+
+/**
+ * @brief Maps gameplay effect identifiers to the supplied WAV files.
+ *
+ * @param sfx Effect identifier.
+ * @return Asset path, or NULL for an invalid identifier.
+ */
+static const char	*game_sfx_path(audio_sfx_t sfx)
+{
+	static const char	*paths[AUDIO_SFX_COUNT] = {
+		GENERAL_SFX_DIR "/se_game_move.wav",
+		GENERAL_SFX_DIR "/se_game_rotate.wav",
+		GENERAL_SFX_DIR "/se_game_softdrop.wav",
+		GENERAL_SFX_DIR "/se_game_harddrop.wav",
+		GENERAL_SFX_DIR "/se_game_landing.wav",
+		GENERAL_SFX_DIR "/se_game_hold.wav",
+		GENERAL_SFX_DIR "/se_game_single.wav",
+		GENERAL_SFX_DIR "/se_game_double.wav",
+		GENERAL_SFX_DIR "/se_game_triple.wav",
+		GENERAL_SFX_DIR "/se_game_tetris.wav",
+		GENERAL_SFX_DIR "/se_game_perfect.wav",
+		GENERAL_SFX_DIR "/se_game_special.wav",
+		GENERAL_SFX_DIR "/se_game_attack1.wav",
+		GENERAL_SFX_DIR "/se_sys_alert.wav",
+		GENERAL_SFX_DIR "/se_game_count.wav",
+		GENERAL_SFX_DIR "/me_game_start2.wav",
+		GENERAL_SFX_DIR "/se_game_pause.wav",
+		GENERAL_SFX_DIR "/me_game_plvup.wav",
+		GENERAL_SFX_DIR "/me_game_gameover.wav",
+		GENERAL_SFX_DIR "/me_game_iget.wav"
+	};
+
+	if (sfx < 0 || sfx >= AUDIO_SFX_COUNT)
+		return (NULL);
+	return (paths[sfx]);
+}
+
+/**
+ * @brief Returns a restrained per-category effect volume.
+ *
+ * High-frequency movement sounds stay quiet beneath the music; event and
+ * achievement cues use the normal effect level.
+ *
+ * @param sfx Effect identifier.
+ * @return SDL_mixer chunk volume.
+ */
+static int	game_sfx_volume(audio_sfx_t sfx)
+{
+	if (sfx == AUDIO_SFX_MOVE || sfx == AUDIO_SFX_ROTATE
+		|| sfx == AUDIO_SFX_SOFT_DROP)
+		return (AUDIO_SFX_QUIET_VOLUME);
+	return (AUDIO_SFX_NORMAL_VOLUME);
 }
 
 /**

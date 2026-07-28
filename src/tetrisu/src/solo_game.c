@@ -82,6 +82,7 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 	{
 		if (piece_soft_drop(&game->board, &game->active) != BRAIN_OK)
 			return (false);
+		game->pending_events |= SOLO_EVENT_SOFT_DROP;
 		score_add_drop(&game->scoring, 1, false);
 		game->gravity_elapsed_ms = 0;
 		game->lock_elapsed_ms = 0;
@@ -92,6 +93,7 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 		return (false);
 	distance = piece_drop_distance(&game->board, &game->active);
 	piece_hard_drop(&game->board, &game->active);
+	game->pending_events |= SOLO_EVENT_HARD_DROP;
 	score_add_drop(&game->scoring, distance, true);
 	if (distance > 0)
 		game->last_action_was_rotation = false;
@@ -222,6 +224,23 @@ bool	solo_game_update_danger(solo_game_t *game, int elapsed_ms)
 	game->danger_safe_elapsed_ms = 0;
 	game->danger_active = false;
 	return (true);
+}
+
+/**
+ * @brief Returns and clears gameplay events accumulated since the last frame.
+ *
+ * @param game Pointer to the Solo state.
+ * @return Bitmask of solo_event_t values.
+ */
+uint32_t	solo_game_take_events(solo_game_t *game)
+{
+	uint32_t	events;
+
+	if (game == NULL)
+		return (0);
+	events = game->pending_events;
+	game->pending_events = 0;
+	return (events);
 }
 
 /**
@@ -378,7 +397,10 @@ bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
 void	solo_game_toggle_pause(solo_game_t *game)
 {
 	if (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING)
+	{
 		game->paused = !game->paused;
+		game->pending_events |= SOLO_EVENT_PAUSE;
+	}
 }
 
 /**
@@ -415,6 +437,7 @@ static bool	apply_shift(solo_game_t *game, int direction)
 	was_grounded = piece_is_grounded(game);
 	if (piece_move(&game->board, &game->active, direction, 0) != BRAIN_OK)
 		return (false);
+	game->pending_events |= SOLO_EVENT_MOVE;
 	reset_lock_after_move(game, was_grounded);
 	game->last_action_was_rotation = false;
 	return (true);
@@ -472,6 +495,7 @@ static bool	apply_rotation(solo_game_t *game, int direction)
 	if (piece_rotate_with_kick(&game->board, &game->active, direction,
 			&kick_index) != BRAIN_OK)
 		return (false);
+	game->pending_events |= SOLO_EVENT_ROTATE;
 	reset_lock_after_move(game, was_grounded);
 	game->last_action_was_rotation = true;
 	game->last_kick_index = kick_index;
@@ -509,6 +533,7 @@ static bool	apply_hold(solo_game_t *game)
 		spawn_queued_piece(game);
 	}
 	game->hold_used = true;
+	game->pending_events |= SOLO_EVENT_HOLD;
 	return (true);
 }
 
@@ -529,6 +554,7 @@ static void	lock_active_piece(solo_game_t *game)
 		spin = piece_t_spin_type(&game->board, &game->active,
 			game->last_kick_index);
 	piece_stamp(&game->board, &game->active);
+	game->pending_events |= SOLO_EVENT_LOCK;
 	game->hold_used = false;
 	if (piece_touches_top(&game->active))
 	{
@@ -586,6 +612,7 @@ static void	begin_top_out_reveal(solo_game_t *game)
 {
 	game->top_out_elapsed_ms = 0;
 	game->phase = SOLO_TOP_OUT_REVEAL;
+	game->pending_events |= SOLO_EVENT_TOP_OUT;
 }
 
 /**
@@ -724,14 +751,31 @@ static bool	process_due_event(solo_game_t *game)
 static void	finish_line_clear(solo_game_t *game)
 {
 	bool	perfect_clear;
+	int		previous_charge;
+	int		previous_level;
+	int		ability;
 	int		crystals_earned;
 
 	board_clear_lines(&game->board);
 	perfect_clear = board_is_empty(&game->board);
 	remember_score_event(game, game->clear_count, game->pending_spin,
 		perfect_clear);
+	if (perfect_clear)
+		game->pending_events |= SOLO_EVENT_PERFECT_CLEAR;
+	else if (game->clear_count == 1)
+		game->pending_events |= SOLO_EVENT_SINGLE;
+	else if (game->clear_count == 2)
+		game->pending_events |= SOLO_EVENT_DOUBLE;
+	else if (game->clear_count == 3)
+		game->pending_events |= SOLO_EVENT_TRIPLE;
+	else if (game->clear_count == 4)
+		game->pending_events |= SOLO_EVENT_TETRIS;
+	previous_level = game->level;
+	previous_charge = game->crystal_charge;
 	game->total_lines += game->clear_count;
 	game->level = level_from_lines(game->total_lines);
+	if (game->level > previous_level)
+		game->pending_events |= SOLO_EVENT_LEVEL_UP;
 	game->crystal_line_progress += game->clear_count;
 	crystals_earned = game->crystal_line_progress
 		/ SOLO_CRYSTAL_LINES_PER_CHARGE;
@@ -741,6 +785,18 @@ static void	finish_line_clear(solo_game_t *game)
 	{
 		game->crystal_charge = SOLO_CRYSTAL_CAPACITY;
 		game->crystal_line_progress = 0;
+	}
+	ability = SOLO_ABILITY_MIRURUN;
+	while (ability <= SOLO_ABILITY_SIRTET)
+	{
+		if (previous_charge < solo_ability_cost((solo_ability_t)ability)
+			&& game->crystal_charge
+				>= solo_ability_cost((solo_ability_t)ability))
+		{
+			game->pending_events |= SOLO_EVENT_ABILITY_READY;
+			break ;
+		}
+		ability++;
 	}
 	game->clear_count = 0;
 	game->clear_elapsed_ms = 0;

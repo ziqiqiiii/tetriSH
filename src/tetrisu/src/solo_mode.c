@@ -22,6 +22,7 @@ static bool	dispatch_game_key(solo_game_t *game, uint32_t key);
 static bool	apply_handling_actions(solo_game_t *game,
 				solo_handling_state_t *handling,
 				const solo_handling_config_t *config, int elapsed_ms);
+static void	play_solo_events(audio_ctx_t *audio, uint32_t events);
 
 /**
  * @brief Runs the temporary local-authority Solo game loop.
@@ -193,6 +194,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		}
 		if (leave)
 			break ;
+		play_solo_events(audio, solo_game_take_events(&game));
 		if (resize_pending)
 		{
 			solo_handling_reset(&handling);
@@ -523,4 +525,51 @@ static bool	apply_handling_actions(solo_game_t *game,
 		index++;
 	}
 	return (changed);
+}
+
+/**
+ * @brief Plays the supplied WAV mapped to each accumulated gameplay event.
+ *
+ * Hard drops suppress the simultaneous landing clip, and perfect clears
+ * suppress the ordinary line-count clip, keeping layered feedback readable.
+ *
+ * @param audio Active audio context.
+ * @param events Bitmask of solo_event_t values.
+ */
+static void	play_solo_events(audio_ctx_t *audio, uint32_t events)
+{
+	if ((events & SOLO_EVENT_MOVE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_MOVE);
+	if ((events & SOLO_EVENT_ROTATE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_ROTATE);
+	if ((events & SOLO_EVENT_SOFT_DROP) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_SOFT_DROP);
+	if ((events & SOLO_EVENT_HARD_DROP) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_HARD_DROP);
+	else if ((events & SOLO_EVENT_LOCK) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_LANDING);
+	if ((events & SOLO_EVENT_HOLD) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_HOLD);
+	if ((events & SOLO_EVENT_PERFECT_CLEAR) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_PERFECT_CLEAR);
+	else if ((events & SOLO_EVENT_TETRIS) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_TETRIS);
+	else if ((events & SOLO_EVENT_TRIPLE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_TRIPLE);
+	else if ((events & SOLO_EVENT_DOUBLE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_DOUBLE);
+	else if ((events & SOLO_EVENT_SINGLE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_SINGLE);
+	if ((events & SOLO_EVENT_ABILITY_READY) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_ABILITY_READY);
+	if ((events & SOLO_EVENT_ABILITY_ACTIVATED) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_ABILITY_ACTIVATED);
+	if ((events & SOLO_EVENT_ABILITY_REJECTED) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_ABILITY_REJECTED);
+	if ((events & SOLO_EVENT_PAUSE) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_PAUSE);
+	if ((events & SOLO_EVENT_LEVEL_UP) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_LEVEL_UP);
+	if ((events & SOLO_EVENT_TOP_OUT) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_TOP_OUT);
 }

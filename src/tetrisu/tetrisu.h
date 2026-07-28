@@ -62,6 +62,7 @@
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
 # define MENU_SELECT_SFX_PATH	ASSET_DIR "/menu_select.wav"
+# define GENERAL_SFX_DIR	ASSET_DIR "/General Sounds"
 # define MENU_ITEM_COUNT	5
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
@@ -90,6 +91,8 @@
 # define AUDIO_MAX_VOLUME		128
 # define AUDIO_MUSIC_TRANSITION_MS	300
 # define AUDIO_PATH_MAX			512
+# define AUDIO_SFX_QUIET_VOLUME	40
+# define AUDIO_SFX_NORMAL_VOLUME	72
 
 /* UI_NOTIFICATION.C */
 # define UI_NOTIFICATION_STACK_MAX	3
@@ -253,6 +256,31 @@ typedef struct
 	int	selected;
 }	menu_selection_t;
 
+typedef enum e_audio_sfx
+{
+	AUDIO_SFX_MOVE,
+	AUDIO_SFX_ROTATE,
+	AUDIO_SFX_SOFT_DROP,
+	AUDIO_SFX_HARD_DROP,
+	AUDIO_SFX_LANDING,
+	AUDIO_SFX_HOLD,
+	AUDIO_SFX_SINGLE,
+	AUDIO_SFX_DOUBLE,
+	AUDIO_SFX_TRIPLE,
+	AUDIO_SFX_TETRIS,
+	AUDIO_SFX_PERFECT_CLEAR,
+	AUDIO_SFX_ABILITY_READY,
+	AUDIO_SFX_ABILITY_ACTIVATED,
+	AUDIO_SFX_ABILITY_REJECTED,
+	AUDIO_SFX_COUNTDOWN_TICK,
+	AUDIO_SFX_COUNTDOWN_GO,
+	AUDIO_SFX_PAUSE,
+	AUDIO_SFX_LEVEL_UP,
+	AUDIO_SFX_TOP_OUT,
+	AUDIO_SFX_PERSONAL_BEST,
+	AUDIO_SFX_COUNT
+}	audio_sfx_t;
+
 typedef struct
 {
 	int		enabled;
@@ -263,6 +291,7 @@ typedef struct
 	void	*music;
 	void	*menu_move_sfx;
 	void	*menu_select_sfx;
+	void	*game_sfx[AUDIO_SFX_COUNT];
 	char	music_path[AUDIO_PATH_MAX];
 	char	pending_music_path[AUDIO_PATH_MAX];
 }	audio_ctx_t;
@@ -366,6 +395,27 @@ typedef enum e_solo_action
 	SOLO_HOLD
 }	solo_action_t;
 
+typedef enum e_solo_event
+{
+	SOLO_EVENT_MOVE = 1u << 0,
+	SOLO_EVENT_ROTATE = 1u << 1,
+	SOLO_EVENT_SOFT_DROP = 1u << 2,
+	SOLO_EVENT_HARD_DROP = 1u << 3,
+	SOLO_EVENT_LOCK = 1u << 4,
+	SOLO_EVENT_HOLD = 1u << 5,
+	SOLO_EVENT_SINGLE = 1u << 6,
+	SOLO_EVENT_DOUBLE = 1u << 7,
+	SOLO_EVENT_TRIPLE = 1u << 8,
+	SOLO_EVENT_TETRIS = 1u << 9,
+	SOLO_EVENT_PERFECT_CLEAR = 1u << 10,
+	SOLO_EVENT_ABILITY_READY = 1u << 11,
+	SOLO_EVENT_ABILITY_ACTIVATED = 1u << 12,
+	SOLO_EVENT_ABILITY_REJECTED = 1u << 13,
+	SOLO_EVENT_PAUSE = 1u << 14,
+	SOLO_EVENT_LEVEL_UP = 1u << 15,
+	SOLO_EVENT_TOP_OUT = 1u << 16
+}	solo_event_t;
+
 typedef struct s_solo_handling_config
 {
 	int	das_ms;
@@ -440,6 +490,7 @@ typedef struct s_solo_game
 	int				clear_elapsed_ms;
 	int				top_out_elapsed_ms;
 	int				danger_safe_elapsed_ms;
+	uint32_t		pending_events;
 	int				lock_resets;
 	int				last_kick_index;
 	bool			last_action_was_rotation;
@@ -593,6 +644,8 @@ void			audio_play_once(audio_ctx_t *audio, const char *path);
 void			audio_stop_music(audio_ctx_t *audio);
 void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
 					const char *select_path);
+void			audio_load_game_sfx(audio_ctx_t *audio);
+void			audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx);
 void			audio_play_menu_move(audio_ctx_t *audio);
 void			audio_play_menu_select(audio_ctx_t *audio);
 void			audio_set_music_volume(audio_ctx_t *audio, int volume);
@@ -605,6 +658,7 @@ void			solo_game_init(solo_game_t *game, uint32_t seed);
 bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
 bool			solo_game_update(solo_game_t *game, int elapsed_ms);
 bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
+uint32_t		solo_game_take_events(solo_game_t *game);
 int				solo_game_next_wake_ms(const solo_game_t *game);
 int				solo_clear_duration_ms(int level);
 t_piece			solo_game_ghost(const solo_game_t *game);

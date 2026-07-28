@@ -218,6 +218,10 @@ static solo_ability_result_t	remember_ability_result(solo_game_t *game,
 	game->last_ability = ability;
 	game->ability_result = result;
 	game->ability_feedback_elapsed_ms = 0;
+	if (result == SOLO_ABILITY_RESULT_ACTIVATED)
+		game->pending_events |= SOLO_EVENT_ABILITY_ACTIVATED;
+	else if (result != SOLO_ABILITY_RESULT_INVALID)
+		game->pending_events |= SOLO_EVENT_ABILITY_REJECTED;
 	return (result);
 }
 

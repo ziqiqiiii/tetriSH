@@ -30,6 +30,7 @@ int	main(void)
 	audio_set_music_volume(&audio, HOME_BGM_START_VOLUME);
 	audio_play_music(&audio, HOME_BGM_PATH);
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
+	audio_load_game_sfx(&audio);
 	state = APP_MAIN_MENU;
 	render_menu_create(&ctx);
 	enable_home_mouse(&ctx);

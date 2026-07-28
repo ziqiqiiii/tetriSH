@@ -23,6 +23,7 @@ static void	test_clear_animation_wakes_at_visual_boundaries(void);
 static void	test_pause_freezes_active_and_clear_timers(void);
 static void	test_clear_animation_then_level_and_meter_update(void);
 static void	test_danger_state_has_stable_exit_hysteresis(void);
+static void	test_gameplay_events_are_one_shot(void);
 static void	test_rotation_stress_preserves_valid_state(void);
 static int	filled_cells(const t_board *board);
 static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed);
@@ -58,6 +59,7 @@ int	main(void)
 	test_pause_freezes_active_and_clear_timers();
 	test_clear_animation_then_level_and_meter_update();
 	test_danger_state_has_stable_exit_hysteresis();
+	test_gameplay_events_are_one_shot();
 	test_rotation_stress_preserves_valid_state();
 	return (0);
 }
@@ -692,6 +694,46 @@ static void	test_danger_state_has_stable_exit_hysteresis(void)
 	assert(solo_game_update_danger(&game, 1));
 	assert(!game.danger_active);
 	printf("PASS test_danger_state_has_stable_exit_hysteresis\n");
+}
+
+/**
+ * @brief Exercises one-shot action, clear, pause, and ability event delivery.
+ */
+static void	test_gameplay_events_are_one_shot(void)
+{
+	solo_game_t	game;
+	uint32_t	events;
+
+	solo_game_init(&game, 800u);
+	assert(solo_game_take_events(&game) == 0);
+	assert(solo_game_apply_action(&game, SOLO_HOLD));
+	assert(solo_game_take_events(&game) == SOLO_EVENT_HOLD);
+	assert(solo_game_take_events(&game) == 0);
+	assert(solo_game_apply_action(&game, SOLO_ROTATE_CW));
+	assert(solo_game_take_events(&game) == SOLO_EVENT_ROTATE);
+	assert(solo_game_apply_action(&game, SOLO_HARD_DROP));
+	events = solo_game_take_events(&game);
+	assert((events & SOLO_EVENT_HARD_DROP) != 0);
+	assert((events & SOLO_EVENT_LOCK) != 0);
+	prepare_single_line_clear(&game, 801u);
+	(void)solo_game_take_events(&game);
+	assert(solo_game_update(&game, solo_clear_duration_ms(game.level)));
+	assert((solo_game_take_events(&game) & SOLO_EVENT_SINGLE) != 0);
+	solo_game_toggle_pause(&game);
+	assert((solo_game_take_events(&game) & SOLO_EVENT_PAUSE) != 0);
+	solo_game_toggle_pause(&game);
+	(void)solo_game_take_events(&game);
+	game.crystal_charge = solo_ability_cost(SOLO_ABILITY_MIRURUN);
+	assert(solo_game_activate_ability(&game, SOLO_ABILITY_MIRURUN)
+		== SOLO_ABILITY_RESULT_ACTIVATED);
+	assert((solo_game_take_events(&game)
+			& SOLO_EVENT_ABILITY_ACTIVATED) != 0);
+	game.crystal_charge = 0;
+	assert(solo_game_activate_ability(&game, SOLO_ABILITY_MIRURUN)
+		== SOLO_ABILITY_RESULT_NO_CHARGE);
+	assert((solo_game_take_events(&game)
+			& SOLO_EVENT_ABILITY_REJECTED) != 0);
+	printf("PASS test_gameplay_events_are_one_shot\n");
 }
 
 /**

@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 continues with event-driven retro sound
-effects in item 10.
+Phases 1 and 2 are complete. Phase 3 continues with persistent offline
+personal bests in item 11.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -51,6 +51,9 @@ effects in item 10.
 - Normal music now uses the supplied techno track. Settled blocks reaching
   rows 0–3 transition into the supplied phonk danger track; returning below
   row 5 for 1.5 seconds restores techno through a non-blocking 300 ms fade.
+- Item 10 maps the supplied General Sounds WAV bank through one-shot gameplay
+  events. Single, double, triple, Tetris, perfect clear, movement, drops, HOLD,
+  abilities, pause, level-up, and top-out each have distinct restrained cues.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -147,12 +150,16 @@ effects in item 10.
      badge beside the crisp native-text card. WezTerm compatibility mode keeps
      the terminal-only fallback; score events remain independent underneath.
 
-10. **Add event-driven retro sound effects**
+10. **Add event-driven retro sound effects** — complete
 
-    - Events: HOLD, normal clear, Tetris, perfect clear, ability ready,
-      activated, rejected, countdown tick/go, top-out, and personal best.
-    - Generate concise retro waveforms in memory; retain the silent fallback
-      when SDL audio is unavailable.
+    - Dedicated supplied WAVs cover movement, rotation, drops, landing, HOLD,
+      single, double, triple, Tetris, perfect clear, ability ready, activated,
+      rejected, pause, level-up, and top-out.
+    - Countdown tick/go and personal-best clips are preloaded for their future
+      screens and events.
+    - One-shot gameplay event bits prevent polling and duplicate playback.
+    - Frequent movement cues use a quieter mix than clears and achievements.
+    - SDL audio remains optional; missing audio retains the silent fallback.
 
 11. **Add persistent offline personal bests**
 
