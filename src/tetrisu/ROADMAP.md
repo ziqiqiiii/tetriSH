@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 begins with screen navigation and
-typed view models in item 15.
+Phases 1 through 3 are complete. Phase 4 continues with the login, sign-up,
+and offline entry screens in item 16.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -67,6 +67,11 @@ typed view models in item 15.
   and the same flat tint works in Kitty and compatibility mode.
 - Home navigation and confirmation now use short, low-volume clips from the
   supplied General Sounds pack instead of missing placeholder paths.
+- Item 15 replaces the splash/home/quit-only state enum with a validated
+  fourteen-screen graph. Typed authentication, profile, catalogue,
+  leaderboard, lobby, room, and match models sit behind a provider interface;
+  deterministic fixture-backed scaffolds are visibly marked
+  `LOCAL UI PREVIEW`.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -218,13 +223,16 @@ typed view models in item 15.
 
 ## Phase 4 — screen framework and UI-first app flow
 
-15. **Add screen navigation and typed view models**
+15. **Add screen navigation and typed view models** — complete
 
     - States: entry, login, sign-up, home, Solo, marketplace, settings,
       leaderboard, lobby, create-room modal, waiting room, Double, Battle
       Royale, quit.
     - Provider interface for authentication, profile, catalogue, leaderboard,
       and room data, with marked local fixtures for UI work.
+    - Invalid cross-screen jumps are rejected, Back destinations are explicit,
+      and every state has a native-terminal scaffold pending its dedicated
+      screen item.
 
 16. **Add login, sign-up, and offline entry screens**
 

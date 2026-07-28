@@ -3,36 +3,118 @@
 // Static Variables
 static char	g_stub_buf[64];
 
+// Static Functions
+static bool	navigation_target(const app_navigation_t *navigation,
+				app_nav_action_t action, app_screen_t *target);
+
 /**
- * @brief Computes the next app_state_t given the current one and a keycode.
- *
- * The only two state-level transitions are: APP_SPLASH advances to
- * APP_MAIN_MENU on any key, and APP_MAIN_MENU advances to APP_QUIT on 'q'.
- * Menu selection movement (arrow keys) is handled separately by
- * menu_move_selection() and never changes app_state_t.
- *
- * @param current The current application state.
- * @param key The key code just read from render_wait_key() (a Unicode
- * codepoint, an NCKEY_* constant, or (uint32_t)-1 on input error/EOF).
- * @return The next application state.
+ * @brief Initializes the application navigation state.
  */
-app_state_t	app_handle_key(app_state_t current, uint32_t key)
+void	app_navigation_init(app_navigation_t *navigation,
+	app_screen_t initial)
 {
-	if (current == APP_SPLASH)
-		return (APP_MAIN_MENU);
-	if (current == APP_MAIN_MENU && key == 'q')
-		return (APP_QUIT);
+	if (navigation == NULL)
+		return ;
+	if (initial < APP_SCREEN_ENTRY || initial >= APP_SCREEN_COUNT)
+		initial = APP_SCREEN_ENTRY;
+	navigation->current = initial;
+	navigation->previous = initial;
+	navigation->offline = false;
+}
+
+/**
+ * @brief Applies one validated screen transition.
+ *
+ * Invalid routes are rejected rather than silently jumping between unrelated
+ * screens. This keeps future renderers and network adapters on the same state
+ * graph.
+ */
+bool	app_navigation_dispatch(app_navigation_t *navigation,
+	app_nav_action_t action)
+{
+	app_screen_t	target;
+
+	if (navigation == NULL
+		|| !navigation_target(navigation, action, &target))
+		return (false);
+	if (action == APP_NAV_PLAY_OFFLINE)
+		navigation->offline = true;
+	else if (action == APP_NAV_AUTHENTICATED)
+		navigation->offline = false;
+	else if (target == APP_SCREEN_ENTRY)
+		navigation->offline = false;
+	navigation->previous = navigation->current;
+	navigation->current = target;
+	return (true);
+}
+
+/**
+ * @brief Returns the deterministic Back destination for one screen.
+ */
+app_screen_t	app_screen_parent(app_screen_t screen)
+{
+	if (screen == APP_SCREEN_LOGIN || screen == APP_SCREEN_SIGN_UP
+		|| screen == APP_SCREEN_HOME)
+		return (APP_SCREEN_ENTRY);
+	if (screen == APP_SCREEN_SOLO || screen == APP_SCREEN_MARKETPLACE
+		|| screen == APP_SCREEN_SETTINGS || screen == APP_SCREEN_LEADERBOARD
+		|| screen == APP_SCREEN_LOBBY)
+		return (APP_SCREEN_HOME);
+	if (screen == APP_SCREEN_CREATE_ROOM_MODAL
+		|| screen == APP_SCREEN_WAITING_ROOM)
+		return (APP_SCREEN_LOBBY);
+	if (screen == APP_SCREEN_DOUBLE
+		|| screen == APP_SCREEN_BATTLE_ROYALE)
+		return (APP_SCREEN_WAITING_ROOM);
+	return (screen);
+}
+
+/**
+ * @brief Returns the reader-facing name for one application screen.
+ */
+const char	*app_screen_name(app_screen_t screen)
+{
+	static const char	*names[APP_SCREEN_COUNT] = {
+		"Entry",
+		"Login",
+		"Sign Up",
+		"Home",
+		"Solo",
+		"Marketplace",
+		"Settings",
+		"Leaderboard",
+		"Multiplayer Lobby",
+		"Create Room",
+		"Waiting Room",
+		"Double",
+		"Battle Royale",
+		"Quit"
+	};
+
+	if (screen < APP_SCREEN_ENTRY || screen >= APP_SCREEN_COUNT)
+		return ("Unknown");
+	return (names[screen]);
+}
+
+/**
+ * @brief Handles universal keyboard navigation without rendering concerns.
+ */
+app_screen_t	app_handle_key(app_screen_t current, uint32_t key)
+{
+	if (key == 'q' || key == 'Q')
+		return (APP_SCREEN_QUIT);
+	if (key == NCKEY_ESC)
+		return (app_screen_parent(current));
 	return (current);
 }
 
 /**
  * @brief Moves the menu selection up or down, wrapping at the ends.
- *
- * @param m Pointer to the selection state to update.
- * @param key The key just read; only NCKEY_UP and NCKEY_DOWN have any effect.
  */
 void	menu_move_selection(menu_selection_t *m, uint32_t key)
 {
+	if (m == NULL)
+		return ;
 	if (key == NCKEY_UP)
 		m->selected = (m->selected + MENU_ITEM_COUNT - 1) % MENU_ITEM_COUNT;
 	else if (key == NCKEY_DOWN)
@@ -41,19 +123,15 @@ void	menu_move_selection(menu_selection_t *m, uint32_t key)
 
 /**
  * @brief Returns the fixed-order label for a menu item.
- *
- * @param index Menu item index, 0 to MENU_ITEM_COUNT - 1.
- * @return The item's label, or an empty string if index is out of range.
  */
 const char	*menu_item_label(int index)
 {
-	static const char	*labels[MENU_ITEM_COUNT] =
-	{
+	static const char	*labels[MENU_ITEM_COUNT] = {
 		"Single Player",
 		"Multiplayer",
 		"Marketplace",
 		"Leaderboard",
-		"Settings",
+		"Settings"
 	};
 
 	if (index < 0 || index >= MENU_ITEM_COUNT)
@@ -62,15 +140,65 @@ const char	*menu_item_label(int index)
 }
 
 /**
- * @brief Builds the "not wired up yet" stub message for a menu item.
- *
- * @param selected_index Index of the selected menu item.
- * @return Pointer to an internal static buffer holding the message; valid
- * until the next call to this function.
+ * @brief Builds a temporary message for a scaffolded home destination.
  */
 const char	*menu_stub_text(int selected_index)
 {
-	snprintf(g_stub_buf, sizeof(g_stub_buf), "[%s] not wired up yet",
+	snprintf(g_stub_buf, sizeof(g_stub_buf), "[%s] screen ready",
 		menu_item_label(selected_index));
 	return (g_stub_buf);
+}
+
+/**
+ * @brief Resolves only routes allowed by the item-15 screen graph.
+ */
+static bool	navigation_target(const app_navigation_t *navigation,
+	app_nav_action_t action, app_screen_t *target)
+{
+	app_screen_t	current;
+
+	current = navigation->current;
+	if (action == APP_NAV_QUIT && current != APP_SCREEN_QUIT)
+		*target = APP_SCREEN_QUIT;
+	else if (action == APP_NAV_BACK && app_screen_parent(current) != current)
+		*target = app_screen_parent(current);
+	else if (action == APP_NAV_OPEN_LOGIN && current == APP_SCREEN_ENTRY)
+		*target = APP_SCREEN_LOGIN;
+	else if (action == APP_NAV_OPEN_SIGN_UP && current == APP_SCREEN_ENTRY)
+		*target = APP_SCREEN_SIGN_UP;
+	else if (action == APP_NAV_PLAY_OFFLINE
+		&& (current == APP_SCREEN_ENTRY || current == APP_SCREEN_LOGIN
+			|| current == APP_SCREEN_SIGN_UP))
+		*target = APP_SCREEN_HOME;
+	else if (action == APP_NAV_AUTHENTICATED
+		&& (current == APP_SCREEN_LOGIN || current == APP_SCREEN_SIGN_UP))
+		*target = APP_SCREEN_HOME;
+	else if (action == APP_NAV_OPEN_SOLO && current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_SOLO;
+	else if (action == APP_NAV_OPEN_MARKETPLACE
+		&& current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_MARKETPLACE;
+	else if (action == APP_NAV_OPEN_SETTINGS && current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_SETTINGS;
+	else if (action == APP_NAV_OPEN_LEADERBOARD
+		&& current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_LEADERBOARD;
+	else if (action == APP_NAV_OPEN_LOBBY && current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_LOBBY;
+	else if (action == APP_NAV_OPEN_CREATE_ROOM
+		&& current == APP_SCREEN_LOBBY)
+		*target = APP_SCREEN_CREATE_ROOM_MODAL;
+	else if (action == APP_NAV_OPEN_WAITING_ROOM
+		&& (current == APP_SCREEN_LOBBY
+			|| current == APP_SCREEN_CREATE_ROOM_MODAL))
+		*target = APP_SCREEN_WAITING_ROOM;
+	else if (action == APP_NAV_START_DOUBLE
+		&& current == APP_SCREEN_WAITING_ROOM)
+		*target = APP_SCREEN_DOUBLE;
+	else if (action == APP_NAV_START_BATTLE_ROYALE
+		&& current == APP_SCREEN_WAITING_ROOM)
+		*target = APP_SCREEN_BATTLE_ROYALE;
+	else
+		return (false);
+	return (true);
 }

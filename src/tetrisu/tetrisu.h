@@ -66,6 +66,11 @@
 	ASSET_DIR "/General Sounds/se_sys_dialog.wav"
 # define GENERAL_SFX_DIR	ASSET_DIR "/General Sounds"
 # define MENU_ITEM_COUNT	5
+# define APP_TEXT_MAX	64
+# define APP_CATALOGUE_MAX_ITEMS	8
+# define APP_LEADERBOARD_MAX_ENTRIES	10
+# define APP_LOBBY_MAX_ROOMS	8
+# define APP_ROOM_MAX_PLAYERS	8
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
@@ -244,12 +249,212 @@
 # define SOLO_ABILITY_HITBOX_HALF_WIDTH	20
 # define SOLO_ABILITY_HITBOX_HALF_HEIGHT	20
 
-typedef enum
+typedef enum e_app_screen
 {
-	APP_SPLASH,
-	APP_MAIN_MENU,
-	APP_QUIT,
-}	app_state_t;
+	APP_SCREEN_ENTRY,
+	APP_SCREEN_LOGIN,
+	APP_SCREEN_SIGN_UP,
+	APP_SCREEN_HOME,
+	APP_SCREEN_SOLO,
+	APP_SCREEN_MARKETPLACE,
+	APP_SCREEN_SETTINGS,
+	APP_SCREEN_LEADERBOARD,
+	APP_SCREEN_LOBBY,
+	APP_SCREEN_CREATE_ROOM_MODAL,
+	APP_SCREEN_WAITING_ROOM,
+	APP_SCREEN_DOUBLE,
+	APP_SCREEN_BATTLE_ROYALE,
+	APP_SCREEN_QUIT,
+	APP_SCREEN_COUNT
+}	app_screen_t;
+
+typedef enum e_app_nav_action
+{
+	APP_NAV_NONE,
+	APP_NAV_OPEN_LOGIN,
+	APP_NAV_OPEN_SIGN_UP,
+	APP_NAV_PLAY_OFFLINE,
+	APP_NAV_AUTHENTICATED,
+	APP_NAV_OPEN_SOLO,
+	APP_NAV_OPEN_MARKETPLACE,
+	APP_NAV_OPEN_SETTINGS,
+	APP_NAV_OPEN_LEADERBOARD,
+	APP_NAV_OPEN_LOBBY,
+	APP_NAV_OPEN_CREATE_ROOM,
+	APP_NAV_OPEN_WAITING_ROOM,
+	APP_NAV_START_DOUBLE,
+	APP_NAV_START_BATTLE_ROYALE,
+	APP_NAV_BACK,
+	APP_NAV_QUIT
+}	app_nav_action_t;
+
+typedef enum e_app_data_status
+{
+	APP_DATA_IDLE,
+	APP_DATA_LOADING,
+	APP_DATA_READY,
+	APP_DATA_EMPTY,
+	APP_DATA_UNAVAILABLE,
+	APP_DATA_ERROR
+}	app_data_status_t;
+
+typedef enum e_app_provider_result
+{
+	APP_PROVIDER_OK,
+	APP_PROVIDER_EMPTY,
+	APP_PROVIDER_UNAVAILABLE,
+	APP_PROVIDER_INVALID,
+	APP_PROVIDER_ERROR
+}	app_provider_result_t;
+
+typedef enum e_app_catalogue_kind
+{
+	APP_CATALOGUE_CHARACTERS,
+	APP_CATALOGUE_THEMES
+}	app_catalogue_kind_t;
+
+typedef enum e_app_game_mode
+{
+	APP_GAME_MODE_NONE,
+	APP_GAME_MODE_DOUBLE,
+	APP_GAME_MODE_BATTLE_ROYALE
+}	app_game_mode_t;
+
+typedef struct s_app_navigation
+{
+	app_screen_t	current;
+	app_screen_t	previous;
+	bool			offline;
+}	app_navigation_t;
+
+typedef struct s_app_auth_view_model
+{
+	bool	signed_in;
+	char	username[APP_TEXT_MAX];
+	char	message[APP_TEXT_MAX];
+}	app_auth_view_model_t;
+
+typedef struct s_app_profile_view_model
+{
+	bool		signed_in;
+	char		username[APP_TEXT_MAX];
+	char		character[APP_TEXT_MAX];
+	char		theme[APP_TEXT_MAX];
+	uint64_t	score;
+	int			wallet_points;
+	int			rank;
+}	app_profile_view_model_t;
+
+typedef struct s_app_catalogue_item_view_model
+{
+	char	id[APP_TEXT_MAX];
+	char	name[APP_TEXT_MAX];
+	int		price;
+	bool	owned;
+	bool	equipped;
+}	app_catalogue_item_view_model_t;
+
+typedef struct s_app_catalogue_view_model
+{
+	app_catalogue_kind_t			kind;
+	int							count;
+	app_catalogue_item_view_model_t	items[APP_CATALOGUE_MAX_ITEMS];
+}	app_catalogue_view_model_t;
+
+typedef struct s_app_leaderboard_entry_view_model
+{
+	int			position;
+	char		username[APP_TEXT_MAX];
+	uint64_t	score;
+}	app_leaderboard_entry_view_model_t;
+
+typedef struct s_app_leaderboard_view_model
+{
+	int								count;
+	app_leaderboard_entry_view_model_t	entries[
+		APP_LEADERBOARD_MAX_ENTRIES];
+}	app_leaderboard_view_model_t;
+
+typedef struct s_app_room_summary_view_model
+{
+	char			id[APP_TEXT_MAX];
+	char			owner[APP_TEXT_MAX];
+	app_game_mode_t	mode;
+	int				players;
+	int				capacity;
+}	app_room_summary_view_model_t;
+
+typedef struct s_app_lobby_view_model
+{
+	int							count;
+	app_room_summary_view_model_t	rooms[APP_LOBBY_MAX_ROOMS];
+}	app_lobby_view_model_t;
+
+typedef struct s_app_room_player_view_model
+{
+	char	username[APP_TEXT_MAX];
+	bool	owner;
+	bool	ready;
+}	app_room_player_view_model_t;
+
+typedef struct s_app_room_view_model
+{
+	char						id[APP_TEXT_MAX];
+	app_game_mode_t				mode;
+	int							required_players;
+	int							player_count;
+	app_room_player_view_model_t	players[APP_ROOM_MAX_PLAYERS];
+}	app_room_view_model_t;
+
+typedef struct s_app_match_view_model
+{
+	char			room_id[APP_TEXT_MAX];
+	app_game_mode_t	mode;
+	int				player_count;
+	char			status[APP_TEXT_MAX];
+}	app_match_view_model_t;
+
+typedef union u_app_screen_data
+{
+	app_auth_view_model_t			auth;
+	app_profile_view_model_t		profile;
+	app_catalogue_view_model_t		catalogue;
+	app_leaderboard_view_model_t	leaderboard;
+	app_lobby_view_model_t			lobby;
+	app_room_view_model_t			room;
+	app_match_view_model_t			match;
+}	app_screen_data_t;
+
+typedef struct s_app_screen_view_model
+{
+	app_screen_t		screen;
+	app_data_status_t	status;
+	bool				local_preview;
+	char				title[APP_TEXT_MAX];
+	char				subtitle[APP_TEXT_MAX];
+	app_screen_data_t	data;
+}	app_screen_view_model_t;
+
+typedef struct s_app_data_provider
+{
+	const char	*name;
+	bool		local_fixtures;
+	void		*userdata;
+	app_provider_result_t	(*login)(void *userdata, const char *username,
+			const char *password, app_auth_view_model_t *view);
+	app_provider_result_t	(*sign_up)(void *userdata, const char *username,
+			const char *password, app_auth_view_model_t *view);
+	app_provider_result_t	(*load_profile)(void *userdata,
+			app_profile_view_model_t *view);
+	app_provider_result_t	(*load_catalogue)(void *userdata,
+			app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
+	app_provider_result_t	(*load_leaderboard)(void *userdata,
+			app_leaderboard_view_model_t *view);
+	app_provider_result_t	(*load_lobby)(void *userdata,
+			app_lobby_view_model_t *view);
+	app_provider_result_t	(*load_room)(void *userdata, const char *room_id,
+			app_room_view_model_t *view);
+}	app_data_provider_t;
 
 typedef enum e_tetrisu_renderer_mode
 {
@@ -336,6 +541,7 @@ typedef struct
 	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
+	struct ncplane		*screen_plane;
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
 	struct ncplane		*compatibility_plane;
@@ -598,10 +804,24 @@ typedef struct s_solo_render
 }	solo_render_t;
 
 /* APP_STATE.C */
-app_state_t		app_handle_key(app_state_t current, uint32_t key);
+void			app_navigation_init(app_navigation_t *navigation,
+					app_screen_t initial);
+bool			app_navigation_dispatch(app_navigation_t *navigation,
+					app_nav_action_t action);
+app_screen_t	app_screen_parent(app_screen_t screen);
+const char		*app_screen_name(app_screen_t screen);
+app_screen_t	app_handle_key(app_screen_t current, uint32_t key);
 void			menu_move_selection(menu_selection_t *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
+
+/* APP_PROVIDER.C */
+void			app_fixture_provider_init(app_data_provider_t *provider);
+app_provider_result_t	app_screen_view_load(
+					const app_data_provider_t *provider,
+					app_screen_t screen, app_screen_view_model_t *view);
+const char		*app_data_status_name(app_data_status_t status);
+const char		*app_game_mode_name(app_game_mode_t mode);
 
 /* UI_NOTIFICATION.C */
 void			ui_notification_stack_init(ui_notification_stack_t *stack);
@@ -661,6 +881,11 @@ void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
 void			render_menu_destroy(render_ctx_t *ctx);
 struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
 int				render_menu_label_y(const render_ctx_t *ctx, int index);
+
+/* RENDER_SCREEN.C */
+bool			render_screen_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view);
+void			render_screen_destroy(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,

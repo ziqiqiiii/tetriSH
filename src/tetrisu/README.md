@@ -209,6 +209,10 @@ and graphics-protocol support at startup. It exits with
 | `Enter` | Select the highlighted item |
 | Mouse hover | Highlight the menu item under the pointer |
 | Left click | Select the menu item under the pointer |
+| `Esc` | Return to the parent screen |
+| `L` / `S` / `O` on Entry | Open Login / Sign Up / play offline |
+| `Enter` in Lobby/Create Room | Open the next room-flow scaffold |
+| `D` / `B` in Waiting Room | Open Double / Battle Royale scaffold |
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
@@ -228,8 +232,10 @@ and graphics-protocol support at startup. It exits with
 | `R` | Restart after top-out |
 | `Esc` or `Q` | Return from Solo to the home screen |
 
-Single Player opens the playable local mode. The other four menu items still
-print a `[<item>] not wired up yet` message.
+Single Player opens the playable local mode. The other home actions enter
+native-terminal screen scaffolds backed by deterministic typed fixture data.
+Fixture-backed screens are visibly labelled `LOCAL UI PREVIEW`; their complete
+layouts and interactions land in the subsequent roadmap items.
 
 ---
 
@@ -238,10 +244,10 @@ print a `[<item>] not wired up yet` message.
 | Item | Status |
 |---|---|
 | `Single Player` | Playable local Endless mode; can remain as offline play |
-| `Multiplayer` | Stub — prints "not wired up yet" |
-| `Marketplace` | Stub — prints "not wired up yet" |
-| `Leaderboard` | Stub — prints "not wired up yet" |
-| `Settings` | Stub — prints "not wired up yet" |
+| `Multiplayer` | Navigable lobby/create/waiting/match scaffolds |
+| `Marketplace` | Typed fixture-backed scaffold |
+| `Leaderboard` | Typed fixture-backed scaffold |
+| `Settings` | Typed profile/settings scaffold |
 
 ---
 
@@ -289,12 +295,13 @@ render_intro_play          stream INTRO_VIDEO_PATH; skippable, best-effort audio
 render_menu_create         draw the bunny selector over the background
      │
      ▼
-  input loop               render_wait_key → dispatch:
+  screen loop              render_wait_input → validated navigation:
      ├── ↑/↓   menu_move_selection + render_menu_move_bunny + move SFX
      ├── Enter Single Player -> solo_mode_run -> return to menu
-     ├── Enter other item -> menu_stub_text + render_menu_show_message
+     ├── Enter other item -> typed LOCAL UI PREVIEW scaffold
+     ├── Esc    explicit parent screen
      ├── +/-   audio_volume_up / audio_volume_down
-     └── q     APP_QUIT
+     └── q     APP_SCREEN_QUIT
 ```
 
 Modules (each a `.c` under `src/`):
@@ -302,11 +309,13 @@ Modules (each a `.c` under `src/`):
 | File | Responsibility |
 |---|---|
 | `main.c` | Entry point; wires render + audio and runs the input loop |
-| `app_state.c` | Handle pure menu state, selection, and labels |
+| `app_state.c` | Validate the complete screen graph, Back routes, menu state, and labels |
+| `app_provider.c` | Typed screen models and marked local fixture provider |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
 | `renderer_policy.c` | renderer environment parsing and forced compatibility policy |
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
+| `render_screen.c` | Shared native-terminal scaffold for future dedicated screens |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
 | `solo_abilities.c` | Mirurun metadata, charge spending, board transform, and mouse geometry |
@@ -314,8 +323,9 @@ Modules (each a `.c` under `src/`):
 | `render_solo_canvas.c` | Load assets and compose pixel-perfect HUD/board canvases |
 | `solo_mode.c` | Run the poll-driven local Solo input and render loop |
 
-`app_state.c` is pure logic with no rendering or audio dependencies. It joins
-`solo_game.c` in `obj/logic.a`, which unit tests link without notcurses or SDL.
+`app_state.c` and `app_provider.c` are pure logic with no rendering or audio
+dependencies. They join `solo_game.c` in `obj/logic.a`, which unit tests link
+without notcurses or SDL.
 
 ---
 
@@ -325,11 +335,13 @@ Modules (each a `.c` under `src/`):
 tetrisu/
 ├── src/
 │   ├── main.c                 Entry point + input loop → bin/tetrisu
-│   ├── app_state.c            Pure menu/state logic → logic.a (unit-tested)
+│   ├── app_state.c            Pure validated screen graph → logic.a
+│   ├── app_provider.c         Typed models + local fixture provider
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── renderer_policy.c      Renderer environment and compatibility policy
 │   ├── render_intro.c         Splash video streamer
 │   ├── render_menu.c          Bunny selector + messages
+│   ├── render_screen.c        Native-terminal screen scaffold
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
 │   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition
 │   ├── solo_mode.c            Poll-driven local Solo loop
