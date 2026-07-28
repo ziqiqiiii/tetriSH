@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 continues with restrained event
-animation in item 12.
+Phases 1 and 2 are complete. Phase 3 continues with the no-glow danger
+presentation in item 13.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -58,6 +58,10 @@ animation in item 12.
 - Item 11 persists only completed Solo top-out best scores in a versioned,
   atomically replaced local state file. A new best gets a brief terminal-safe
   pulse/fade and its own achievement cue.
+- Item 12 adds restrained 30 FPS-only event presentation: an input-gated
+  3-2-1-GO countdown, fading clear awards, newly-ready ability marker pulses,
+  activation-result fades, and the existing personal-best pulse. Every effect
+  changes tint or opacity only; none moves, shakes, blooms, or glows.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -176,12 +180,16 @@ animation in item 12.
       corrupt, missing, or unwritable state safely behaves like an empty
       profile.
 
-12. **Add restrained event animation**
+12. **Add restrained event animation** — complete
 
     - Pulses/fades for clears, perfect clears, ability-ready transitions,
       activation results, countdown, and personal best.
     - Render at 30 FPS only while an animation is active.
     - No bloom or glow.
+    - Countdown blocks movement and abilities until `GO`, and emits the
+      preloaded tick/GO cues.
+    - Kitty bitmap regions and compatibility-mode cell regions share the same
+      timer-derived opacity and dirty signatures.
 
 13. **Add no-glow danger presentation**
 

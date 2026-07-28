@@ -75,6 +75,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	}
 	solo_game_init(&game, new_game_seed());
 	solo_game_set_personal_best(&game, solo_best_load());
+	solo_game_start_countdown(&game);
+	play_solo_events(audio, solo_game_take_events(&game));
 	handling_config = solo_handling_default_config();
 	solo_handling_reset(&handling);
 	render_solo_create(ctx, &solo);
@@ -90,7 +92,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 	{
 		display_ready = solo_display_ready(&solo);
 		wake_ms = display_ready ? solo_game_next_wake_ms(&game) : -1;
-		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
+		if (display_ready && !game.paused && !game.countdown_active
+			&& game.phase == SOLO_ACTIVE)
 		{
 			handling_wake_ms = solo_handling_next_wake_ms(&handling,
 					&handling_config, gravity_interval_ms(game.level));
@@ -160,7 +163,8 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
 		}
 		needs_draw = solo_popover_update(&solo, &game, elapsed_ms)
 			|| needs_draw;
-		if (display_ready && !game.paused && game.phase == SOLO_ACTIVE)
+		if (display_ready && !game.paused && !game.countdown_active
+			&& game.phase == SOLO_ACTIVE)
 			needs_draw = apply_handling_actions(&game, &handling,
 					&handling_config, elapsed_ms) || needs_draw;
 		resize_pending = render_terminal_geometry_changed(ctx);
@@ -376,7 +380,8 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 				display_ready, *resize_pending, state_changed));
 	if (key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_DOWN)
 	{
-		if (game->paused || game->phase != SOLO_ACTIVE
+		if (game->paused || game->countdown_active
+			|| game->phase != SOLO_ACTIVE
 			|| !display_ready || *resize_pending)
 		{
 			if (input->evtype == NCTYPE_RELEASE)
@@ -418,6 +423,7 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 		personal_best = game->personal_best;
 		solo_game_init(game, new_game_seed());
 		solo_game_set_personal_best(game, personal_best);
+		solo_game_start_countdown(game);
 		audio_transition_music(audio, HOME_BGM_PATH,
 			AUDIO_MUSIC_TRANSITION_MS);
 		solo_handling_reset(handling);
@@ -472,6 +478,8 @@ static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
 		|| (input->evtype != NCTYPE_PRESS
 			&& input->evtype != NCTYPE_UNKNOWN))
 		return (false);
+	if (game->countdown_active)
+		return (false);
 	result = solo_game_activate_ability(game, ability);
 	if (result != SOLO_ABILITY_RESULT_INVALID)
 		*state_changed = true;
@@ -489,6 +497,8 @@ static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
 {
 	solo_ability_result_t	result;
 
+	if (game->countdown_active)
+		return (false);
 	if (key >= '1' && key <= '4')
 	{
 		result = solo_game_activate_ability(game,
@@ -582,4 +592,8 @@ static void	play_solo_events(audio_ctx_t *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_LEVEL_UP);
 	if ((events & SOLO_EVENT_PERSONAL_BEST) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_PERSONAL_BEST);
+	if ((events & SOLO_EVENT_COUNTDOWN_TICK) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_TICK);
+	if ((events & SOLO_EVENT_COUNTDOWN_GO) != 0)
+		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_GO);
 }

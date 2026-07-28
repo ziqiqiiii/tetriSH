@@ -731,6 +731,9 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 	const char		*event;
 	color_t			white;
 	color_t			pink;
+	color_t			event_white;
+	color_t			event_pink;
+	unsigned		event_opacity;
 	int				rows;
 	int				cols;
 	int				combo;
@@ -753,6 +756,9 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 	ncplane_erase(solo->compatibility_score_plane);
 	white = (color_t){255, 236, 248};
 	pink = (color_t){255, 98, 186};
+	event_opacity = solo_game_score_event_opacity(game);
+	event_white = popover_faded_color(white, (int)event_opacity);
+	event_pink = popover_faded_color(pink, (int)event_opacity);
 	if (!compatibility_put_centered(solo->compatibility_score_plane,
 			(HUD_SCORE_Y + 6 - SOLO_SCORE_HEADER_Y) * rows
 			/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
@@ -785,21 +791,21 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 	event_row = (SOLO_SCORE_EVENT_Y + 2 - SOLO_SCORE_HEADER_Y) * rows
 		/ (SOLO_SCORE_EVENT_Y + SOLO_SCORE_EVENT_HEIGHT
 			- SOLO_SCORE_HEADER_Y);
-	if (game->scoring.back_to_back
+	if (event_opacity > 0 && game->scoring.back_to_back
 		&& !compatibility_put_centered(solo->compatibility_score_plane,
-			event_row, "BACK-TO-BACK", pink, true))
+			event_row, "BACK-TO-BACK", event_pink, true))
 		return (false);
 	event = compatibility_clear_name(game);
-	if (event[0] != '\0'
+	if (event_opacity > 0 && event[0] != '\0'
 		&& !compatibility_put_centered(solo->compatibility_score_plane,
-			event_row + 1, event, white, true))
+			event_row + 1, event, event_white, true))
 		return (false);
-	if (game->last_score.total_awarded > 0)
+	if (event_opacity > 0 && game->last_score.total_awarded > 0)
 	{
 		snprintf(line, sizeof(line), "+%" PRIu64,
 			game->last_score.total_awarded);
 		if (!compatibility_put_centered(solo->compatibility_score_plane,
-				event_row + 2, line, pink, true))
+				event_row + 2, line, event_pink, true))
 			return (false);
 	}
 	ncplane_move_top(solo->compatibility_score_plane);
@@ -812,18 +818,22 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	solo_render_t *solo, const solo_game_t *game)
 {
+	char		countdown[8];
 	const char	*title;
 	const char	*action;
 	color_t		white;
 	color_t		pink;
 	unsigned	best_opacity;
+	unsigned	countdown_opacity;
 	uint64_t	channels;
+	int			countdown_value;
 	int			y;
 	int			x;
 	int			rows;
 	int			cols;
 
-	if (!game->paused && game->phase != SOLO_GAME_OVER)
+	if (!game->paused && game->phase != SOLO_GAME_OVER
+		&& !game->countdown_active)
 	{
 		destroy_plane(&solo->compatibility_overlay_plane);
 		return (true);
@@ -849,6 +859,21 @@ static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	ncplane_erase(solo->compatibility_overlay_plane);
 	white = (color_t){255, 236, 248};
 	pink = (color_t){255, 98, 186};
+	countdown_value = solo_game_countdown_value(game);
+	if (countdown_value >= 0)
+	{
+		if (countdown_value == 0)
+			snprintf(countdown, sizeof(countdown), "GO!");
+		else
+			snprintf(countdown, sizeof(countdown), "%d", countdown_value);
+		countdown_opacity = solo_game_countdown_opacity(game);
+		if (!compatibility_put_overlay_line(
+				solo->compatibility_overlay_plane, rows / 2, countdown,
+				popover_faded_color(pink, (int)countdown_opacity), true))
+			return (false);
+		ncplane_move_top(solo->compatibility_overlay_plane);
+		return (true);
+	}
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";
@@ -1586,6 +1611,9 @@ static uint64_t	meter_frame_signature(const solo_render_t *solo,
 	hash = hash_value(hash, (uint64_t)solo->hovered_ability);
 	hash = hash_value(hash, (uint64_t)game->last_ability);
 	hash = hash_value(hash, (uint64_t)game->ability_result);
+	hash = hash_value(hash, (uint64_t)game->ready_ability);
+	hash = hash_value(hash, solo_game_ability_ready_opacity(game));
+	hash = hash_value(hash, solo_game_ability_result_opacity(game));
 	return (hash);
 }
 
@@ -1628,6 +1656,7 @@ static uint64_t	score_event_signature(const solo_game_t *game)
 	hash = hash_value(hash, (uint64_t)game->last_spin);
 	hash = hash_value(hash, game->last_perfect_clear);
 	hash = hash_value(hash, game->last_score.total_awarded);
+	hash = hash_value(hash, solo_game_score_event_opacity(game));
 	return (hash);
 }
 
@@ -1734,7 +1763,7 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
 	int			result;
 	int			changed;
 
-	if (solo->composite_board || game->paused
+	if (solo->composite_board || game->paused || game->countdown_active
 		|| game->phase == SOLO_GAME_OVER)
 	{
 		signature = board_overlay_signature(game);
@@ -2014,6 +2043,8 @@ static uint64_t	board_overlay_signature(const solo_game_t *game)
 	hash = hash_value(hash, (uint64_t)(game->active.col + BOARD_WIDTH));
 	hash = hash_value(hash, (uint64_t)(game->active.row + BOARD_HEIGHT));
 	hash = hash_value(hash, solo_game_personal_best_opacity(game));
+	hash = hash_value(hash, (uint64_t)(solo_game_countdown_value(game) + 1));
+	hash = hash_value(hash, solo_game_countdown_opacity(game));
 	return (hash);
 }
 

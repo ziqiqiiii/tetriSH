@@ -30,6 +30,7 @@ static void	draw_rect(uint32_t *canvas, int x, int y, int width, int height,
 static void	put_pixel(uint32_t *canvas, int x, int y, uint32_t pixel);
 static uint32_t	make_pixel(color_t color, unsigned alpha);
 static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend);
+static color_t	mix_color(color_t base, color_t accent, unsigned strength);
 static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game);
 static void	draw_preview_piece(uint32_t *canvas,
@@ -68,10 +69,12 @@ static void	draw_mask(uint32_t *canvas, const uint32_t *mask,
 static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
 	uint64_t score);
 static void	draw_numbers_centered_fit(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int y, color_t tint);
+	const solo_render_t *solo, const char *text, int y, color_t tint,
+	unsigned opacity);
 static void	draw_numbers_shadowed(uint32_t *canvas,
 	const solo_render_t *solo, const char *text, int x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint);
+	int glyph_width, int glyph_height, int spacing, color_t tint,
+	unsigned opacity);
 static void	draw_numbers(uint32_t *canvas, const solo_render_t *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
 	int spacing, color_t tint, unsigned opacity);
@@ -816,6 +819,22 @@ static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend)
 }
 
 /**
+ * @brief Linearly mixes one theme color toward an accent without glow.
+ */
+static color_t	mix_color(color_t base, color_t accent, unsigned strength)
+{
+	if (strength > 255u)
+		strength = 255u;
+	base.r = (unsigned char)((base.r * (255u - strength)
+				+ accent.r * strength) / 255u);
+	base.g = (unsigned char)((base.g * (255u - strength)
+				+ accent.g * strength) / 255u);
+	base.b = (unsigned char)((base.b * (255u - strength)
+				+ accent.b * strength) / 255u);
+	return (base);
+}
+
+/**
  * @brief Draws the HOLD preview and the three queued NEXT previews.
  *
  * HOLD sits in the authored top-left frame with fixed-size tiles and dims to
@@ -1041,6 +1060,7 @@ static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
 	char		number[2];
 	color_t	ring;
 	color_t	digit;
+	unsigned	pulse;
 	int			center_x;
 	int			center_y;
 	bool		affordable;
@@ -1058,11 +1078,18 @@ static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
 		ring = g_pink;
 		digit = g_white;
 	}
-	if (solo->hovered_ability == ability || feedback)
+	if (solo->hovered_ability == ability)
 	{
 		ring = g_white;
 		digit = g_white;
 	}
+	pulse = 0;
+	if (game->ability_ready_active && game->ready_ability == ability)
+		pulse = solo_game_ability_ready_opacity(game);
+	if (feedback && solo_game_ability_result_opacity(game) > pulse)
+		pulse = solo_game_ability_result_opacity(game);
+	ring = mix_color(ring, g_white, pulse);
+	digit = mix_color(digit, g_white, pulse);
 	draw_filled_circle(canvas, center_x, center_y,
 		SOLO_ABILITY_CIRCLE_RADIUS - 2, make_pixel(g_dark, 245));
 	draw_circle_ring(canvas, center_x, center_y,
@@ -1150,6 +1177,7 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game)
 {
 	char	points[32];
+	unsigned	event_opacity;
 	int		combo;
 
 	draw_text_centered(canvas, solo, "SCORE",
@@ -1165,19 +1193,20 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
 		HUD_SCORE_STAT_FIRST_Y + HUD_SCORE_STAT_ROW_STEP);
 	draw_stat_line(canvas, solo, "COMBO", combo,
 		HUD_SCORE_STAT_FIRST_Y + 2 * HUD_SCORE_STAT_ROW_STEP);
-	if (game->scoring.back_to_back)
-		draw_text_centered(canvas, solo, "BACK-TO-BACK",
+	event_opacity = solo_game_score_event_opacity(game);
+	if (game->scoring.back_to_back && event_opacity > 0)
+		draw_text_centered_opacity(canvas, solo, "BACK-TO-BACK",
 			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 118,
-			8, 8, 1, g_pink);
-	if (game->last_score.total_awarded > 0)
+			8, 8, 1, g_pink, event_opacity);
+	if (game->last_score.total_awarded > 0 && event_opacity > 0)
 	{
-		draw_text_centered(canvas, solo, clear_name(game),
+		draw_text_centered_opacity(canvas, solo, clear_name(game),
 			HUD_SCORE_X + HUD_SCORE_WIDTH / 2, HUD_SCORE_Y + 130,
-			8, 8, 1, g_white);
+			8, 8, 1, g_white, event_opacity);
 		snprintf(points, sizeof(points), "+%" PRIu64,
 			game->last_score.total_awarded);
 		draw_numbers_centered_fit(canvas, solo, points, HUD_SCORE_Y + 143,
-			g_pink);
+			g_pink, event_opacity);
 	}
 }
 
@@ -1376,7 +1405,7 @@ static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
 
 	snprintf(score_text, sizeof(score_text), "%010" PRIu64, score);
 	draw_numbers_centered_fit(canvas, solo, score_text, HUD_SCORE_Y + 23,
-		g_pink);
+		g_pink, 255u);
 }
 
 /**
@@ -1392,7 +1421,8 @@ static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
  * @param tint Color applied to visible mask pixels.
  */
 static void	draw_numbers_centered_fit(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int y, color_t tint)
+	const solo_render_t *solo, const char *text, int y, color_t tint,
+	unsigned opacity)
 {
 	int		length;
 	int		glyph_width;
@@ -1417,7 +1447,7 @@ static void	draw_numbers_centered_fit(uint32_t *canvas,
 	}
 	draw_numbers_shadowed(canvas, solo, text,
 		HUD_SCORE_X + (HUD_SCORE_WIDTH - width) / 2, y,
-		glyph_width, glyph_height, spacing, tint);
+		glyph_width, glyph_height, spacing, tint, opacity);
 }
 
 /**
@@ -1438,14 +1468,15 @@ static void	draw_numbers_centered_fit(uint32_t *canvas,
  */
 static void	draw_numbers_shadowed(uint32_t *canvas,
 	const solo_render_t *solo, const char *text, int x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint)
+	int glyph_width, int glyph_height, int spacing, color_t tint,
+	unsigned opacity)
 {
 	draw_numbers(canvas, solo, text, x + 1, y + 1, glyph_width, glyph_height,
-		spacing, g_dark, 190);
+		spacing, g_dark, opacity * 190u / 255u);
 	/* Keep the authored mask exact: expanding it also expands the intentional
 	 * slot-edge pixels and produces punctuation-like artifacts after tinting. */
 	draw_numbers(canvas, solo, text, x, y, glyph_width, glyph_height,
-		spacing, tint, 255);
+		spacing, tint, opacity);
 }
 
 /**
@@ -1688,13 +1719,17 @@ static void	draw_piece(uint32_t *canvas, const solo_render_t *solo,
 static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 	const solo_game_t *game)
 {
+	char		countdown[8];
 	const char	*title;
 	const char	*help;
 	unsigned	best_opacity;
+	unsigned	countdown_opacity;
+	int			countdown_value;
 	int			x;
 	int			y;
 
-	if (!game->paused && game->phase != SOLO_GAME_OVER)
+	if (!game->paused && game->phase != SOLO_GAME_OVER
+		&& !game->countdown_active)
 		return ;
 	x = HUD_BOARD_X + 16;
 	y = HUD_BOARD_Y + 128;
@@ -1702,6 +1737,19 @@ static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
 	draw_outline(canvas, x, y, 128, 64, 2, make_pixel(g_pink, 255));
 	if (solo->cell_board)
 		return ;
+	countdown_value = solo_game_countdown_value(game);
+	if (countdown_value >= 0)
+	{
+		countdown_opacity = solo_game_countdown_opacity(game);
+		if (countdown_value == 0)
+			snprintf(countdown, sizeof(countdown), "GO!");
+		else
+			snprintf(countdown, sizeof(countdown), "%d", countdown_value);
+		draw_text_centered_opacity(canvas, solo, countdown, x + 64,
+			y + 16, countdown_value == 0 ? 16 : 32,
+			32, 1, g_pink, countdown_opacity);
+		return ;
+	}
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";

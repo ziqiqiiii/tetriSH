@@ -25,6 +25,8 @@ static void	test_clear_animation_then_level_and_meter_update(void);
 static void	test_danger_state_has_stable_exit_hysteresis(void);
 static void	test_gameplay_events_are_one_shot(void);
 static void	test_personal_best_only_finishes_once_at_game_over(void);
+static void	test_countdown_blocks_play_and_emits_cues(void);
+static void	test_score_and_ready_animations_expire(void);
 static void	test_rotation_stress_preserves_valid_state(void);
 static int	filled_cells(const t_board *board);
 static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed);
@@ -62,6 +64,8 @@ int	main(void)
 	test_danger_state_has_stable_exit_hysteresis();
 	test_gameplay_events_are_one_shot();
 	test_personal_best_only_finishes_once_at_game_over();
+	test_countdown_blocks_play_and_emits_cues();
+	test_score_and_ready_animations_expire();
 	test_rotation_stress_preserves_valid_state();
 	return (0);
 }
@@ -771,6 +775,74 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
 	assert(game.personal_best_checked);
 	assert(!game.new_personal_best);
 	printf("PASS test_personal_best_only_finishes_once_at_game_over\n");
+}
+
+/**
+ * @brief Exercises the animated 3, 2, 1, GO gate and its audio events.
+ */
+static void	test_countdown_blocks_play_and_emits_cues(void)
+{
+	solo_game_t	game;
+
+	solo_game_init(&game, 804u);
+	solo_game_start_countdown(&game);
+	assert(game.countdown_active);
+	assert(solo_game_countdown_value(&game) == 3);
+	assert(solo_game_countdown_opacity(&game) == 255);
+	assert((solo_game_take_events(&game)
+			& SOLO_EVENT_COUNTDOWN_TICK) != 0);
+	assert(!solo_game_apply_action(&game, SOLO_HOLD));
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
+	assert(solo_game_update(&game, SOLO_COUNTDOWN_STEP_MS / 2));
+	assert(solo_game_countdown_value(&game) == 3);
+	assert(solo_game_countdown_opacity(&game) == 200);
+	assert(solo_game_update(&game, SOLO_COUNTDOWN_STEP_MS / 2));
+	assert(solo_game_countdown_value(&game) == 2);
+	assert((solo_game_take_events(&game)
+			& SOLO_EVENT_COUNTDOWN_TICK) != 0);
+	assert(solo_game_update(&game, SOLO_COUNTDOWN_STEP_MS));
+	assert(solo_game_countdown_value(&game) == 1);
+	assert((solo_game_take_events(&game)
+			& SOLO_EVENT_COUNTDOWN_TICK) != 0);
+	assert(solo_game_update(&game, SOLO_COUNTDOWN_STEP_MS));
+	assert(solo_game_countdown_value(&game) == 0);
+	assert((solo_game_take_events(&game) & SOLO_EVENT_COUNTDOWN_GO) != 0);
+	assert(solo_game_update(&game, SOLO_COUNTDOWN_STEP_MS));
+	assert(!game.countdown_active);
+	assert(solo_game_countdown_value(&game) == -1);
+	assert(solo_game_apply_action(&game, SOLO_HOLD));
+	printf("PASS test_countdown_blocks_play_and_emits_cues\n");
+}
+
+/**
+ * @brief Exercises bounded 30 FPS score and ability-ready presentation.
+ */
+static void	test_score_and_ready_animations_expire(void)
+{
+	solo_game_t	game;
+
+	prepare_single_line_clear(&game, 805u);
+	game.crystal_charge = 1;
+	game.crystal_line_progress = 1;
+	(void)solo_game_take_events(&game);
+	assert(solo_game_update(&game, solo_clear_duration_ms(game.level)));
+	assert(game.score_event_active);
+	assert(game.ability_ready_active);
+	assert(game.ready_ability == SOLO_ABILITY_MIRURUN);
+	assert(solo_game_score_event_opacity(&game) == 255);
+	assert(solo_game_ability_ready_opacity(&game) == 255);
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
+	assert(solo_game_update(&game,
+			SOLO_SCORE_EVENT_PULSE_MS + SOLO_SCORE_EVENT_FADE_MS));
+	assert(!game.score_event_active);
+	assert(solo_game_score_event_opacity(&game) == 0);
+	assert(game.ability_ready_active);
+	assert(solo_game_update(&game,
+			SOLO_ABILITY_READY_PULSE_MS + SOLO_ABILITY_READY_FADE_MS
+			- SOLO_SCORE_EVENT_PULSE_MS - SOLO_SCORE_EVENT_FADE_MS));
+	assert(!game.ability_ready_active);
+	assert(solo_game_ability_ready_opacity(&game) == 0);
+	printf("PASS test_score_and_ready_animations_expire\n");
 }
 
 /**

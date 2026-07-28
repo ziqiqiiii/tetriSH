@@ -81,6 +81,14 @@
 # define SOLO_PERSONAL_BEST_PULSE_MS	720
 # define SOLO_PERSONAL_BEST_FADE_MS	300
 # define SOLO_PERSONAL_BEST_FRAME_MS	33
+# define SOLO_SCORE_EVENT_PULSE_MS	420
+# define SOLO_SCORE_EVENT_FADE_MS	300
+# define SOLO_ABILITY_READY_PULSE_MS	540
+# define SOLO_ABILITY_READY_FADE_MS	300
+# define SOLO_ABILITY_RESULT_FADE_MS	300
+# define SOLO_COUNTDOWN_STEP_MS	600
+# define SOLO_COUNTDOWN_STEPS	4
+# define SOLO_EVENT_ANIMATION_FRAME_MS	33
 # define SOLO_LOCK_DELAY_MS	500
 # define SOLO_LOCK_RESET_LIMIT	15
 # define SOLO_DEFAULT_DAS_MS	167
@@ -415,7 +423,9 @@ typedef enum e_solo_event
 	SOLO_EVENT_ABILITY_REJECTED = 1u << 13,
 	SOLO_EVENT_PAUSE = 1u << 14,
 	SOLO_EVENT_LEVEL_UP = 1u << 15,
-	SOLO_EVENT_PERSONAL_BEST = 1u << 16
+	SOLO_EVENT_PERSONAL_BEST = 1u << 16,
+	SOLO_EVENT_COUNTDOWN_TICK = 1u << 17,
+	SOLO_EVENT_COUNTDOWN_GO = 1u << 18
 }	solo_event_t;
 
 typedef struct s_solo_handling_config
@@ -493,6 +503,9 @@ typedef struct s_solo_game
 	int				clear_elapsed_ms;
 	int				top_out_elapsed_ms;
 	int				personal_best_elapsed_ms;
+	int				score_event_elapsed_ms;
+	int				ability_ready_elapsed_ms;
+	int				countdown_elapsed_ms;
 	int				danger_safe_elapsed_ms;
 	uint32_t		pending_events;
 	int				lock_resets;
@@ -505,6 +518,10 @@ typedef struct s_solo_game
 	bool			danger_active;
 	bool			personal_best_checked;
 	bool			new_personal_best;
+	bool			score_event_active;
+	bool			ability_ready_active;
+	bool			countdown_active;
+	solo_ability_t	ready_ability;
 }	solo_game_t;
 
 typedef struct s_solo_render
@@ -669,6 +686,12 @@ void			solo_game_set_personal_best(solo_game_t *game,
 					uint64_t score);
 bool			solo_game_finish_personal_best(solo_game_t *game);
 unsigned		solo_game_personal_best_opacity(const solo_game_t *game);
+void			solo_game_start_countdown(solo_game_t *game);
+int				solo_game_countdown_value(const solo_game_t *game);
+unsigned		solo_game_countdown_opacity(const solo_game_t *game);
+unsigned		solo_game_score_event_opacity(const solo_game_t *game);
+unsigned		solo_game_ability_ready_opacity(const solo_game_t *game);
+unsigned		solo_game_ability_result_opacity(const solo_game_t *game);
 int				solo_game_next_wake_ms(const solo_game_t *game);
 int				solo_clear_duration_ms(int level);
 t_piece			solo_game_ghost(const solo_game_t *game);

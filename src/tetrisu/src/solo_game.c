@@ -18,6 +18,11 @@ static bool	process_due_event(solo_game_t *game);
 static void	finish_line_clear(solo_game_t *game);
 static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms);
 static bool	advance_personal_best(solo_game_t *game, int elapsed_ms);
+static bool	advance_event_animations(solo_game_t *game, int elapsed_ms);
+static bool	advance_timed_animation(int *elapsed_ms, bool *active,
+				int duration_ms, int step_ms);
+static unsigned	pulse_fade_opacity(int elapsed_ms, int pulse_ms, int fade_ms);
+static int	animation_wake_ms(int wake_ms, bool active, int remaining_ms);
 static int	gameplay_next_wake_ms(const solo_game_t *game);
 static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms);
 static int	min_int(int left, int right);
@@ -67,7 +72,7 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
 {
 	int	distance;
 
-	if (game->paused || game->phase != SOLO_ACTIVE)
+	if (game->paused || game->countdown_active || game->phase != SOLO_ACTIVE)
 		return (false);
 	if (action == SOLO_MOVE_LEFT)
 		return (apply_shift(game, -1));
@@ -117,13 +122,18 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 	int		remaining_ms;
 	int		due_events;
 	bool	changed;
+	bool	started_in_countdown;
 	bool	started_in_reveal;
 
 	if (elapsed_ms < 0)
 		return (false);
 	remaining_ms = elapsed_ms;
+	started_in_countdown = game->countdown_active;
 	changed = advance_ability_feedback(game, elapsed_ms);
 	changed = advance_personal_best(game, elapsed_ms) || changed;
+	changed = advance_event_animations(game, elapsed_ms) || changed;
+	if (started_in_countdown)
+		return (changed);
 	if (game->paused)
 		return (changed);
 	if (game->phase == SOLO_GAME_OVER)
@@ -311,6 +321,90 @@ unsigned	solo_game_personal_best_opacity(const solo_game_t *game)
 }
 
 /**
+ * @brief Starts the four-step 3, 2, 1, GO presentation before Solo input.
+ */
+void	solo_game_start_countdown(solo_game_t *game)
+{
+	if (game == NULL || game->phase != SOLO_ACTIVE)
+		return ;
+	game->countdown_elapsed_ms = 0;
+	game->countdown_active = true;
+	game->pending_events |= SOLO_EVENT_COUNTDOWN_TICK;
+	reset_piece_timers(game);
+}
+
+/**
+ * @brief Returns 3, 2, 1, or 0 for GO while the countdown is visible.
+ */
+int	solo_game_countdown_value(const solo_game_t *game)
+{
+	int	stage;
+
+	if (game == NULL || !game->countdown_active)
+		return (-1);
+	stage = game->countdown_elapsed_ms / SOLO_COUNTDOWN_STEP_MS;
+	if (stage < 0 || stage >= SOLO_COUNTDOWN_STEPS)
+		return (-1);
+	if (stage == SOLO_COUNTDOWN_STEPS - 1)
+		return (0);
+	return (3 - stage);
+}
+
+/**
+ * @brief Returns one countdown label's restrained hold-and-fade opacity.
+ */
+unsigned	solo_game_countdown_opacity(const solo_game_t *game)
+{
+	int	step_elapsed;
+	int	fade_start;
+
+	if (solo_game_countdown_value(game) < 0)
+		return (0);
+	step_elapsed = game->countdown_elapsed_ms % SOLO_COUNTDOWN_STEP_MS;
+	fade_start = SOLO_COUNTDOWN_STEP_MS / 2;
+	if (step_elapsed <= fade_start)
+		return ((unsigned)(255 - 55 * step_elapsed / fade_start));
+	return ((unsigned)(200 * (SOLO_COUNTDOWN_STEP_MS - step_elapsed)
+			/ (SOLO_COUNTDOWN_STEP_MS - fade_start)));
+}
+
+/**
+ * @brief Returns the active line-clear score-label pulse/fade opacity.
+ */
+unsigned	solo_game_score_event_opacity(const solo_game_t *game)
+{
+	if (game == NULL || !game->score_event_active)
+		return (0);
+	return (pulse_fade_opacity(game->score_event_elapsed_ms,
+			SOLO_SCORE_EVENT_PULSE_MS, SOLO_SCORE_EVENT_FADE_MS));
+}
+
+/**
+ * @brief Returns the newly affordable ability-marker pulse strength.
+ */
+unsigned	solo_game_ability_ready_opacity(const solo_game_t *game)
+{
+	if (game == NULL || !game->ability_ready_active)
+		return (0);
+	return (pulse_fade_opacity(game->ability_ready_elapsed_ms,
+			SOLO_ABILITY_READY_PULSE_MS, SOLO_ABILITY_READY_FADE_MS));
+}
+
+/**
+ * @brief Returns activation/rejection feedback pulse/fade opacity.
+ */
+unsigned	solo_game_ability_result_opacity(const solo_game_t *game)
+{
+	int	pulse_ms;
+
+	if (game == NULL || game->ability_result == SOLO_ABILITY_RESULT_NONE)
+		return (0);
+	pulse_ms = SOLO_ABILITY_FEEDBACK_MS - SOLO_ABILITY_RESULT_FADE_MS;
+	return (pulse_fade_opacity(game->ability_feedback_elapsed_ms,
+			pulse_ms, SOLO_ABILITY_RESULT_FADE_MS));
+}
+
+/**
  * @brief Calculates the next state-timer deadline.
  *
  * The renderer can sleep until this value instead of polling gravity or lock
@@ -323,7 +417,6 @@ unsigned	solo_game_personal_best_opacity(const solo_game_t *game)
 int	solo_game_next_wake_ms(const solo_game_t *game)
 {
 	int	feedback_ms;
-	int	frame_ms;
 	int	personal_best_ms;
 	int	wake_ms;
 
@@ -335,16 +428,20 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
 	else
 		feedback_ms = SOLO_ABILITY_FEEDBACK_MS
 			- game->ability_feedback_elapsed_ms;
-	if (feedback_ms >= 0 && (wake_ms < 0 || feedback_ms < wake_ms))
-		wake_ms = feedback_ms;
+	wake_ms = animation_wake_ms(wake_ms, feedback_ms > 0, feedback_ms);
 	personal_best_ms = SOLO_PERSONAL_BEST_PULSE_MS
 		+ SOLO_PERSONAL_BEST_FADE_MS - game->personal_best_elapsed_ms;
-	frame_ms = SOLO_PERSONAL_BEST_FRAME_MS;
-	if (personal_best_ms < frame_ms)
-		frame_ms = personal_best_ms;
-	if (game->new_personal_best && frame_ms > 0
-		&& (wake_ms < 0 || frame_ms < wake_ms))
-		wake_ms = frame_ms;
+	wake_ms = animation_wake_ms(wake_ms, game->new_personal_best,
+			personal_best_ms);
+	wake_ms = animation_wake_ms(wake_ms, game->score_event_active,
+			SOLO_SCORE_EVENT_PULSE_MS + SOLO_SCORE_EVENT_FADE_MS
+			- game->score_event_elapsed_ms);
+	wake_ms = animation_wake_ms(wake_ms, game->ability_ready_active,
+			SOLO_ABILITY_READY_PULSE_MS + SOLO_ABILITY_READY_FADE_MS
+			- game->ability_ready_elapsed_ms);
+	wake_ms = animation_wake_ms(wake_ms, game->countdown_active,
+			SOLO_COUNTDOWN_STEP_MS * SOLO_COUNTDOWN_STEPS
+			- game->countdown_elapsed_ms);
 	return (wake_ms);
 }
 
@@ -472,7 +569,8 @@ bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
  */
 void	solo_game_toggle_pause(solo_game_t *game)
 {
-	if (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING)
+	if (!game->countdown_active
+		&& (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING))
 	{
 		game->paused = !game->paused;
 		game->pending_events |= SOLO_EVENT_PAUSE;
@@ -836,15 +934,35 @@ static void	finish_line_clear(solo_game_t *game)
 	remember_score_event(game, game->clear_count, game->pending_spin,
 		perfect_clear);
 	if (perfect_clear)
+	{
 		game->pending_events |= SOLO_EVENT_PERFECT_CLEAR;
+		game->score_event_active = true;
+		game->score_event_elapsed_ms = 0;
+	}
 	else if (game->clear_count == 1)
+	{
 		game->pending_events |= SOLO_EVENT_SINGLE;
+		game->score_event_active = true;
+		game->score_event_elapsed_ms = 0;
+	}
 	else if (game->clear_count == 2)
+	{
 		game->pending_events |= SOLO_EVENT_DOUBLE;
+		game->score_event_active = true;
+		game->score_event_elapsed_ms = 0;
+	}
 	else if (game->clear_count == 3)
+	{
 		game->pending_events |= SOLO_EVENT_TRIPLE;
+		game->score_event_active = true;
+		game->score_event_elapsed_ms = 0;
+	}
 	else if (game->clear_count == 4)
+	{
 		game->pending_events |= SOLO_EVENT_TETRIS;
+		game->score_event_active = true;
+		game->score_event_elapsed_ms = 0;
+	}
 	previous_level = game->level;
 	previous_charge = game->crystal_charge;
 	game->total_lines += game->clear_count;
@@ -869,6 +987,9 @@ static void	finish_line_clear(solo_game_t *game)
 				>= solo_ability_cost((solo_ability_t)ability))
 		{
 			game->pending_events |= SOLO_EVENT_ABILITY_READY;
+			game->ability_ready_active = true;
+			game->ability_ready_elapsed_ms = 0;
+			game->ready_ability = (solo_ability_t)ability;
 			break ;
 		}
 		ability++;
@@ -879,10 +1000,9 @@ static void	finish_line_clear(solo_game_t *game)
 }
 
 /**
- * @brief Expires one ability response without requesting animation frames.
+ * @brief Advances one pulsing and fading ability response.
  *
- * Feedback is static for its lifetime, so only the expiry boundary dirties the
- * HUD. Gameplay and feedback consume the same elapsed wall-clock interval.
+ * Gameplay and feedback consume the same elapsed wall-clock interval.
  *
  * @param game Pointer to the Solo state.
  * @param elapsed_ms Elapsed monotonic milliseconds.
@@ -896,7 +1016,7 @@ static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms)
 		- game->ability_feedback_elapsed_ms)
 	{
 		game->ability_feedback_elapsed_ms += elapsed_ms;
-		return (false);
+		return (elapsed_ms > 0);
 	}
 	game->ability_feedback_elapsed_ms = 0;
 	game->ability_result = SOLO_ABILITY_RESULT_NONE;
@@ -924,6 +1044,98 @@ static bool	advance_personal_best(solo_game_t *game, int elapsed_ms)
 	if (game->personal_best_elapsed_ms > total_ms)
 		game->personal_best_elapsed_ms = total_ms;
 	return (elapsed_ms > 0);
+}
+
+/**
+ * @brief Advances bounded score, ready, and countdown animation timers.
+ */
+static bool	advance_event_animations(solo_game_t *game, int elapsed_ms)
+{
+	int		before_stage;
+	int		after_stage;
+	bool	changed;
+
+	changed = advance_timed_animation(&game->score_event_elapsed_ms,
+			&game->score_event_active,
+			SOLO_SCORE_EVENT_PULSE_MS + SOLO_SCORE_EVENT_FADE_MS, elapsed_ms);
+	changed = advance_timed_animation(&game->ability_ready_elapsed_ms,
+			&game->ability_ready_active,
+			SOLO_ABILITY_READY_PULSE_MS + SOLO_ABILITY_READY_FADE_MS,
+			elapsed_ms) || changed;
+	if (!game->countdown_active)
+		return (changed);
+	before_stage = game->countdown_elapsed_ms / SOLO_COUNTDOWN_STEP_MS;
+	game->countdown_elapsed_ms += elapsed_ms;
+	if (game->countdown_elapsed_ms
+		> SOLO_COUNTDOWN_STEP_MS * SOLO_COUNTDOWN_STEPS)
+		game->countdown_elapsed_ms
+			= SOLO_COUNTDOWN_STEP_MS * SOLO_COUNTDOWN_STEPS;
+	after_stage = game->countdown_elapsed_ms / SOLO_COUNTDOWN_STEP_MS;
+	if (before_stage < 1 && after_stage >= 1)
+		game->pending_events |= SOLO_EVENT_COUNTDOWN_TICK;
+	if (before_stage < 2 && after_stage >= 2)
+		game->pending_events |= SOLO_EVENT_COUNTDOWN_TICK;
+	if (before_stage < SOLO_COUNTDOWN_STEPS - 1
+		&& after_stage >= SOLO_COUNTDOWN_STEPS - 1)
+		game->pending_events |= SOLO_EVENT_COUNTDOWN_GO;
+	if (after_stage >= SOLO_COUNTDOWN_STEPS)
+		game->countdown_active = false;
+	return (elapsed_ms > 0 || changed);
+}
+
+/**
+ * @brief Advances one duration-capped animation and clears it at expiry.
+ */
+static bool	advance_timed_animation(int *elapsed_ms, bool *active,
+	int duration_ms, int step_ms)
+{
+	if (!*active || step_ms <= 0)
+		return (false);
+	*elapsed_ms += step_ms;
+	if (*elapsed_ms >= duration_ms)
+	{
+		*elapsed_ms = duration_ms;
+		*active = false;
+	}
+	return (true);
+}
+
+/**
+ * @brief Produces a small brightness pulse followed by a linear fade.
+ */
+static unsigned	pulse_fade_opacity(int elapsed_ms, int pulse_ms, int fade_ms)
+{
+	int	phase;
+	int	remaining;
+
+	if (elapsed_ms >= pulse_ms)
+	{
+		remaining = pulse_ms + fade_ms - elapsed_ms;
+		if (remaining <= 0)
+			return (0);
+		return ((unsigned)(255 * remaining / fade_ms));
+	}
+	phase = elapsed_ms % (pulse_ms / 2);
+	if (phase > pulse_ms / 4)
+		phase = pulse_ms / 2 - phase;
+	return ((unsigned)(255 - 48 * phase / (pulse_ms / 4)));
+}
+
+/**
+ * @brief Merges one active animation's 30 FPS deadline into the current wake.
+ */
+static int	animation_wake_ms(int wake_ms, bool active, int remaining_ms)
+{
+	int	frame_ms;
+
+	if (!active || remaining_ms <= 0)
+		return (wake_ms);
+	frame_ms = SOLO_EVENT_ANIMATION_FRAME_MS;
+	if (remaining_ms < frame_ms)
+		frame_ms = remaining_ms;
+	if (wake_ms < 0 || frame_ms < wake_ms)
+		return (frame_ms);
+	return (wake_ms);
 }
 
 /**

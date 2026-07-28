@@ -66,24 +66,34 @@ bool	solo_popover_update(solo_render_t *solo, const solo_game_t *game,
 		before = solo->popover_opacity;
 		changed = !solo->popover_feedback_active
 			|| solo->popover_ability != game->last_ability
-			|| before != 255;
+			|| before != (int)solo_game_ability_result_opacity(game);
 		solo->popover_feedback_active = true;
 		solo->popover_ability = game->last_ability;
 		solo->popover_phase = SOLO_POPOVER_VISIBLE;
-		solo->popover_opacity = 255;
-		solo->popover_fade_start_opacity = 255;
+		solo->popover_opacity
+			= (int)solo_game_ability_result_opacity(game);
+		solo->popover_fade_start_opacity = solo->popover_opacity;
 		solo->popover_fade_elapsed_ms = 0;
 		return (changed);
 	}
 	if (solo->popover_feedback_active)
 	{
 		solo->popover_feedback_active = false;
-		solo->popover_opacity = 255;
 		solo->popover_ability = solo->hovered_ability;
 		if (solo->hovered_ability != SOLO_ABILITY_NONE)
-			solo->popover_phase = SOLO_POPOVER_VISIBLE;
-		else
+		{
+			if (solo->popover_opacity >= 255)
+				solo->popover_phase = SOLO_POPOVER_VISIBLE;
+			else
+				start_fade(solo, SOLO_POPOVER_FADING_IN);
+		}
+		else if (solo->popover_opacity > 0)
 			start_fade(solo, SOLO_POPOVER_FADING_OUT);
+		else
+		{
+			solo->popover_phase = SOLO_POPOVER_HIDDEN;
+			solo->popover_ability = SOLO_ABILITY_NONE;
+		}
 		return (true);
 	}
 	if (solo->popover_phase != SOLO_POPOVER_FADING_IN
@@ -156,7 +166,7 @@ int	solo_popover_displayed_opacity(const solo_render_t *solo,
 {
 	if (game != NULL
 		&& game->ability_result != SOLO_ABILITY_RESULT_NONE)
-		return (255);
+		return ((int)solo_game_ability_result_opacity(game));
 	if (solo == NULL)
 		return (0);
 	return (solo->popover_opacity);

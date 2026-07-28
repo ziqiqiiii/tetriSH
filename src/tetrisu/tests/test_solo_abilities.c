@@ -171,8 +171,8 @@ static void	test_feedback_expires_on_shared_wake_deadline(void)
 	game.crystal_charge = 2;
 	assert(solo_game_activate_ability(&game, SOLO_ABILITY_MIRURUN)
 		== SOLO_ABILITY_RESULT_ACTIVATED);
-	assert(solo_game_next_wake_ms(&game) == SOLO_ABILITY_FEEDBACK_MS);
-	assert(!solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS - 1));
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
+	assert(solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS - 1));
 	assert(game.ability_result == SOLO_ABILITY_RESULT_ACTIVATED);
 	assert(solo_game_next_wake_ms(&game) == 1);
 	assert(solo_game_update(&game, 1));
@@ -181,7 +181,7 @@ static void	test_feedback_expires_on_shared_wake_deadline(void)
 	game.phase = SOLO_GAME_OVER;
 	assert(solo_game_activate_ability(&game, SOLO_ABILITY_INVERSION)
 		== SOLO_ABILITY_RESULT_UNAVAILABLE);
-	assert(solo_game_next_wake_ms(&game) == SOLO_ABILITY_FEEDBACK_MS);
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
 	assert(solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS));
 	assert(game.ability_result == SOLO_ABILITY_RESULT_NONE);
 	assert(solo_game_next_wake_ms(&game) == -1);
@@ -189,7 +189,7 @@ static void	test_feedback_expires_on_shared_wake_deadline(void)
 	game.paused = true;
 	assert(solo_game_activate_ability(&game, SOLO_ABILITY_MIRURUN)
 		== SOLO_ABILITY_RESULT_UNAVAILABLE);
-	assert(solo_game_next_wake_ms(&game) == SOLO_ABILITY_FEEDBACK_MS);
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
 	assert(solo_game_update(&game, SOLO_ABILITY_FEEDBACK_MS));
 	assert(game.ability_result == SOLO_ABILITY_RESULT_NONE);
 	assert(solo_game_next_wake_ms(&game) == -1);
@@ -234,6 +234,11 @@ static void	test_popover_fades_and_feedback_priority(void)
 	assert(solo_popover_displayed_ability(&solo, &game)
 		== SOLO_ABILITY_MIRURUN);
 	assert(solo_popover_displayed_opacity(&solo, &game) == 255);
+	game.ability_feedback_elapsed_ms = SOLO_ABILITY_FEEDBACK_MS
+		- SOLO_ABILITY_RESULT_FADE_MS / 2;
+	assert(solo_popover_update(&solo, &game, 0));
+	assert(solo_popover_displayed_opacity(&solo, &game) < 255);
+	assert(solo_popover_displayed_opacity(&solo, &game) > 0);
 	assert(solo_popover_set_hover(&solo, SOLO_ABILITY_SIRTET));
 	assert(solo_popover_displayed_ability(&solo, &game)
 		== SOLO_ABILITY_MIRURUN);
@@ -242,7 +247,8 @@ static void	test_popover_fades_and_feedback_priority(void)
 	assert(solo_popover_update(&solo, &game, 0));
 	assert(solo_popover_displayed_ability(&solo, &game)
 		== SOLO_ABILITY_SIRTET);
-	assert(solo.popover_phase == SOLO_POPOVER_VISIBLE);
+	assert(solo.popover_phase == SOLO_POPOVER_FADING_IN);
+	assert(solo_popover_next_wake_ms(&solo) == SOLO_RENDER_INTERVAL_MS);
 	printf("PASS test_popover_fades_and_feedback_priority\n");
 }
 

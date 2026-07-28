@@ -171,7 +171,8 @@ solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
 
 	if (game == NULL || !ability_is_valid(ability))
 		return (SOLO_ABILITY_RESULT_INVALID);
-	if (game->paused || game->phase != SOLO_ACTIVE)
+	if (game->paused || game->countdown_active
+		|| game->phase != SOLO_ACTIVE)
 		return (remember_ability_result(game, ability,
 				SOLO_ABILITY_RESULT_UNAVAILABLE));
 	cost = solo_ability_cost(ability);
