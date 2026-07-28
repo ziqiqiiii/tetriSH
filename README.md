@@ -515,7 +515,8 @@ MacMini_tetriSH/
 │   ├── use_cases.md               Gameplay use cases
 │   ├── game-economics.md          Points, pricing, rewards
 │   ├── themes.md                  Theme catalogue
-│   ├── class_diagrams/            System and per-library diagrams
+│   ├── diagrams/                  Class, sequence, domain, and solution diagrams
+│   ├── bugs/                      Post-mortem notes on design defects
 │   └── cleaning/                  Code, Makefile, and README style guides
 ├── scripts/                       Dependency check/install helpers
 ├── .tetrishrc                     Shell start-up file — launches the daemons

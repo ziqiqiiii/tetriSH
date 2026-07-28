@@ -122,8 +122,9 @@ Characters and themes are read-only catalogues loaded from `config/characters.cf
 |---|---|
 | `db_login(db, username, password_hashed, out)` | Verify credentials; `DB_BAD_CREDS` on mismatch |
 | `db_get_player(db, id, out)` | Fetch a player document by id |
-| `db_player_owns_character(db, id, cid)` | Test membership in `owned_characters` |
-| `db_player_owns_theme(db, id, tid)` | Test membership in `owned_themes` |
+| `db_get_salt(db, username, out_salt, cap)` | Fetch a player's salt **by username** so a caller can hash a login attempt before `db_login`. `cap` must be ≥ `DB_SALT_LEN` (short buffers are rejected, not truncated). Unlike `db_login` this reports `DB_NOT_FOUND` for an unknown user — concealing that is the authentication caller's job |
+| `db_player_owns_character(db, id, cid)` | Test membership in `owned_characters`; returns `t_db_bool` (`DB_TRUE` / `DB_FALSE` / `DB_UNKNOWN`) |
+| `db_player_owns_theme(db, id, tid)` | Test membership in `owned_themes`; returns `t_db_bool` |
 | `db_leaderboard(db, out, cap, out_count)` | Top entries by `(score, id)`, capped at `cap` |
 | `db_rank(db, id, out_rank)` | Player's 1-based leaderboard rank |
 | `db_get_character(db, cid)` | Look up a catalogue character by id, or `NULL` |
@@ -136,6 +137,16 @@ Characters and themes are read-only catalogues loaded from `config/characters.cf
 Functions that can succeed or be rejected return `t_db_result`:
 
 `DB_OK`, `DB_NOT_FOUND`, `DB_EXISTS`, `DB_BAD_CREDS`, `DB_INSUFFICIENT`, `DB_NOT_OWNED`, `DB_IO_ERROR`, `DB_FULL`, `DB_INVALID`
+
+Functions that answer a yes/no question return `t_db_bool` instead:
+
+`DB_TRUE`, `DB_FALSE`, `DB_UNKNOWN`
+
+The two vocabularies are kept apart on purpose. A probe returning `DB_FALSE`
+succeeded — "no" is an answer, not a failure — so `DB_OK` is meaningless for
+these calls and `!= DB_TRUE` would lump a real "no" together with `DB_UNKNOWN`.
+Branch on all three. `DB_FALSE` is `0`, so a bare truth test still reads
+correctly, but only `DB_UNKNOWN` signals that the question could not be answered.
 
 ---
 
