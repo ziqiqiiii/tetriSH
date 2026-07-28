@@ -271,6 +271,12 @@ void	audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
 		audio->menu_move_sfx = Mix_LoadWAV(move_path);
 	if (select_path != NULL)
 		audio->menu_select_sfx = Mix_LoadWAV(select_path);
+	if (audio->menu_move_sfx != NULL)
+		Mix_VolumeChunk((Mix_Chunk *)audio->menu_move_sfx,
+			AUDIO_MENU_MOVE_VOLUME);
+	if (audio->menu_select_sfx != NULL)
+		Mix_VolumeChunk((Mix_Chunk *)audio->menu_select_sfx,
+			AUDIO_MENU_SELECT_VOLUME);
 #else
 	(void)move_path;
 	(void)select_path;

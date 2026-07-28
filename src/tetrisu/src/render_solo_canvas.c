@@ -189,8 +189,10 @@ bool	solo_canvas_load(solo_render_t *solo)
 	if (loaded)
 	{
 		solo->static_pixels = malloc(canvas_bytes);
+		solo->background_pixels = malloc(canvas_bytes);
 		solo->frame_pixels = malloc(canvas_bytes);
-		if (solo->static_pixels == NULL || solo->frame_pixels == NULL)
+		if (solo->static_pixels == NULL || solo->background_pixels == NULL
+			|| solo->frame_pixels == NULL)
 		{
 			loaded = false;
 			solo_canvas_set_error(solo, "Could not allocate Solo canvas", NULL);
@@ -227,6 +229,7 @@ bool	solo_canvas_load(solo_render_t *solo)
 		blit_asset_scaled(solo->static_pixels, SOLO_CANVAS_WIDTH,
 			SOLO_CANVAS_HEIGHT, &mirurun, HUD_MIRURUN_X, HUD_MIRURUN_Y,
 			HUD_MIRURUN_SIZE, HUD_MIRURUN_SIZE, 255);
+		memcpy(solo->background_pixels, solo->static_pixels, canvas_bytes);
 		solo->font_pixels = font.pixels;
 		solo->font_width = font.width;
 		font.pixels = NULL;
@@ -381,6 +384,58 @@ void	solo_canvas_compose_board(solo_render_t *solo,
 		draw_piece(solo->frame_pixels, solo, &game->active, 255u, false);
 	}
 	draw_overlays(solo->frame_pixels, solo, game);
+}
+
+/**
+ * @brief Darkens authored scenery while preserving the playfield.
+ *
+ * This flat black mix is shared by bitmap and compatibility rendering. It
+ * deliberately avoids glow, geometry changes, and board movement.
+ *
+ * @param solo Pointer to the Solo render state.
+ * @param game Pointer to the current Solo game state.
+ */
+void	solo_canvas_compose_danger_background(solo_render_t *solo,
+	const solo_game_t *game)
+{
+	color_t	color;
+	uint32_t	pixel;
+	unsigned	dim;
+	int			protected_left;
+	int			protected_top;
+	int			protected_right;
+	int			protected_bottom;
+	int			y;
+	int			x;
+
+	dim = solo_game_danger_dim(game);
+	protected_left = HUD_BOARD_X - SOLO_DANGER_BOARD_PAD;
+	protected_top = HUD_BOARD_Y - SOLO_DANGER_BOARD_PAD;
+	protected_right = HUD_BOARD_X + SOLO_BOARD_WIDTH
+		+ SOLO_DANGER_BOARD_PAD;
+	protected_bottom = HUD_BOARD_Y + SOLO_BOARD_HEIGHT
+		+ SOLO_DANGER_BOARD_PAD;
+	y = 0;
+	while (y < SOLO_CONTENT_HEIGHT)
+	{
+		x = 0;
+		while (x < SOLO_CANVAS_WIDTH)
+		{
+			pixel = solo->static_pixels[(size_t)y * SOLO_CANVAS_WIDTH + x];
+			if (dim > 0 && !(x >= protected_left && x < protected_right
+					&& y >= protected_top && y < protected_bottom))
+			{
+				color.r = ncpixel_r(pixel) * (255u - dim) / 255u;
+				color.g = ncpixel_g(pixel) * (255u - dim) / 255u;
+				color.b = ncpixel_b(pixel) * (255u - dim) / 255u;
+				pixel = make_pixel(color, ncpixel_a(pixel));
+			}
+			solo->background_pixels[(size_t)y * SOLO_CANVAS_WIDTH + x]
+				= pixel;
+			x++;
+		}
+		y++;
+	}
 }
 
 /**

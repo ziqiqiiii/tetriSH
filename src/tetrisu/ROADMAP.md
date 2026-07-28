@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 and 2 are complete. Phase 3 continues with the no-glow danger
-presentation in item 13.
+Phases 1 through 3 are complete. Phase 4 begins with screen navigation and
+typed view models in item 15.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -62,6 +62,11 @@ presentation in item 13.
   3-2-1-GO countdown, fading clear awards, newly-ready ability marker pulses,
   activation-result fades, and the existing personal-best pulse. Every effect
   changes tint or opacity only; none moves, shakes, blooms, or glows.
+- Item 13 fades the authored environment darker over 300 ms during the
+  existing high-stack danger state. The board stays bright and stationary,
+  and the same flat tint works in Kitty and compatibility mode.
+- Home navigation and confirmation now use short, low-volume clips from the
+  supplied General Sounds pack instead of missing placeholder paths.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -191,7 +196,7 @@ presentation in item 13.
     - Kitty bitmap regions and compatibility-mode cell regions share the same
       timer-derived opacity and dirty signatures.
 
-13. **Add no-glow danger presentation**
+13. **Add no-glow danger presentation** — complete
 
     - Music-state detection already enters when locked blocks reach rows 0–3.
     - It exits only after the highest locked block remains below row 5 for
@@ -199,6 +204,8 @@ presentation in item 13.
     - Fade the surrounding environment darker over 300 ms while preserving a
       readable, emphasized board.
     - Do not shake, scale, move, or glow the board.
+    - The shared background fades at 30 FPS only during the 300 ms transition;
+      the protected playfield and live foreground planes remain crisp.
 
 14. **Add authored danger-music transition** — complete
 

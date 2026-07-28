@@ -19,6 +19,7 @@ static void	finish_line_clear(solo_game_t *game);
 static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms);
 static bool	advance_personal_best(solo_game_t *game, int elapsed_ms);
 static bool	advance_event_animations(solo_game_t *game, int elapsed_ms);
+static bool	advance_danger_presentation(solo_game_t *game, int elapsed_ms);
 static bool	advance_timed_animation(int *elapsed_ms, bool *active,
 				int duration_ms, int step_ms);
 static unsigned	pulse_fade_opacity(int elapsed_ms, int pulse_ms, int fade_ms);
@@ -132,6 +133,7 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
 	changed = advance_ability_feedback(game, elapsed_ms);
 	changed = advance_personal_best(game, elapsed_ms) || changed;
 	changed = advance_event_animations(game, elapsed_ms) || changed;
+	changed = advance_danger_presentation(game, elapsed_ms) || changed;
 	if (started_in_countdown)
 		return (changed);
 	if (game->paused)
@@ -236,6 +238,25 @@ bool	solo_game_update_danger(solo_game_t *game, int elapsed_ms)
 	game->danger_safe_elapsed_ms = 0;
 	game->danger_active = false;
 	return (true);
+}
+
+/**
+ * @brief Returns the current no-glow environment dim strength.
+ *
+ * The board renderer excludes the playfield from this tint, so the value only
+ * darkens the surrounding authored environment.
+ *
+ * @param game Pointer to the Solo state.
+ * @return Black-mix strength from 0 through SOLO_DANGER_DIM_MAX.
+ */
+unsigned	solo_game_danger_dim(const solo_game_t *game)
+{
+	if (game == NULL || game->danger_fade_elapsed_ms <= 0)
+		return (0);
+	if (game->danger_fade_elapsed_ms >= SOLO_DANGER_FADE_MS)
+		return (SOLO_DANGER_DIM_MAX);
+	return ((unsigned)(SOLO_DANGER_DIM_MAX
+			* game->danger_fade_elapsed_ms / SOLO_DANGER_FADE_MS));
 }
 
 /**
@@ -442,6 +463,14 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
 	wake_ms = animation_wake_ms(wake_ms, game->countdown_active,
 			SOLO_COUNTDOWN_STEP_MS * SOLO_COUNTDOWN_STEPS
 			- game->countdown_elapsed_ms);
+	if (game->danger_active)
+		wake_ms = animation_wake_ms(wake_ms,
+				game->danger_fade_elapsed_ms < SOLO_DANGER_FADE_MS,
+				SOLO_DANGER_FADE_MS - game->danger_fade_elapsed_ms);
+	else
+		wake_ms = animation_wake_ms(wake_ms,
+				game->danger_fade_elapsed_ms > 0,
+				game->danger_fade_elapsed_ms);
 	return (wake_ms);
 }
 
@@ -1081,6 +1110,31 @@ static bool	advance_event_animations(solo_game_t *game, int elapsed_ms)
 	if (after_stage >= SOLO_COUNTDOWN_STEPS)
 		game->countdown_active = false;
 	return (elapsed_ms > 0 || changed);
+}
+
+/**
+ * @brief Fades the environment dim level toward the current danger state.
+ */
+static bool	advance_danger_presentation(solo_game_t *game, int elapsed_ms)
+{
+	int	before;
+
+	if (elapsed_ms <= 0)
+		return (false);
+	before = game->danger_fade_elapsed_ms;
+	if (game->danger_active)
+	{
+		game->danger_fade_elapsed_ms += elapsed_ms;
+		if (game->danger_fade_elapsed_ms > SOLO_DANGER_FADE_MS)
+			game->danger_fade_elapsed_ms = SOLO_DANGER_FADE_MS;
+	}
+	else
+	{
+		game->danger_fade_elapsed_ms -= elapsed_ms;
+		if (game->danger_fade_elapsed_ms < 0)
+			game->danger_fade_elapsed_ms = 0;
+	}
+	return (before != game->danger_fade_elapsed_ms);
 }
 
 /**

@@ -36,6 +36,8 @@ static void	update_solo_compatibility_badge(render_ctx_t *ctx,
 static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
 static void	set_standard_backdrop(render_ctx_t *ctx);
 static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
+static int	update_danger_background(render_ctx_t *ctx, solo_render_t *solo,
+				const solo_game_t *game);
 static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo);
 static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
 	int rows, int cols);
@@ -218,6 +220,14 @@ void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
 		destroy_plane(&solo->status_plane);
 		changed = 1;
 	}
+	result = update_danger_background(ctx, solo, game);
+	if (result < 0)
+	{
+		solo_canvas_set_error(solo,
+			"Notcurses rejected the Solo danger background", NULL);
+		goto render_failure;
+	}
+	changed |= result;
 	result = update_foreground_regions(ctx, solo, game);
 	if (result < 0)
 	{
@@ -266,6 +276,7 @@ void	render_solo_destroy(solo_render_t *solo)
 {
 	destroy_solo_planes(solo);
 	free(solo->static_pixels);
+	free(solo->background_pixels);
 	free(solo->frame_pixels);
 	free(solo->tile_pixels);
 	free(solo->font_pixels);
@@ -335,6 +346,7 @@ static void	reset_render_signatures(solo_render_t *solo)
 	solo->score_event_signature = UINT64_MAX;
 	solo->popover_signature = UINT64_MAX;
 	solo->overlay_signature = UINT64_MAX;
+	solo->danger_signature = UINT64_MAX;
 	solo->active_shape_signature = UINT64_MAX;
 	solo->ghost_shape_signature = UINT64_MAX;
 	solo->piece_planes_combined = false;
@@ -517,7 +529,7 @@ static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo)
 		solo->canvas_col, solo->content_rows, solo->canvas_cols);
 	if (solo->background_plane == NULL)
 		return (false);
-	if (!blit_surface(ctx, solo->background_plane, solo->static_pixels,
+	if (!blit_surface(ctx, solo->background_plane, solo->background_pixels,
 			SOLO_CANVAS_WIDTH, SOLO_CONTENT_HEIGHT,
 			SOLO_CANVAS_WIDTH, NCBLIT_4x2))
 	{
@@ -525,6 +537,30 @@ static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo)
 		return (false);
 	}
 	return (true);
+}
+
+/**
+ * @brief Refreshes the flat no-glow danger tint when its fade step changes.
+ *
+ * The same 4x2 background surface is used in Kitty and compatibility mode;
+ * higher foreground planes keep the playfield and live HUD readable.
+ */
+static int	update_danger_background(render_ctx_t *ctx, solo_render_t *solo,
+	const solo_game_t *game)
+{
+	uint64_t	signature;
+
+	signature = solo_game_danger_dim(game);
+	if (signature == solo->danger_signature)
+		return (0);
+	solo_canvas_compose_danger_background(solo, game);
+	ncplane_erase(solo->background_plane);
+	if (!blit_surface(ctx, solo->background_plane, solo->background_pixels,
+			SOLO_CANVAS_WIDTH, SOLO_CONTENT_HEIGHT,
+			SOLO_CANVAS_WIDTH, NCBLIT_4x2))
+		return (-1);
+	solo->danger_signature = signature;
+	return (1);
 }
 
 /**

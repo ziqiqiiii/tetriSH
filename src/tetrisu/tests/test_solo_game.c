@@ -679,6 +679,13 @@ static void	test_danger_state_has_stable_exit_hysteresis(void)
 		(t_cell){CELL_FILLED, PIECE_T});
 	assert(solo_game_update_danger(&game, 0));
 	assert(game.danger_active);
+	assert(solo_game_danger_dim(&game) == 0);
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
+	assert(solo_game_update(&game, SOLO_DANGER_FADE_MS / 2));
+	assert(solo_game_danger_dim(&game) > 0
+		&& solo_game_danger_dim(&game) < SOLO_DANGER_DIM_MAX);
+	assert(solo_game_update(&game, SOLO_DANGER_FADE_MS / 2));
+	assert(solo_game_danger_dim(&game) == SOLO_DANGER_DIM_MAX);
 	board_set(&game.board, 0, SOLO_DANGER_ENTER_ROW,
 		(t_cell){CELL_EMPTY, 0});
 	board_set(&game.board, 0, SOLO_DANGER_EXIT_ROW - 1,
@@ -699,6 +706,9 @@ static void	test_danger_state_has_stable_exit_hysteresis(void)
 	game.paused = false;
 	assert(solo_game_update_danger(&game, 1));
 	assert(!game.danger_active);
+	assert(solo_game_next_wake_ms(&game) == SOLO_EVENT_ANIMATION_FRAME_MS);
+	assert(solo_game_update(&game, SOLO_DANGER_FADE_MS));
+	assert(solo_game_danger_dim(&game) == 0);
 	printf("PASS test_danger_state_has_stable_exit_hysteresis\n");
 }
 

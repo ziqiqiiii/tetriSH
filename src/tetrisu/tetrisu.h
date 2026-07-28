@@ -60,8 +60,10 @@
 	ASSET_DIR "/default_theme/ability_popover.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
-# define MENU_MOVE_SFX_PATH	ASSET_DIR "/menu_move.wav"
-# define MENU_SELECT_SFX_PATH	ASSET_DIR "/menu_select.wav"
+# define MENU_MOVE_SFX_PATH \
+	ASSET_DIR "/General Sounds/se_sys_cursor2.wav"
+# define MENU_SELECT_SFX_PATH \
+	ASSET_DIR "/General Sounds/se_sys_dialog.wav"
 # define GENERAL_SFX_DIR	ASSET_DIR "/General Sounds"
 # define MENU_ITEM_COUNT	5
 # define SOLO_NEXT_COUNT	3
@@ -77,6 +79,9 @@
 # define SOLO_DANGER_ENTER_ROW	3
 # define SOLO_DANGER_EXIT_ROW	5
 # define SOLO_DANGER_EXIT_HOLD_MS	1500
+# define SOLO_DANGER_FADE_MS	300
+# define SOLO_DANGER_DIM_MAX	150
+# define SOLO_DANGER_BOARD_PAD	4
 # define SOLO_TOP_OUT_REVEAL_MS	350
 # define SOLO_PERSONAL_BEST_PULSE_MS	720
 # define SOLO_PERSONAL_BEST_FADE_MS	300
@@ -104,6 +109,8 @@
 # define AUDIO_PATH_MAX			512
 # define AUDIO_SFX_QUIET_VOLUME	40
 # define AUDIO_SFX_NORMAL_VOLUME	72
+# define AUDIO_MENU_MOVE_VOLUME	36
+# define AUDIO_MENU_SELECT_VOLUME	48
 
 /* UI_NOTIFICATION.C */
 # define UI_NOTIFICATION_STACK_MAX	3
@@ -507,6 +514,7 @@ typedef struct s_solo_game
 	int				ability_ready_elapsed_ms;
 	int				countdown_elapsed_ms;
 	int				danger_safe_elapsed_ms;
+	int				danger_fade_elapsed_ms;
 	uint32_t		pending_events;
 	int				lock_resets;
 	int				last_kick_index;
@@ -545,6 +553,7 @@ typedef struct s_solo_render
 	struct ncplane	*ghost_plane;
 	struct ncplane	*status_plane;
 	uint32_t		*static_pixels;
+	uint32_t		*background_pixels;
 	uint32_t		*frame_pixels;
 	uint32_t		*tile_pixels;
 	uint32_t		*font_pixels;
@@ -567,6 +576,7 @@ typedef struct s_solo_render
 	uint64_t		score_event_signature;
 	uint64_t		popover_signature;
 	uint64_t		overlay_signature;
+	uint64_t		danger_signature;
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
@@ -681,6 +691,7 @@ void			solo_game_init(solo_game_t *game, uint32_t seed);
 bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
 bool			solo_game_update(solo_game_t *game, int elapsed_ms);
 bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
+unsigned		solo_game_danger_dim(const solo_game_t *game);
 uint32_t		solo_game_take_events(solo_game_t *game);
 void			solo_game_set_personal_best(solo_game_t *game,
 					uint64_t score);
@@ -748,6 +759,8 @@ void			solo_canvas_set_error(solo_render_t *solo, const char *message,
 void			solo_canvas_compose_hud(solo_render_t *solo,
 					const solo_game_t *game);
 void			solo_canvas_compose_board(solo_render_t *solo,
+					const solo_game_t *game);
+void			solo_canvas_compose_danger_background(solo_render_t *solo,
 					const solo_game_t *game);
 
 /* RENDER_SOLO.C */
