@@ -100,4 +100,34 @@ void			board_fill_rows(t_board *b, int n, int hole_col);
 void			board_clear_cells(t_board *b, int cols[], int rows[], int count);
 void			board_delete_columns(t_board *b, int start_col, int end_col);
 
+/* BATTLE ROYALE */
+
+/*
+ * Targeting mode selected by a player (or defaulted by the server).
+ * tetrisd reads this value to choose which room receives garbage; it is
+ * defined here so tetrisu can send the same enum value in a HTTTP body
+ * without duplicating the definition.
+ *
+ * TARGET_RANDOM     - a uniformly random other room (spec baseline)
+ * TARGET_ATTACKERS  - room(s) currently sending garbage to this room
+ * TARGET_KO         - room with the highest stack / closest to game over
+ * TARGET_TOP_SCORE  - room with the highest current score
+ */
+typedef enum e_target_mode
+{
+	TARGET_RANDOM    = 0,
+	TARGET_ATTACKERS = 1,
+	TARGET_KO        = 2,
+	TARGET_TOP_SCORE = 3
+}	t_target_mode;
+
+/*
+ * Returns the number of garbage lines to send when `lines_cleared` lines
+ * are cleared in a single drop (spec rule: max(0, lines_cleared - 1)).
+ * Inputs outside [0, 4] are clamped: negative -> 0, >4 -> treat as 4.
+ * The caller (tetrisd) is responsible for choosing the target room and
+ * calling board_inject_garbage() on the receiver's board.
+ */
+int				garbage_lines_from_clear(int lines_cleared);
+
 #endif
