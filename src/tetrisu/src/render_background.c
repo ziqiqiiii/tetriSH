@@ -237,6 +237,26 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	bool stretch)
 {
 	struct ncvisual			*ncv;
+	int						result;
+
+	ncv = ncvisual_from_file(image_path);
+	if (ncv == NULL)
+		return (-1);
+	result = render_background_replace_visual(ctx, ncv, stretch);
+	ncvisual_destroy(ncv);
+	return (result);
+}
+
+/**
+ * @brief Replaces the background with an already composed visual.
+ *
+ * The caller retains ownership of ncv. Keeping the sizing and replacement
+ * logic here ensures synthesized visuals obey the same exact plane contract as
+ * file-backed artwork.
+ */
+int	render_background_replace_visual(render_ctx_t *ctx,
+	struct ncvisual *ncv, bool stretch)
+{
 	struct ncvisual_options	vopts;
 	ncplane_options			bg_opts;
 	struct ncplane			*new_plane;
@@ -244,8 +264,7 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	unsigned				std_rows;
 	unsigned				std_cols;
 
-	ncv = ncvisual_from_file(image_path);
-	if (ncv == NULL)
+	if (ctx == NULL || ncv == NULL)
 		return (-1);
 	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
 	refresh_cell_geometry(ctx);
@@ -265,10 +284,7 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	bg_opts.cols = ctx->bg_cols;
 	new_plane = ncplane_create(ctx->std, &bg_opts);
 	if (new_plane == NULL)
-	{
-		ncvisual_destroy(ncv);
 		return (-1);
-	}
 	memset(&vopts, 0, sizeof(vopts));
 	vopts.n = new_plane;
 	vopts.scaling = NCSCALE_STRETCH;
@@ -276,11 +292,9 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
 	{
-		ncvisual_destroy(ncv);
 		ncplane_destroy(new_plane);
 		return (-1);
 	}
-	ncvisual_destroy(ncv);
 	old_plane = ctx->bg_plane;
 	if (old_plane != NULL)
 		(void)ncplane_move_above(new_plane, old_plane);
@@ -402,7 +416,7 @@ void	render_teardown(render_ctx_t *ctx)
 		ctx->bg_plane = NULL;
 		ctx->menu_plane = NULL;
 		ctx->menu_labels_plane = NULL;
-		ctx->auth_labels_plane = NULL;
+		ctx->auth_background_signature = 0;
 		ctx->bunny_plane = NULL;
 		ctx->pixels = TETRISU_PIXELS_NONE;
 	}

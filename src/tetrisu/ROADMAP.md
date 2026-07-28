@@ -80,10 +80,13 @@ routing in item 17.
   server states, while the future network seam is isolated behind one semantic
   check action. The current no-server fixture resolves checks to offline and
   leaves Play Offline available. WezTerm compatibility mode retains the compact
-  high-contrast terminal-only form. The large Kitty typography surface is
-  cached across typing and focus changes, and the native input plane is reused
-  in place; focused empty fields show only a fixed left-edge caret instead of
-  presenting placeholder copy as editable text.
+  high-contrast terminal-only form. Kitty composes the authored background and
+  all static typography once at the exact 1448 x 1086 source resolution in one
+  bitmap plane, avoiding the oversized transparent overlay and multi-sprixel
+  interaction discouraged by notcurses. The native value/status plane is
+  reused in place with transparent cell backgrounds; supported-mode fields
+  show no placeholder copy and display only a fixed left-edge caret when empty
+  and focused.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -254,8 +257,9 @@ routing in item 17.
     - Login accepts username, password, and domain/server; Sign Up adds
       password confirmation and returns to Login after account creation.
     - Kitty-capable terminals use a character-free authored pixel frame and
-      the shared high-resolution game font for static copy, while editable
-      values stay crisp native terminal text.
+      the shared high-resolution game font for static copy in one exact-size
+      composite, while editable values and dynamic server status stay crisp
+      native terminal text without painting cell bars over the artwork.
     - Server availability is explicit: unverified, checking, online, and
       offline states drive the status row and disable server-backed primary
       actions until online. The current network stub resolves to offline.

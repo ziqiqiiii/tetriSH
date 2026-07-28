@@ -606,7 +606,6 @@ typedef struct
 	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
-	struct ncplane		*auth_labels_plane;
 	struct ncplane		*screen_plane;
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
@@ -624,7 +623,7 @@ typedef struct
 	int					menu_col;
 	int					bunny_rows;
 	int					bunny_cols;
-	uint64_t			auth_labels_signature;
+	uint64_t			auth_background_signature;
 	tetrisu_pixel_policy_t	pixels;
 }	render_ctx_t;
 
@@ -926,6 +925,8 @@ uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
 void			render_teardown(render_ctx_t *ctx);
 int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
+int				render_background_replace_visual(render_ctx_t *ctx,
+					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(render_ctx_t *ctx);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
@@ -977,9 +978,9 @@ bool			render_auth_hit_test(const render_ctx_t *ctx,
 					const auth_form_t *form, const ncinput *input,
 					auth_focus_t *focus);
 void			render_auth_destroy(render_ctx_t *ctx);
-bool			render_auth_pixel_labels_refresh(render_ctx_t *ctx,
+bool			render_auth_pixel_background_refresh(render_ctx_t *ctx,
 					const auth_form_t *form, bool force);
-void			render_auth_pixel_labels_destroy(render_ctx_t *ctx);
+void			render_auth_pixel_background_reset(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
