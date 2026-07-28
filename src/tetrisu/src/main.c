@@ -2,6 +2,17 @@
 
 // Static Functions
 static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
+static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, auth_form_t *form,
+				const menu_selection_t *menu);
+static auth_action_t	auth_pointer_action(render_ctx_t *ctx,
+				audio_ctx_t *audio, auth_form_t *form,
+				const ncinput *input, uint32_t key);
+static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, auth_form_t *form,
+				auth_action_t action);
 static bool	activate_menu_selection(audio_ctx_t *audio,
 				app_navigation_t *navigation,
 				const menu_selection_t *menu);
@@ -21,6 +32,7 @@ int	main(void)
 	app_navigation_t	navigation;
 	app_data_provider_t	provider;
 	menu_selection_t	menu;
+	auth_form_t		auth_form;
 	render_ctx_t		ctx;
 	audio_ctx_t			audio;
 	ncinput				input;
@@ -36,11 +48,23 @@ int	main(void)
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
 	audio_load_game_sfx(&audio);
 	app_fixture_provider_init(&provider);
-	app_navigation_init(&navigation, APP_SCREEN_HOME);
-	render_menu_create(&ctx);
-	enable_home_mouse(&ctx);
+	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
+	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
 	while (navigation.current != APP_SCREEN_QUIT)
 	{
+		if (navigation.current == APP_SCREEN_ENTRY)
+		{
+			(void)app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_LOGIN
+			|| navigation.current == APP_SCREEN_SIGN_UP)
+		{
+			if (run_auth_flow(&ctx, &audio, &provider, &navigation,
+					&auth_form, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
 		if (navigation.current == APP_SCREEN_SOLO)
 		{
 			if (solo_mode_run(&ctx, &audio) < 0)
@@ -113,6 +137,132 @@ int	main(void)
 	render_background_destroy(&ctx);
 	render_teardown(&ctx);
 	return (0);
+}
+
+/**
+ * @brief Runs the complete login/sign-up/offline entry experience.
+ */
+static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	auth_form_t *form, const menu_selection_t *menu)
+{
+	ncinput			input;
+	uint32_t		key;
+	auth_action_t	action;
+	bool			rebuild;
+
+	if (navigation->current == APP_SCREEN_SIGN_UP
+		&& form->mode != AUTH_FORM_SIGN_UP)
+		auth_form_set_mode(form, AUTH_FORM_SIGN_UP);
+	else if (navigation->current == APP_SCREEN_LOGIN
+		&& form->mode != AUTH_FORM_LOGIN)
+		auth_form_set_mode(form, AUTH_FORM_LOGIN);
+	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
+	rebuild = true;
+	while (navigation->current == APP_SCREEN_LOGIN
+		|| navigation->current == APP_SCREEN_SIGN_UP)
+	{
+		if (!render_auth_show(ctx, form, rebuild))
+			return (-1);
+		rebuild = false;
+		key = render_wait_input(ctx, &input);
+		action = AUTH_ACTION_NONE;
+		if (key == (uint32_t)-1)
+			action = AUTH_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0)
+				return (-1);
+			rebuild = true;
+		}
+		else if (nckey_mouse_p(key))
+			action = auth_pointer_action(ctx, audio, form, &input, key);
+		else
+			action = auth_form_handle_key(form, key);
+		if (action != AUTH_ACTION_NONE
+			&& !apply_auth_action(ctx, audio, provider, navigation,
+				form, action))
+			return (-1);
+	}
+	render_auth_destroy(ctx);
+	if (navigation->current == APP_SCREEN_HOME)
+	{
+		if (reflow_home(ctx, menu) < 0)
+			return (-1);
+		enable_home_mouse(ctx);
+	}
+	return (0);
+}
+
+/**
+ * @brief Turns pointer hover and click into the shared form focus/action path.
+ */
+static auth_action_t	auth_pointer_action(render_ctx_t *ctx,
+	audio_ctx_t *audio, auth_form_t *form, const ncinput *input, uint32_t key)
+{
+	auth_focus_t	focus;
+
+	if (!render_auth_hit_test(ctx, form, input, &focus))
+		return (AUTH_ACTION_NONE);
+	if (form->focus != focus)
+	{
+		form->focus = focus;
+		audio_play_menu_move(audio);
+	}
+	if (key == NCKEY_BUTTON1 && (input->evtype == NCTYPE_PRESS
+			|| input->evtype == NCTYPE_UNKNOWN))
+		return (auth_form_handle_key(form, NCKEY_ENTER));
+	return (AUTH_ACTION_NONE);
+}
+
+/**
+ * @brief Applies one semantic auth action to providers and screen navigation.
+ */
+static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	auth_form_t *form, auth_action_t action)
+{
+	app_auth_view_model_t	view;
+	app_provider_result_t	result;
+
+	if (action == AUTH_ACTION_SUBMIT_LOGIN
+		|| action == AUTH_ACTION_SUBMIT_SIGN_UP)
+	{
+		audio_play_menu_select(audio);
+		if (!render_auth_show(ctx, form, false))
+			return (false);
+		memset(&view, 0, sizeof(view));
+		result = auth_form_submit(form, provider, &view);
+		if (result != APP_PROVIDER_OK)
+			return (true);
+		if (action == AUTH_ACTION_SUBMIT_LOGIN)
+			return (app_navigation_dispatch(navigation,
+					APP_NAV_AUTHENTICATED));
+		(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		auth_form_set_mode(form, AUTH_FORM_LOGIN);
+		form->feedback = AUTH_FEEDBACK_SUCCESS;
+		snprintf(form->status, sizeof(form->status),
+			"ACCOUNT CREATED - PLEASE SIGN IN");
+		return (true);
+	}
+	audio_play_menu_select(audio);
+	if (action == AUTH_ACTION_OPEN_SIGN_UP)
+	{
+		if (!app_navigation_dispatch(navigation, APP_NAV_OPEN_SIGN_UP))
+			return (false);
+		auth_form_set_mode(form, AUTH_FORM_SIGN_UP);
+	}
+	else if (action == AUTH_ACTION_OPEN_LOGIN)
+	{
+		if (!app_navigation_dispatch(navigation, APP_NAV_BACK))
+			return (false);
+		auth_form_set_mode(form, AUTH_FORM_LOGIN);
+	}
+	else if (action == AUTH_ACTION_PLAY_OFFLINE)
+		return (app_navigation_dispatch(navigation, APP_NAV_PLAY_OFFLINE));
+	else if (action == AUTH_ACTION_QUIT)
+		return (app_navigation_dispatch(navigation, APP_NAV_QUIT));
+	return (true);
 }
 
 /**

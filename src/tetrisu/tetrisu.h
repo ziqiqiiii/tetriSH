@@ -42,6 +42,8 @@
 # endif
 
 # define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
+# define AUTH_BACKGROUND_PATH \
+	ASSET_DIR "/default_theme/auth_screen.png"
 # define BUNNY_ASSET_PATH \
 	ASSET_DIR "/default_theme/default_bunny_ghost_pointer.png"
 # define INTRO_VIDEO_PATH	ASSET_DIR "/intro.mp4"
@@ -67,6 +69,9 @@
 # define GENERAL_SFX_DIR	ASSET_DIR "/General Sounds"
 # define MENU_ITEM_COUNT	5
 # define APP_TEXT_MAX	64
+# define AUTH_FIELD_MAX	128
+# define AUTH_STATUS_MAX	96
+# define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
 # define APP_LOBBY_MAX_ROOMS	8
@@ -441,9 +446,11 @@ typedef struct s_app_data_provider
 	bool		local_fixtures;
 	void		*userdata;
 	app_provider_result_t	(*login)(void *userdata, const char *username,
-			const char *password, app_auth_view_model_t *view);
+			const char *password, const char *domain,
+			app_auth_view_model_t *view);
 	app_provider_result_t	(*sign_up)(void *userdata, const char *username,
-			const char *password, app_auth_view_model_t *view);
+			const char *password, const char *domain,
+			app_auth_view_model_t *view);
 	app_provider_result_t	(*load_profile)(void *userdata,
 			app_profile_view_model_t *view);
 	app_provider_result_t	(*load_catalogue)(void *userdata,
@@ -478,6 +485,54 @@ typedef struct
 {
 	int	selected;
 }	menu_selection_t;
+
+typedef enum e_auth_form_mode
+{
+	AUTH_FORM_LOGIN,
+	AUTH_FORM_SIGN_UP
+}	auth_form_mode_t;
+
+typedef enum e_auth_focus
+{
+	AUTH_FOCUS_USERNAME,
+	AUTH_FOCUS_PASSWORD,
+	AUTH_FOCUS_CONFIRM,
+	AUTH_FOCUS_DOMAIN,
+	AUTH_FOCUS_PRIMARY,
+	AUTH_FOCUS_SECONDARY,
+	AUTH_FOCUS_OFFLINE
+}	auth_focus_t;
+
+typedef enum e_auth_feedback
+{
+	AUTH_FEEDBACK_IDLE,
+	AUTH_FEEDBACK_LOADING,
+	AUTH_FEEDBACK_SUCCESS,
+	AUTH_FEEDBACK_ERROR
+}	auth_feedback_t;
+
+typedef enum e_auth_action
+{
+	AUTH_ACTION_NONE,
+	AUTH_ACTION_SUBMIT_LOGIN,
+	AUTH_ACTION_SUBMIT_SIGN_UP,
+	AUTH_ACTION_OPEN_LOGIN,
+	AUTH_ACTION_OPEN_SIGN_UP,
+	AUTH_ACTION_PLAY_OFFLINE,
+	AUTH_ACTION_QUIT
+}	auth_action_t;
+
+typedef struct s_auth_form
+{
+	auth_form_mode_t	mode;
+	auth_focus_t		focus;
+	auth_feedback_t	feedback;
+	char				username[AUTH_FIELD_MAX];
+	char				password[AUTH_FIELD_MAX];
+	char				confirm[AUTH_FIELD_MAX];
+	char				domain[AUTH_FIELD_MAX];
+	char				status[AUTH_STATUS_MAX];
+}	auth_form_t;
 
 typedef enum e_audio_sfx
 {
@@ -823,6 +878,19 @@ app_provider_result_t	app_screen_view_load(
 const char		*app_data_status_name(app_data_status_t status);
 const char		*app_game_mode_name(app_game_mode_t mode);
 
+/* AUTH_FORM.C */
+void			auth_form_init(auth_form_t *form, auth_form_mode_t mode);
+void			auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode);
+void			auth_form_focus_next(auth_form_t *form);
+void			auth_form_focus_previous(auth_form_t *form);
+auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key);
+bool			auth_form_validate(auth_form_t *form);
+app_provider_result_t	auth_form_submit(auth_form_t *form,
+					const app_data_provider_t *provider,
+					app_auth_view_model_t *view);
+bool			auth_form_mask_password(const char *password, char *masked,
+					size_t size);
+
 /* UI_NOTIFICATION.C */
 void			ui_notification_stack_init(ui_notification_stack_t *stack);
 void			ui_notification_show(ui_notification_stack_t *stack,
@@ -886,6 +954,14 @@ int				render_menu_label_y(const render_ctx_t *ctx, int index);
 bool			render_screen_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view);
 void			render_screen_destroy(render_ctx_t *ctx);
+
+/* RENDER_AUTH.C */
+bool			render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
+					bool rebuild_background);
+bool			render_auth_hit_test(const render_ctx_t *ctx,
+					const auth_form_t *form, const ncinput *input,
+					auth_focus_t *focus);
+void			render_auth_destroy(render_ctx_t *ctx);
 
 /* RENDER_INTRO.C */
 int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,

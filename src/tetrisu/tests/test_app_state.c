@@ -30,8 +30,9 @@ static void	test_screen_names_and_parents(void)
 		assert(strcmp(app_screen_name((app_screen_t)screen), "Unknown") != 0);
 		screen++;
 	}
-	assert(app_screen_parent(APP_SCREEN_LOGIN) == APP_SCREEN_ENTRY);
-	assert(app_screen_parent(APP_SCREEN_HOME) == APP_SCREEN_ENTRY);
+	assert(app_screen_parent(APP_SCREEN_LOGIN) == APP_SCREEN_LOGIN);
+	assert(app_screen_parent(APP_SCREEN_SIGN_UP) == APP_SCREEN_LOGIN);
+	assert(app_screen_parent(APP_SCREEN_HOME) == APP_SCREEN_LOGIN);
 	assert(app_screen_parent(APP_SCREEN_SOLO) == APP_SCREEN_HOME);
 	assert(app_screen_parent(APP_SCREEN_MARKETPLACE) == APP_SCREEN_HOME);
 	assert(app_screen_parent(APP_SCREEN_CREATE_ROOM_MODAL) == APP_SCREEN_LOBBY);
@@ -50,16 +51,19 @@ static void	test_entry_and_account_navigation(void)
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN));
 	assert(navigation.current == APP_SCREEN_LOGIN);
 	assert(navigation.previous == APP_SCREEN_ENTRY);
-	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
-	assert(navigation.current == APP_SCREEN_ENTRY);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_SIGN_UP));
+	assert(navigation.current == APP_SCREEN_SIGN_UP);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_LOGIN);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_AUTHENTICATED));
 	assert(navigation.current == APP_SCREEN_HOME && !navigation.offline);
-	app_navigation_init(&navigation, APP_SCREEN_ENTRY);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_LOGIN);
+	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_PLAY_OFFLINE));
 	assert(navigation.current == APP_SCREEN_HOME && navigation.offline);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
-	assert(navigation.current == APP_SCREEN_ENTRY && !navigation.offline);
+	assert(navigation.current == APP_SCREEN_LOGIN && !navigation.offline);
 	printf("PASS test_entry_and_account_navigation\n");
 }
 

@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 continues with the login, sign-up,
-and offline entry screens in item 16.
+Phases 1 through 3 are complete. Phase 4 continues with complete home-action
+routing in item 17.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -72,6 +72,11 @@ and offline entry screens in item 16.
   leaderboard, lobby, room, and match models sit behind a provider interface;
   deterministic fixture-backed scaffolds are visibly marked
   `LOCAL UI PREVIEW`.
+- Item 16 makes Login the first interactive screen after the splash. A
+  character-free pixel-art frame keeps username, masked password, domain, and
+  confirmation copy as sharp terminal text; keyboard/mouse focus, UTF-8
+  editing, validation, loading/error/success states, sign-up return, offline
+  entry, resize, and a pure cell-mode fallback share one form state machine.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -234,11 +239,16 @@ and offline entry screens in item 16.
       and every state has a native-terminal scaffold pending its dedicated
       screen item.
 
-16. **Add login, sign-up, and offline entry screens**
+16. **Add login, sign-up, and offline entry screens** — complete
 
     - Startup: Login, Sign Up, Play Offline.
     - UTF-8 field editing, password masking, focus order, validation, loading,
       error, back, and resize support.
+    - Login accepts username, password, and domain/server; Sign Up adds
+      password confirmation and returns to Login after account creation.
+    - Kitty-capable terminals use a character-free authored pixel frame with
+      native terminal text. Compatibility mode keeps the same controls in a
+      compact high-contrast terminal-only frame.
 
 17. **Route all five home actions**
 

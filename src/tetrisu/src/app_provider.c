@@ -3,9 +3,11 @@
 // Static Functions
 static app_provider_result_t	fixture_login(void *userdata,
 				const char *username, const char *password,
+				const char *domain,
 				app_auth_view_model_t *view);
 static app_provider_result_t	fixture_sign_up(void *userdata,
 				const char *username, const char *password,
+				const char *domain,
 				app_auth_view_model_t *view);
 static app_provider_result_t	fixture_load_profile(void *userdata,
 				app_profile_view_model_t *view);
@@ -101,11 +103,13 @@ const char	*app_game_mode_name(app_game_mode_t mode)
  * @brief Fixture authentication accepts non-empty preview credentials.
  */
 static app_provider_result_t	fixture_login(void *userdata,
-	const char *username, const char *password, app_auth_view_model_t *view)
+	const char *username, const char *password, const char *domain,
+	app_auth_view_model_t *view)
 {
 	(void)userdata;
 	if (view == NULL || username == NULL || password == NULL
-		|| username[0] == '\0' || password[0] == '\0')
+		|| domain == NULL || username[0] == '\0' || password[0] == '\0'
+		|| domain[0] == '\0')
 		return (APP_PROVIDER_INVALID);
 	memset(view, 0, sizeof(*view));
 	view->signed_in = true;
@@ -119,9 +123,10 @@ static app_provider_result_t	fixture_login(void *userdata,
  * @brief Fixture sign-up shares the local preview authentication contract.
  */
 static app_provider_result_t	fixture_sign_up(void *userdata,
-	const char *username, const char *password, app_auth_view_model_t *view)
+	const char *username, const char *password, const char *domain,
+	app_auth_view_model_t *view)
 {
-	return (fixture_login(userdata, username, password, view));
+	return (fixture_login(userdata, username, password, domain, view));
 }
 
 /**

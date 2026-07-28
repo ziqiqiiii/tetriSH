@@ -26,10 +26,11 @@ static void	test_fixture_provider_contract(void)
 	assert(provider.load_profile != NULL && provider.load_catalogue != NULL);
 	assert(provider.load_leaderboard != NULL && provider.load_lobby != NULL);
 	assert(provider.load_room != NULL);
-	assert(provider.login(provider.userdata, "", "password", &auth)
+	assert(provider.login(provider.userdata, "", "password", "example.com",
+			&auth)
 		== APP_PROVIDER_INVALID);
 	assert(provider.login(provider.userdata, "PreviewPlayer", "password",
-			&auth) == APP_PROVIDER_OK);
+			"example.com", &auth) == APP_PROVIDER_OK);
 	assert(auth.signed_in);
 	assert(strcmp(auth.username, "PreviewPlayer") == 0);
 	assert(strstr(auth.message, "LOCAL UI PREVIEW") != NULL);

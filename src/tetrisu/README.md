@@ -292,7 +292,10 @@ render_init (background)
 render_intro_play          stream INTRO_VIDEO_PATH; skippable, best-effort audio
      │
      ▼
-render_menu_create         draw the bunny selector over the background
+render_auth_show           Login / Sign Up / Play Offline; native-text fields
+     │
+     ▼
+render_menu_create         after authentication/offline entry, draw home menu
      │
      ▼
   screen loop              render_wait_input → validated navigation:
@@ -311,10 +314,12 @@ Modules (each a `.c` under `src/`):
 | `main.c` | Entry point; wires render + audio and runs the input loop |
 | `app_state.c` | Validate the complete screen graph, Back routes, menu state, and labels |
 | `app_provider.c` | Typed screen models and marked local fixture provider |
+| `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
 | `renderer_policy.c` | renderer environment parsing and forced compatibility policy |
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
+| `render_auth.c` | Pixel-art login/sign-up frame and terminal-only fallback |
 | `render_screen.c` | Shared native-terminal scaffold for future dedicated screens |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
@@ -337,10 +342,12 @@ tetrisu/
 │   ├── main.c                 Entry point + input loop → bin/tetrisu
 │   ├── app_state.c            Pure validated screen graph → logic.a
 │   ├── app_provider.c         Typed models + local fixture provider
+│   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── renderer_policy.c      Renderer environment and compatibility policy
 │   ├── render_intro.c         Splash video streamer
 │   ├── render_menu.c          Bunny selector + messages
+│   ├── render_auth.c          Auth artwork overlay + cell fallback
 │   ├── render_screen.c        Native-terminal screen scaffold
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
 │   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition

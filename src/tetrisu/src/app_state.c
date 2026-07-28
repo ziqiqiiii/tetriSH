@@ -41,7 +41,7 @@ bool	app_navigation_dispatch(app_navigation_t *navigation,
 		navigation->offline = true;
 	else if (action == APP_NAV_AUTHENTICATED)
 		navigation->offline = false;
-	else if (target == APP_SCREEN_ENTRY)
+	else if (target == APP_SCREEN_ENTRY || target == APP_SCREEN_LOGIN)
 		navigation->offline = false;
 	navigation->previous = navigation->current;
 	navigation->current = target;
@@ -53,9 +53,8 @@ bool	app_navigation_dispatch(app_navigation_t *navigation,
  */
 app_screen_t	app_screen_parent(app_screen_t screen)
 {
-	if (screen == APP_SCREEN_LOGIN || screen == APP_SCREEN_SIGN_UP
-		|| screen == APP_SCREEN_HOME)
-		return (APP_SCREEN_ENTRY);
+	if (screen == APP_SCREEN_SIGN_UP || screen == APP_SCREEN_HOME)
+		return (APP_SCREEN_LOGIN);
 	if (screen == APP_SCREEN_SOLO || screen == APP_SCREEN_MARKETPLACE
 		|| screen == APP_SCREEN_SETTINGS || screen == APP_SCREEN_LEADERBOARD
 		|| screen == APP_SCREEN_LOBBY)
@@ -164,7 +163,8 @@ static bool	navigation_target(const app_navigation_t *navigation,
 		*target = app_screen_parent(current);
 	else if (action == APP_NAV_OPEN_LOGIN && current == APP_SCREEN_ENTRY)
 		*target = APP_SCREEN_LOGIN;
-	else if (action == APP_NAV_OPEN_SIGN_UP && current == APP_SCREEN_ENTRY)
+	else if (action == APP_NAV_OPEN_SIGN_UP
+		&& (current == APP_SCREEN_ENTRY || current == APP_SCREEN_LOGIN))
 		*target = APP_SCREEN_SIGN_UP;
 	else if (action == APP_NAV_PLAY_OFFLINE
 		&& (current == APP_SCREEN_ENTRY || current == APP_SCREEN_LOGIN
