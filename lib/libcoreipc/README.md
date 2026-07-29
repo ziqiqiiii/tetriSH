@@ -6,22 +6,12 @@ tetriSH IPC (Inter-process communication) library
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
 - [Build](#build)
+- [Testing](#testing)
 - [API Reference](#api-reference)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
-- [Testing](#testing)
 
-
----
-
-## Prerequisites
-
-A C11 toolchain and `make`. Linking requires `-lpthread` and `-lrt`.
-
-POSIX message queues need `/dev/mqueue` mounted; where it is absent the
-`mq_helpers` suite reports a skip rather than a failure.
 
 ---
 
@@ -50,6 +40,26 @@ cc ... -I lib/libcoreipc/include lib/libcoreipc/libcoreipc.a -lpthread -lrt
 ```
 
 `tetrisd`, `tetrislogd`, `tetrisctl`, and `tetrisu` link it directly.
+
+---
+
+## Testing
+
+Each test has its own `main()` and links `libcoreipc.a`:
+
+```bash
+make -C lib/libcoreipc test
+make -C lib/libcoreipc test FILTER=ring_buffer
+```
+
+| Suite | Proves |
+|---|---|
+| `test_ring_buffer` | FIFO order, wraparound, full ⇒ `-1` and `rb_drops` increments, pop-empty ⇒ `-1`, drain batching |
+| `test_ring_buffer_mt` | 4 producers × 10k records, 1 consumer: `popped + dropped == pushed`, no duplicates |
+| `test_unix_dgram` | Round trip under `mkdtemp()`, unbound path ⇒ `ECONNREFUSED`, re-bind over a stale file |
+| `test_unix_stream` | 100 KiB round trip (forcing short writes), `0600` on the bound path, early close ⇒ `EPIPE` |
+| `test_fd_signal` | Flags preserved, socket file removed, notify from a real handler, N notifies coalesce to one |
+| `test_mq_helpers` | With `maxmsg=4`: four sends succeed, the fifth ⇒ `EAGAIN` without blocking, drain in order |
 
 ---
 
@@ -163,24 +173,5 @@ lib/libcoreipc/
 └── libcoreipc.a                Generated archive
 ```
 
----
-
-## Testing
-
-Each test has its own `main()` and links `libcoreipc.a`:
-
-```bash
-make -C lib/libcoreipc test
-make -C lib/libcoreipc test FILTER=ring_buffer
-```
-
-| Suite | Proves |
-|---|---|
-| `test_ring_buffer` | FIFO order, wraparound, full ⇒ `-1` and `rb_drops` increments, pop-empty ⇒ `-1`, drain batching |
-| `test_ring_buffer_mt` | 4 producers × 10k records, 1 consumer: `popped + dropped == pushed`, no duplicates |
-| `test_unix_dgram` | Round trip under `mkdtemp()`, unbound path ⇒ `ECONNREFUSED`, re-bind over a stale file |
-| `test_unix_stream` | 100 KiB round trip (forcing short writes), `0600` on the bound path, early close ⇒ `EPIPE` |
-| `test_fd_signal` | Flags preserved, socket file removed, notify from a real handler, N notifies coalesce to one |
-| `test_mq_helpers` | With `maxmsg=4`: four sends succeed, the fifth ⇒ `EAGAIN` without blocking, drain in order |
 
 
