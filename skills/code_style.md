@@ -53,6 +53,7 @@ Rules:
 - Mark unused parameters as such: `@param argc Number of command-line arguments (unused).`
 - `@return` describes every return path (e.g. `EXIT_SUCCESS on success, EXIT_FAILURE on failure.`).
 - `void` functions have no `@return` line.
+- keep it concise (IMPORTANT).
 
 ---
 
