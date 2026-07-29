@@ -86,8 +86,7 @@ bool	render_pixels_available(const render_ctx_t *ctx)
  * @brief Reports whether this session uses the terminal-native renderer.
  *
  * Automatic mode only falls back to cells when the terminal reports no bitmap
- * support, or when its bitmap registry is known to grow without bound;
- * TETRISU_RENDERER=cell makes the same polished path deterministic.
+ * support. TETRISU_RENDERER=cell makes the same polished path deterministic.
  *
  * @param ctx Active render context.
  * @return true when all changing UI surfaces must remain terminal cells.
@@ -274,7 +273,7 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 	int				pixel_cols;
 	int				result;
 
-	if (ctx == NULL || image_path == NULL || !render_pixel_planes_reliable(ctx))
+	if (ctx == NULL || image_path == NULL || !render_pixels_available(ctx))
 		return (-1);
 	ncv = ncvisual_from_file(image_path);
 	if (ncv == NULL)
@@ -478,6 +477,7 @@ void	render_teardown(render_ctx_t *ctx)
 		render_notification_destroy(ctx);
 		render_compatibility_badge_hide(ctx);
 		render_auth_pixel_overlay_destroy(ctx);
+		render_auth_pixel_background_reset(ctx);
 		if (ctx->auth_font_visual != NULL)
 		{
 			ncvisual_destroy(ctx->auth_font_visual);

@@ -854,7 +854,7 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	solo_render_t *solo, const solo_game_t *game)
 {
-	char		countdown[8];
+	char		countdown[12];
 	const char	*title;
 	const char	*action;
 	color_t		white;

@@ -39,8 +39,8 @@ routing in item 17.
   protocols keep a terminal-side image registry that can leak. So foot, XTerm,
   mlterm, VTE-based terminals, Konsole, and contour all keep the authored
   bitmaps under a stationary tier that never moves or restacks a sprixel.
-  Cells are reserved for terminals reporting no bitmap support and for the two
-  registry terminals measured to retain every replaced frame.
+  WezTerm and iTerm2 use that same bounded-retransmission tier. Cells are
+  reserved for terminals reporting no bitmap support.
 - Item 8 adds a reusable notification stack with a cutesy authored Mirurun
   music card. Music changes show a crisp live percentage and 16-step crystal
   bar on Home and Solo, including compatibility mode and builds without SDL
@@ -72,8 +72,8 @@ routing in item 17.
   leaderboard, lobby, room, and match models sit behind a provider interface;
   deterministic fixture-backed scaffolds are visibly marked
   `LOCAL UI PREVIEW`.
-- Item 16 makes Login the first interactive screen after the splash. Reliable
-  Kitty rendering uses authored pixel artwork with real bold Mononoki
+- Item 16 makes Login the first interactive screen after the splash.
+  Bitmap-capable rendering uses authored pixel artwork with real bold Mononoki
   typography for headings, labels, and actions. Editable values, live status,
   and focus marks use small reusable pixel sprites from the same generated font
   atlas, so every visible word stays sharp without repainting the full screen.
@@ -81,13 +81,13 @@ routing in item 17.
   creation stay visibly disabled through unverified, checking, and offline
   server states, while the future network seam is isolated behind one semantic
   check action. The current no-server fixture resolves checks to offline and
-  leaves Play Offline available. WezTerm compatibility mode retains the compact
-  high-contrast terminal-only form. Kitty loads precomposed Login and Sign Up
-  PNGs at the exact 1448 x 1086 source resolution in one background bitmap
-  plane. Persistent compact overlay planes update only changed text, avoiding
-  the incomplete rows and input lag caused by rebuilding a full-screen RGBA
-  visual per key. Supported-mode fields show no placeholder copy and display
-  only a fixed left-edge caret when empty and focused.
+  leaves Play Offline available. Bitmap-capable terminals load precomposed
+  Login and Sign Up PNGs at the exact 1448 x 1086 source resolution in one
+  background bitmap plane. Persistent compact overlay planes update only
+  changed text without moving the background, including on stationary Sixel
+  terminals. This avoids the incomplete rows and input lag caused by rebuilding
+  a full-screen RGBA visual per key. Supported-mode fields show no placeholder
+  copy and display only a fixed left-edge caret when empty and focused.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -168,8 +168,8 @@ routing in item 17.
    - Work on home, gameplay, future screens, and silent-audio builds.
    - Repeated volume changes refresh one notification instead of creating
      duplicates; the shared stack retains room for future notification types.
-   - Kitty uses the authored bitmap; WezTerm compatibility mode renders the
-     same PNG through dense terminal cells with crisp native text above it.
+   - Kitty uses the authored moving bitmap; stationary bitmap terminals render
+     the same card without moving its image plane.
 
 9. **Replace ability help with a fading popover** — complete
 
@@ -181,8 +181,8 @@ routing in item 17.
      existing one-second game deadline, then return to hovered help or fade.
    - Mouse and keyboard activation use the same feedback card.
    - Kitty's pixel renderer adds a generated Mirurun-and-crystals pixel-art
-     badge beside the crisp native-text card. WezTerm compatibility mode keeps
-     the terminal-only fallback; score events remain independent underneath.
+     badge beside the crisp native-text card. Stationary bitmap terminals keep
+     the terminal-only card; score events remain independent underneath.
 
 10. **Add event-driven retro sound effects** — complete
 
@@ -257,10 +257,10 @@ routing in item 17.
       error, back, and resize support.
     - Login accepts username, password, and domain/server; Sign Up adds
       password confirmation and returns to Login after account creation.
-    - Kitty-capable terminals load exact-size authored Login and Sign Up PNGs
+    - Bitmap-capable terminals load exact-size authored Login and Sign Up PNGs
       with bold Mononoki copy. Editable values, dynamic server status, and focus
       marks use reusable pixel-font sprites without painting cell bars over the
-      artwork.
+      artwork or moving stationary Sixel planes.
     - Server availability is explicit: unverified, checking, online, and
       offline states drive the status row and disable server-backed primary
       actions until online. The current network stub resolves to offline.

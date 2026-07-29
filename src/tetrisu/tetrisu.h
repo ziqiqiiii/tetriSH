@@ -618,6 +618,7 @@ typedef struct
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
+	struct ncvisual		*auth_background_visual;
 	struct ncvisual		*auth_font_visual;
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];

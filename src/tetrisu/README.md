@@ -152,8 +152,8 @@ picks one of three tiers:
 | Tier | Chosen for | Presentation |
 |---|---|---|
 | movable | kitty and Ghostty — Kitty-protocol terminals measured to free a replaced image | Authored bitmaps everywhere; the selector and the falling piece are their own planes and slide |
-| stationary | Sixel and the Linux framebuffer (foot, XTerm, mlterm, VTE ≥ 0.78, `/dev/fb0`), plus any other Kitty-protocol terminal (Konsole, contour) | The same authored bitmaps, but no bitmap is ever moved: the board is flattened into one image redrawn in place, and the selector is destroyed and blitted again at its new row |
-| cell | Terminals reporting no bitmap support, plus WezTerm and iTerm2, measured to retain every replaced frame | True-colour terminal cells throughout, with the `:: COMPATIBILITY MODE ::` badge |
+| stationary | Sixel and the Linux framebuffer (foot, XTerm, mlterm, VTE ≥ 0.78, `/dev/fb0`), plus other image-registry terminals such as WezTerm, iTerm2, Konsole, and contour | The same authored bitmaps, but no bitmap is ever moved: the board is flattened into one image redrawn in place, and the selector is destroyed and blitted again at its new row |
+| cell | Terminals reporting no bitmap support | True-colour terminal cells throughout, with the `:: COMPATIBILITY MODE ::` badge |
 
 Two independent properties decide this, and conflating them is what previously
 sent perfectly capable terminals to the cell renderer:
@@ -175,10 +175,9 @@ terminal an image registry that a buggy terminal can grow without bound. Sixel
 and the framebuffer paint straight into the grid and keep nothing. The backend
 enum cannot grade the registry terminals, because notcurses reserves
 `NCPIXEL_KITTY_ANIMATED` and `NCPIXEL_KITTY_SELFREF` for kitty itself and drops
-every other Kitty-graphics terminal onto `NCPIXEL_KITTY_STATIC`, so they are
-split by name: measured-good moves, measured-leaky uses cells, and anything
-unmeasured takes the stationary tier, which retransmits on board change rather
-than once per frame.
+every other Kitty-graphics terminal onto `NCPIXEL_KITTY_STATIC`. Measured-good
+terminals move bitmaps; every other detected registry backend takes the
+stationary tier, which retransmits on board change rather than once per frame.
 
 Any tier can be forced, which is how an unmeasured terminal is tried or a
 suspected rendering bug is bisected:

@@ -19,6 +19,8 @@ static const color_t	g_auth_disabled = {116, 111, 132};
 
 static uint64_t			form_signature(const auth_form_t *form);
 static bool				ensure_font_atlas(render_ctx_t *ctx);
+static bool				cache_background_visual(render_ctx_t *ctx,
+								const char *path);
 static bool				add_value_sprite(render_ctx_t *ctx,
 							const auth_form_t *form, auth_focus_t focus,
 							int row, int x, int width, const char *value,
@@ -37,6 +39,11 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 							struct ncplane *plane, const char *text,
 							int row, int x, int plane_width, color_t tint,
 							bool centered);
+static bool				prefill_sprite_background(render_ctx_t *ctx,
+								uint32_t *pixels, int row, int x,
+								int width, int pixel_rows);
+static void				blend_sprite_pixel(uint32_t *pixel, color_t tint,
+								unsigned alpha);
 static void				set_transparent_base(struct ncplane *plane);
 static size_t			visible_ascii(char *output, size_t capacity,
 							const char *text, int max_width);
@@ -46,7 +53,7 @@ static uint64_t			sprite_signature(const char *text, int row, int x,
 /**
  * @brief Loads the authored auth screen for the active form.
  *
- * Static artwork is transferred as one exact-size Kitty bitmap. Live values,
+ * Static artwork is transferred as one exact-size bitmap. Live values,
  * status, and focus use separate small font sprites so they stay above the
  * background without repainting a full-screen image for every key press.
  */
@@ -56,18 +63,23 @@ bool	render_auth_pixel_background_refresh(render_ctx_t *ctx,
 	const char	*path;
 	uint64_t	signature;
 
-	if (ctx == NULL || form == NULL || !render_pixel_planes_reliable(ctx)
+	if (ctx == NULL || form == NULL || !render_pixels_available(ctx)
 		|| !notcurses_canpixel(ctx->nc))
 		return (false);
 	signature = form_signature(form);
 	if (!force && ctx->bg_plane != NULL
-		&& ctx->auth_background_signature == signature)
+		&& ctx->auth_background_signature == signature
+		&& (ctx->pixels != TETRISU_PIXELS_STATIONARY
+			|| ctx->auth_background_visual != NULL))
 		return (true);
 	if (form->mode == AUTH_FORM_SIGN_UP)
 		path = AUTH_SIGNUP_BACKGROUND_PATH;
 	else
 		path = AUTH_LOGIN_BACKGROUND_PATH;
 	if (render_background_replace_exact(ctx, path, false) < 0)
+		return (false);
+	if (ctx->pixels == TETRISU_PIXELS_STATIONARY
+		&& !cache_background_visual(ctx, path))
 		return (false);
 	ctx->auth_background_signature = signature;
 	return (true);
@@ -176,6 +188,11 @@ void	render_auth_pixel_background_reset(render_ctx_t *ctx)
 {
 	if (ctx == NULL)
 		return ;
+	if (ctx->auth_background_visual != NULL)
+	{
+		ncvisual_destroy(ctx->auth_background_visual);
+		ctx->auth_background_visual = NULL;
+	}
 	ctx->auth_background_signature = 0;
 }
 
@@ -206,6 +223,31 @@ static bool	ensure_font_atlas(render_ctx_t *ctx)
 		ctx->auth_font_visual = NULL;
 		return (false);
 	}
+	return (true);
+}
+
+static bool	cache_background_visual(render_ctx_t *ctx, const char *path)
+{
+	struct ncvisual	*ncv;
+	int				pixel_rows;
+	int				pixel_cols;
+
+	if (ctx->cell_px_y <= 0 || ctx->cell_px_x <= 0
+		|| ctx->bg_rows > INT_MAX / ctx->cell_px_y
+		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x)
+		return (false);
+	pixel_rows = ctx->bg_rows * ctx->cell_px_y;
+	pixel_cols = ctx->bg_cols * ctx->cell_px_x;
+	ncv = ncvisual_from_file(path);
+	if (ncv == NULL || ncvisual_resize(ncv, pixel_rows, pixel_cols) != 0)
+	{
+		if (ncv != NULL)
+			ncvisual_destroy(ncv);
+		return (false);
+	}
+	if (ctx->auth_background_visual != NULL)
+		ncvisual_destroy(ctx->auth_background_visual);
+	ctx->auth_background_visual = ncv;
 	return (true);
 }
 
@@ -381,6 +423,12 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 	pixels = calloc(count, sizeof(*pixels));
 	if (pixels == NULL)
 		return (NULL);
+	if (ctx->pixels == TETRISU_PIXELS_STATIONARY
+		&& !prefill_sprite_background(ctx, pixels, row, x, width, pixel_rows))
+	{
+		free(pixels);
+		return (NULL);
+	}
 	y = 0;
 	while (y < ctx->cell_px_y * AUTH_TEXT_CELL_ROWS)
 	{
@@ -417,10 +465,16 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 					alpha = ncpixel_a(source);
 					if (alpha != 0)
 					{
-						pixels[(size_t)y * width + px]
-							= ncpixel(tint.r, tint.g, tint.b);
-						ncpixel_set_a(&pixels[(size_t)y * width + px],
-							alpha);
+						if (ctx->pixels == TETRISU_PIXELS_STATIONARY)
+							blend_sprite_pixel(&pixels[(size_t)y * width + px],
+								tint, alpha);
+						else
+						{
+							pixels[(size_t)y * width + px]
+								= ncpixel(tint.r, tint.g, tint.b);
+							ncpixel_set_a(&pixels[(size_t)y * width + px],
+								alpha);
+						}
 					}
 				}
 				glyph_x++;
@@ -486,6 +540,53 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 	}
 	ncvisual_destroy(ncv);
 	return (plane);
+}
+
+static bool	prefill_sprite_background(render_ctx_t *ctx, uint32_t *pixels,
+	int row, int x, int width, int pixel_rows)
+{
+	uint32_t	pixel;
+	int			origin_y;
+	int			origin_x;
+	int			y;
+	int			px;
+
+	if (ctx->auth_background_visual == NULL)
+		return (false);
+	origin_y = (row - 1 - ctx->bg_row) * ctx->cell_px_y;
+	origin_x = (x - ctx->bg_col) * ctx->cell_px_x;
+	y = 0;
+	while (y < pixel_rows)
+	{
+		px = 0;
+		while (px < width)
+		{
+			if (origin_y + y < 0 || origin_x + px < 0
+				|| ncvisual_at_yx(ctx->auth_background_visual,
+					(unsigned)(origin_y + y), (unsigned)(origin_x + px),
+					&pixel) < 0)
+				pixel = ncpixel(8, 8, 31);
+			ncpixel_set_a(&pixel, 255u);
+			pixels[(size_t)y * width + px] = pixel;
+			px++;
+		}
+		y++;
+	}
+	return (true);
+}
+
+static void	blend_sprite_pixel(uint32_t *pixel, color_t tint,
+	unsigned alpha)
+{
+	unsigned	red;
+	unsigned	green;
+	unsigned	blue;
+
+	red = (tint.r * alpha + ncpixel_r(*pixel) * (255u - alpha)) / 255u;
+	green = (tint.g * alpha + ncpixel_g(*pixel) * (255u - alpha)) / 255u;
+	blue = (tint.b * alpha + ncpixel_b(*pixel) * (255u - alpha)) / 255u;
+	*pixel = ncpixel(red, green, blue);
+	ncpixel_set_a(pixel, 255u);
 }
 
 static void	set_transparent_base(struct ncplane *plane)
