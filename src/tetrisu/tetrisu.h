@@ -882,6 +882,69 @@ typedef struct s_solo_render
 	char			asset_error[160];
 }	solo_render_t;
 
+/* HOME_ROUTING.C */
+typedef enum e_home_route_action
+{
+	HOME_ROUTE_NAVIGATE,
+	HOME_ROUTE_SIGN_IN_REQUIRED,
+	HOME_ROUTE_BLOCKED
+}	home_route_action_t;
+
+typedef struct s_home_route
+{
+	home_route_action_t	action;
+	app_nav_action_t	nav_action;
+	const char			*label;
+}	home_route_t;
+
+home_route_t	home_menu_route(int selected, bool offline);
+void			home_sign_in_body_line1(const char *label, char *line1,
+					size_t size);
+void			home_sign_in_body_line2(char *line2, size_t size);
+
+/* RENDER_SIGN_IN.C */
+# define SIGN_IN_ASSET_PATH \
+	ASSET_DIR "/default_theme/sign_in_required.png"
+# define SIGN_IN_SOURCE_PIXELS_X	1586
+# define SIGN_IN_SOURCE_PIXELS_Y	992
+# define SIGN_IN_MODAL_COLS		52
+# define SIGN_IN_MODAL_ROWS		16
+
+typedef enum e_sign_in_focus
+{
+	SIGN_IN_FOCUS_DISMISS,
+	SIGN_IN_FOCUS_LOGIN
+}	sign_in_focus_t;
+
+typedef struct s_sign_in_modal
+{
+	bool				visible;
+	sign_in_focus_t		focus;
+	const char			*label;
+	struct ncplane		*art_plane;
+	struct ncplane		*text_plane;
+}	sign_in_modal_t;
+
+typedef enum e_sign_in_result
+{
+	SIGN_IN_RESULT_NONE,
+	SIGN_IN_RESULT_DISMISS,
+	SIGN_IN_RESULT_LOGIN
+}	sign_in_result_t;
+
+void			sign_in_modal_init(sign_in_modal_t *modal);
+sign_in_result_t	sign_in_modal_handle_key(sign_in_modal_t *modal,
+						uint32_t key);
+sign_in_result_t	sign_in_modal_handle_mouse(sign_in_modal_t *modal,
+						const render_ctx_t *ctx, const ncinput *input,
+						uint32_t key);
+bool			render_sign_in_show(render_ctx_t *ctx,
+					sign_in_modal_t *modal);
+bool			render_sign_in_refresh(render_ctx_t *ctx,
+					sign_in_modal_t *modal);
+void			render_sign_in_destroy(render_ctx_t *ctx,
+					sign_in_modal_t *modal);
+
 /* APP_STATE.C */
 void			app_navigation_init(app_navigation_t *navigation,
 					app_screen_t initial);

@@ -13,10 +13,14 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, auth_form_t *form,
 				auth_action_t action);
-static bool	activate_menu_selection(audio_ctx_t *audio,
+static int	activate_menu_selection(render_ctx_t *ctx, audio_ctx_t *audio,
 				app_navigation_t *navigation,
-				const menu_selection_t *menu);
-static app_nav_action_t	menu_navigation_action(int selected);
+				const menu_selection_t *menu,
+				sign_in_modal_t *modal);
+static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
+				app_navigation_t *navigation,
+				const menu_selection_t *menu,
+				sign_in_modal_t *modal);
 static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
@@ -33,6 +37,7 @@ int	main(void)
 	app_data_provider_t	provider;
 	menu_selection_t	menu;
 	auth_form_t		auth_form;
+	sign_in_modal_t	sign_in;
 	render_ctx_t		ctx;
 	audio_ctx_t			audio;
 	ncinput				input;
@@ -40,6 +45,7 @@ int	main(void)
 	int					hovered;
 
 	menu.selected = 0;
+	sign_in_modal_init(&sign_in);
 	ctx = render_init(SPLASH_ASSET_PATH);
 	audio_init(&audio);
 	render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
@@ -109,10 +115,19 @@ int	main(void)
 			if (key == NCKEY_BUTTON1
 				&& (input.evtype == NCTYPE_PRESS
 					|| input.evtype == NCTYPE_UNKNOWN))
-				(void)activate_menu_selection(&audio, &navigation, &menu);
+			{
+				if (activate_menu_selection(&ctx, &audio, &navigation,
+						&menu, &sign_in) < 0)
+					(void)app_navigation_dispatch(&navigation,
+						APP_NAV_QUIT);
+			}
 		}
-		else if (key == NCKEY_ENTER || key == '\n')
-			(void)activate_menu_selection(&audio, &navigation, &menu);
+		else if (key == NCKEY_ENTER || key == '\n' || key == '\r')
+		{
+			if (activate_menu_selection(&ctx, &audio, &navigation,
+					&menu, &sign_in) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+		}
 		else if (key == '+' || key == '=')
 		{
 			audio_volume_up(&audio);
@@ -132,6 +147,7 @@ int	main(void)
 		}
 	}
 	audio_teardown(&audio);
+	render_sign_in_destroy(&ctx, &sign_in);
 	render_screen_destroy(&ctx);
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
@@ -307,38 +323,97 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 }
 
 /**
- * @brief Routes one home selection into the screen graph.
+ * @brief Routes one home selection using the pure routing policy.
+ *
+ * Returns 0 on success (including showing the modal), -1 on fatal error.
+ * When the route is HOME_ROUTE_SIGN_IN_REQUIRED the sign-in modal loop runs
+ * blocking until the user dismisses or goes to Login.
  */
-static bool	activate_menu_selection(audio_ctx_t *audio,
-	app_navigation_t *navigation, const menu_selection_t *menu)
+static int	activate_menu_selection(render_ctx_t *ctx, audio_ctx_t *audio,
+	app_navigation_t *navigation, const menu_selection_t *menu,
+	sign_in_modal_t *modal)
 {
-	app_nav_action_t	action;
+	home_route_t	route;
 
 	if (navigation == NULL || menu == NULL)
-		return (false);
-	action = menu_navigation_action(menu->selected);
-	if (action == APP_NAV_NONE)
-		return (false);
+		return (0);
+	route = home_menu_route(menu->selected, navigation->offline);
+	if (route.action == HOME_ROUTE_BLOCKED)
+		return (0);
 	audio_play_menu_select(audio);
-	return (app_navigation_dispatch(navigation, action));
+	if (route.action == HOME_ROUTE_NAVIGATE)
+	{
+		(void)app_navigation_dispatch(navigation, route.nav_action);
+		return (0);
+	}
+	modal->label = route.label;
+	modal->focus = SIGN_IN_FOCUS_DISMISS;
+	modal->visible = true;
+	return (run_sign_in_modal(ctx, audio, navigation, menu, modal));
 }
 
 /**
- * @brief Maps the fixed five-item home order to typed navigation actions.
+ * @brief Runs the blocking sign-in-required modal loop.
+ *
+ * Blocks on input until the user dismisses or navigates to Login. Handles
+ * resize by destroying and recreating modal planes. Returns 0 on normal
+ * exit, -1 on fatal error.
  */
-static app_nav_action_t	menu_navigation_action(int selected)
+static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
+	app_navigation_t *navigation, const menu_selection_t *menu,
+	sign_in_modal_t *modal)
 {
-	if (selected == 0)
-		return (APP_NAV_OPEN_SOLO);
-	if (selected == 1)
-		return (APP_NAV_OPEN_LOBBY);
-	if (selected == 2)
-		return (APP_NAV_OPEN_MARKETPLACE);
-	if (selected == 3)
-		return (APP_NAV_OPEN_LEADERBOARD);
-	if (selected == 4)
-		return (APP_NAV_OPEN_SETTINGS);
-	return (APP_NAV_NONE);
+	ncinput			input;
+	uint32_t		key;
+	sign_in_result_t	result;
+	sign_in_focus_t		old_focus;
+
+	if (!render_sign_in_show(ctx, modal))
+		return (-1);
+	while (modal->visible)
+	{
+		key = render_wait_input(ctx, &input);
+		result = SIGN_IN_RESULT_NONE;
+		old_focus = modal->focus;
+		if (key == (uint32_t)-1)
+		{
+			render_sign_in_destroy(ctx, modal);
+			return (-1);
+		}
+		if (key == NCKEY_RESIZE || key == 12u)
+		{
+			render_sign_in_destroy(ctx, modal);
+			if (reflow_home(ctx, menu) < 0)
+				return (-1);
+			modal->visible = true;
+			if (!render_sign_in_show(ctx, modal))
+				return (-1);
+			continue ;
+		}
+		if (nckey_mouse_p(key))
+			result = sign_in_modal_handle_mouse(modal, ctx, &input, key);
+		else
+			result = sign_in_modal_handle_key(modal, key);
+		if (result == SIGN_IN_RESULT_DISMISS)
+		{
+			render_sign_in_destroy(ctx, modal);
+			(void)notcurses_render(ctx->nc);
+			return (0);
+		}
+		if (result == SIGN_IN_RESULT_LOGIN)
+		{
+			render_sign_in_destroy(ctx, modal);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+			return (0);
+		}
+		if (modal->focus != old_focus)
+		{
+			audio_play_menu_move(audio);
+			if (!render_sign_in_refresh(ctx, modal))
+				return (-1);
+		}
+	}
+	return (0);
 }
 
 /**
@@ -411,13 +486,13 @@ static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
 	if (screen == APP_SCREEN_ENTRY && (key == 'o' || key == 'O'))
 		return (APP_NAV_PLAY_OFFLINE);
 	if ((screen == APP_SCREEN_LOGIN || screen == APP_SCREEN_SIGN_UP)
-		&& (key == NCKEY_ENTER || key == '\n'))
+		&& (key == NCKEY_ENTER || key == '\n' || key == '\r'))
 		return (APP_NAV_AUTHENTICATED);
 	if (screen == APP_SCREEN_LOBBY
-		&& (key == NCKEY_ENTER || key == '\n'))
+		&& (key == NCKEY_ENTER || key == '\n' || key == '\r'))
 		return (APP_NAV_OPEN_CREATE_ROOM);
 	if (screen == APP_SCREEN_CREATE_ROOM_MODAL
-		&& (key == NCKEY_ENTER || key == '\n'))
+		&& (key == NCKEY_ENTER || key == '\n' || key == '\r'))
 		return (APP_NAV_OPEN_WAITING_ROOM);
 	if (screen == APP_SCREEN_WAITING_ROOM && (key == 'd' || key == 'D'))
 		return (APP_NAV_START_DOUBLE);

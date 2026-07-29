@@ -209,6 +209,10 @@ and graphics-protocol support at startup. It exits with
 | Mouse hover | Highlight the menu item under the pointer |
 | Left click | Select the menu item under the pointer |
 | `Esc` | Return to the parent screen |
+| `Esc` in sign-in modal | Dismiss the modal |
+| `Tab` / `←` / `→` in modal | Toggle focus between Back and Sign In |
+| `Enter` in modal | Confirm the focused button |
+| Mouse click in modal | Confirm the clicked button |
 | `L` / `S` / `O` on Entry | Open Login / Sign Up / play offline |
 | `Enter` in Lobby/Create Room | Open the next room-flow scaffold |
 | `D` / `B` in Waiting Room | Open Double / Battle Royale scaffold |
@@ -231,10 +235,10 @@ and graphics-protocol support at startup. It exits with
 | `R` | Restart after top-out |
 | `Esc` or `Q` | Return from Solo to the home screen |
 
-Single Player opens the playable local mode. The other home actions enter
-native-terminal screen scaffolds backed by deterministic typed fixture data.
-Fixture-backed screens are visibly labelled `LOCAL UI PREVIEW`; their complete
-layouts and interactions land in the subsequent roadmap items.
+Single Player opens the playable local mode. In offline mode, Multiplayer,
+Marketplace, and Leaderboard open a sign-in-required modal with Escape to
+dismiss and Sign In to navigate to the Login screen. When authenticated or in
+fixture mode, those items open their scaffold screens marked `LOCAL UI PREVIEW`.
 
 ---
 
@@ -267,6 +271,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
 | `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
+| `SIGN_IN_ASSET_PATH` | Character-free art for the sign-in-required modal |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |

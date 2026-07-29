@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 continues with complete home-action
-routing in item 17.
+Phases 1 through 3 are complete. Phase 4 continues with item 17 complete and
+item 18 next.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -267,14 +267,30 @@ routing in item 17.
     - Compatibility mode keeps the same controls and disabled states in a
       compact high-contrast terminal-only frame.
 
-17. **Route all five home actions**
+17. **Route all five home actions** — complete
 
-    - Offline Single Player works locally.
-    - Offline Multiplayer, Marketplace, and Leaderboard show a polished
-      sign-in-required notification.
-    - Settings stays available locally.
-    - Fixture mode opens server-dependent UIs with a visible
+    - Offline Single Player routes to local Solo exactly as before.
+    - Offline Multiplayer, Marketplace, and Leaderboard show a polished,
+      dismissible sign-in-required modal with authored pixel-art background
+      on bitmap-capable terminals and a compact high-contrast terminal-only
+      frame in compatibility mode. All title, body, and button text is live
+      terminal text on separate planes, never baked into the PNG.
+    - Settings stays available locally in both offline and fixture modes.
+    - Fixture mode (navigation.offline == false) routes all five items to
+      their existing scaffold view models, preserving the visible
       `LOCAL UI PREVIEW` marker.
+    - Pure routing policy extracted into `home_menu_route()` with unit tests
+      covering all five menu items in both offline and fixture modes.
+    - Modal input handling tested without an interactive terminal:
+      Escape dismisses, Enter on focused Dismiss button dismisses, Enter on
+      focused Sign In button navigates to Login via the validated graph,
+      Tab and arrow keys toggle focus between the two buttons.
+    - Resize while the modal is open destroys and recreates planes safely.
+    - No polling or busy loops; the modal loop blocks on `render_wait_input`.
+    - Mouse consistently supported: click on buttons confirms, hover changes
+      focus.
+    - Going to Login uses the validated `APP_NAV_BACK` action to reach the
+      login screen through the app navigation graph.
 
 18. **Add the leaderboard screen**
 
