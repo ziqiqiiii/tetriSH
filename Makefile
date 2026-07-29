@@ -21,7 +21,7 @@
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
 
-MAKE_FLAGS	:= --no-print-directory
+MAKE_FLAGS	:= --no-print-directory -s
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS	:= 1

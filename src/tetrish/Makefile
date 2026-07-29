@@ -88,7 +88,7 @@ all: check-dependencies $(NAME) system-programs
 # installer. The umbrella build sets DEPS_READY=1 because it has already run it.
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
-		$(MAKE) --no-print-directory -C ../.. deps; \
+		$(MAKE) --no-print-directory -s -C ../.. deps; \
 	fi
 
 run: all

@@ -20,7 +20,7 @@ CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
 LDLIBS		:= -lssl -lcrypto -lpthread -lrt
 RM			:= rm -rf
-MAKE_FLAGS	:= --no-print-directory
+MAKE_FLAGS	:= --no-print-directory -s
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -36,8 +36,8 @@ CYAN		:= \033[1;36m
 SRC_DIR		:= src
 OBJ_DIR		:= obj
 LIB_ROOT	:= ../../lib
+INC_DIR		:= include
 
-HEADER		:= tetrisd.h
 
 # One archive per CoreStack library, each with the include path that goes with
 # it. Adding a library here wires up its build, its -I and its link in one step.
@@ -46,7 +46,7 @@ LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
 LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
 LIB_INC		:= $(LIB_DIRS:%=-I%/include)
 
-INC			:= -I. -I$(SRC_DIR) $(LIB_INC)
+INC			:= -I./$(INC_DIR) $(LIB_INC)
 
 ################################################################################
 #                                  SOURCES                                     #
@@ -69,7 +69,7 @@ libs:
 	@ for d in $(LIB_DIRS); do $(MAKE) $(MAKE_FLAGS) -C $$d || exit 1; done
 
 # --- daemon binary ------------------------------------------------------------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) | libs
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | libs
 	@ mkdir -p $(dir $@)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
