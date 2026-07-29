@@ -2,6 +2,20 @@
 
 `libtetrisroom` is the pure lobby/room/slot domain library for tetriSH.
 
+---
+
+## Table of Contents
+
+- [Build And Test](#build-and-test)
+- [Usage](#usage)
+- [Room Identity](#room-identity)
+- [Status Model](#status-model)
+- [The Connection Probe Seam](#the-connection-probe-seam)
+- [API Reference](#api-reference)
+- [Project Structure](#project-structure)
+
+---
+
 ## Build And Test
 
 ```bash
