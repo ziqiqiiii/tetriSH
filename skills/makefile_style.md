@@ -5,7 +5,7 @@ be replicated in other repos. The style favours **banner-sectioned layout,
 `:=` assignment, colour-coded quiet recipes, and pattern rules over enumerated
 targets** — a Makefile a reader can skim top-to-bottom like a document.
 
-The canonical example is [`src/tetrish/Makefile`](../../src/tetrish/Makefile); every
+The canonical example is [`src/tetrish/Makefile`](../src/tetrish/Makefile); every
 snippet below is drawn from it.
 
 ---

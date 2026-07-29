@@ -14,12 +14,15 @@ Implementation status:
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
 | `src/tetrisu` (client) | partial — notcurses intro/menu/audio; no gameplay or networking yet |
-| `lib/libtetrisbrain` | implemented — all six modules + tests |
+| `lib/libtetrisbrain` | implemented — all nine modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
-| `lib/libcoreipc` | planning only — README is the agreed scope, no code |
+| `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX`, mqueue + tests |
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
-| `tetrisd`, `tetrislogd`, `tetrisctl` | not started — no `src/` directories yet |
+| `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests |
+| `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests |
+| `src/tetrisd`, `src/tetrislogd` | scaffolded — Makefile, header, and empty `main.c`; no logic yet |
+| `tetrisctl` | not started — no `src/` directory yet |
 
 ## Build & Test
 
@@ -30,6 +33,7 @@ rather than erroring).
 
 ```bash
 make              # deps + libs + shell + daemons
+make test         # build, then run every library and component suite
 make run          # build, then launch the shell (sources .tetrishrc)
 make stack        # build, then launch available daemons headless
 make deps         # check/install dependencies for this OS
@@ -94,10 +98,12 @@ each binary lands; launch order is logger → game server.
 own `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libXXX.a`.
 
 - `libtetrisbrain/` — pure game logic (no I/O, no networking); linked into `tetrisd` and optionally `tetrisu` for client-side prediction
+- `libtetrisroom/` — pure lobby/room/slot domain — seating, ownership succession, start verdicts, room listing
 - `libmacminidb/` — in-memory NoSQL store ("NoSQLite") for player/character/theme state, with an append-only log and crash recovery
 - `libtetrissh/` — secure session handshake and encrypted framing; linked into both `tetrisd` and `tetrisu`
-- `libcoreipc/` — IPC primitives (ring buffer, `AF_UNIX` helpers, POSIX message queues); no internal dependencies, built first
+- `libcoreipc/` — IPC primitives (log records, ring buffer, `AF_UNIX` helpers, self-pipe, POSIX message queues); no internal dependencies, built first
 - `libhtttp/` — HTTTP parser and serialiser; linked into both `tetrisd` and `tetrisu`
+- `libstatusbody/` — HTTTP message-body codec — encodes the bodies `tetrisd` sends, decodes the ones `tetrisu` receives
 
 **Self-contained library layout** (every `libXXX/` follows this):
 
@@ -124,6 +130,9 @@ Header at `lib/libtetrisbrain/include/tetrisbrain.h`; each module is one `.c` un
 | `lineclear.c` | `board_clear_lines` (returns lines cleared 0–4) |
 | `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms` |
 | `abilities.c` | `board_cut_top`, `board_cut_bottom`, `board_apply_gravity`, `board_invert`, `board_fill_rows`, `board_clear_cells`, `board_delete_columns` |
+| `bag.c` | `piece_bag_init`, `piece_bag_next` (7-bag randomiser) |
+| `charge.c` | `charge_state_init`, `charge_on_clear`, `ability_cost`, `charge_can_afford`, `charge_deduct`, `charge_transfer` |
+| `effects.c` | `effect_state_init`, `effect_apply`, `effect_clear`, `effect_on_piece_lock`, plus the `effect_*` predicates (`rotation_blocked`, `fastdrop_blocked`, `controls_inverted`, `thwack_active`, `fry_rows`) |
 
 `t_brain_result` return codes: `BRAIN_OK`, `BRAIN_BLOCKED`, `BRAIN_LOCKED`, `BRAIN_GAME_OVER`, `BRAIN_CLEARED`.
 
@@ -162,11 +171,40 @@ enum (`TETRISSH_ROLE_CLIENT` / `TETRISSH_ROLE_SERVER`). `session_recv` returns
 one complete decrypted message. `src/common.c` is the frozen course-provided
 crypto helper — the Makefile compiles it separately with relaxed flags.
 
+## libtetrisroom API (tetrisroom.h)
+
+Pure domain library — no I/O, no networking, same discipline as `libtetrisbrain`.
+Three layers: `t_membership` (a seated player), `t_slot` (a seat), `t_room`
+(mode, slots, status), and `t_lobby` (a set of rooms).
+
+Verdict enums report *why* an operation was refused rather than a bare failure:
+`t_join_verdict` — `JOIN_ACCEPTED`, `JOIN_FULL`, `JOIN_IN_GAME`;
+`t_start_verdict` — `START_ACCEPTED`, `START_NOT_OWNER`, `START_TOO_FEW_PLAYERS`,
+`START_ALREADY_STARTED`. Room status is `ROOM_WAITING`, `ROOM_READY`,
+`ROOM_IN_GAME`, `ROOM_FINISHED`.
+
+`room_seat` and `room_release` take a `probe` callback (`bool (*)(void *ctx,
+t_player_id)`) so liveness is asked of the caller — the library never touches a
+socket itself. `room_release` picks a successor via `room_select_successor` when
+the owner leaves.
+
+## libstatusbody API (statusbody.h)
+
+The HTTTP message-body codec shared by both ends: `tetrisd` encodes, `tetrisu`
+decodes. Four body types, each an encode/decode pair in its own `.c` —
+`sb_state_*` (`state.c`), `sb_rooms_*` (`rooms.c`), `sb_profile_*`
+(`profile.c`), `sb_leaderboard_*` (`leaderboard.c`).
+
+Encoders return the body length in bytes, decoders return `0`; both return `-1`
+with `errno` set — `EINVAL` for NULL args or a too-small buffer, `EBADMSG` for
+malformed input. Callers pass a buffer and its capacity; the library allocates
+nothing.
+
 ## Key Design Constraints
 
 - `common.c`/`common.h` (PA2 crypto primitives, at `lib/libtetrissh/src/common.c` and `include/libs/common.h`) are **not modified** — all crypto goes through them.
 - No TLS, no `SSL_*` API — handshake is implemented manually in `libtetrissh`.
-- `libtetrisbrain` has **no I/O, no side effects** — pure logic only.
+- `libtetrisbrain` and `libtetrisroom` have **no I/O, no side effects** — pure logic only. Where a room decision needs external facts (is a player still connected?), the caller supplies a probe callback.
 - `libcoreipc` must not log, `printf`, or `exit()` — it *is* the log path and must never recurse into itself. Errno-style returns only.
 - No hard-coded paths anywhere; all paths come from `.tetrishrc` or are passed in by the caller.
 - `tetrislogd` and `tetrisd` communicate over IPC with a non-blocking ring buffer — log records are dropped (not blocked) under pressure; the drop counter is exposed via `tetrisctl dropped-logs`.
@@ -185,4 +223,4 @@ Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
 - `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
-- `docs/cleaning/{code_style,makefile_style,readme_style}.md` — style guides these files are expected to follow
+- `skills/{code_style,makefile_style,readme_style}.md` — style guides these files are expected to follow; see `skills/README.md`
