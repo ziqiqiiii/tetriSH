@@ -1,5 +1,7 @@
 # README_STYLE.md
 
+FIRST THING FIRST - KEEP IT CONCISE
+
 The conventions for writing a `README.md` in this repository, written so they can
 be replicated in other repos. The guiding principle is **big picture first, then
 progressive drill-down** — a reader never meets a detail before its context, and
