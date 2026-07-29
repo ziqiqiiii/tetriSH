@@ -214,11 +214,13 @@ nothing.
 
 ## HTTTP Protocol
 
-Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other methods are client-initiated request/response. The `Player-Id` header is required on every authenticated request. See README.md for the full grammar and method table.
+Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other methods are client-initiated request/response. The `Player-Id` header is required on every authenticated request. `lib/libhtttp/README.md` carries the grammar and method table; `lib/libstatusbody/README.md` documents the body formats.
 
 ## Docs
 
-- `README.md` — full protocol grammar, method table, `.tetrishrc` keys, IPC design
+- `README.md` — project identity and context only; the detail lives in the per-component READMEs below
+- `lib/*/README.md`, `src/*/README.md` — each component's own scope, API, and build; `libhtttp` carries the protocol grammar and method table
+- `.tetrishrc` — the shell start-up file; its keys are documented inline as comments
 - `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
