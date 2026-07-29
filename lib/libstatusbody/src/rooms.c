@@ -2,7 +2,7 @@
 
 /**
  * @brief Serialises the LIST /rooms body: one line per row in the form
- * `<id> <mode> <players>/<slots> <status> <owner>`.
+ * `<name> <mode> <players>/<slots> <status> <owner>`.
  *
  * An empty list (count 0) is a valid empty body - the UC-03 empty state.
  *
@@ -14,10 +14,9 @@
  *         EINVAL (NULL args with count > 0, bad enum value) or ERANGE
  *         (cap too small).
  */
-int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out,
-		size_t cap)
+int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap)
 {
-	/* TODO: per row, snprintf id, mode token (SINGLE/DOUBLE/
+	/* TODO: per row, snprintf name, mode token (SINGLE/DOUBLE/
 	   BATTLE_ROYALE), players/slots, status token (WAITING/READY/
 	   IN_GAME/FINISHED), owner. */
 	(void)rows;
@@ -39,11 +38,10 @@ int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out,
  * @param cap Capacity of rows.
  * @param count Receives the number of rows decoded.
  * @return 0 on success, -1 with errno = EINVAL (NULL args), EBADMSG
- *         (malformed line, unknown mode/status token, overlong id/owner),
+ *         (malformed line, unknown mode/status token, overlong name/owner),
  *         or ERANGE (more rows than cap).
  */
-int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows,
-		size_t cap, size_t *count)
+int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count)
 {
 	/* TODO: split lines within len; parse the five fields per line with
 	   length caps; map tokens back to enums. */

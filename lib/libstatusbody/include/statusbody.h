@@ -20,10 +20,15 @@
 **   sb_*_decode -> 0, or -1 with errno = EBADMSG (missing key, malformed
 **                  or out-of-range value, trailing junk) or EINVAL (NULL).
 ** Round-trip law: decode(encode(x)) == x; encode is deterministic.
+**
+** Rooms travel by name (S-01, D-02, BR-10), never by their numeric id:
+** ids run per mode in tetrisd, so only the prefixed name is unique, and
+** it is what the client displays and sends back. Mode still rides as its
+** own field so clients never parse the prefix.
 */
 
-# define SB_ID_MAX			16
-# define SB_NAME_MAX		32
+# define SB_NAME_MAX		16
+# define SB_USER_MAX		32
 # define SB_OWNED_MAX		64
 # define SB_BOARD_ROWS		20
 # define SB_BOARD_COLS		10
@@ -123,21 +128,21 @@ typedef struct s_sb_state
 	t_sb_clear_label	last_clear;
 }	t_sb_state;
 
-/* one LIST /rooms line: <id> <mode> <players>/<slots> <status> <owner> */
+/* one LIST /rooms line: <name> <mode> <players>/<slots> <status> <owner> */
 typedef struct s_sb_room_row
 {
-	char				id[SB_ID_MAX];
+	char				name[SB_NAME_MAX];
 	t_sb_mode			mode;
 	int					players;
 	int					slot_count;
 	t_sb_room_status	status;
-	char				owner[SB_NAME_MAX];
+	char				owner[SB_USER_MAX];
 }	t_sb_room_row;
 
 /* UC-20 ProfileView body, one key per line; owned lists are count-prefixed */
 typedef struct s_sb_profile
 {
-	char		username[SB_NAME_MAX];
+	char		username[SB_USER_MAX];
 	uint64_t	wallet;
 	uint64_t	score;
 	int			rank;
@@ -153,7 +158,7 @@ typedef struct s_sb_profile
 typedef struct s_sb_lb_row
 {
 	int			rank;
-	char		username[SB_NAME_MAX];
+	char		username[SB_USER_MAX];
 	uint64_t	score;
 }	t_sb_lb_row;
 
@@ -162,19 +167,15 @@ int	sb_state_encode(const t_sb_state *in, char *out, size_t cap);
 int	sb_state_decode(const char *buf, size_t len, t_sb_state *out);
 
 /* ROOMS.C */
-int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out,
-		size_t cap);
-int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows,
-		size_t cap, size_t *count);
+int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap);
+int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count);
 
 /* PROFILE.C */
 int	sb_profile_encode(const t_sb_profile *in, char *out, size_t cap);
 int	sb_profile_decode(const char *buf, size_t len, t_sb_profile *out);
 
 /* LEADERBOARD.C */
-int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out,
-		size_t cap);
-int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows,
-		size_t cap, size_t *count);
+int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap);
+int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count);
 
 # endif

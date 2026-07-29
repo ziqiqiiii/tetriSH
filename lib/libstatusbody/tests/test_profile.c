@@ -1,10 +1,3 @@
-// tests/test_profile.c
-//
-// WT-17..WT-20: the UC-20 ProfileView body - one key per line, owned lists
-// count-prefixed:
-//   username <s> / wallet <u64> / score <u64> / rank <n> /
-//   equipped_character <id> / equipped_theme <id> /
-//   owned_characters <count> [<ids>...] / owned_themes <count> [<ids>...]
 #include "statusbody.h"
 
 #include <assert.h>

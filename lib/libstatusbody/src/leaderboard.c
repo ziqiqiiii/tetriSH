@@ -13,8 +13,7 @@
  * @return Body length in bytes (0 for an empty board), or -1 with errno =
  *         EINVAL (NULL args with count > 0) or ERANGE (cap too small).
  */
-int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out,
-		size_t cap)
+int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap)
 {
 	/* TODO: snprintf "<rank> <username> <score>\n" per row. */
 	(void)rows;
@@ -39,8 +38,7 @@ int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out,
  *         (non-numeric rank/score, malformed line, overlong name), or
  *         ERANGE (more rows than cap).
  */
-int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows,
-		size_t cap, size_t *count)
+int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count)
 {
 	/* TODO: split lines within len; parse rank/name/score with caps. */
 	(void)buf;

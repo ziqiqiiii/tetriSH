@@ -1,7 +1,3 @@
-// tests/test_leaderboard.c
-//
-// WT-21..WT-23: the UC-21 leaderboard body - one line per rank:
-// <rank> <username> <score>, rank ascending. Empty is a valid empty body.
 #include "statusbody.h"
 
 #include <assert.h>
@@ -19,7 +15,7 @@ static void	make_rows(t_sb_lb_row *rows, size_t count)
 	{
 		memset(&rows[i], 0, sizeof(rows[i]));
 		rows[i].rank = (int)(i + 1);
-		snprintf(rows[i].username, SB_NAME_MAX, "player%zu", i + 1);
+		snprintf(rows[i].username, SB_USER_MAX, "player%zu", i + 1);
 		rows[i].score = 1000 - (i * 50);
 		i++;
 	}

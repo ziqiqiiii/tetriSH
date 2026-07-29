@@ -1,10 +1,3 @@
-// tests/test_hardening.c
-//
-// WT-24..WT-27: cross-codec robustness, mirroring libhtttp's hardening
-// suite. Note on WT-24: the single-object decoders (state, profile) reject
-// an empty buffer; the list decoders (rooms, leaderboard) accept it as a
-// valid zero-row body - the empty lobby and empty leaderboard are real
-// states (UC-03 / UC-21 ext 2a), not wire errors.
 #include "statusbody.h"
 
 #include <assert.h>
@@ -103,18 +96,18 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 	while (i < 99)
 	{
 		memset(&rooms[i], 0, sizeof(rooms[i]));
-		snprintf(rooms[i].id, SB_ID_MAX, "R-%02d", i + 1);
+		snprintf(rooms[i].name, SB_NAME_MAX, "BR-%02d", i + 1);
 		rooms[i].mode = SB_MODE_BATTLE_ROYALE;
 		rooms[i].players = 99;
 		rooms[i].slot_count = 99;
 		rooms[i].status = SB_ROOM_WAITING;
-		memset(rooms[i].owner, 'o', SB_NAME_MAX - 1);
+		memset(rooms[i].owner, 'o', SB_USER_MAX - 1);
 		i++;
 	}
 	n = sb_rooms_encode(rooms, 99, g_out, sizeof(g_out));
 	assert(n > 0 && n < 65536);
 	memset(&pr, 0, sizeof(pr));
-	memset(pr.username, 'u', SB_NAME_MAX - 1);
+	memset(pr.username, 'u', SB_USER_MAX - 1);
 	pr.wallet = UINT64_MAX;
 	pr.score = UINT64_MAX;
 	pr.owned_character_count = SB_OWNED_MAX;
@@ -133,7 +126,7 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 	{
 		memset(&lb[i], 0, sizeof(lb[i]));
 		lb[i].rank = i + 1;
-		memset(lb[i].username, 'p', SB_NAME_MAX - 1);
+		memset(lb[i].username, 'p', SB_USER_MAX - 1);
 		lb[i].score = UINT64_MAX;
 		i++;
 	}

@@ -26,7 +26,7 @@ int	sb_profile_encode(const t_sb_profile *in, char *out, size_t cap)
  * @brief Parses a ProfileView body back into a profile.
  *
  * Strict: keys in encode order, every key present, owned counts within
- * SB_OWNED_MAX, username within SB_NAME_MAX.
+ * SB_OWNED_MAX, username within SB_USER_MAX.
  *
  * @param buf The received body bytes (need not be NUL-terminated).
  * @param len Number of body bytes.

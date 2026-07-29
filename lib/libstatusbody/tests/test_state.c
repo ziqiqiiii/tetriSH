@@ -1,8 +1,3 @@
-// tests/test_state.c
-//
-// WT-01..WT-10: the application/tetris-state body. These tests pin the
-// exact wire text (key order, board block of 20 x 20 hex chars) and the
-// round-trip law decode(encode(x)) == x.
 #include "statusbody.h"
 
 #include <assert.h>
