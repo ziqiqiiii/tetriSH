@@ -16,8 +16,7 @@
 
 NAME		:= tetrisu
 CC			:= gcc
-BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic \
-			   -D_POSIX_C_SOURCE=200809L
+BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS				:= 1
