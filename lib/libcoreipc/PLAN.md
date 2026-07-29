@@ -22,7 +22,7 @@ Fixed constraints every increment must satisfy (from CLAUDE.md): no printf/loggi
 errno-style returns only, C11 -Wall -Wextra -Werror clean, no hard-coded paths, valgrind
 clean, no mutex held across a blocking syscall.
 
-## Cross-platform decision (2026-07-30, agreed with teammate)
+## Cross-platform decision (2026-07-30, to be updated with the teammate)
 
 `coreipc.h` and this Makefile currently make the *entire* library mac-incompatible, not
 just mq_helpers.c: `coreipc.h` unconditionally `#include <mqueue.h>` (doesn't exist on
