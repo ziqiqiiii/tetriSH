@@ -191,10 +191,12 @@ static app_provider_result_t	fixture_load_leaderboard(void *userdata,
 {
 	static const char	*names[] = {
 		"BlockBunny", "Tetromancer", "MoonStack", "PreviewPlayer",
-		"SoftDrop"
+		"SoftDrop", "LineDancer", "GhostPiece", "StackWitch",
+		"NeonMino", "TinyTSpin"
 	};
 	static const uint64_t	scores[] = {
-		980500, 744200, 631900, 125400, 99200
+		980500, 744200, 631900, 525400, 499200, 410800, 388600, 302100,
+		276400, 245900
 	};
 	int						index;
 
@@ -202,7 +204,7 @@ static app_provider_result_t	fixture_load_leaderboard(void *userdata,
 	if (view == NULL)
 		return (APP_PROVIDER_INVALID);
 	memset(view, 0, sizeof(*view));
-	view->count = 5;
+	view->count = APP_LEADERBOARD_MAX_ENTRIES;
 	index = 0;
 	while (index < view->count)
 	{

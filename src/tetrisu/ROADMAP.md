@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 continues with item 17 complete and
-item 18 next.
+Phases 1 through 3 are complete. Phase 4 continues with item 18 complete and
+item 19 next.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -88,6 +88,11 @@ item 18 next.
   terminals. This avoids the incomplete rows and input lag caused by rebuilding
   a full-screen RGBA visual per key. Supported-mode fields show no placeholder
   copy and display only a fixed left-edge caret when empty and focused.
+- Item 18 adds the dedicated leaderboard. Bitmap-capable terminals reuse the
+  stationary homepage art beneath one opaque live-text panel; compatibility
+  mode removes the bitmap and uses a flatter full-grid layout. Both render all
+  ten fixture ranks, top-three emphasis, loading/empty/unavailable/error
+  states, refresh/back controls, mouse input, and resize-safe reflow.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -292,10 +297,17 @@ item 18 next.
     - Going to Login uses the validated `APP_NAV_BACK` action to reach the
       login screen through the app navigation graph.
 
-18. **Add the leaderboard screen**
+18. **Add the leaderboard screen** — complete
 
-    - Top-three podium; positions 4–10; loading, empty, unavailable, refresh,
-      and back states.
+    - The top three use distinct gold, silver, and bronze podium cards while
+      positions 4–10 remain a compact aligned table.
+    - Loading, empty, unavailable, and error models use readable live terminal
+      text rather than baking data into the background.
+    - Refresh and Back support keyboard shortcuts, focus traversal, pointer
+      hover/click, menu SFX, resize, and the global volume controls.
+    - Kitty reuses the authored homepage image as a stationary backdrop.
+      `TETRISU_RENDERER=cell` uses a lower-detail, bitmap-free 80 x 24 layout
+      with the visible compatibility badge.
 
 19. **Add the settings and profile screen**
 

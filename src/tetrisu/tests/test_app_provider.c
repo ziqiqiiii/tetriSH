@@ -4,6 +4,9 @@ static void	test_fixture_provider_contract(void);
 static void	test_every_screen_has_a_typed_model(void);
 static void	test_fixture_models_are_marked_and_populated(void);
 static void	test_missing_provider_is_unavailable(void);
+static void	test_empty_leaderboard_status(void);
+static app_provider_result_t	empty_leaderboard(void *userdata,
+				app_leaderboard_view_model_t *view);
 
 int	main(void)
 {
@@ -11,6 +14,7 @@ int	main(void)
 	test_every_screen_has_a_typed_model();
 	test_fixture_models_are_marked_and_populated();
 	test_missing_provider_is_unavailable();
+	test_empty_leaderboard_status();
 	return (0);
 }
 
@@ -79,8 +83,10 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	assert(view.data.catalogue.items[0].owned);
 	assert(app_screen_view_load(&provider, APP_SCREEN_LEADERBOARD, &view)
 		== APP_PROVIDER_OK);
-	assert(view.local_preview && view.data.leaderboard.count == 5);
+	assert(view.local_preview
+		&& view.data.leaderboard.count == APP_LEADERBOARD_MAX_ENTRIES);
 	assert(view.data.leaderboard.entries[0].position == 1);
+	assert(view.data.leaderboard.entries[9].position == 10);
 	assert(app_screen_view_load(&provider, APP_SCREEN_LOBBY, &view)
 		== APP_PROVIDER_OK);
 	assert(view.local_preview && view.data.lobby.count == 2);
@@ -110,4 +116,28 @@ static void	test_missing_provider_is_unavailable(void)
 	assert(strcmp(app_data_status_name(APP_DATA_ERROR), "ERROR") == 0);
 	assert(strcmp(app_game_mode_name(APP_GAME_MODE_DOUBLE), "Double") == 0);
 	printf("PASS test_missing_provider_is_unavailable\n");
+}
+
+static void	test_empty_leaderboard_status(void)
+{
+	app_data_provider_t		provider;
+	app_screen_view_model_t	view;
+
+	memset(&provider, 0, sizeof(provider));
+	provider.load_leaderboard = empty_leaderboard;
+	assert(app_screen_view_load(&provider, APP_SCREEN_LEADERBOARD, &view)
+		== APP_PROVIDER_EMPTY);
+	assert(view.status == APP_DATA_EMPTY);
+	assert(view.data.leaderboard.count == 0);
+	printf("PASS test_empty_leaderboard_status\n");
+}
+
+static app_provider_result_t	empty_leaderboard(void *userdata,
+	app_leaderboard_view_model_t *view)
+{
+	(void)userdata;
+	if (view == NULL)
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	return (APP_PROVIDER_EMPTY);
 }

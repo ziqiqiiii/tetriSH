@@ -21,6 +21,11 @@ static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
 				app_navigation_t *navigation,
 				const menu_selection_t *menu,
 				sign_in_modal_t *modal);
+static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, const menu_selection_t *menu);
+static void	leaderboard_loading_view(const app_data_provider_t *provider,
+				app_screen_view_model_t *view);
 static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
@@ -80,6 +85,13 @@ int	main(void)
 			}
 			(void)app_navigation_dispatch(&navigation, APP_NAV_BACK);
 			enable_home_mouse(&ctx);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_LEADERBOARD)
+		{
+			if (run_leaderboard_screen(&ctx, &audio, &provider,
+					&navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
 		if (navigation.current != APP_SCREEN_HOME)
@@ -414,6 +426,118 @@ static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 	}
 	return (0);
+}
+
+/**
+ * @brief Runs the dedicated leaderboard, including refresh and pointer input.
+ */
+static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	const menu_selection_t *menu)
+{
+	app_screen_view_model_t	view;
+	leaderboard_state_t		state;
+	leaderboard_focus_t		hovered;
+	leaderboard_focus_t		old_focus;
+	leaderboard_action_t	action;
+	app_provider_result_t	result;
+	ncinput					input;
+	uint32_t				key;
+	bool					refresh;
+
+	leaderboard_state_init(&state);
+	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
+	refresh = true;
+	while (navigation->current == APP_SCREEN_LEADERBOARD)
+	{
+		if (refresh)
+		{
+			leaderboard_loading_view(provider, &view);
+			if (!render_leaderboard_show(ctx, &view, &state, true))
+				return (-1);
+			result = app_screen_view_load(provider, APP_SCREEN_LEADERBOARD,
+					&view);
+			if (result == APP_PROVIDER_INVALID
+				|| !render_leaderboard_show(ctx, &view, &state, false))
+				return (-1);
+			refresh = false;
+		}
+		key = render_wait_input(ctx, &input);
+		action = LEADERBOARD_ACTION_NONE;
+		old_focus = state.focus;
+		if (key == (uint32_t)-1)
+			action = LEADERBOARD_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_leaderboard_show(ctx, &view, &state, false))
+				return (-1);
+			continue ;
+		}
+		else if (key == '+' || key == '=')
+		{
+			audio_volume_up(audio);
+			render_notification_show_volume(ctx, audio->music_volume);
+			continue ;
+		}
+		else if (key == '-' || key == '_')
+		{
+			audio_volume_down(audio);
+			render_notification_show_volume(ctx, audio->music_volume);
+			continue ;
+		}
+		else if (nckey_mouse_p(key)
+			&& render_leaderboard_hit_test(ctx, &input, &hovered))
+		{
+			leaderboard_set_focus(&state, hovered);
+			if (key == NCKEY_BUTTON1 && (input.evtype == NCTYPE_PRESS
+					|| input.evtype == NCTYPE_UNKNOWN))
+				action = leaderboard_handle_key(&state, NCKEY_ENTER);
+		}
+		else if (!nckey_mouse_p(key))
+			action = leaderboard_handle_key(&state, key);
+		if (state.focus != old_focus)
+		{
+			audio_play_menu_move(audio);
+			if (!render_leaderboard_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		if (action == LEADERBOARD_ACTION_REFRESH)
+		{
+			audio_play_menu_select(audio);
+			refresh = true;
+		}
+		else if (action == LEADERBOARD_ACTION_BACK)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == LEADERBOARD_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
+	render_leaderboard_destroy(ctx);
+	if (navigation->current == APP_SCREEN_HOME)
+	{
+		if (reflow_home(ctx, menu) < 0)
+			return (-1);
+		enable_home_mouse(ctx);
+	}
+	return (0);
+}
+
+/**
+ * @brief Creates the visible loading model before a provider refresh.
+ */
+static void	leaderboard_loading_view(const app_data_provider_t *provider,
+	app_screen_view_model_t *view)
+{
+	memset(view, 0, sizeof(*view));
+	view->screen = APP_SCREEN_LEADERBOARD;
+	view->status = APP_DATA_LOADING;
+	view->local_preview = provider != NULL && provider->local_fixtures;
+	snprintf(view->title, sizeof(view->title), "Leaderboard");
+	snprintf(view->subtitle, sizeof(view->subtitle),
+		"Fetching the latest scores");
 }
 
 /**

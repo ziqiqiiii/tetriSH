@@ -388,6 +388,25 @@ typedef struct s_app_leaderboard_view_model
 		APP_LEADERBOARD_MAX_ENTRIES];
 }	app_leaderboard_view_model_t;
 
+typedef enum e_leaderboard_focus
+{
+	LEADERBOARD_FOCUS_BACK,
+	LEADERBOARD_FOCUS_REFRESH
+}	leaderboard_focus_t;
+
+typedef enum e_leaderboard_action
+{
+	LEADERBOARD_ACTION_NONE,
+	LEADERBOARD_ACTION_BACK,
+	LEADERBOARD_ACTION_REFRESH,
+	LEADERBOARD_ACTION_QUIT
+}	leaderboard_action_t;
+
+typedef struct s_leaderboard_state
+{
+	leaderboard_focus_t	focus;
+}	leaderboard_state_t;
+
 typedef struct s_app_room_summary_view_model
 {
 	char			id[APP_TEXT_MAX];
@@ -1043,6 +1062,22 @@ int				render_menu_label_y(const render_ctx_t *ctx, int index);
 bool			render_screen_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view);
 void			render_screen_destroy(render_ctx_t *ctx);
+
+/* LEADERBOARD_SCREEN.C */
+void			leaderboard_state_init(leaderboard_state_t *state);
+leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
+					uint32_t key);
+void			leaderboard_set_focus(leaderboard_state_t *state,
+					leaderboard_focus_t focus);
+
+/* RENDER_LEADERBOARD.C */
+bool			render_leaderboard_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const leaderboard_state_t *state,
+					bool rebuild_background);
+bool			render_leaderboard_hit_test(const render_ctx_t *ctx,
+					const ncinput *input, leaderboard_focus_t *focus);
+void			render_leaderboard_destroy(render_ctx_t *ctx);
 
 /* RENDER_AUTH.C */
 bool			render_auth_show(render_ctx_t *ctx, const auth_form_t *form,

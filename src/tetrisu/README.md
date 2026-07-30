@@ -238,7 +238,10 @@ and graphics-protocol support at startup. It exits with
 Single Player opens the playable local mode. In offline mode, Multiplayer,
 Marketplace, and Leaderboard open a sign-in-required modal with Escape to
 dismiss and Sign In to navigate to the Login screen. When authenticated or in
-fixture mode, those items open their scaffold screens marked `LOCAL UI PREVIEW`.
+fixture mode, those items open their dedicated or scaffold screens marked
+`LOCAL UI PREVIEW`. Leaderboard has its complete top-ten presentation:
+`R` refreshes, `Esc` returns Home, Left/Right or Tab changes the focused button,
+and both Back and Refresh support mouse hover/click.
 
 ---
 
@@ -249,7 +252,7 @@ fixture mode, those items open their scaffold screens marked `LOCAL UI PREVIEW`.
 | `Single Player` | Playable local Endless mode; can remain as offline play |
 | `Multiplayer` | Navigable lobby/create/waiting/match scaffolds |
 | `Marketplace` | Typed fixture-backed scaffold |
-| `Leaderboard` | Typed fixture-backed scaffold |
+| `Leaderboard` | Complete top-three podium and positions 4–10, with refresh/error states |
 | `Settings` | Typed profile/settings scaffold |
 
 ---
@@ -304,6 +307,7 @@ render_menu_create         after authentication/offline entry, draw home menu
   screen loop              render_wait_input → validated navigation:
      ├── ↑/↓   menu_move_selection + render_menu_move_bunny + move SFX
      ├── Enter Single Player -> solo_mode_run -> return to menu
+     ├── Enter Leaderboard -> dedicated top-ten screen + refresh/back
      ├── Enter other item -> typed LOCAL UI PREVIEW scaffold
      ├── Esc    explicit parent screen
      ├── +/-   audio_volume_up / audio_volume_down
@@ -317,6 +321,7 @@ Modules (each a `.c` under `src/`):
 | `main.c` | Entry point; wires render + audio and runs the input loop |
 | `app_state.c` | Validate the complete screen graph, Back routes, menu state, and labels |
 | `app_provider.c` | Typed screen models and marked local fixture provider |
+| `leaderboard_screen.c` | Pure leaderboard focus and action handling |
 | `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
 | `renderer_policy.c` | renderer environment parsing and forced compatibility policy |
@@ -324,6 +329,7 @@ Modules (each a `.c` under `src/`):
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `render_auth.c` | Pixel-art login/sign-up frame and terminal-only fallback |
 | `render_screen.c` | Shared native-terminal scaffold for future dedicated screens |
+| `render_leaderboard.c` | Homepage-backed podium/table and cell compatibility renderer |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
 | `solo_abilities.c` | Mirurun metadata, charge spending, board transform, and mouse geometry |
@@ -345,6 +351,7 @@ tetrisu/
 │   ├── main.c                 Entry point + input loop → bin/tetrisu
 │   ├── app_state.c            Pure validated screen graph → logic.a
 │   ├── app_provider.c         Typed models + local fixture provider
+│   ├── leaderboard_screen.c   Pure leaderboard focus/actions → logic.a
 │   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── renderer_policy.c      Renderer environment and compatibility policy
@@ -352,6 +359,7 @@ tetrisu/
 │   ├── render_menu.c          Bunny selector + messages
 │   ├── render_auth.c          Auth artwork overlay + cell fallback
 │   ├── render_screen.c        Native-terminal screen scaffold
+│   ├── render_leaderboard.c   Dedicated podium/table + compatibility view
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
 │   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition
 │   ├── solo_mode.c            Poll-driven local Solo loop
