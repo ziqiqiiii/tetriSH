@@ -117,12 +117,11 @@ static int	intro_streamer(struct ncvisual *ncv,
 }
 
 /**
- * @brief Filters startup protocol noise from deliberate intro skipping.
+ * @brief Accepts only explicit intro-skip controls.
  *
- * Notcurses can surface resize, signal, invalid, or pointer-motion events
- * while the terminal is still completing capability negotiation. Treating
- * any one of those as a key press made the six-second intro disappear on
- * Kitty startup.
+ * Kitty can emit an ESC while negotiating terminal state. Treating arbitrary
+ * key events as a skip made startup nondeterministic, so only Space, Enter,
+ * or a primary-button press may leave the intro early.
  */
 static bool	intro_skip_requested(uint32_t key, const ncinput *input)
 {
@@ -135,5 +134,6 @@ static bool	intro_skip_requested(uint32_t key, const ncinput *input)
 		return (key == NCKEY_BUTTON1
 			&& (input->evtype == NCTYPE_PRESS
 				|| input->evtype == NCTYPE_UNKNOWN));
-	return (true);
+	return (key == ' ' || key == '\n' || key == '\r'
+		|| key == NCKEY_ENTER);
 }
