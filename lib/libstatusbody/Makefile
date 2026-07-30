@@ -37,7 +37,8 @@ OBJ_DIR		:= obj
 INC_DIR		:= include
 INC			:= -I$(INC_DIR)
 
-HEADER		:= $(INC_DIR)/statusbody.h
+# The public header, plus the private one the codecs share internally.
+HEADER		:= $(INC_DIR)/statusbody.h $(wildcard $(SRC_DIR)/*.h)
 
 ################################################################################
 #                                  SOURCES                                     #

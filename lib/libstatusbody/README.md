@@ -192,7 +192,9 @@ libstatusbody/
 │   ├── state.c             application/tetris-state encode/decode
 │   ├── rooms.c             LIST /rooms row encode/decode
 │   ├── profile.c           ProfileView encode/decode
-│   └── leaderboard.c       leaderboard row encode/decode
+│   ├── leaderboard.c       leaderboard row encode/decode
+│   ├── sb_util.h           Private — shared append/scan primitives
+│   └── sb_util.c           Private — not part of the public API
 ├── tests/test_*.c          Unit tests, one per module (each with its own main)
 ├── scripts/run_tests.sh    Formatted test runner
 ├── obj/                    Generated objects
