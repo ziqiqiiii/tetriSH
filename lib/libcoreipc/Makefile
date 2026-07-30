@@ -16,7 +16,7 @@
 
 NAME		:= libcoreipc.a
 CC			:= gcc
-FLAGS		:= -Wall -Wextra -Werror
+FLAGS		:= -D_GNU_SOURCE -Wall -Wextra -Werror
 LDLIBS		:= -lpthread -lrt
 AR			:= ar
 ARFLAGS		:= rcs

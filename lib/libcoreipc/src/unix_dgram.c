@@ -1,5 +1,14 @@
 #include "coreipc.h"
 
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+// Static Functions
+static int	fill_addr(struct sockaddr_un *addr, const char *path);
+static int	fail(int fd, int err);
+
 /**
  * @brief Create, bind, and chmod a non-blocking datagram socket at a path.
  *
@@ -12,18 +21,29 @@
  */
 int	us_dgram_bind(const char *path, mode_t mode)
 {
-	/* TODO: socket(AF_UNIX, SOCK_DGRAM, 0); unlink ignoring ENOENT; fill
-	   sockaddr_un (length -> ENAMETOOLONG); bind; chmod; us_set_nonblock. */
-	(void)path;
-	(void)mode;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	if (fill_addr(&addr, path) == -1)
+		return (-1);
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	if (fd == -1)
+		return (-1);
+	if (unlink(path) == -1 && errno != ENOENT)
+		return (fail(fd, errno));
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+		return (fail(fd, errno));
+	if (chmod(path, mode) == -1)
+		return (fail(fd, errno));
+	if (us_set_nonblock(fd) == -1)
+		return (fail(fd, errno));
+	return (fd);
 }
 
 /**
  * @brief Open a connected datagram sender aimed at a bound path.
  *
- * Neither blocks nor requires the receiver to exist yet — a missing receiver
+ * Neither blocks nor requires the receiver to exist yet - a missing receiver
  * surfaces later as ECONNREFUSED from us_dgram_send_nb.
  *
  * @param path Filesystem path of the peer's bound socket.
@@ -31,11 +51,19 @@ int	us_dgram_bind(const char *path, mode_t mode)
  */
 int	us_dgram_open(const char *path)
 {
-	/* TODO: socket(AF_UNIX, SOCK_DGRAM, 0); fill sockaddr_un; connect;
-	   us_set_nonblock. */
-	(void)path;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	if (fill_addr(&addr, path) == -1)
+		return (-1);
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	if (fd == -1)
+		return (-1);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+		return (fail(fd, errno));
+	if (us_set_nonblock(fd) == -1)
+		return (fail(fd, errno));
+	return (fd);
 }
 
 /**
@@ -51,13 +79,22 @@ int	us_dgram_open(const char *path)
  */
 int	us_dgram_send_nb(int fd, const void *buf, size_t len)
 {
-	/* TODO: send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL); short sends are
-	   impossible on SOCK_DGRAM, so treat != len as -1/EMSGSIZE. */
-	(void)fd;
-	(void)buf;
-	(void)len;
-	errno = ENOSYS;
-	return (-1);
+	ssize_t	n;
+
+	if (!buf)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	n = send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL);
+	if (n == -1)
+		return (-1);
+	if ((size_t)n != len)
+	{
+		errno = EMSGSIZE;
+		return (-1);
+	}
+	return (0);
 }
 
 /**
@@ -73,10 +110,54 @@ int	us_dgram_send_nb(int fd, const void *buf, size_t len)
  */
 ssize_t	us_dgram_recv(int fd, void *buf, size_t buflen)
 {
-	/* TODO: recv(fd, buf, buflen, 0); retry on EINTR; let EAGAIN through. */
-	(void)fd;
-	(void)buf;
-	(void)buflen;
-	errno = ENOSYS;
+	ssize_t	n;
+
+	if (!buf)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	n = recv(fd, buf, buflen, 0);
+	while (n == -1 && errno == EINTR)
+		n = recv(fd, buf, buflen, 0);
+	return (n);
+}
+
+/**
+ * @brief Fill a sockaddr_un for an AF_UNIX path, rejecting over-long paths.
+ *
+ * @param addr The address to fill.
+ * @param path The filesystem path to copy in.
+ * @return 0 on success, -1 with errno set (EINVAL, ENAMETOOLONG) on failure.
+ */
+static int	fill_addr(struct sockaddr_un *addr, const char *path)
+{
+	if (!path || *path == '\0')
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	if (strlen(path) >= sizeof(addr->sun_path))
+	{
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+	memset(addr, 0, sizeof(*addr));
+	addr->sun_family = AF_UNIX;
+	strncpy(addr->sun_path, path, sizeof(addr->sun_path) - 1);
+	return (0);
+}
+
+/**
+ * @brief Close a half-built socket and report the failure that caused it.
+ *
+ * @param fd The descriptor to close.
+ * @param err The errno value to surface to the caller.
+ * @return Always -1, with errno set to err.
+ */
+static int	fail(int fd, int err)
+{
+	close(fd);
+	errno = err;
 	return (-1);
 }

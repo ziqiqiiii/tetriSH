@@ -1,5 +1,8 @@
 #include "coreipc.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 /**
  * @brief Add O_NONBLOCK to an existing descriptor.
  *
@@ -8,11 +11,14 @@
  */
 int	us_set_nonblock(int fd)
 {
-	/* TODO: fcntl(fd, F_GETFL) then F_SETFL with O_NONBLOCK added, so flags
-	   the caller already set are preserved. */
-	(void)fd;
-	errno = ENOSYS;
-	return (-1);
+	int	flags;
+
+	flags = fcntl(fd, F_GETFL);
+	if (flags == -1)
+		return (-1);
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+		return (-1);
+	return (0);
 }
 
 /**
@@ -27,12 +33,19 @@ int	us_set_nonblock(int fd)
  */
 int	us_close_unlink(int fd, const char *path)
 {
-	/* TODO: close(fd); unlink(path) treating ENOENT as success; report the
-	   first failure with its errno intact. */
-	(void)fd;
-	(void)path;
-	errno = ENOSYS;
-	return (-1);
+	int	saved;
+
+	saved = 0;
+	if (close(fd) == -1)
+		saved = errno;
+	if (path && unlink(path) == -1 && errno != ENOENT && saved == 0)
+		saved = errno;
+	if (saved != 0)
+	{
+		errno = saved;
+		return (-1);
+	}
+	return (0);
 }
 
 /**
@@ -46,25 +59,33 @@ int	us_close_unlink(int fd, const char *path)
  */
 int	sp_pipe(int fds[2])
 {
-	/* TODO: pipe2(fds, O_NONBLOCK | O_CLOEXEC); without pipe2, fall back to
-	   pipe() + us_set_nonblock + FD_CLOEXEC on both ends. */
-	(void)fds;
-	errno = ENOSYS;
-	return (-1);
+	if (!fds)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) == -1)
+		return (-1);
+	return (0);
 }
 
 /**
  * @brief Wake the event loop from a signal handler.
  *
- * The only async-signal-safe function in the library.
+ * The only async-signal-safe function in the library. A failed write means a
+ * wakeup is already pending, which is exactly the outcome the caller wanted.
  *
  * @param write_fd The write end from sp_pipe (fds[SP_WRITE]).
  */
 void	sp_notify(int write_fd)
 {
-	/* TODO: saved = errno; write(write_fd, "\1", 1); errno = saved. EAGAIN
-	   means a wakeup is already pending. No error reporting is safe here. */
-	(void)write_fd;
+	int		saved;
+	ssize_t	n;
+
+	saved = errno;
+	n = write(write_fd, "\1", 1);
+	(void)n;
+	errno = saved;
 }
 
 /**
@@ -77,9 +98,20 @@ void	sp_notify(int write_fd)
  */
 int	sp_drain(int read_fd)
 {
-	/* TODO: loop read() into a scratch buffer until -1/EAGAIN (success) or a
-	   different errno (failure); retry on EINTR. */
-	(void)read_fd;
-	errno = ENOSYS;
-	return (-1);
+	char	buf[64];
+	ssize_t	n;
+
+	while (1)
+	{
+		n = read(read_fd, buf, sizeof(buf));
+		if (n > 0)
+			continue ;
+		if (n == 0)
+			return (0);
+		if (errno == EINTR)
+			continue ;
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+			return (0);
+		return (-1);
+	}
 }

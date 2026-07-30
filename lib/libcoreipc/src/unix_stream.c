@@ -1,9 +1,18 @@
 #include "coreipc.h"
 
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+// Static Functions
+static int	fill_addr(struct sockaddr_un *addr, const char *path);
+static int	fail(int fd, int err);
+
 /**
  * @brief Create, bind, chmod, and listen on a stream socket at a path.
  *
- * `mode` is the control plane's entire authorisation model — 0600 on
+ * `mode` is the control plane's entire authorisation model - 0600 on
  * ctl_socket is what restricts tetrisctl to the operator, since that channel
  * carries no Player-Id and no session auth.
  *
@@ -14,13 +23,23 @@
  */
 int	us_stream_listen(const char *path, int backlog, mode_t mode)
 {
-	/* TODO: socket(AF_UNIX, SOCK_STREAM, 0); unlink stale; bind; chmod;
-	   listen(backlog). */
-	(void)path;
-	(void)backlog;
-	(void)mode;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	if (fill_addr(&addr, path) == -1)
+		return (-1);
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd == -1)
+		return (-1);
+	if (unlink(path) == -1 && errno != ENOENT)
+		return (fail(fd, errno));
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+		return (fail(fd, errno));
+	if (chmod(path, mode) == -1)
+		return (fail(fd, errno));
+	if (listen(fd, backlog) == -1)
+		return (fail(fd, errno));
+	return (fd);
 }
 
 /**
@@ -31,11 +50,12 @@ int	us_stream_listen(const char *path, int backlog, mode_t mode)
  */
 int	us_stream_accept(int listen_fd)
 {
-	/* TODO: loop accept(listen_fd, NULL, NULL) while errno == EINTR; the
-	   peer address is unnamed, so it is discarded. */
-	(void)listen_fd;
-	errno = ENOSYS;
-	return (-1);
+	int	fd;
+
+	fd = accept(listen_fd, NULL, NULL);
+	while (fd == -1 && errno == EINTR)
+		fd = accept(listen_fd, NULL, NULL);
+	return (fd);
 }
 
 /**
@@ -47,10 +67,17 @@ int	us_stream_accept(int listen_fd)
  */
 int	us_stream_connect(const char *path)
 {
-	/* TODO: socket(AF_UNIX, SOCK_STREAM, 0); fill sockaddr_un; connect. */
-	(void)path;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	if (fill_addr(&addr, path) == -1)
+		return (-1);
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd == -1)
+		return (-1);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+		return (fail(fd, errno));
+	return (fd);
 }
 
 /**
@@ -66,13 +93,27 @@ int	us_stream_connect(const char *path)
  */
 int	us_send_all(int fd, const void *buf, size_t len)
 {
-	/* TODO: loop send(fd, p, remaining, MSG_NOSIGNAL); retry on EINTR;
-	   advance p by the returned count. */
-	(void)fd;
-	(void)buf;
-	(void)len;
-	errno = ENOSYS;
-	return (-1);
+	const unsigned char	*p;
+	size_t				sent;
+	ssize_t				n;
+
+	if (!buf)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	p = (const unsigned char *)buf;
+	sent = 0;
+	while (sent < len)
+	{
+		n = send(fd, p + sent, len - sent, MSG_NOSIGNAL);
+		if (n == -1 && errno == EINTR)
+			continue ;
+		if (n == -1)
+			return (-1);
+		sent += (size_t)n;
+	}
+	return (0);
 }
 
 /**
@@ -87,11 +128,69 @@ int	us_send_all(int fd, const void *buf, size_t len)
  */
 int	us_recv_all(int fd, void *buf, size_t len)
 {
-	/* TODO: loop recv(fd, p, remaining, 0); retry on EINTR; a 0 return means
-	   the peer closed early -> errno = EPIPE, return (-1). */
-	(void)fd;
-	(void)buf;
-	(void)len;
-	errno = ENOSYS;
+	unsigned char	*p;
+	size_t			got;
+	ssize_t			n;
+
+	if (!buf)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	p = (unsigned char *)buf;
+	got = 0;
+	while (got < len)
+	{
+		n = recv(fd, p + got, len - got, 0);
+		if (n == -1 && errno == EINTR)
+			continue ;
+		if (n == -1)
+			return (-1);
+		if (n == 0)
+		{
+			errno = EPIPE;
+			return (-1);
+		}
+		got += (size_t)n;
+	}
+	return (0);
+}
+
+/**
+ * @brief Fill a sockaddr_un for an AF_UNIX path, rejecting over-long paths.
+ *
+ * @param addr The address to fill.
+ * @param path The filesystem path to copy in.
+ * @return 0 on success, -1 with errno set (EINVAL, ENAMETOOLONG) on failure.
+ */
+static int	fill_addr(struct sockaddr_un *addr, const char *path)
+{
+	if (!path || *path == '\0')
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	if (strlen(path) >= sizeof(addr->sun_path))
+	{
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+	memset(addr, 0, sizeof(*addr));
+	addr->sun_family = AF_UNIX;
+	strncpy(addr->sun_path, path, sizeof(addr->sun_path) - 1);
+	return (0);
+}
+
+/**
+ * @brief Close a half-built socket and report the failure that caused it.
+ *
+ * @param fd The descriptor to close.
+ * @param err The errno value to surface to the caller.
+ * @return Always -1, with errno set to err.
+ */
+static int	fail(int fd, int err)
+{
+	close(fd);
+	errno = err;
 	return (-1);
 }
