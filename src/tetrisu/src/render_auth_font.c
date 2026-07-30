@@ -514,8 +514,9 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 		free(pixels);
 		return (NULL);
 	}
-	if (created)
-		set_transparent_base(plane);
+	/* Reusing a plane without erasing its old sprixel makes Kitty reject the
+	 * next bitmap bind, which used to close the auth flow on the first key. */
+	set_transparent_base(plane);
 	ncv = ncvisual_from_rgba(pixels,
 			ctx->cell_px_y * AUTH_TEXT_CELL_ROWS,
 			width * (int)sizeof(*pixels), width);

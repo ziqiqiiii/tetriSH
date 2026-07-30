@@ -4,6 +4,7 @@
 static struct ncplane	*create_intro_plane(render_ctx_t *ctx);
 static int	intro_streamer(struct ncvisual *ncv,
 	struct ncvisual_options *vopts, const struct timespec *tspec, void *curry);
+static bool	intro_skip_requested(uint32_t key, const ncinput *input);
 
 /**
  * @brief Plays the splash intro video, with optional best-effort audio.
@@ -31,6 +32,13 @@ int	render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
 	ncv = ncvisual_from_file(video_path);
 	if (ncv == NULL)
 		return (0);
+	/*
+	 * The initial home artwork can be a Kitty bitmap (sprixel). A cell-blitted
+	 * video cannot reliably cover an existing sprixel even when its plane is
+	 * higher in the Notcurses pile, so remove the placeholder before streaming.
+	 * The auth screen installs its own background as soon as playback ends.
+	 */
+	render_background_destroy(ctx);
 	plane = create_intro_plane(ctx);
 	if (plane == NULL)
 	{
@@ -100,10 +108,32 @@ static int	intro_streamer(struct ncvisual *ncv,
 	if (ret != 0)
 		return (ret);
 	key = notcurses_get_nblock(intro->ctx->nc, &ni);
-	if (key != 0 && key != (uint32_t)-1 && ni.evtype != NCTYPE_RELEASE)
+	if (intro_skip_requested(key, &ni))
 	{
 		intro->skipped = 1;
 		return (1);
 	}
 	return (0);
+}
+
+/**
+ * @brief Filters startup protocol noise from deliberate intro skipping.
+ *
+ * Notcurses can surface resize, signal, invalid, or pointer-motion events
+ * while the terminal is still completing capability negotiation. Treating
+ * any one of those as a key press made the six-second intro disappear on
+ * Kitty startup.
+ */
+static bool	intro_skip_requested(uint32_t key, const ncinput *input)
+{
+	if (input == NULL || key == 0 || key == (uint32_t)-1
+		|| input->evtype == NCTYPE_RELEASE || key == NCKEY_INVALID
+		|| key == NCKEY_RESIZE || key == NCKEY_SIGNAL
+		|| key == NCKEY_MOTION)
+		return (false);
+	if (nckey_mouse_p(key))
+		return (key == NCKEY_BUTTON1
+			&& (input->evtype == NCTYPE_PRESS
+				|| input->evtype == NCTYPE_UNKNOWN));
+	return (true);
 }
