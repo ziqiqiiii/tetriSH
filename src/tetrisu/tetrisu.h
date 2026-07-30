@@ -903,12 +903,8 @@ void			home_sign_in_body_line1(const char *label, char *line1,
 void			home_sign_in_body_line2(char *line2, size_t size);
 
 /* RENDER_SIGN_IN.C */
-# define SIGN_IN_ASSET_PATH \
-	ASSET_DIR "/default_theme/sign_in_required.png"
-# define SIGN_IN_SOURCE_PIXELS_X	1586
-# define SIGN_IN_SOURCE_PIXELS_Y	992
-# define SIGN_IN_MODAL_COLS		52
-# define SIGN_IN_MODAL_ROWS		16
+# define SIGN_IN_MODAL_COLS	58
+# define SIGN_IN_MODAL_ROWS	14
 
 typedef enum e_sign_in_focus
 {
@@ -921,7 +917,6 @@ typedef struct s_sign_in_modal
 	bool				visible;
 	sign_in_focus_t		focus;
 	const char			*label;
-	struct ncplane		*art_plane;
 	struct ncplane		*text_plane;
 }	sign_in_modal_t;
 

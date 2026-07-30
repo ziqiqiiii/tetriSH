@@ -271,7 +271,6 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
 | `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
-| `SIGN_IN_ASSET_PATH` | Character-free art for the sign-in-required modal |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |

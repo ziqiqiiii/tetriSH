@@ -270,11 +270,11 @@ item 18 next.
 17. **Route all five home actions** — complete
 
     - Offline Single Player routes to local Solo exactly as before.
-    - Offline Multiplayer, Marketplace, and Leaderboard show a polished,
-      dismissible sign-in-required modal with authored pixel-art background
-      on bitmap-capable terminals and a compact high-contrast terminal-only
-      frame in compatibility mode. All title, body, and button text is live
-      terminal text on separate planes, never baked into the PNG.
+    - Offline Multiplayer, Marketplace, and Leaderboard show the same compact,
+      dismissible terminal-native sign-in-required modal on every terminal.
+      It deliberately avoids bitmap loading so it opens instantly and remains
+      responsive on long-running Kitty and compatibility-mode sessions.
+      All title, body, and button text is live terminal text.
     - Settings stays available locally in both offline and fixture modes.
     - Fixture mode (navigation.offline == false) routes all five items to
       their existing scaffold view models, preserving the visible
