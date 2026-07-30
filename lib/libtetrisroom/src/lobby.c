@@ -1,5 +1,8 @@
 #include "tetrisroom.h"
 
+// Static Functions
+static t_room	*entry_by_name(const t_lobby *l, const char *name);
+
 /**
  * @brief Initialises an empty lobby with clamped capacity settings.
  *
@@ -10,12 +13,19 @@
  */
 int	lobby_init(t_lobby *l, size_t max_rooms, int br_slot_count)
 {
-	/* TODO: zero l; clamp max_rooms; store br_slot_count; every
-	   next_id[mode] = 0 (room_init is handed ++id, so ids start at 1). */
-	(void)l;
-	(void)max_rooms;
-	(void)br_slot_count;
-	return (-1);
+	if (!l)
+		return (-1);
+	memset(l, 0, sizeof(*l));
+	if (max_rooms < 1)
+		max_rooms = 1;
+	if (max_rooms > LOBBY_MAX_ROOMS)
+		max_rooms = LOBBY_MAX_ROOMS;
+	l->max_rooms = max_rooms;
+	l->br_slot_count = br_slot_count;
+	l->next_id[MODE_SINGLE] = 0;
+	l->next_id[MODE_DOUBLE] = 0;
+	l->next_id[MODE_BATTLE_ROYALE] = 0;
+	return (0);
 }
 
 /**
@@ -33,12 +43,22 @@ int	lobby_init(t_lobby *l, size_t max_rooms, int br_slot_count)
  */
 int	lobby_create_room(t_lobby *l, t_game_mode mode, t_room **out)
 {
-	/* TODO: find free entry; room_init(room, mode, ++l->next_id[mode],
-	   l->br_slot_count); mark in_use; *out = room. */
-	(void)l;
-	(void)mode;
-	(void)out;
-	return (-1);
+	size_t	i;
+
+	if (!l || !out || mode > MODE_BATTLE_ROYALE)
+		return (-1);
+	i = 0;
+	while (i < l->max_rooms && l->in_use[i])
+		i++;
+	if (i == l->max_rooms)
+		return (-1);
+	if (room_init(&l->rooms[i], mode, l->next_id[mode] + 1,
+			l->br_slot_count) != 0)
+		return (-1);
+	l->next_id[mode]++;
+	l->in_use[i] = true;
+	*out = &l->rooms[i];
+	return (0);
 }
 
 /**
@@ -54,10 +74,7 @@ int	lobby_create_room(t_lobby *l, t_game_mode mode, t_room **out)
  */
 t_room	*lobby_find_room(t_lobby *l, const char *name)
 {
-	/* TODO: scan in_use entries for a strcmp match on room->name. */
-	(void)l;
-	(void)name;
-	return (NULL);
+	return (entry_by_name(l, name));
 }
 
 /**
@@ -71,10 +88,23 @@ t_room	*lobby_find_room(t_lobby *l, const char *name)
  */
 int	lobby_destroy_room(t_lobby *l, const char *name)
 {
-	/* TODO: find entry; slot_clear each slot; in_use false. */
-	(void)l;
-	(void)name;
-	return (-1);
+	t_room	*r;
+	size_t	index;
+	int		i;
+
+	r = entry_by_name(l, name);
+	if (!r)
+		return (-1);
+	i = 0;
+	while (i < r->slot_count)
+	{
+		slot_clear(&r->slots[i]);
+		i++;
+	}
+	r->number_of_players = 0;
+	index = (size_t)(r - l->rooms);
+	l->in_use[index] = false;
+	return (0);
 }
 
 /**
@@ -89,11 +119,24 @@ int	lobby_destroy_room(t_lobby *l, const char *name)
  */
 size_t	lobby_list_open(const t_lobby *l, t_room_summary *out, size_t cap)
 {
-	/* TODO: room_to_summary per WAITING/READY room, up to cap. */
-	(void)l;
-	(void)out;
-	(void)cap;
-	return (0);
+	size_t	n;
+	size_t	i;
+
+	if (!l || !out)
+		return (0);
+	n = 0;
+	i = 0;
+	while (i < l->max_rooms && n < cap)
+	{
+		if (l->in_use[i] && (l->rooms[i].status == ROOM_WAITING
+				|| l->rooms[i].status == ROOM_READY))
+		{
+			room_to_summary(&l->rooms[i], &out[n]);
+			n++;
+		}
+		i++;
+	}
+	return (n);
 }
 
 /**
@@ -106,11 +149,23 @@ size_t	lobby_list_open(const t_lobby *l, t_room_summary *out, size_t cap)
  */
 size_t	lobby_list_all(const t_lobby *l, t_room_snapshot *out, size_t cap)
 {
-	/* TODO: room_to_snapshot per in_use room, up to cap. */
-	(void)l;
-	(void)out;
-	(void)cap;
-	return (0);
+	size_t	n;
+	size_t	i;
+
+	if (!l || !out)
+		return (0);
+	n = 0;
+	i = 0;
+	while (i < l->max_rooms && n < cap)
+	{
+		if (l->in_use[i])
+		{
+			room_to_snapshot(&l->rooms[i], &out[n]);
+			n++;
+		}
+		i++;
+	}
+	return (n);
 }
 
 /**
@@ -121,7 +176,43 @@ size_t	lobby_list_all(const t_lobby *l, t_room_snapshot *out, size_t cap)
  */
 size_t	lobby_room_count(const t_lobby *l)
 {
-	/* TODO: count in_use entries. */
-	(void)l;
-	return (0);
+	size_t	n;
+	size_t	i;
+
+	if (!l)
+		return (0);
+	n = 0;
+	i = 0;
+	while (i < l->max_rooms)
+	{
+		if (l->in_use[i])
+			n++;
+		i++;
+	}
+	return (n);
+}
+
+/**
+ * @brief Finds a live room entry by its display name.
+ *
+ * @param l The lobby to search.
+ * @param name The room name to match.
+ * @return The stored room, or NULL when no live entry matches.
+ */
+static t_room	*entry_by_name(const t_lobby *l, const char *name)
+{
+	t_room	*rooms;
+	size_t	i;
+
+	if (!l || !name)
+		return (NULL);
+	rooms = (t_room *)l->rooms;
+	i = 0;
+	while (i < l->max_rooms)
+	{
+		if (l->in_use[i] && strcmp(rooms[i].name, name) == 0)
+			return (&rooms[i]);
+		i++;
+	}
+	return (NULL);
 }

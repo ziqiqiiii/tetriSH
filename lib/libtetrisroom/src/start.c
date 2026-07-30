@@ -10,11 +10,18 @@
  */
 t_start_verdict	room_can_start(const t_room *r, t_player_id requester)
 {
-	/* TODO: IN_GAME/FINISHED -> ALREADY_STARTED; requester not the owner
-	   -> NOT_OWNER; count < min_to_start -> TOO_FEW_PLAYERS. */
-	(void)r;
-	(void)requester;
-	return (START_NOT_OWNER);
+	t_membership	*m;
+
+	if (!r)
+		return (START_NOT_OWNER);
+	if (r->status == ROOM_IN_GAME || r->status == ROOM_FINISHED)
+		return (START_ALREADY_STARTED);
+	m = room_find_member((t_room *)r, requester);
+	if (!m || !membership_is_owner(m))
+		return (START_NOT_OWNER);
+	if (r->number_of_players < r->min_to_start)
+		return (START_TOO_FEW_PLAYERS);
+	return (START_ACCEPTED);
 }
 
 /**
@@ -27,10 +34,12 @@ t_start_verdict	room_can_start(const t_room *r, t_player_id requester)
  */
 t_start_verdict	room_start(t_room *r, t_player_id requester)
 {
-	/* TODO: verdict = room_can_start; on ACCEPTED status = ROOM_IN_GAME. */
-	(void)r;
-	(void)requester;
-	return (START_NOT_OWNER);
+	t_start_verdict	verdict;
+
+	verdict = room_can_start(r, requester);
+	if (verdict == START_ACCEPTED)
+		r->status = ROOM_IN_GAME;
+	return (verdict);
 }
 
 /**
@@ -40,8 +49,18 @@ t_start_verdict	room_start(t_room *r, t_player_id requester)
  */
 void	room_finish(t_room *r)
 {
-	/* TODO: status = ROOM_FINISHED; slot_clear each slot; count = 0. */
-	(void)r;
+	int	i;
+
+	if (!r)
+		return ;
+	r->status = ROOM_FINISHED;
+	i = 0;
+	while (i < r->slot_count)
+	{
+		slot_clear(&r->slots[i]);
+		i++;
+	}
+	r->number_of_players = 0;
 }
 
 /**
@@ -52,7 +71,13 @@ void	room_finish(t_room *r)
  */
 const char	*room_state_message(const t_room *r)
 {
-	/* TODO: WAITING/READY/IN_GAME/FINISHED -> the four fixed strings. */
-	(void)r;
-	return ("");
+	if (!r)
+		return ("");
+	if (r->status == ROOM_READY)
+		return ("READY TO START, OWNER CAN START ANYTIME");
+	if (r->status == ROOM_IN_GAME)
+		return ("GAME IN PROGRESS");
+	if (r->status == ROOM_FINISHED)
+		return ("GAME OVER, RECORDING THE RESULTS");
+	return ("WAITING FOR OPPONENT");
 }

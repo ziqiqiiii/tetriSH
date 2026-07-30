@@ -1,8 +1,14 @@
 #include "tetrisroom.h"
 
+#include <stdio.h>
+
 // Static Variables
 // id prefix per t_game_mode; const table, not mutable module state
 static const char	*g_mode_prefix[] = {"S", "D", "BR"};
+
+// Static Functions
+static void		apply_mode_shape(t_room *r, t_game_mode mode, int br_slots);
+static t_slot	*first_free_slot(t_room *r);
 
 /**
  * @brief Initialises a room and derives its display name from mode and id.
@@ -20,15 +26,24 @@ static const char	*g_mode_prefix[] = {"S", "D", "BR"};
  */
 int	room_init(t_room *r, t_game_mode mode, int id, int br_slots)
 {
-	/* TODO: validate r/mode/id; zero r; store id; snprintf name as
-	   "<g_mode_prefix[mode]>-%02d"; slot_count/min_to_start from mode;
-	   slot_init each slot with 1-based index; ROOM_WAITING. */
-	(void)r;
-	(void)mode;
-	(void)id;
-	(void)br_slots;
-	(void)g_mode_prefix;
-	return (-1);
+	int	i;
+
+	if (!r || mode > MODE_BATTLE_ROYALE || id < 1)
+		return (-1);
+	memset(r, 0, sizeof(*r));
+	r->id = id;
+	snprintf(r->name, ROOM_NAME_MAX, "%s-%02d", g_mode_prefix[mode], id);
+	r->mode = mode;
+	apply_mode_shape(r, mode, br_slots);
+	i = 0;
+	while (i < r->slot_count)
+	{
+		slot_init(&r->slots[i], i + 1);
+		i++;
+	}
+	r->number_of_players = 0;
+	r->status = ROOM_WAITING;
+	return (0);
 }
 
 /**
@@ -42,10 +57,13 @@ int	room_init(t_room *r, t_game_mode mode, int id, int br_slots)
  */
 t_join_verdict	room_can_accept(const t_room *r)
 {
-	/* TODO: IN_GAME/FINISHED -> JOIN_IN_GAME; players == slot_count ->
-	   JOIN_FULL; else JOIN_ACCEPTED. */
-	(void)r;
-	return (JOIN_FULL);
+	if (!r)
+		return (JOIN_FULL);
+	if (r->status == ROOM_IN_GAME || r->status == ROOM_FINISHED)
+		return (JOIN_IN_GAME);
+	if (r->number_of_players >= r->slot_count)
+		return (JOIN_FULL);
+	return (JOIN_ACCEPTED);
 }
 
 /**
@@ -66,15 +84,31 @@ t_join_verdict	room_can_accept(const t_room *r)
 int	room_seat(t_room *r, t_player_id pid, const char *username,
 		bool (*probe)(void *ctx, t_player_id pid), void *probe_ctx)
 {
-	/* TODO: verdict check; duplicate check; first free slot -> JOINING;
-	   probe fail -> slot back to WAITING, -1; membership_make (owner if
-	   count == 0); slot_occupy; count++; room_recompute_status. */
-	(void)r;
-	(void)pid;
-	(void)username;
-	(void)probe;
-	(void)probe_ctx;
-	return (-1);
+	t_slot		*s;
+	t_room_role	role;
+
+	if (room_can_accept(r) != JOIN_ACCEPTED || room_find_member(r, pid))
+		return (-1);
+	s = first_free_slot(r);
+	if (!s)
+		return (-1);
+	s->status = SLOT_JOINING;
+	if (probe && !probe(probe_ctx, pid))
+	{
+		s->status = SLOT_WAITING;
+		return (-1);
+	}
+	role = ROLE_PLAYER;
+	if (r->number_of_players == 0)
+		role = ROLE_OWNER;
+	if (slot_occupy(s, membership_make(pid, username, role)) != 0)
+	{
+		s->status = SLOT_WAITING;
+		return (-1);
+	}
+	r->number_of_players++;
+	room_recompute_status(r);
+	return (s->index);
 }
 
 /**
@@ -87,9 +121,12 @@ int	room_seat(t_room *r, t_player_id pid, const char *username,
  */
 void	room_recompute_status(t_room *r)
 {
-	/* TODO: skip unless WAITING/READY; count >= min -> READY else
-	   WAITING. */
-	(void)r;
+	if (!r || (r->status != ROOM_WAITING && r->status != ROOM_READY))
+		return ;
+	if (r->number_of_players >= r->min_to_start)
+		r->status = ROOM_READY;
+	else
+		r->status = ROOM_WAITING;
 }
 
 /**
@@ -102,8 +139,66 @@ void	room_recompute_status(t_room *r)
  */
 t_membership	*room_find_member(t_room *r, t_player_id pid)
 {
-	/* TODO: scan occupied slots for pid. */
-	(void)r;
-	(void)pid;
+	int	i;
+
+	if (!r)
+		return (NULL);
+	i = 0;
+	while (i < r->slot_count)
+	{
+		if (r->slots[i].occupied && r->slots[i].membership.player_id == pid)
+			return (&r->slots[i].membership);
+		i++;
+	}
+	return (NULL);
+}
+
+/**
+ * @brief Sets a room's slot count and start threshold from its mode.
+ *
+ * @param r The room being initialised.
+ * @param mode The game mode.
+ * @param br_slots Requested slot count, honoured only for BATTLE_ROYALE.
+ */
+static void	apply_mode_shape(t_room *r, t_game_mode mode, int br_slots)
+{
+	if (mode == MODE_SINGLE)
+	{
+		r->slot_count = 1;
+		r->min_to_start = 1;
+	}
+	else if (mode == MODE_DOUBLE)
+	{
+		r->slot_count = 2;
+		r->min_to_start = 2;
+	}
+	else
+	{
+		if (br_slots < 4)
+			br_slots = 4;
+		if (br_slots > ROOM_MAX_SLOTS)
+			br_slots = ROOM_MAX_SLOTS;
+		r->slot_count = br_slots;
+		r->min_to_start = 4;
+	}
+}
+
+/**
+ * @brief Finds the first free slot a joining player may take.
+ *
+ * @param r The room to scan.
+ * @return The first unoccupied WAITING slot, or NULL when none is free.
+ */
+static t_slot	*first_free_slot(t_room *r)
+{
+	int	i;
+
+	i = 0;
+	while (i < r->slot_count)
+	{
+		if (!r->slots[i].occupied && r->slots[i].status == SLOT_WAITING)
+			return (&r->slots[i]);
+		i++;
+	}
 	return (NULL);
 }

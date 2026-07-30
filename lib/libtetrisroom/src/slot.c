@@ -8,9 +8,12 @@
  */
 void	slot_init(t_slot *s, int index)
 {
-	/* TODO: zero s; s->index = index; SLOT_WAITING; occupied false. */
-	(void)s;
-	(void)index;
+	if (!s)
+		return ;
+	memset(s, 0, sizeof(*s));
+	s->index = index;
+	s->status = SLOT_WAITING;
+	s->occupied = false;
 }
 
 /**
@@ -22,11 +25,12 @@ void	slot_init(t_slot *s, int index)
  */
 int	slot_occupy(t_slot *s, t_membership m)
 {
-	/* TODO: reject status != SLOT_JOINING; store m; occupied true;
-	   status SLOT_READY; index preserved. */
-	(void)s;
-	(void)m;
-	return (-1);
+	if (!s || s->status != SLOT_JOINING)
+		return (-1);
+	s->membership = m;
+	s->occupied = true;
+	s->status = SLOT_READY;
+	return (0);
 }
 
 /**
@@ -36,6 +40,9 @@ int	slot_occupy(t_slot *s, t_membership m)
  */
 void	slot_clear(t_slot *s)
 {
-	/* TODO: occupied false; zero membership; SLOT_WAITING; keep index. */
-	(void)s;
+	if (!s)
+		return ;
+	s->occupied = false;
+	memset(&s->membership, 0, sizeof(s->membership));
+	s->status = SLOT_WAITING;
 }

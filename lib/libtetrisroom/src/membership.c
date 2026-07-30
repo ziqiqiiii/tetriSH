@@ -4,7 +4,7 @@
  * @brief Builds a membership value for a seated player.
  *
  * @param pid The player's id.
- * @param username Display name, truncated to ROOM_NAME_MAX - 1.
+ * @param username Display name, truncated to ROOM_USER_MAX - 1.
  * @param role ROLE_OWNER or ROLE_PLAYER.
  * @return The membership, with muted defaulting to false.
  */
@@ -12,11 +12,12 @@ t_membership	membership_make(t_player_id pid, const char *username, t_room_role 
 {
 	t_membership	m;
 
-	/* TODO: zero m; copy pid/username (NUL-terminated)/role; muted false. */
-	(void)pid;
-	(void)username;
-	(void)role;
 	memset(&m, 0, sizeof(m));
+	m.player_id = pid;
+	if (username)
+		strncpy(m.username, username, ROOM_USER_MAX - 1);
+	m.role = role;
+	m.muted = false;
 	return (m);
 }
 
@@ -28,9 +29,9 @@ t_membership	membership_make(t_player_id pid, const char *username, t_room_role 
  */
 void	membership_set_role(t_membership *m, t_room_role role)
 {
-	/* TODO: m->role = role; identity fields untouched. */
-	(void)m;
-	(void)role;
+	if (!m)
+		return ;
+	m->role = role;
 }
 
 /**
@@ -41,7 +42,7 @@ void	membership_set_role(t_membership *m, t_room_role role)
  */
 bool	membership_is_owner(const t_membership *m)
 {
-	/* TODO: return m->role == ROLE_OWNER. */
-	(void)m;
-	return (false);
+	if (!m)
+		return (false);
+	return (m->role == ROLE_OWNER);
 }
