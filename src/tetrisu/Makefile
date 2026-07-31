@@ -22,7 +22,8 @@ RM			:= rm -rf
 
 AUTO_INSTALL_DEPS				:= 1
 INSTALL_NOTCURSES_FROM_SOURCE	:= 1
-NOTCURSES_VERSION				:= v3.0.17
+NOTCURSES_VERSION				:= v3.0.12
+NOTCURSES_MIN_VERSION			:= 3.0.5
 NOTCURSES_PREFIX				:= /usr/local
 
 CLR_RMV		:= \033[0m
@@ -138,6 +139,7 @@ deps:
 	@ UNAME_S=$(UNAME) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
 		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) CC=$(CC) \
 		PKG_CONFIG=$(PKG_CONFIG) GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
@@ -145,6 +147,7 @@ deps:
 install-deps:
 	@ INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
 		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) \
 		bash ./scripts/install_deps.sh
 
@@ -160,6 +163,7 @@ brain:
 # headers and libraries rather than trusting package-manager state.
 check-tetrisu-deps:
 	@ CC=$(CC) PKG_CONFIG=$(PKG_CONFIG) AUDIO_DEPS='$(AUDIO_DEPS)' \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		bash ./scripts/check_deps.sh
 
 ################################################################################

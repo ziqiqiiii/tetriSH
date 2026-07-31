@@ -8,13 +8,17 @@
 #   INSTALL_NOTCURSES_FROM_SOURCE  1 to build notcurses from source when no
 #                                  distro development package is available (Linux)
 #   NOTCURSES_VERSION              git tag to build when falling back to source
+#                                  (defaults to the newest release supported by
+#                                  Debian 11's CMake)
 #
 # Privilege is resolved once, at the top; sudo performs its own password prompt.
 
 set -euo pipefail
 
 INSTALL_NOTCURSES_FROM_SOURCE="${INSTALL_NOTCURSES_FROM_SOURCE:-1}"
-NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.17}"
+NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.12}"
+NOTCURSES_MIN_VERSION="${NOTCURSES_MIN_VERSION:-3.0.5}"
+PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 UNAME_S="$(uname -s)"
@@ -67,14 +71,26 @@ install_linux() {
 
         if [ -n "$NOTCURSES_PKG" ]; then
             $SUDO apt-get install -y "$NOTCURSES_PKG"
+        fi
+
+        if "$PKG_CONFIG" --atleast-version="$NOTCURSES_MIN_VERSION" \
+                notcurses 2>/dev/null; then
+            :
         elif [ "$INSTALL_NOTCURSES_FROM_SOURCE" = "1" ]; then
-            echo "No APT notcurses development package found; building notcurses $NOTCURSES_VERSION from source."
+            if [ -n "$NOTCURSES_PKG" ]; then
+                installed_version="$("$PKG_CONFIG" --modversion notcurses \
+                    2>/dev/null || printf 'unknown')"
+                echo "APT provides notcurses $installed_version, but tetrisu requires $NOTCURSES_MIN_VERSION or newer."
+            else
+                echo "No APT notcurses development package found."
+            fi
+            echo "Building notcurses $NOTCURSES_VERSION from source."
             $SUDO apt-get install -y git cmake libavdevice-dev \
                 libdeflate-dev libgpm-dev libswscale-dev libunistring-dev
             NOTCURSES_VERSION="$NOTCURSES_VERSION" bash "$SCRIPT_DIR/install_notcurses.sh"
         else
-            echo "No notcurses development package is available in configured APT repositories." >&2
-            echo "Enable Ubuntu universe/Debian testing, install notcurses manually, or run with INSTALL_NOTCURSES_FROM_SOURCE=1." >&2
+            echo "APT does not provide notcurses $NOTCURSES_MIN_VERSION or newer." >&2
+            echo "Install a supported notcurses manually or run with INSTALL_NOTCURSES_FROM_SOURCE=1." >&2
             exit 1
         fi
     elif command -v dnf >/dev/null 2>&1; then

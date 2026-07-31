@@ -81,7 +81,7 @@ becomes server-authoritative without rewriting the renderer.
 
 ## Prerequisites
 
-notcurses (render) is **required**; SDL2 and SDL2_mixer (audio) are
+notcurses 3.0.5 or newer (render) is **required**; SDL2 and SDL2_mixer (audio) are
 **optional** and compiled out when absent. This Makefile owns those
 component-only dependencies. The repository Makefile owns GCC, make,
 pkg-config, OpenSSL, Readline, and ncurses.
@@ -97,13 +97,14 @@ Package installation may request sudo access. Use the following when system chan
 make deps AUTO_INSTALL_DEPS=0      # check-only; fail instead of installing
 ```
 
-If APT has no `libnotcurses-dev`, the default
-`INSTALL_NOTCURSES_FROM_SOURCE=1` builds notcurses from source. Ubuntu may need
-its `universe` repository; RHEL-compatible systems need EPEL/CRB; Fedora and
-openSUSE Tumbleweed ship `notcurses-devel`. Build it explicitly with:
+If APT has no compatible `libnotcurses-dev`—including Debian releases whose
+package is older than 3.0.5—the default `INSTALL_NOTCURSES_FROM_SOURCE=1` builds
+notcurses from source. Ubuntu may need its `universe` repository;
+RHEL-compatible systems need EPEL/CRB; Fedora and openSUSE Tumbleweed ship
+`notcurses-devel`. Build it explicitly with:
 
 ```bash
-make install-notcurses-from-source NOTCURSES_VERSION=v3.0.17
+make install-notcurses-from-source NOTCURSES_VERSION=v3.0.12
 ```
 
 ---
