@@ -142,7 +142,7 @@ request/response. Auth means a non-empty `Player-Id` header.
 | `ROTATE` | `/room/<id>/player/<pid>` | ✓ | Rotate the falling piece |
 | `DROP` | `/room/<id>/player/<pid>` | ✓ | Soft or hard drop |
 | `ABILITY` | `/room/<id>/player/<pid>` | ✓ | Activate a Gaiden ability |
-| `STATE` | `/room/<id>` | ✓ | **Server-pushed** authoritative game state |
+| `STATE` | `/room/<id>/player/<pid>` | ✓ | **Server-pushed** authoritative game state; the path names its subject |
 | `BUY` | `/store/character/<cid>`, `/store/theme/<tid>` | ✓ | Purchase a catalogue item |
 | `EQUIP` | `/player/<pid>/character/<cid>`, `/player/<pid>/theme/<tid>` | ✓ | Set a default character or theme |
 | `PROFILE` | `/player/<pid>` | ✓ | Fetch the ProfileView body |
@@ -158,7 +158,7 @@ Valid extension methods parse without a library change — see
 [Dispatch](#dispatch). A `STATE` push on the wire, escaped:
 
 ```text
-STATE /room/main HTTTP/1.0\r\nContent-Type: application/tetris-state\r\nContent-Length: 3\r\n\r\nabc
+STATE /room/S-01/player/7 HTTTP/1.0\r\nContent-Type: application/tetris-state\r\nContent-Length: 3\r\n\r\nabc
 ```
 
 ---
