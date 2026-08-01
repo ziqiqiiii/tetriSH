@@ -1,97 +1,173 @@
 #include "coreipc.h"
 
-/**
- * @brief Create, bind, chmod, and listen on a stream socket at a path.
- *
- * `mode` is the control plane's entire authorisation model — 0600 on
- * ctl_socket is what restricts tetrisctl to the operator, since that channel
- * carries no Player-Id and no session auth.
- *
- * @param path Filesystem path to bind (from .tetrishrc, never defaulted).
- * @param backlog Depth of the pending-connection queue.
- * @param mode Permission bits applied to the bound socket file.
- * @return The listening fd on success, -1 with errno set on failure.
- */
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#ifdef __linux__
+# define STREAM_SEND_FLAGS MSG_NOSIGNAL
+#else
+# define STREAM_SEND_FLAGS 0
+#endif
+
+static int	stream_socket(void)
+{
+	int	fd;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd == -1)
+		return (-1);
+#ifndef __linux__
+	{
+		int	opt = 1;
+
+		if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt)) == -1)
+		{
+			close(fd);
+			return (-1);
+		}
+	}
+#endif
+	return (fd);
+}
+
+static int	stream_fill(const char *path, struct sockaddr_un *addr)
+{
+	memset(addr, 0, sizeof(*addr));
+	addr->sun_family = AF_UNIX;
+	if (strlen(path) >= sizeof(addr->sun_path))
+	{
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+	strncpy(addr->sun_path, path, sizeof(addr->sun_path) - 1);
+	addr->sun_path[sizeof(addr->sun_path) - 1] = '\0';
+	return (0);
+}
+
 int	us_stream_listen(const char *path, int backlog, mode_t mode)
 {
-	/* TODO: socket(AF_UNIX, SOCK_STREAM, 0); unlink stale; bind; chmod;
-	   listen(backlog). */
-	(void)path;
-	(void)backlog;
-	(void)mode;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	fd = stream_socket();
+	if (fd == -1)
+		return (-1);
+	if (unlink(path) == -1 && errno != ENOENT)
+	{
+		close(fd);
+		return (-1);
+	}
+	if (stream_fill(path, &addr) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	if (chmod(path, mode) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	if (listen(fd, backlog) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	return (fd);
 }
 
-/**
- * @brief Accept one connection from a listening socket.
- *
- * @param listen_fd A listening fd from us_stream_listen.
- * @return The accepted connection fd, or -1 with errno set on failure.
- */
 int	us_stream_accept(int listen_fd)
 {
-	/* TODO: loop accept(listen_fd, NULL, NULL) while errno == EINTR; the
-	   peer address is unnamed, so it is discarded. */
-	(void)listen_fd;
-	errno = ENOSYS;
-	return (-1);
+	int	fd;
+
+	do {
+		fd = accept(listen_fd, NULL, NULL);
+#ifndef __linux__
+		if (fd != -1)
+		{
+			int	opt = 1;
+
+			setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt));
+		}
+#endif
+	} while (fd == -1 && errno == EINTR);
+	return (fd);
 }
 
-/**
- * @brief Connect to a stream socket at a filesystem path.
- *
- * @param path Filesystem path of the listening socket.
- * @return The connected fd on success, -1 with errno set on failure
- *         (ENOENT no socket file, ECONNREFUSED nothing listening).
- */
 int	us_stream_connect(const char *path)
 {
-	/* TODO: socket(AF_UNIX, SOCK_STREAM, 0); fill sockaddr_un; connect. */
-	(void)path;
-	errno = ENOSYS;
-	return (-1);
+	struct sockaddr_un	addr;
+	int					fd;
+
+	fd = stream_socket();
+	if (fd == -1)
+		return (-1);
+	if (stream_fill(path, &addr) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+	{
+		close(fd);
+		return (-1);
+	}
+	return (fd);
 }
 
-/**
- * @brief Send a whole buffer, looping over short writes.
- *
- * MSG_NOSIGNAL keeps a peer that hung up from killing the process; it
- * surfaces as EPIPE instead.
- *
- * @param fd A connected stream fd.
- * @param buf The bytes to send.
- * @param len Number of bytes to send.
- * @return 0 when all len bytes were sent, -1 with errno set otherwise.
- */
 int	us_send_all(int fd, const void *buf, size_t len)
 {
-	/* TODO: loop send(fd, p, remaining, MSG_NOSIGNAL); retry on EINTR;
-	   advance p by the returned count. */
-	(void)fd;
-	(void)buf;
-	(void)len;
-	errno = ENOSYS;
-	return (-1);
+	const char	*p;
+	size_t		remaining;
+	ssize_t		n;
+
+	p = buf;
+	remaining = len;
+	while (remaining > 0)
+	{
+		n = send(fd, p, remaining, STREAM_SEND_FLAGS);
+		if (n == -1)
+		{
+			if (errno == EINTR)
+				continue;
+			return (-1);
+		}
+		p += n;
+		remaining -= (size_t)n;
+	}
+	return (0);
 }
 
-/**
- * @brief Receive exactly len bytes, looping over short reads.
- *
- * A peer that closes early is a truncated message, not a short read.
- *
- * @param fd A connected stream fd.
- * @param buf Destination for exactly len bytes.
- * @param len Number of bytes required.
- * @return 0 when all len bytes were read, -1 with errno set otherwise.
- */
 int	us_recv_all(int fd, void *buf, size_t len)
 {
-	/* TODO: loop recv(fd, p, remaining, 0); retry on EINTR; a 0 return means
-	   the peer closed early -> errno = EPIPE, return (-1). */
-	(void)fd;
-	(void)buf;
-	(void)len;
-	errno = ENOSYS;
-	return (-1);
+	char	*p;
+	size_t	remaining;
+	ssize_t	n;
+
+	p = buf;
+	remaining = len;
+	while (remaining > 0)
+	{
+		n = recv(fd, p, remaining, 0);
+		if (n == -1)
+		{
+			if (errno == EINTR)
+				continue;
+			return (-1);
+		}
+		if (n == 0)
+		{
+			errno = EPIPE;
+			return (-1);
+		}
+		p += n;
+		remaining -= (size_t)n;
+	}
+	return (0);
 }
