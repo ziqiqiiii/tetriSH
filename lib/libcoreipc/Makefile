@@ -17,7 +17,12 @@
 NAME		:= libcoreipc.a
 CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
+UNAME_S		:= $(shell uname -s)
+ifeq ($(UNAME_S), Darwin)
+LDLIBS		:= -lpthread
+else
 LDLIBS		:= -lpthread -lrt
+endif
 AR			:= ar
 ARFLAGS		:= rcs
 RM			:= rm -rf

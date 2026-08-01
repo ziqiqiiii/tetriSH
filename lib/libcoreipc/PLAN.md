@@ -187,8 +187,8 @@ support), so the suite runs on macOS for the first time instead of permanently s
 
 ## Status
 
-- [ ] Increment 1: fd_signal.c
+- [x] Increment 1: fd_signal.c (commit 39da4fc, pushed)
 - [x] Increment 2: ring_buffer.c (commit 395ea9f, pushed)
-- [ ] Increment 3: unix_dgram.c
-- [ ] Increment 4: unix_stream.c
-- [ ] Increment 5: portability fix (coreipc.h + Makefile) + mq_helpers.c redesign
+- [x] Increment 3: unix_dgram.c (commit 53aed7f, pushed)
+- [x] Increment 4: unix_stream.c (commit dc9b8ab, pushed)
+- [x] Increment 5: portability fix (coreipc.h + Makefile) + mq_helpers.c redesign (5b in-process on rb_* + mutex/condvar; test gate flipped to always-run)

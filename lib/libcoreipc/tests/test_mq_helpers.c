@@ -189,9 +189,12 @@ static void	queue_name(char *out, size_t cap)
 	assert(n > 0 && (size_t)n < cap);
 }
 
+// The mq_helpers backend is in-process (ring-buffer based) and needs no kernel
+// message-queue support, so the suite always runs now (was gated on
+// /dev/mqueue, which is absent on macOS).
 static int	mqueue_available(void)
 {
-	return (access("/dev/mqueue", F_OK) == 0);
+	return (1);
 }
 
 static long	elapsed_ms(struct timespec *from, struct timespec *to)

@@ -1,121 +1,254 @@
 #include "coreipc.h"
 
-/**
- * @brief Open or create a non-blocking POSIX message queue.
- *
- * @param name POSIX queue name, leading '/' and no other slashes
- *             (from .tetrishrc, never defaulted).
- * @param maxmsg Maximum messages the queue holds before sends fail.
- * @param msgsize Maximum size of one message, in bytes.
- * @param mode Permission bits for the created queue.
- * @return The open descriptor, or (mqd_t)-1 with errno set on failure.
- */
+#include <string.h>
+#include <time.h>
+
+#define MQ_MAX_QUEUES	32
+#define MQ_NAME_MAX		64
+
+typedef struct s_mq_entry
+{
+	char				name[MQ_NAME_MAX];
+	t_ring_buffer		rb;
+	pthread_mutex_t		mutex;
+	pthread_cond_t		cond;
+	long				msgsize;
+	int					in_use;
+	int					refcount;
+}	t_mq_entry;
+
+static t_mq_entry		g_queues[MQ_MAX_QUEUES];
+static pthread_mutex_t	g_table_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static t_mq_entry	*entry_by_handle(mqd_t q)
+{
+	int	i;
+
+	i = (int)q;
+	if (i < 0 || i >= MQ_MAX_QUEUES || !g_queues[i].in_use)
+		return (NULL);
+	return (&g_queues[i]);
+}
+
+static t_mq_entry	*entry_by_name(const char *name)
+{
+	int	i;
+
+	i = 0;
+	while (i < MQ_MAX_QUEUES)
+	{
+		if (g_queues[i].in_use && strcmp(g_queues[i].name, name) == 0)
+			return (&g_queues[i]);
+		i++;
+	}
+	return (NULL);
+}
+
 mqd_t	mqh_open(const char *name, long maxmsg, long msgsize, mode_t mode)
 {
-	/* TODO: fill mq_attr { O_NONBLOCK, mq_maxmsg, mq_msgsize }; mq_open with
-	   O_CREAT | O_RDWR | O_NONBLOCK. */
-	(void)name;
-	(void)maxmsg;
-	(void)msgsize;
+	t_mq_entry	*e;
+	int			i;
+
 	(void)mode;
-	errno = ENOSYS;
-	return ((mqd_t)-1);
+	if (name == NULL || name[0] != '/' || maxmsg <= 0 || msgsize <= 0)
+	{
+		errno = EINVAL;
+		return ((mqd_t)-1);
+	}
+	pthread_mutex_lock(&g_table_lock);
+	e = entry_by_name(name);
+	if (e != NULL)
+	{
+		e->refcount++;
+		pthread_mutex_unlock(&g_table_lock);
+		return ((mqd_t)(e - g_queues));
+	}
+	i = 0;
+	while (i < MQ_MAX_QUEUES && g_queues[i].in_use)
+		i++;
+	if (i == MQ_MAX_QUEUES)
+	{
+		pthread_mutex_unlock(&g_table_lock);
+		errno = ENOSPC;
+		return ((mqd_t)-1);
+	}
+	e = &g_queues[i];
+	memset(e, 0, sizeof(*e));
+	strncpy(e->name, name, MQ_NAME_MAX - 1);
+	e->name[MQ_NAME_MAX - 1] = '\0';
+	e->msgsize = msgsize;
+	e->in_use = 1;
+	e->refcount = 1;
+	if (pthread_mutex_init(&e->mutex, NULL) != 0
+		|| pthread_cond_init(&e->cond, NULL) != 0)
+	{
+		e->in_use = 0;
+		pthread_mutex_unlock(&g_table_lock);
+		return ((mqd_t)-1);
+	}
+	if (rb_init(&e->rb, (size_t)msgsize, (size_t)maxmsg) != 0)
+	{
+		pthread_mutex_destroy(&e->mutex);
+		pthread_cond_destroy(&e->cond);
+		e->in_use = 0;
+		pthread_mutex_unlock(&g_table_lock);
+		return ((mqd_t)-1);
+	}
+	pthread_mutex_unlock(&g_table_lock);
+	return ((mqd_t)i);
 }
 
-/**
- * @brief Send one message without ever blocking.
- *
- * A full queue is EAGAIN, and the caller counts that drop.
- *
- * @param q An open queue descriptor.
- * @param msg The message to send.
- * @param len Length of msg; must not exceed the queue's msgsize.
- * @return 0 when the message was queued, -1 with errno set otherwise.
- */
 int	mqh_send_nb(mqd_t q, const void *msg, size_t len)
 {
-	/* TODO: mq_send(q, msg, len, 0) — priority is always 0, so garbage
-	   events stay strictly FIFO. */
-	(void)q;
-	(void)msg;
-	(void)len;
-	errno = ENOSYS;
-	return (-1);
+	t_mq_entry	*e;
+	int			rc;
+
+	e = entry_by_handle(q);
+	if (e == NULL)
+	{
+		errno = EBADF;
+		return (-1);
+	}
+	if (len > (size_t)e->msgsize)
+	{
+		errno = EMSGSIZE;
+		return (-1);
+	}
+	pthread_mutex_lock(&e->mutex);
+	rc = rb_push(&e->rb, msg);
+	if (rc == -1)
+	{
+		pthread_mutex_unlock(&e->mutex);
+		errno = EAGAIN;
+		return (-1);
+	}
+	pthread_cond_signal(&e->cond);
+	pthread_mutex_unlock(&e->mutex);
+	return (0);
 }
 
-/**
- * @brief Receive one message, returning immediately when the queue is empty.
- *
- * @param q An open queue descriptor.
- * @param buf Destination; must be at least the queue's mq_msgsize, or the
- *            call fails with EMSGSIZE rather than truncating.
- * @param buflen Capacity of buf in bytes.
- * @return Bytes received, or -1 with errno set (EAGAIN when empty).
- */
 ssize_t	mqh_recv_nb(mqd_t q, void *buf, size_t buflen)
 {
-	/* TODO: mq_receive(q, buf, buflen, NULL); retry on EINTR; let EAGAIN
-	   through as "queue empty". */
-	(void)q;
-	(void)buf;
-	(void)buflen;
-	errno = ENOSYS;
-	return (-1);
+	t_mq_entry	*e;
+	int			rc;
+
+	e = entry_by_handle(q);
+	if (e == NULL)
+	{
+		errno = EBADF;
+		return (-1);
+	}
+	if (buflen < (size_t)e->msgsize)
+	{
+		errno = EMSGSIZE;
+		return (-1);
+	}
+	pthread_mutex_lock(&e->mutex);
+	rc = rb_pop(&e->rb, buf);
+	if (rc == -1)
+	{
+		pthread_mutex_unlock(&e->mutex);
+		errno = EAGAIN;
+		return (-1);
+	}
+	pthread_mutex_unlock(&e->mutex);
+	return ((ssize_t)e->msgsize);
 }
 
-/**
- * @brief Receive one message, waiting up to timeout_ms for one to arrive.
- *
- * The only blocking call in the library: no lock may be held across it, and
- * callers holding a room mutex use mqh_recv_nb instead.
- *
- * @param q An open queue descriptor.
- * @param buf Destination; must be at least the queue's mq_msgsize.
- * @param buflen Capacity of buf in bytes.
- * @param timeout_ms Milliseconds to wait; 0 polls once.
- * @return Bytes received, or -1 with errno set (ETIMEDOUT when none arrived).
- */
 ssize_t	mqh_recv_timed(mqd_t q, void *buf, size_t buflen, int timeout_ms)
 {
-	/* TODO: CLOCK_REALTIME + timeout_ms, normalising nsec; mq_timedreceive;
-	   on EINTR retry against the same deadline, never an extended one. */
-	(void)q;
-	(void)buf;
-	(void)buflen;
-	(void)timeout_ms;
-	errno = ENOSYS;
-	return (-1);
+	t_mq_entry		*e;
+	struct timespec	deadline;
+	int				rc;
+
+	e = entry_by_handle(q);
+	if (e == NULL)
+	{
+		errno = EBADF;
+		return (-1);
+	}
+	if (buflen < (size_t)e->msgsize)
+	{
+		errno = EMSGSIZE;
+		return (-1);
+	}
+	if (timeout_ms > 0)
+	{
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_sec += timeout_ms / 1000;
+		deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+		if (deadline.tv_nsec >= 1000000000L)
+		{
+			deadline.tv_sec += 1;
+			deadline.tv_nsec -= 1000000000L;
+		}
+	}
+	pthread_mutex_lock(&e->mutex);
+	for (;;)
+	{
+		rc = rb_pop(&e->rb, buf);
+		if (rc == 0)
+		{
+			pthread_mutex_unlock(&e->mutex);
+			return ((ssize_t)e->msgsize);
+		}
+		if (timeout_ms <= 0)
+		{
+			pthread_mutex_unlock(&e->mutex);
+			errno = ETIMEDOUT;
+			return (-1);
+		}
+		rc = pthread_cond_timedwait(&e->cond, &e->mutex, &deadline);
+		if (rc == ETIMEDOUT)
+		{
+			pthread_mutex_unlock(&e->mutex);
+			errno = ETIMEDOUT;
+			return (-1);
+		}
+	}
 }
 
-/**
- * @brief Close a queue descriptor.
- *
- * The queue itself outlives every descriptor until mqh_unlink removes it.
- *
- * @param q The descriptor to close.
- * @return 0 on success, -1 with errno set on failure.
- */
 int	mqh_close(mqd_t q)
 {
-	/* TODO: mq_close(q). */
-	(void)q;
-	errno = ENOSYS;
-	return (-1);
+	t_mq_entry	*e;
+
+	e = entry_by_handle(q);
+	if (e == NULL)
+	{
+		errno = EBADF;
+		return (-1);
+	}
+	pthread_mutex_lock(&g_table_lock);
+	if (e->refcount > 0)
+		e->refcount--;
+	pthread_mutex_unlock(&g_table_lock);
+	return (0);
 }
 
-/**
- * @brief Remove a queue name from the system.
- *
- * A POSIX queue is kernel-persistent, so a daemon that exits without
- * unlinking leaves messages behind for its next start to consume.
- *
- * @param name The POSIX queue name to remove.
- * @return 0 on success, -1 with errno set on failure.
- */
 int	mqh_unlink(const char *name)
 {
-	/* TODO: mq_unlink(name), treating ENOENT as already gone. */
-	(void)name;
-	errno = ENOSYS;
-	return (-1);
+	t_mq_entry	*e;
+
+	if (name == NULL || name[0] != '/')
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+	pthread_mutex_lock(&g_table_lock);
+	e = entry_by_name(name);
+	if (e == NULL)
+	{
+		pthread_mutex_unlock(&g_table_lock);
+		errno = ENOENT;
+		return (-1);
+	}
+	pthread_mutex_lock(&e->mutex);
+	rb_destroy(&e->rb);
+	pthread_mutex_unlock(&e->mutex);
+	pthread_mutex_destroy(&e->mutex);
+	pthread_cond_destroy(&e->cond);
+	e->in_use = 0;
+	memset(e->name, 0, sizeof(e->name));
+	pthread_mutex_unlock(&g_table_lock);
+	return (0);
 }

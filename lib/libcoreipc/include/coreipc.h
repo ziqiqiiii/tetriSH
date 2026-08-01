@@ -2,7 +2,6 @@
 # define COREIPC_H
 
 # include <errno.h>
-# include <mqueue.h>
 # include <pthread.h>
 # include <stdatomic.h>
 # include <stddef.h>
@@ -12,6 +11,11 @@
 
 # define SP_READ	0
 # define SP_WRITE	1
+
+/* macOS has no POSIX message-queue kernel support, so this library implements
+ * the mq_helpers API in-process on top of the ring buffer (see mq_helpers.c).
+ * We define a plain int handle so no platform ifdef is needed anywhere. */
+typedef int	mqd_t;
 
 typedef struct s_ring_buffer
 {
