@@ -15,6 +15,7 @@
 #   make deps         check/install dependencies for this OS
 #   make check-deps   verify dependencies without changing the system
 #   make run          build, then launch the shell (sources .tetrishrc)
+#   make certs        generate the dev CA + server certificate tetrisd needs
 #   make stack        build, then launch the daemons headless (integration tests)
 #   make test         build, then run every available component test suite
 #   make clean        recurse `clean` into every component
@@ -61,6 +62,7 @@ endif
 SHELL_DIR	:= src/tetrish
 SHELL_BIN	:= $(SHELL_DIR)/macmini_shell
 BIN			:= bin
+CERT_DIR	:= certs
 
 # Build only the components that exist yet — the project is in early dev, so
 # the daemon directories are filled in over time. Match Makefiles rather than
@@ -73,7 +75,7 @@ COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrisctl/Makefile \
 							  src/tetrisu/Makefile)
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
-TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu,$(DAEMON_DIRS))
+TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd,$(DAEMON_DIRS))
 
 ################################################################################
 #                                   BUILD                                      #
@@ -105,9 +107,15 @@ bin-link: shell daemons
 run: all bin-link
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
+# Development credentials for the secure session. tetrisd refuses to boot
+# without them, so `stack` depends on this; the directory is git-ignored and
+# the script is a no-op while the current certificate is still valid.
+certs:
+	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
+
 # Headless stack for integration tests (no interactive shell). Launches only
 # the daemons that have been built.
-stack: all bin-link
+stack: all bin-link certs
 	@ for d in tetrislogd tetrisd; do \
 		if [ -x $(BIN)/$$d ]; then $(BIN)/$$d & fi; \
 	done; \
@@ -184,4 +192,4 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run stack test clean fclean reset re
+			bin-link run certs stack test clean fclean reset re

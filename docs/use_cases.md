@@ -103,8 +103,8 @@ Every use case's wire request and the status codes it can return. Two transports
 
 | UC | Request (wire) | Transport | Success | Error statuses |
 |---|---|---|---|---|
-| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → account svc | `201` | • `409` taken<br>• `400` malformed<br>• `500` |
-| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → account svc | `200` (+`Player-Id`) | • `401` bad creds/unknown<br>• `400`<br>• `500` |
+| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → tetrisd | `201` | • `409` taken<br>• `400` malformed<br>• `500` |
+| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → tetrisd | `200` (+`Player-Id`) | • `401` bad creds/unknown<br>• `400`<br>• `500` |
 | UC-02a Connect | crypto handshake (nonce → cert → RSA-OAEP AES key) | `libtetrissh` session | session up | handshake fail → connection dropped |
 | UC-03 Browse Rooms | `LIST /rooms` | HTTTP → tetrisd | `200` (room list) | `500` |
 | UC-03a Refresh | `LIST /rooms` | HTTTP → tetrisd | `200` | `500` |
@@ -119,7 +119,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-11 Double | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
-| — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
+| — `STATE /room/<id>/player/<pid>` | server-originated push, one subject per snapshot (no client status) | HTTTP ← tetrisd | pushed | — |
 | UC-15 Buy Character | `BUY /store/character/<cid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-16 Buy Theme | `BUY /store/theme/<tid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-17 Deduct Points | — internal to `db_buy_*` | — | — | — |

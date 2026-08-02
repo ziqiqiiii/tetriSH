@@ -37,11 +37,13 @@ SRC_DIR		:= src
 OBJ_DIR		:= obj
 LIB_ROOT	:= ../../lib
 INC_DIR		:= include
+HEADER		:= $(INC_DIR)/tetrisd.h
 
 
 # One archive per CoreStack library, each with the include path that goes with
 # it. Adding a library here wires up its build, its -I and its link in one step.
-LIB_NAMES	:= libcoreipc libhtttp libtetrisbrain libmacminidb libtetrissh
+LIB_NAMES	:= libcoreipc libhtttp libtetrisbrain libmacminidb libtetrissh \
+			   libtetrisroom libstatusbody
 LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
 LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
 LIB_INC		:= $(LIB_DIRS:%=-I%/include)
@@ -69,7 +71,7 @@ libs:
 	@ for d in $(LIB_DIRS); do $(MAKE) $(MAKE_FLAGS) -C $$d || exit 1; done
 
 # --- daemon binary ------------------------------------------------------------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | libs
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) | libs
 	@ mkdir -p $(dir $@)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
@@ -92,15 +94,21 @@ TEST_BIN_DIR	:= $(TESTS_DIR)/bin
 TEST_SRC		:= $(wildcard $(TESTS_DIR)/test_*.c)
 TEST_BINS		:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
 
+# The headless harness client every integration test drives the server with:
+# shared code, not a suite of its own, so it is compiled into each binary.
+TEST_HELPERS	:= $(filter-out $(TEST_SRC), $(wildcard $(TESTS_DIR)/*.c))
+
 TEST_RUNNER		:= ./scripts/run_tests.sh
 
 # main.o is excluded so each test can provide its own main().
 TEST_OBJ		:= $(filter-out $(OBJ_DIR)/main.o, $(OBJ))
 
-$(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(TEST_OBJ)
+$(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(TEST_HELPERS) $(HEADER) \
+						$(wildcard $(TESTS_DIR)/*.h) $(TEST_OBJ)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
-	@ $(CC) $(FLAGS) $(INC) $< $(TEST_OBJ) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ $(CC) $(FLAGS) $(INC) -I$(TESTS_DIR) $< $(TEST_HELPERS) $(TEST_OBJ) \
+		$(LIB_ARCS) $(LDLIBS) -o $@
 
 # Filter a subset with: make test FILTER=outq
 test: $(TEST_BINS)

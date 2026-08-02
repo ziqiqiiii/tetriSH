@@ -32,7 +32,7 @@ The sections below describe the target design; this table says what exists today
 |---|---|
 | `src/tetrish` | Implemented — REPL, builtins, `.tetrishrc`, system programs under `bin/` |
 | `src/tetrisu` | Partial — notcurses intro, menu, and audio; no gameplay or networking |
-| `src/tetrisd` | Scaffolded — Makefile, header, empty `main.c`; no logic |
+| `src/tetrisd` | Implemented — Single mode end to end: accounts, lobby, rooms, live games, `STATE` push; integration tested |
 | `src/tetrislogd` | Scaffolded — Makefile, header, empty `main.c`; no logic |
 | `tetrisctl` | Not started — no source directory |
 | `lib/libtetrisbrain` | Implemented — nine modules, unit tested |
@@ -84,6 +84,7 @@ This runs `make deps`, builds every library under `lib/`, builds the shell, then
 | `make daemons` | Build the daemon and client components that exist |
 | `make bin-link` | Symlink every built binary into `./bin` |
 | `make run` | Build, then launch the shell (sources `.tetrishrc`) |
+| `make certs` | Generate the development CA and server certificate `tetrisd` boots with |
 | `make stack` | Build, then launch the available daemons headless for integration tests |
 | `make test` | Build, then run every available component test suite |
 | `make clean` | Remove object files from every component |
@@ -163,7 +164,7 @@ Steps 2, 4, and 5 depend on components that are not finished yet — see [Status
 
 ### tetrisd
 
-`tetrisd` is the server-authoritative game daemon. It binds the TCP port from `.tetrishrc`, accepts concurrent clients, establishes a secure session before any HTTTP traffic, maintains rooms and runs game logic, and broadcasts `STATE`. It handles `SIGTERM` (graceful shutdown), `SIGHUP` (reload config), and `SIGUSR1` (dump state to log); it ignores `SIGPIPE` and detects broken connections via `EPIPE`. All log records are forwarded to `tetrislogd` over a non-blocking ring buffer, and a separate local-only channel exposes the control plane to `tetrisctl`. See [`src/tetrisd/README.md`](src/tetrisd/README.md).
+`tetrisd` is the server-authoritative game daemon. It binds the TCP port from `.tetrishrc`, accepts concurrent clients, establishes a secure session before any HTTTP traffic, maintains rooms and runs game logic, and broadcasts `STATE`. It handles `SIGTERM` (graceful shutdown) and `SIGHUP` (reload config); it ignores `SIGPIPE`, so a client that vanishes mid-send kills only its own connection. All log records are forwarded to `tetrislogd` over a non-blocking ring buffer, and a separate local-only channel exposes the control plane to `tetrisctl`. See [`src/tetrisd/README.md`](src/tetrisd/README.md).
 
 ### tetrislogd
 
@@ -283,19 +284,25 @@ dspawn tetrislogd             # logger first, so it captures everything
 dspawn tetrisd                # game server (also serves chat and the marketplace)
 ```
 
-Both lines ship commented out until the binaries land. Daemon configuration directives are **[document: not yet parsed — the rc file currently executes shell commands only]**. The planned directives are:
+Both lines ship commented out until the binaries land.
+
+Daemon settings live in the same file as `export` lines, so each one is both an ordinary shell command — inherited by anything `dspawn` launches — and a line the daemon parses out of the file itself at boot. `tetrisd` re-reads them on `SIGHUP`:
 
 ```
-listen_port  <port>           # TCP port for tetrisd
-cert_path    <path>           # Server certificate
-key_path     <path>           # Server private key
-ca_path      <path>           # CA certificate for client verification
-log_path     <path>           # Path where tetrislogd writes log records
-log_ipc      <address>        # IPC address between tetrisd and tetrislogd
-ctl_socket   <path>           # Control plane socket path
+export TETRISD_PORT=4242                             # TCP port
+export TETRISD_DATA_DIR=tmp/tetrisd                  # player store
+export TETRISD_CONFIG_DIR=lib/libmacminidb/config    # item catalogues
+export TETRISD_CERT_PATH=certs/server.crt            # server certificate
+export TETRISD_KEY_PATH=certs/server.key             # server private key
+export TETRISD_CA_PATH=certs/ca.crt                  # CA clients verify against
+export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock   # tetrisd -> tetrislogd
+export TETRISD_LOG_LEVEL=info                        # debug|info|warning|error
+export TETRISD_MAX_CLIENTS=64                        # connection limit
+export TETRISD_TICK_MS=12                            # room ticker period
+export TETRISD_BR_SLOTS=4                            # Battle Royale room slots
 ```
 
-All paths are relative to the project root. No hard-coded paths exist in the source.
+Certificates come from `make certs`, which writes a development CA and server certificate into the git-ignored `certs/`; `tetrisd` refuses to boot without them. All paths are relative to the project root. No hard-coded paths exist in the source.
 
 ---
 
@@ -331,7 +338,7 @@ MacMini_tetriSH/
 ├── src/
 │   ├── tetrish/                   Shell → macmini_shell, system programs → bin/
 │   ├── tetrisu/                   notcurses client → src/tetrisu/bin/tetrisu
-│   ├── tetrisd/                   Game server (scaffolded)
+│   ├── tetrisd/                   Game server (Single mode end to end)
 │   └── tetrislogd/                Logger daemon (scaffolded)
 ├── docs/
 │   ├── use_cases.md               Gameplay use cases
