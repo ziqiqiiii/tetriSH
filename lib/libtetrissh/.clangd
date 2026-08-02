@@ -1,0 +1,13 @@
+# clangd config for libtetrissh — teaches the language server where the headers
+# live. They sit in include/ (tetrissh.h, internal.h, libs/common.h), not beside
+# the .c files, so without a hint clangd floods every source/test with bogus
+# "file not found" errors on #include "tetrissh.h" / "libs/common.h". The
+# Makefile passes -Iinclude, but clangd has no compile_commands database here, so
+# it runs a generic fallback whose working directory is the *source file's own
+# directory* (src/ or tests/). A plain -Iinclude would resolve to src/include
+# (nonexistent); -I../include resolves to lib/libtetrissh/include for every .c
+# under src/ and tests/ (all exactly one level deep), which also covers the
+# libs/ subdir. Build flags are unchanged; this only affects the editor.
+CompileFlags:
+  Add:
+    - -I../include
