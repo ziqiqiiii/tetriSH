@@ -67,10 +67,13 @@ BIN			:= bin
 LIB_MAKEFILES		:= $(wildcard lib/lib*/Makefile)
 LIB_DIRS			:= $(patsubst %/,%,$(dir $(LIB_MAKEFILES)))
 
-COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
+COMPONENT_CANDIDATES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrislogd/Makefile \
 							  src/tetrisctl/Makefile \
 							  src/tetrisu/Makefile)
+# Empty Makefiles are placeholders for components that have not landed yet.
+COMPONENT_MAKEFILES	:= $(foreach f,$(COMPONENT_CANDIDATES),\
+							  $(if $(shell test -s "$(f)" && printf x),$(f)))
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
 
 ################################################################################

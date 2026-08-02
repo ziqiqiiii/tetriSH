@@ -208,7 +208,11 @@ $(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(HEADER)
 # skip the probe. Manual check via `make run` is the verification path.
 test: $(UNIT_BINS)
 	@ echo "\n$(CYAN)==> Running tests$(CLR_RMV)"
-	@ $(TEST_RUNNER) unit $(UNIT_BINS)
+	@ if [ -n "$(UNIT_BINS)" ]; then \
+		bash $(TEST_RUNNER) unit $(UNIT_BINS); \
+	else \
+		echo "No tetrisu unit tests found"; \
+	fi
 
 ################################################################################
 #                                   CLEANUP                                    #

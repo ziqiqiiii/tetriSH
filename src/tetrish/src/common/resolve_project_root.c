@@ -1,5 +1,30 @@
 #include "common.h"
 
+#ifdef __APPLE__
+# include <mach-o/dyld.h>
+# include <stdint.h>
+#endif
+
+static int	get_executable_path(char path[PATH_MAX])
+{
+#ifdef __APPLE__
+	uint32_t	size;
+
+	size = PATH_MAX;
+	if (_NSGetExecutablePath(path, &size) != 0)
+		return (-1);
+	return (0);
+#else
+	ssize_t	n;
+
+	n = readlink("/proc/self/exe", path, PATH_MAX - 1);
+	if (n == -1)
+		return (-1);
+	path[n] = '\0';
+	return (0);
+#endif
+}
+
 /**
  * @brief Resolves the absolute path of the project root directory.
  *
@@ -16,18 +41,14 @@ char	*resolve_project_root(void)
 	char		path[PATH_MAX];
 	const char	*home;
 	char		*dir;
-	ssize_t		n;
 
-	n = readlink("/proc/self/exe", path, sizeof(path) - 1);
-	if (n == -1)
+	if (get_executable_path(path) == -1)
 	{
-		perror("readlink");
 		home = getenv("HOME");
 		if (home)
 			return (ft_strdup(home));
 		return (ft_strdup("."));
 	}
-	path[n] = '\0';
 	dir = dirname(path);
 	if (strcmp(basename(dir), "bin") == 0)
 		dir = dirname(dir);

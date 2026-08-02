@@ -17,12 +17,17 @@
 NAME			:= libtetrissh.a
 CC				:= gcc
 FLAGS			:= -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pedantic
+ifeq ($(shell uname -s),Darwin)
+FLAGS			+= -D_DARWIN_C_SOURCE
+endif
 AR				:= ar
 ARFLAGS			:= rcs
 RM				:= rm -rf
 
-INC				:= -Iinclude
-LDLIBS			:= -lssl -lcrypto
+OPENSSL_CFLAGS		:= $(shell pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS		:= $(shell pkg-config --libs openssl 2>/dev/null)
+INC				:= -Iinclude $(OPENSSL_CFLAGS)
+LDLIBS			:= $(if $(OPENSSL_LIBS),$(OPENSSL_LIBS),-lssl -lcrypto)
 
 # common.c is the frozen course-provided crypto helper; it is built without
 # -Werror -pedantic so its warnings do not fail this library's strict build.

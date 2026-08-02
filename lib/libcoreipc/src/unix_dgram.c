@@ -114,7 +114,14 @@ int	us_dgram_send_nb(int fd, const void *buf, size_t len)
 
 	n = send(fd, buf, len, DG_SEND_FLAGS);
 	if (n == -1)
+	{
+#ifndef __linux__
+		/* macOS reports an unbound peer as ENOENT rather than ECONNREFUSED. */
+		if (errno == ENOENT)
+			errno = ECONNREFUSED;
+#endif
 		return (-1);
+	}
 	if ((size_t)n != len)
 	{
 		errno = EMSGSIZE;
