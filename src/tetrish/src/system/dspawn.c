@@ -1,7 +1,6 @@
 #include "system_program.h"
 
-static void     daemon_register(const char *project_root, const char *name,
-					char *out_name, size_t out_size);
+static void     daemon_register(const char *project_root, const char *name, char *out_name, size_t out_size);
 static void     daemon_spawn_log(const char *project_root);
 static void     daemon_work(const char *project_root);
 static int      target_is_executable(const char *target);
