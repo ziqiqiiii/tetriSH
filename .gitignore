@@ -71,3 +71,6 @@ dkms.conf
 
 # claude
 *.claude
+
+.scratch/*
+docs/adr/*
