@@ -98,10 +98,16 @@ daemons: libs | deps
 	done
 
 # Collect every built binary into a single ./bin. The shell prepends $PWD/bin
-# to PATH, so dspawn/dcheck and the daemons resolve by name from the prompt.
+# to PATH, and dspawn resolves its target through PATH exactly as execvp does,
+# so a daemon missing from ./bin cannot be launched by name at all. Each
+# component's binary is named after its directory; unbuilt ones are skipped.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
 	@ ln -sf $(CURDIR)/$(SHELL_DIR)/bin/* $(BIN)/ 2>/dev/null || true
+	@ for d in $(DAEMON_DIRS); do \
+		n=`basename $$d`; \
+		if [ -x $$d/$$n ]; then ln -sf $(CURDIR)/$$d/$$n $(BIN)/; fi; \
+	done
 
 # Idiomatic launch: the shell sources .tetrishrc, which dspawns the daemons.
 run: all bin-link

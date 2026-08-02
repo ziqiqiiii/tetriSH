@@ -59,6 +59,10 @@ export TETRISD_INPUT_RATE=60
 #                                 daemons                                      #
 ################################################################################
 #
-# Uncomment each line as its binary lands:
-# dspawn tetrislogd
-# dspawn tetrisd
+# Uncomment each line as its binary lands. The `--` is required: without it
+# dspawn treats the argument purely as a registry name and runs its own
+# placeholder loop, so `dspawn tetrisd` registers something called "tetrisd"
+# that is not the game server. The name before `--` is what dcheck and dkill
+# refer to; the words after it are the program actually exec'd.
+# dspawn tetrislogd -- tetrislogd
+# dspawn tetrisd -- tetrisd

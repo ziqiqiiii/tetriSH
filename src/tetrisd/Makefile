@@ -81,8 +81,9 @@ $(NAME): $(OBJ) | libs
 	@ $(CC) $(FLAGS) $(OBJ) $(LIB_ARCS) $(LDLIBS) -o $(NAME)
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) created ✔️"
 
+# Every path in .tetrishrc is relative to the project root
 run: $(NAME)
-	@ ./$(NAME)
+	@ cd ../.. && ./src/tetrisd/$(NAME)
 
 ################################################################################
 #                                    TESTS                                     #
