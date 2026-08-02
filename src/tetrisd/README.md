@@ -119,18 +119,18 @@ Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETR
 
 ## Routes
 
-Milestone 1 serves Single mode. Every route below `LOGIN` requires a `Player-Id` header matching the player bound to the connection (ADR-0001); a mismatch is `401`, never a guess.
+For now, the server serves Single mode. Every route below `LOGIN` requires a `Player-Id` header matching the player bound to the connection; a mismatch is `401`, never a guess.
 
 | Method | Path | Success | Refusals |
 |---|---|---|---|
-| `SIGNUP` | `/account` | `201` | `409` name taken, `400` bad body |
-| `LOGIN` | `/session` | `200` + `Player-Id` | `401` bad credentials, `409` connection already bound, `503` previous connection would not release the player |
-| `LIST` | `/rooms` | `200` room rows | `401` |
-| `JOIN` | `/rooms` | `201` room created, caller is owner | `400` unknown mode, `409` `lobby-full` / `already-in-room` |
-| `JOIN` | `/room/<name>` | `200` seated | `404` no such room, `409` `full` / `in-game` |
-| `LEAVE` | `/room/<name>` | `200` | `404` not in that room |
-| `START` | `/room/<name>` | `200` | `403` `not-owner`, `409` `too-few-players` / `already-started` |
-| `MOVE` | `/room/<name>/player/<pid>` | `200` | `409` `input-blocked`, `403` not your board, `400` bad body, `429` too fast |
+| `SIGNUP` | `/account` | `201` | • `409` name taken <br>• `400` bad body |
+| `LOGIN` | `/session` | `200` + `Player-Id` | •  `401` bad credentials <br>• `409` connection already bound <br>• `503` previous connection would not release the player |
+| `LIST` | `/rooms` | `200` room rows | •  `401` |
+| `JOIN` | `/rooms` | `201` room created <br>• caller is owner |  • `400` unknown mode <br>• `409` `lobby-full` / `already-in-room` |
+| `JOIN` | `/room/<name>` | `200` seated |  • `404` no such room <br>• `409` `full` / `in-game` |
+| `LEAVE` | `/room/<name>` | `200` |  • `404` not in that room |
+| `START` | `/room/<name>` | `200` |  • `403` `not-owner` <br>• `409` `too-few-players` / `already-started` |
+| `MOVE` | `/room/<name>/player/<pid>` | `200` |  • `409` `input-blocked` <br>• `403` not your board <br>• `400` bad body <br>• `429` too fast |
 | `ROTATE` | `/room/<name>/player/<pid>` | `200` | as `MOVE` |
 | `DROP` | `/room/<name>/player/<pid>` | `200` | as `MOVE` |
 | `STATE` | `/room/<name>/player/<pid>` | **server-pushed** | — |
@@ -190,12 +190,12 @@ Two rules sit underneath the order and are easy to break without breaking it. A 
 
 The registry's rwlock is the lifetime guard. An enqueuer holds the read lock across its outbox push, so the client cannot be freed underneath it. Teardown, on the client's own reader thread, runs in one order:
 
-1. forfeit — leaving, topping out, and a dropped connection are the same event (ADR-0002)
+1. forfeit — leaving, topping out, and a dropped connection are the same event
 2. take the write lock, unlink from the registry, release it
 3. `shutdown(fd)`, close the outbox, join the writer thread
 4. close the session and socket, free the client
 
-An empty room returns to the lobby, so a long-running server does not fill up with the ghosts of finished games. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older connection and waits for it to finish leaving before binding the new one (ADR-0004).
+An empty room returns to the lobby, so a long-running server does not fill up with the ghosts of finished games. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older connection and waits for it to finish leaving before binding the new one.
 
 ### Logging
 
