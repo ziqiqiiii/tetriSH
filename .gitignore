@@ -74,3 +74,4 @@ dkms.conf
 
 .scratch/*
 docs/adr/*
+tmp/*
