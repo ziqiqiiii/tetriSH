@@ -163,6 +163,7 @@ t_membership	*room_select_successor(const t_room *r, bool (*probe)(void *ctx, t_
 /* START.C */
 t_start_verdict	room_can_start(const t_room *r, t_player_id requester);
 t_start_verdict	room_start(t_room *r, t_player_id requester);
+void			room_abort_start(t_room *r);
 void			room_finish(t_room *r);
 const char		*room_state_message(const t_room *r);
 

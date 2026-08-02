@@ -124,6 +124,34 @@ void	test_find_member_returns_seated_identity_or_null(void)
 	printf("PASS test_find_member_returns_seated_identity_or_null\n");
 }
 
+void	test_abort_start_returns_the_room_to_its_seated_status(void)
+{
+	t_room	r;
+
+	make_ready_double(&r);
+	assert(room_start(&r, 17) == START_ACCEPTED);
+	assert(r.status == ROOM_IN_GAME);
+	room_abort_start(&r);
+	assert(r.status == ROOM_READY);
+	assert(r.number_of_players == 2);
+	assert(room_find_member(&r, 17) != NULL);
+	assert(room_can_start(&r, 17) == START_ACCEPTED);
+	printf("PASS test_abort_start_returns_the_room_to_its_seated_status\n");
+}
+
+void	test_abort_start_only_undoes_a_start(void)
+{
+	t_room	r;
+
+	make_ready_double(&r);
+	room_abort_start(&r);
+	assert(r.status == ROOM_READY);
+	room_finish(&r);
+	room_abort_start(&r);
+	assert(r.status == ROOM_FINISHED);
+	printf("PASS test_abort_start_only_undoes_a_start\n");
+}
+
 int	main(void)
 {
 	test_can_start_owner_with_min_players_accepted();
@@ -134,5 +162,7 @@ int	main(void)
 	test_room_finish_clears_slots_and_sets_finished();
 	test_state_message_four_fixed_strings();
 	test_find_member_returns_seated_identity_or_null();
+	test_abort_start_returns_the_room_to_its_seated_status();
+	test_abort_start_only_undoes_a_start();
 	return (0);
 }

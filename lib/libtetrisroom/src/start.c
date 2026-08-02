@@ -43,6 +43,27 @@ t_start_verdict	room_start(t_room *r, t_player_id requester)
 }
 
 /**
+ * @brief Undoes a start the caller could not carry out.
+ *
+ * A start the caller cannot honour is not a start: the players keep their
+ * slots and the room goes back to being startable, rather than sitting
+ * IN_GAME with no game behind it. This is not room_finish - nobody played,
+ * so nobody is cleared out and no result exists to record.
+ *
+ * Only IN_GAME is undone. A room that already finished stays finished, so a
+ * late abort can never resurrect a room that has moved on.
+ *
+ * @param r The room whose start is being taken back.
+ */
+void	room_abort_start(t_room *r)
+{
+	if (!r || r->status != ROOM_IN_GAME)
+		return ;
+	r->status = ROOM_WAITING;
+	room_recompute_status(r);
+}
+
+/**
  * @brief Ends the game: FINISHED status, every slot cleared (UC-11/12).
  *
  * @param r The room to finish.
