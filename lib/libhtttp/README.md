@@ -295,6 +295,7 @@ without mutating the message.
 | Response | RFC 1123 UTC `Date` naming a real Gregorian date whose weekday matches |
 | Request with body | `Content-Type: application/tetris-command` |
 | `STATE` request with body | `Content-Type: application/tetris-state` |
+| Response with body | `Content-Type: application/tetris-status` |
 | Authenticated request | Non-empty `Player-Id`, when `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` is set |
 
 `SIGNUP`, `LOGIN`, the initial `JOIN`, and server-originated `STATE` omit the
@@ -387,6 +388,7 @@ Single public header, `include/htttp.h`. Handler signature is
 | `HTTTP_DATE_BUFSIZE` | `30` |
 | `HTTTP_CONTENT_TYPE_COMMAND` | `"application/tetris-command"` |
 | `HTTTP_CONTENT_TYPE_STATE` | `"application/tetris-state"` |
+| `HTTTP_CONTENT_TYPE_STATUS` | `"application/tetris-status"` |
 | `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` | `0x01` |
 
 ---
