@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
 | `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean) |
-| `src/tetrislogd` | scaffolded — Makefile, header, and empty `main.c`; no logic yet |
+| `src/tetrislogd` | implemented — sink + lock, dgram receive, counters, signals; 4 suites (35 tests) pass, valgrind-clean |
 | `tetrisctl` | not started — no `src/` directory yet |
 
 ## Build & Test
@@ -230,7 +230,7 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - `libtetrisbrain` and `libtetrisroom` have **no I/O, no side effects** — pure logic only. Where a room decision needs external facts (is a player still connected?), the caller supplies a probe callback.
 - `libcoreipc` must not log, `printf`, or `exit()` — it *is* the log path and must never recurse into itself. Errno-style returns only.
 - No hard-coded paths anywhere; all paths come from `.tetrishrc` or are passed in by the caller.
-- `tetrislogd` and `tetrisd` communicate over IPC with a non-blocking ring buffer — log records are dropped (not blocked) under pressure; the drop counter is exposed via `tetrisctl dropped-logs`.
+- `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
 - No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 - All components compile clean under `-Wall -Wextra -Werror`; test binaries are expected to pass `valgrind --leak-check=full --error-exitcode=1`.

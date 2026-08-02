@@ -33,7 +33,7 @@ The sections below describe the target design; this table says what exists today
 | `src/tetrish` | Implemented — REPL, builtins, `.tetrishrc`, system programs under `bin/` |
 | `src/tetrisu` | Partial — notcurses intro, menu, and audio; no gameplay or networking |
 | `src/tetrisd` | Implemented — Single mode end to end: accounts, lobby, rooms, live games, `STATE` push; integration tested |
-| `src/tetrislogd` | Scaffolded — Makefile, header, empty `main.c`; no logic |
+| `src/tetrislogd` | Implemented — receives, validates, writes, rotates on `SIGHUP`; 35 tests across four suites, valgrind-clean |
 | `tetrisctl` | Not started — no source directory |
 | `lib/libtetrisbrain` | Implemented — nine modules, unit tested |
 | `lib/libtetrisroom` | Implemented — room/slot/lobby domain, unit tested |
@@ -121,8 +121,8 @@ make run
 
 **2. Launch the daemons from inside the shell:**
 ```
-tetrish$ dspawn tetrislogd
-tetrish$ dspawn tetrisd
+tetrish$ dspawn tetrislogd -- tetrislogd
+tetrish$ dspawn tetrisd -- tetrisd
 ```
 
 `dspawn` daemonises the program, registers it in `tmp/daemons.reg`, then execs it. Uncomment the matching lines in `.tetrishrc` to start them automatically. Launch order is logger first, then game server.
@@ -168,7 +168,7 @@ Steps 2, 4, and 5 depend on components that are not finished yet — see [Status
 
 ### tetrislogd
 
-`tetrislogd` is a separate process, not a thread inside `tetrisd`, so it survives game-server restarts and accepts reconnections. It writes received records to the log path from `.tetrishrc`, maintains a dropped-records counter, and handles `SIGTERM` (flush, close, exit) and `SIGHUP` (reopen the log file for rotation). See [`src/tetrislogd/README.md`](src/tetrislogd/README.md).
+`tetrislogd` is a separate process, not a thread inside `tetrisd`, so it survives game-server restarts. A single-threaded loop receives records on the socket from `.tetrishrc` and appends them to a log file it holds an exclusive `flock` on; it keeps no internal queue ([ADR-0005](docs/adr/0005-logger-keeps-no-internal-queue.md)). It counts Rejected and Degraded records — not Dropped, which is `tetrisd`'s ring counter — and handles `SIGTERM`/`SIGINT` (drain, report, exit), `SIGHUP` (reopen the log file for rotation) and `SIGUSR1` (report counters). See [`src/tetrislogd/README.md`](src/tetrislogd/README.md).
 
 ### tetrisctl
 
@@ -280,8 +280,8 @@ The full grammar and method table live in [`lib/libhtttp/README.md`](lib/libhttt
 Its role at startup is to launch the daemons in dependency order:
 
 ```
-dspawn tetrislogd             # logger first, so it captures everything
-dspawn tetrisd                # game server (also serves chat and the marketplace)
+dspawn tetrislogd -- tetrislogd   # logger first, so it captures everything
+dspawn tetrisd -- tetrisd         # game server (also serves chat and the marketplace)
 ```
 
 Both lines ship commented out until the binaries land.
@@ -296,6 +296,8 @@ export TETRISD_CERT_PATH=certs/server.crt            # server certificate
 export TETRISD_KEY_PATH=certs/server.key             # server private key
 export TETRISD_CA_PATH=certs/ca.crt                  # CA clients verify against
 export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock   # tetrisd -> tetrislogd
+export TETRISLOGD_SOCK=tmp/tetrisd/tetrislogd.sock   # same socket, logger side
+export TETRISLOGD_FILE=tmp/tetrislogd/tetrislogd.log # where records are written
 export TETRISD_LOG_LEVEL=info                        # debug|info|warning|error
 export TETRISD_MAX_CLIENTS=64                        # connection limit
 export TETRISD_TICK_MS=12                            # room ticker period

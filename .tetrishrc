@@ -38,6 +38,7 @@ export TETRISD_CA_PATH=certs/ca.crt
 
 # AF_UNIX datagram socket tetrislogd binds and tetrisd ships log records to.
 # Records are dropped, never blocked on, when the logger is slow or absent.
+# One socket, named twice: this key and TETRISLOGD_SOCK below must be equal.
 export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock
 export TETRISD_LOG_LEVEL=info
 
@@ -56,6 +57,23 @@ export TETRISD_INPUT_BURST=120
 export TETRISD_INPUT_RATE=60
 
 ################################################################################
+#                            tetrislogd settings                               #
+################################################################################
+#
+# The logger reads `export TETRISLOGD_*` lines out of this same file, exactly
+# as tetrisd reads its own prefix. Each daemon parses only its own keys, so
+# the socket both ends share is named twice and the two lines must agree.
+# Configuration is cold: tetrislogd re-reads nothing, and SIGHUP reopens the
+# log file rather than reloading settings.
+
+# Datagram socket tetrislogd binds. Keep identical to TETRISD_LOG_IPC above.
+export TETRISLOGD_SOCK=tmp/tetrisd/tetrislogd.sock
+
+# File tetrislogd appends records to. Rotate it from outside - move the file,
+# then `kill -HUP` the daemon and it reopens this path.
+export TETRISLOGD_FILE=tmp/tetrislogd/tetrislogd.log
+
+################################################################################
 #                                 daemons                                      #
 ################################################################################
 #
@@ -64,5 +82,5 @@ export TETRISD_INPUT_RATE=60
 # placeholder loop, so `dspawn tetrisd` registers something called "tetrisd"
 # that is not the game server. The name before `--` is what dcheck and dkill
 # refer to; the words after it are the program actually exec'd.
-# dspawn tetrislogd -- tetrislogd
-# dspawn tetrisd -- tetrisd
+dspawn tetrislogd -- tetrislogd
+dspawn tetrisd -- tetrisd

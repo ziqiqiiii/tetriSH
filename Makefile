@@ -75,7 +75,8 @@ COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrisctl/Makefile \
 							  src/tetrisu/Makefile)
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
-TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd,$(DAEMON_DIRS))
+TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd \
+							  src/tetrislogd,$(DAEMON_DIRS))
 
 ################################################################################
 #                                   BUILD                                      #

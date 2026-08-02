@@ -1,0 +1,336 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*   test_logd.c - the daemon loop                                            */
+/*                                                                            */
+/*   Records arrive as real datagrams on a real socket, exactly as tetrisd's  */
+/*   shipper sends them. These cases pin the three fates of a record          */
+/*   (written, rejected, degraded), the single-instance guard, and the        */
+/*   promise that a stop still drains what the kernel already accepted.       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "harness.h"
+#include <assert.h>
+
+// Static Functions
+static void	test_start_binds_and_opens_the_sink(void);
+static void	test_a_valid_record_is_written_and_counted(void);
+static void	test_a_malformed_record_is_rejected(void);
+static void	test_a_short_datagram_is_rejected(void);
+static void	test_an_oversized_datagram_is_rejected(void);
+static void	test_a_burst_drains_in_one_iteration(void);
+static void	test_records_degrade_when_the_sink_is_gone(void);
+static void	test_the_sink_recovers_on_the_idle_tick(void);
+static void	test_a_second_instance_refuses_to_start(void);
+static void	test_stop_drains_what_is_still_queued(void);
+static void	test_stop_is_safe_on_a_blank_daemon(void);
+
+static int	boot(t_fixture *fx, t_logd *lg);
+
+int	main(void)
+{
+	test_start_binds_and_opens_the_sink();
+	test_a_valid_record_is_written_and_counted();
+	test_a_malformed_record_is_rejected();
+	test_a_short_datagram_is_rejected();
+	test_an_oversized_datagram_is_rejected();
+	test_a_burst_drains_in_one_iteration();
+	test_records_degrade_when_the_sink_is_gone();
+	test_the_sink_recovers_on_the_idle_tick();
+	test_a_second_instance_refuses_to_start();
+	test_stop_drains_what_is_still_queued();
+	test_stop_is_safe_on_a_blank_daemon();
+	return (0);
+}
+
+/*
+** The sink is claimed before the socket is bound, so the boot line is already
+** in the file by the time anything can send to it. That line is also the only
+** record of which socket this logger is listening on.
+*/
+static void	test_start_binds_and_opens_the_sink(void)
+{
+	t_fixture	fx;
+	struct stat	st;
+	t_logd		lg;
+
+	assert(boot(&fx, &lg) == 0);
+	assert(stat(fx.sock_path, &st) == 0 && S_ISSOCK(st.st_mode));
+	assert(sink_is_open(&lg.sink) == true);
+	assert(lg.running == true);
+	assert(fx_contains(fx.file_path, TL_COMPONENT) == 1);
+	logd_stop(&lg);
+	assert(stat(fx.sock_path, &st) == -1);
+	fx_destroy(&fx);
+	printf("PASS test_start_binds_and_opens_the_sink\n");
+}
+
+static void	test_a_valid_record_is_written_and_counted(void)
+{
+	t_fixture	fx;
+	uint64_t	before;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send(tx, CIPC_LOG_INFO, "room 3 started") == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.written == before + 1);
+	assert(lg.count.rejected == 0 && lg.count.degraded == 0);
+	assert(fx_contains(fx.file_path, "room 3 started") == 1);
+	assert(fx_contains(fx.file_path, "INFO") == 1);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_a_valid_record_is_written_and_counted\n");
+}
+
+/*
+** The sink is a file operators read line by line, so a record that fails
+** validation is discarded rather than written - one malformed datagram must
+** not be able to corrupt a line of it.
+*/
+static void	test_a_malformed_record_is_rejected(void)
+{
+	t_log_record	rec;
+	t_fixture		fx;
+	uint64_t		before;
+	t_logd			lg;
+	int				tx;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(lr_make(&rec, CIPC_LOG_ERROR, 1, 2, "tetrisd", "bad") == 0);
+	rec.magic = 0xDEADBEEFu;
+	assert(fx_send_raw(tx, &rec, sizeof(rec)) == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.rejected == 1);
+	assert(lg.count.written == before);
+	assert(fx_contains(fx.file_path, "bad") == 0);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_a_malformed_record_is_rejected\n");
+}
+
+static void	test_a_short_datagram_is_rejected(void)
+{
+	t_fixture	fx;
+	uint64_t	before;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send_raw(tx, "truncated", 9) == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.rejected == 1);
+	assert(lg.count.written == before);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_a_short_datagram_is_rejected\n");
+}
+
+/*
+** A datagram longer than a record must not be quietly truncated into one that
+** validates. The loop receives into a buffer one byte larger than a record
+** precisely so an over-long datagram comes back over-long and fails the size
+** check, instead of having its tail cut off and its head accepted.
+*/
+static void	test_an_oversized_datagram_is_rejected(void)
+{
+	unsigned char	buf[sizeof(t_log_record) + 64];
+	t_fixture		fx;
+	uint64_t		before;
+	t_logd			lg;
+	int				tx;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	memset(buf, 0, sizeof(buf));
+	assert(lr_make((t_log_record *)buf, CIPC_LOG_INFO, 1, 2,
+			"tetrisd", "valid head, junk tail") == 0);
+	assert(fx_send_raw(tx, buf, sizeof(buf)) == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.rejected == 1);
+	assert(lg.count.written == before);
+	assert(fx_contains(fx.file_path, "valid head") == 0);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_an_oversized_datagram_is_rejected\n");
+}
+
+/*
+** One wake-up drains everything the socket holds. Handling a single record
+** per poll would let a burst outrun the loop and fill the receive buffer,
+** which pushes the sender into its stderr fallback for no reason.
+*/
+static void	test_a_burst_drains_in_one_iteration(void)
+{
+	t_fixture	fx;
+	uint64_t	before;
+	t_logd		lg;
+	int			tx;
+	int			i;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	i = 0;
+	while (i < 8)
+	{
+		assert(fx_send(tx, CIPC_LOG_DEBUG, "burst") == 0);
+		i++;
+	}
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.written == before + 8);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_a_burst_drains_in_one_iteration\n");
+}
+
+/*
+** Degraded is counted separately from Rejected because the two blame different
+** things: a Rejected record was malformed, a Degraded one was fine and the sink
+** was not. Under dspawn stderr goes to /dev/null, so this counter is the only
+** evidence a degraded record ever existed.
+*/
+static void	test_records_degrade_when_the_sink_is_gone(void)
+{
+	t_fixture	fx;
+	uint64_t	before;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	before = lg.count.written;
+	sink_close(&lg.sink);
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send(tx, CIPC_LOG_WARNING, "sink is gone") == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(lg.count.degraded == 1);
+	assert(lg.count.written == before);
+	assert(lg.count.rejected == 0);
+	assert(lg.running == true);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_records_degrade_when_the_sink_is_gone\n");
+}
+
+/*
+** The retry rides the idle tick, so it costs nothing on a busy logger and
+** still recovers a sink that came back. An iteration with a record waiting
+** does not retry - the timeout branch is the only place it happens.
+*/
+static void	test_the_sink_recovers_on_the_idle_tick(void)
+{
+	t_fixture	fx;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	sink_close(&lg.sink);
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send(tx, CIPC_LOG_ERROR, "while degraded") == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(sink_is_open(&lg.sink) == false);
+	assert(logd_run_once(&lg) == 0);
+	assert(sink_is_open(&lg.sink) == true);
+	assert(fx_send(tx, CIPC_LOG_ERROR, "after recovery") == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(fx_contains(fx.file_path, "after recovery") == 1);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_the_sink_recovers_on_the_idle_tick\n");
+}
+
+/*
+** us_dgram_bind unlinks the path before binding, so without the sink lock a
+** second launch would silently steal the socket and leave the first logger
+** deaf. The guard has to run before the bind, which is why the sink is
+** claimed first.
+*/
+static void	test_a_second_instance_refuses_to_start(void)
+{
+	t_fixture	fx;
+	struct stat	st;
+	t_logd		first;
+	t_logd		second;
+
+	assert(boot(&fx, &first) == 0);
+	logd_blank(&second);
+	assert(logd_start(&second, &fx.cfg) == -1);
+	assert(stat(fx.sock_path, &st) == 0 && S_ISSOCK(st.st_mode));
+	assert(sink_is_open(&first.sink) == true);
+	logd_stop(&second);
+	logd_stop(&first);
+	fx_destroy(&fx);
+	printf("PASS test_a_second_instance_refuses_to_start\n");
+}
+
+/*
+** SIGTERM arrives while records are still in the receive buffer. Those are
+** records the kernel already accepted on this process's behalf, so dropping
+** them at shutdown would lose exactly the last few lines before a restart -
+** the ones worth reading.
+*/
+static void	test_stop_drains_what_is_still_queued(void)
+{
+	t_fixture	fx;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send(tx, CIPC_LOG_INFO, "last words") == 0);
+	close(tx);
+	logd_stop(&lg);
+	assert(fx_contains(fx.file_path, "last words") == 1);
+	fx_destroy(&fx);
+	printf("PASS test_stop_drains_what_is_still_queued\n");
+}
+
+static void	test_stop_is_safe_on_a_blank_daemon(void)
+{
+	t_logd	lg;
+
+	logd_blank(&lg);
+	assert(lg.sock_fd == -1);
+	assert(lg.idle_ms == TL_IDLE_MS);
+	logd_stop(&lg);
+	logd_stop(&lg);
+	printf("PASS test_stop_is_safe_on_a_blank_daemon\n");
+}
+
+/*
+** Every case starts the same way; the shortened idle tick keeps the timeout
+** path in the tests measured in milliseconds rather than seconds.
+*/
+static int	boot(t_fixture *fx, t_logd *lg)
+{
+	if (fx_make(fx) != 0)
+		return (-1);
+	logd_blank(lg);
+	if (logd_start(lg, &fx->cfg) != 0)
+		return (-1);
+	lg->idle_ms = FX_IDLE_MS;
+	return (0);
+}

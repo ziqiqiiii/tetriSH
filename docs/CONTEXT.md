@@ -57,6 +57,32 @@ game — whether by top-out, by leaving, or by disconnection. All three are the
 same event; there is no grace period and no rejoining a game in progress.
 _Avoid_: quit, abandon, drop out
 
+### Logging
+
+**Log record**:
+One fixed-size event — level, timestamp, component, pid, message — emitted by
+a daemon. The unit every counter below counts.
+
+**Sink**:
+The file `tetrislogd` appends records to. Exactly one logger owns it at a time.
+_Avoid_: log file (as a term of art), output
+
+**Dropped**:
+A record the producer never sent, because its ring buffer was full. Lost, and
+lost inside `tetrisd`.
+_Avoid_: discarded, lost
+
+**Rejected**:
+A record that reached `tetrislogd` but failed validation. Lost, and lost at the
+logger — the two are counted separately because they blame different halves of
+the system.
+
+**Degraded**:
+A valid record that could not reach the sink and went to stderr instead.
+Whether it survives depends on where stderr points — under `dspawn` it does
+not. Still never report it as Dropped: Dropped means the producer never sent
+it, and the two blame different halves of the system.
+
 ### Protocol
 
 **STATE**:

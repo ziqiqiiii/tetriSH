@@ -88,7 +88,7 @@ Two distinct state systems back these use cases, and their status/result codes m
 | Group | Use cases | Backing store |
 |---|---|---|
 | **Persisted (DB)** | • UC-01 <br>• UC-02<br>• UC-15 <br>• UC-16 <br>• UC-17<br>• UC-18 <br>• UC-19<br>• UC-20 <br>• UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
-| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd memory |
+| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (the Dropped counter lives in `tetrisd`'s ring) | tetrisd memory |
 
 ---
 
@@ -133,7 +133,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
 | UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (control) | `200` (room list) | `500` |
 | UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (control) | `200` (player list) | `500` |
-| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | `500` (logger unreachable) |
+| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | — |
 
 ---
 
@@ -1375,28 +1375,27 @@ Content-Length: 104
 |---|---|
 | **ID** | UC-27  |
 | **Primary Actor** | Administrator |
-| **Secondary Actor** | Logger Daemon (`tetrislogd`) |
-| **Goal** | Read the dropped-records counter — how many log records were lost when the log IPC channel was saturated. |
-| **Preconditions** | `tetrisd` is running; `tetrislogd` is reachable over the log IPC channel. |
-| **Postconditions (success)** | The dropped-records count is returned to the operator; no state changes; the query is logged. |
+| **Secondary Actor** | — (answered by `tetrisd` alone) |
+| **Goal** | Read the Dropped counter — how many log records `tetrisd` never sent because its ring buffer was full. |
+| **Preconditions** | `tetrisd` is running. |
+| **Postconditions (success)** | The Dropped count is returned to the operator; no state changes; the query is logged. |
 | **Trigger** | Operator runs `tetrisctl dropped-logs`. |
 | **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` + count<br>• `500` (logger unreachable) |
+| **Return** | • `200 OK` + count |
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl dropped-logs`.
-2. `tetrisd` receives `DROPPED-LOGS /admin` and queries `tetrislogd` over the log IPC channel for its dropped-records counter (optionally adding `tetrisd`'s own local-side drop count if it buffers internally).
-3. `tetrislogd` returns the counter; `tetrisd` replies `200 OK` with the total.
+2. `tetrisd` receives `DROPPED-LOGS /admin` and reads its own ring-buffer counter (`rb_drops`).
+3. `tetrisd` replies `200 OK` with the count, labelled as producer-side Dropped records.
 4. `tetrisctl` prints the count; the query is logged.
 
-**Extensions / Alternate Flows**
-- **2a. `tetrisd` tracks local drops only (logger query optional):** Return the local-side counter and label it as such.
-
-**Exceptions**
-- **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
+**Notes**
+- The log IPC channel is a one-way datagram socket, so `tetrisd` cannot query the logger over it. Dropped is a quantity only `tetrisd` can observe anyway: the record never left the ring.
+- `tetrislogd` owns two *different* counters — Rejected (arrived malformed) and Degraded (valid, sink unavailable, written to stderr). They are not Dropped records and must not be added to this total. Until `tetrisctl` gains a control channel to the logger, they surface in the log file itself at boot, on rotation, on `SIGUSR1`, and at shutdown.
+- The state of the logger does not affect this response: `tetrisd` falls back to stderr when the logger is absent, so there is no "logger unreachable" failure to report here.
 
 **Related Use Cases**
-- Targets `tetrislogd`, not tetrisd game state or the DB.
+- Targets `tetrisd`'s log path, not tetrisd game state or the DB.
 
 **Example**
 
