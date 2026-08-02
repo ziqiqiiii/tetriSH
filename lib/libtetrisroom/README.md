@@ -93,6 +93,7 @@ stateDiagram-v2
         R_WAITING --> R_READY : players >= min
         R_READY --> R_WAITING : players below min
         R_READY --> R_IN_GAME : owner room_start
+        R_IN_GAME --> R_READY : room_abort_start
         R_IN_GAME --> R_FINISHED : room_finish
         R_FINISHED --> [*] : slots cleared
     }
@@ -176,6 +177,7 @@ Single public header, `include/tetrisroom.h`. Slot indices are 1-based.
 |---|---|
 | `room_can_start(r, requester)` | `START_ACCEPTED`, `START_NOT_OWNER`, `START_TOO_FEW_PLAYERS`, or `START_ALREADY_STARTED` |
 | `room_start(r, requester)` | Re-runs `room_can_start`; flips to `ROOM_IN_GAME` only on `START_ACCEPTED`, unchanged on every rejection |
+| `room_abort_start(r)` | Undo a start the caller could not carry out: `ROOM_IN_GAME` back to `WAITING`/`READY`, slots untouched. Only `IN_GAME` is undone, so a finished room stays finished |
 | `room_finish(r)` | Set `ROOM_FINISHED`, clear every slot, reset the count to `0` |
 | `room_state_message(r)` | Map `t_room_status` to its fixed UI string |
 
