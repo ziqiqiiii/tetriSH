@@ -17,11 +17,12 @@ Implementation status:
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
-| `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX`, mqueue + tests |
+| `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX` dgram/stream, self-pipe, mqueue + tests (7 of 7 suites pass) |
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
-| `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests |
-| `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests |
-| `src/tetrisd`, `src/tetrislogd` | scaffolded — Makefile, header, and empty `main.c`; no logic yet |
+| `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
+| `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean) |
+| `src/tetrislogd` | scaffolded — Makefile, header, and empty `main.c`; no logic yet |
 | `tetrisctl` | not started — no `src/` directory yet |
 
 ## Build & Test
@@ -199,6 +200,28 @@ Encoders return the body length in bytes, decoders return `0`; both return `-1`
 with `errno` set — `EINVAL` for NULL args or a too-small buffer, `EBADMSG` for
 malformed input. Callers pass a buffer and its capacity; the library allocates
 nothing.
+
+## tetrisd (src/tetrisd/include/tetrisd.h)
+
+Entry seam is `server_start(cfg, &srv)` / `server_stop(srv)`; `main.c` is a
+thin shim over it, and every test drives a real server in-process on port 0.
+Config comes from `.tetrishrc` as `export TETRISD_*=...` lines (`argv[1]` →
+`$TETRISHRC` → `./.tetrishrc`, then environment), re-read on SIGHUP; missing
+certificates are a fatal boot error (`make certs` mints dev ones).
+
+Threads: main loop `poll()`s listener + self-pipe; per client a reader thread
+(blocks in `session_recv`) and a writer thread (sole `session_send` caller);
+per in-game room a ticker thread; one log shipper thread. Lock order is
+`lobby_mutex > room->mutex > registry rwlock > outbox mutex`, and no `db_*`,
+`session_*`, or IPC send happens under any lock (the non-blocking outbox push
+is the sole exception). The registry rwlock is the client-lifetime guard.
+
+M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
+`/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`, plus pushed
+`STATE`. A player holds at most one connection — a second `LOGIN` displaces the
+first (ADR-0004). Inputs are rate limited per connection, answering `429` with
+`Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
+own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 
 ## Key Design Constraints
 

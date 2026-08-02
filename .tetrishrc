@@ -10,7 +10,55 @@
 # Daemon launch order: the logger first (so it captures everything), then the
 # game server. tetrisd also serves room chat and the marketplace, so there is
 # no separate social-layer daemon to launch.
+
+################################################################################
+#                              tetrisd settings                                #
+################################################################################
 #
-# These daemons are not built yet — uncomment each line as its binary lands:
+# Every setting is an `export TETRISD_*=<value>` line, so it is both an
+# ordinary shell command (inherited by anything dspawn launches) and a line
+# tetrisd parses out of this file itself at boot — nothing is hard-coded, and
+# a standalone `./bin/tetrisd` reads the same values. SIGHUP re-reads them.
+# Relative paths resolve against tetrisd's working directory.
+
+# TCP port the game server listens on. 0 lets the kernel pick (tests).
+export TETRISD_PORT=4242
+
+# Where the player store keeps its append-only log, and where the read-only
+# character/theme catalogues are read from.
+export TETRISD_DATA_DIR=tmp/tetrisd
+export TETRISD_CONFIG_DIR=lib/libmacminidb/config
+
+# Secure-session credentials. Generate them with `make certs`; tetrisd refuses
+# to boot when the certificate or key is missing, so it can never silently run
+# unauthenticated. ca_path is what clients verify the server against.
+export TETRISD_CERT_PATH=certs/server.crt
+export TETRISD_KEY_PATH=certs/server.key
+export TETRISD_CA_PATH=certs/ca.crt
+
+# AF_UNIX datagram socket tetrislogd binds and tetrisd ships log records to.
+# Records are dropped, never blocked on, when the logger is slow or absent.
+export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock
+export TETRISD_LOG_LEVEL=info
+
+# Concurrency limits and the room ticker period in milliseconds.
+export TETRISD_MAX_CLIENTS=64
+export TETRISD_TICK_MS=12
+
+# Slots in a Battle Royale room (Single and Double are fixed at 1 and 2).
+export TETRISD_BR_SLOTS=4
+
+# Per-connection input budget for MOVE, ROTATE and DROP: a bucket of BURST
+# tokens refilling at RATE per second, one token per input. Sized well above
+# what a person can press - a client that empties it is hammering, and is
+# answered 429 with a Retry-After rather than being served.
+export TETRISD_INPUT_BURST=120
+export TETRISD_INPUT_RATE=60
+
+################################################################################
+#                                 daemons                                      #
+################################################################################
+#
+# Uncomment each line as its binary lands:
 # dspawn tetrislogd
 # dspawn tetrisd
