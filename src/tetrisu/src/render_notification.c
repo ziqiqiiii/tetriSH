@@ -53,6 +53,17 @@ static void	destroy_notification_planes(render_ctx_t *ctx);
  */
 void	render_notification_show_volume(render_ctx_t *ctx, int volume)
 {
+	if (ctx == NULL || ctx->nc == NULL)
+		return ;
+	render_notification_queue_volume(ctx, volume);
+	(void)notcurses_render(ctx->nc);
+}
+
+/**
+ * @brief Refreshes volume notification planes for a caller-owned render.
+ */
+void	render_notification_queue_volume(render_ctx_t *ctx, int volume)
+{
 	uint64_t	now_ms;
 
 	if (ctx == NULL || ctx->nc == NULL)
@@ -61,7 +72,6 @@ void	render_notification_show_volume(render_ctx_t *ctx, int volume)
 	ui_notification_show(&ctx->notifications, "MUSIC",
 		ui_notification_volume_percent(volume), now_ms);
 	refresh_notifications(ctx, now_ms);
-	(void)notcurses_render(ctx->nc);
 }
 
 /**

@@ -478,6 +478,7 @@ void	render_teardown(render_ctx_t *ctx)
 		render_compatibility_badge_hide(ctx);
 		render_auth_pixel_overlay_destroy(ctx);
 		render_auth_pixel_background_reset(ctx);
+		render_settings_pixel_destroy(ctx);
 		if (ctx->auth_font_visual != NULL)
 		{
 			ncvisual_destroy(ctx->auth_font_visual);

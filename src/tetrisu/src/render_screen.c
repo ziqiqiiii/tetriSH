@@ -84,6 +84,31 @@ bool	render_screen_show(render_ctx_t *ctx,
  */
 void	render_screen_destroy(render_ctx_t *ctx)
 {
+	if (ctx != NULL && ctx->settings_portrait_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_portrait_plane);
+		ctx->settings_portrait_plane = NULL;
+	}
+	if (ctx != NULL && ctx->settings_controls_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_controls_plane);
+		ctx->settings_controls_plane = NULL;
+	}
+	if (ctx != NULL && ctx->settings_character_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_character_plane);
+		ctx->settings_character_plane = NULL;
+	}
+	if (ctx != NULL && ctx->settings_volume_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_volume_plane);
+		ctx->settings_volume_plane = NULL;
+	}
+	if (ctx != NULL && ctx->settings_ability_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_ability_plane);
+		ctx->settings_ability_plane = NULL;
+	}
 	if (ctx != NULL && ctx->screen_plane != NULL)
 	{
 		ncplane_destroy(ctx->screen_plane);

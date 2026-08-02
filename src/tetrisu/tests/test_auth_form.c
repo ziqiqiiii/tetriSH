@@ -9,6 +9,7 @@ static void	test_secondary_actions(void);
 
 int	main(void)
 {
+	(void)unsetenv("TETRISU_UI_PREVIEW");
 	test_login_focus_order();
 	test_sign_up_focus_order();
 	test_utf8_editing_and_masking();

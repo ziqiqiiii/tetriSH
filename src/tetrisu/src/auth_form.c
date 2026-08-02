@@ -62,6 +62,13 @@ void	auth_form_focus_next(auth_form_t *form)
 	else if (form->focus == AUTH_FOCUS_PRIMARY)
 		form->focus = AUTH_FOCUS_SECONDARY;
 	else if (form->focus == AUTH_FOCUS_SECONDARY)
+	{
+		if (form->mode == AUTH_FORM_LOGIN && app_ui_preview_enabled())
+			form->focus = AUTH_FOCUS_PREVIEW;
+		else
+			form->focus = AUTH_FOCUS_OFFLINE;
+	}
+	else if (form->focus == AUTH_FOCUS_PREVIEW)
 		form->focus = AUTH_FOCUS_OFFLINE;
 	else
 		form->focus = AUTH_FOCUS_USERNAME;
@@ -77,6 +84,13 @@ void	auth_form_focus_previous(auth_form_t *form)
 	if (form->focus == AUTH_FOCUS_USERNAME)
 		form->focus = AUTH_FOCUS_OFFLINE;
 	else if (form->focus == AUTH_FOCUS_OFFLINE)
+	{
+		if (form->mode == AUTH_FORM_LOGIN && app_ui_preview_enabled())
+			form->focus = AUTH_FOCUS_PREVIEW;
+		else
+			form->focus = AUTH_FOCUS_SECONDARY;
+	}
+	else if (form->focus == AUTH_FOCUS_PREVIEW)
 		form->focus = AUTH_FOCUS_SECONDARY;
 	else if (form->focus == AUTH_FOCUS_SECONDARY)
 		form->focus = AUTH_FOCUS_PRIMARY;
@@ -116,6 +130,9 @@ auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key)
 		auth_form_focus_next(form);
 	else if (key == NCKEY_ENTER || key == '\n' || key == '\r')
 		return (activate_focus(form));
+	else if ((key == 'p' || key == 'P') && form->mode == AUTH_FORM_LOGIN
+		&& app_ui_preview_enabled() && form->focus >= AUTH_FOCUS_PRIMARY)
+		return (AUTH_ACTION_PREVIEW_LOGIN);
 	else
 	{
 		buffer = focused_buffer(form);
@@ -458,6 +475,9 @@ static auth_action_t	activate_focus(auth_form_t *form)
 			return (AUTH_ACTION_OPEN_LOGIN);
 		return (AUTH_ACTION_OPEN_SIGN_UP);
 	}
+	if (form->focus == AUTH_FOCUS_PREVIEW
+		&& form->mode == AUTH_FORM_LOGIN && app_ui_preview_enabled())
+		return (AUTH_ACTION_PREVIEW_LOGIN);
 	if (form->focus == AUTH_FOCUS_OFFLINE)
 		return (AUTH_ACTION_PLAY_OFFLINE);
 	return (AUTH_ACTION_NONE);

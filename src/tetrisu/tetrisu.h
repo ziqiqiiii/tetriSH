@@ -43,6 +43,8 @@
 # endif
 
 # define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
+# define SETTINGS_BACKGROUND_PATH \
+	ASSET_DIR "/settings_profile_background_v1.png"
 # define AUTH_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/auth_screen.png"
 # define AUTH_LOGIN_BACKGROUND_PATH \
@@ -63,6 +65,12 @@
 # define DEFAULT_HUD_PATH	ASSET_DIR "/default_theme/default_board.png"
 # define DEFAULT_TILE_PATH	ASSET_DIR "/default_theme/default_tile.png"
 # define DEFAULT_MIRURUN_PATH	ASSET_DIR "/default_theme/default_mirurun.png"
+# define HALLOWEEN_PORTRAIT_PATH \
+	ASSET_DIR "/default_theme/character_halloween.png"
+# define PRINCESS_PORTRAIT_PATH \
+	ASSET_DIR "/default_theme/character_princess.png"
+# define WOLFMAN_PORTRAIT_PATH \
+	ASSET_DIR "/default_theme/character_wolfman.png"
 # define VOLUME_NOTIFICATION_PATH \
 	ASSET_DIR "/default_theme/volume_notification.png"
 # define ABILITY_POPOVER_PATH \
@@ -76,9 +84,12 @@
 # define GENERAL_SFX_DIR	ASSET_DIR "/General Sounds"
 # define MENU_ITEM_COUNT	5
 # define APP_TEXT_MAX	64
+# define APP_ASSET_PATH_MAX	512
+# define APP_ABILITY_TEXT_MAX	192
+# define APP_CHARACTER_ABILITY_COUNT	4
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
-# define AUTH_OVERLAY_PLANE_MAX	12
+# define AUTH_OVERLAY_PLANE_MAX	16
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
@@ -141,6 +152,50 @@
 /* RENDER_BACKGROUND.C */
 # define BACKGROUND_SOURCE_PIXELS_Y	1086
 # define BACKGROUND_SOURCE_PIXELS_X	1448
+# define SETTINGS_REFERENCE_WIDTH	1448
+# define SETTINGS_REFERENCE_HEIGHT	1086
+# define SETTINGS_BUTTON_COUNT	4
+# define SETTINGS_CHARACTER_ARROW_COUNT	2
+# define SETTINGS_REF_PORTRAIT_X	270
+# define SETTINGS_REF_PORTRAIT_Y	145
+# define SETTINGS_REF_PORTRAIT_WIDTH	240
+# define SETTINGS_REF_PORTRAIT_HEIGHT	255
+# define SETTINGS_REF_PROFILE_X	594
+# define SETTINGS_REF_PROFILE_Y	137
+# define SETTINGS_REF_PROFILE_WIDTH	598
+# define SETTINGS_REF_PROFILE_HEIGHT	312
+# define SETTINGS_REF_CHARACTERS_X	242
+# define SETTINGS_REF_CHARACTERS_Y	530
+# define SETTINGS_REF_CHARACTERS_WIDTH	432
+# define SETTINGS_REF_CHARACTERS_HEIGHT	150
+# define SETTINGS_REF_THEMES_X	754
+# define SETTINGS_REF_THEMES_Y	530
+# define SETTINGS_REF_THEMES_WIDTH	432
+# define SETTINGS_REF_THEMES_HEIGHT	150
+# define SETTINGS_REF_WALLET_X	230
+# define SETTINGS_REF_WALLET_Y	731
+# define SETTINGS_REF_WALLET_WIDTH	300
+# define SETTINGS_REF_WALLET_HEIGHT	77
+# define SETTINGS_REF_SCORE_X	574
+# define SETTINGS_REF_SCORE_Y	731
+# define SETTINGS_REF_SCORE_WIDTH	300
+# define SETTINGS_REF_SCORE_HEIGHT	77
+# define SETTINGS_REF_RANK_X	918
+# define SETTINGS_REF_RANK_Y	731
+# define SETTINGS_REF_RANK_WIDTH	300
+# define SETTINGS_REF_RANK_HEIGHT	77
+# define SETTINGS_REF_CHARACTER_PREVIOUS_X	194
+# define SETTINGS_REF_CHARACTER_NEXT_X	518
+# define SETTINGS_REF_CHARACTER_ARROW_Y	232
+# define SETTINGS_REF_CHARACTER_ARROW_WIDTH	68
+# define SETTINGS_REF_CHARACTER_ARROW_HEIGHT	96
+# define SETTINGS_REF_BUTTON_BACK_X	265
+# define SETTINGS_REF_BUTTON_MARKET_X	500
+# define SETTINGS_REF_BUTTON_VOLUME_DOWN_X	745
+# define SETTINGS_REF_BUTTON_VOLUME_UP_X	985
+# define SETTINGS_REF_BUTTON_Y	875
+# define SETTINGS_REF_BUTTON_WIDTH	190
+# define SETTINGS_REF_BUTTON_HEIGHT	135
 # define RENDER_RESIZE_POLL_MS	100
 # define COMPATIBILITY_BADGE_TEXT	":: COMPATIBILITY MODE ::"
 # define COMPATIBILITY_BADGE_SHORT	":: CELL MODE ::"
@@ -326,6 +381,14 @@ typedef enum e_app_catalogue_kind
 	APP_CATALOGUE_THEMES
 }	app_catalogue_kind_t;
 
+typedef enum e_tetrisu_renderer_mode
+{
+	TETRISU_RENDERER_AUTO,
+	TETRISU_RENDERER_CELL,
+	TETRISU_RENDERER_STATIONARY,
+	TETRISU_RENDERER_PIXEL
+}	tetrisu_renderer_mode_t;
+
 typedef enum e_app_game_mode
 {
 	APP_GAME_MODE_NONE,
@@ -353,18 +416,28 @@ typedef struct s_app_profile_view_model
 	char		username[APP_TEXT_MAX];
 	char		character[APP_TEXT_MAX];
 	char		theme[APP_TEXT_MAX];
+	char		portrait_asset[APP_ASSET_PATH_MAX];
 	uint64_t	score;
 	int			wallet_points;
 	int			rank;
 }	app_profile_view_model_t;
 
+typedef struct s_app_character_ability_view_model
+{
+	char	name[APP_TEXT_MAX];
+	char	description[APP_ABILITY_TEXT_MAX];
+}	app_character_ability_view_model_t;
+
 typedef struct s_app_catalogue_item_view_model
 {
 	char	id[APP_TEXT_MAX];
 	char	name[APP_TEXT_MAX];
+	char	portrait_asset[APP_ASSET_PATH_MAX];
 	int		price;
 	bool	owned;
 	bool	equipped;
+	app_character_ability_view_model_t	abilities[
+		APP_CHARACTER_ABILITY_COUNT];
 }	app_catalogue_item_view_model_t;
 
 typedef struct s_app_catalogue_view_model
@@ -373,6 +446,18 @@ typedef struct s_app_catalogue_view_model
 	int							count;
 	app_catalogue_item_view_model_t	items[APP_CATALOGUE_MAX_ITEMS];
 }	app_catalogue_view_model_t;
+
+typedef struct s_app_settings_view_model
+{
+	bool					signed_in;
+	bool					offline;
+	app_profile_view_model_t	profile;
+	app_catalogue_view_model_t	characters;
+	app_catalogue_view_model_t	themes;
+	int					music_volume;
+	tetrisu_renderer_mode_t	renderer_mode;
+	char					local_status[APP_TEXT_MAX];
+}	app_settings_view_model_t;
 
 typedef struct s_app_leaderboard_entry_view_model
 {
@@ -406,6 +491,64 @@ typedef struct s_leaderboard_state
 {
 	leaderboard_focus_t	focus;
 }	leaderboard_state_t;
+
+typedef enum e_settings_focus
+{
+	SETTINGS_FOCUS_BACK,
+	SETTINGS_FOCUS_MARKETPLACE,
+	SETTINGS_FOCUS_VOLUME_DOWN,
+	SETTINGS_FOCUS_VOLUME_UP,
+	SETTINGS_FOCUS_CHARACTER_PREVIOUS,
+	SETTINGS_FOCUS_CHARACTER_NEXT
+}	settings_focus_t;
+
+typedef enum e_settings_action
+{
+	SETTINGS_ACTION_NONE,
+	SETTINGS_ACTION_BACK,
+	SETTINGS_ACTION_MARKETPLACE,
+	SETTINGS_ACTION_VOLUME_DOWN,
+	SETTINGS_ACTION_VOLUME_UP,
+	SETTINGS_ACTION_CHARACTER_PREVIOUS,
+	SETTINGS_ACTION_CHARACTER_NEXT,
+	SETTINGS_ACTION_QUIT
+}	settings_action_t;
+
+typedef struct s_settings_state
+{
+	settings_focus_t	focus;
+	bool			signed_in;
+	bool			ability_info_visible;
+}	settings_state_t;
+
+typedef struct s_settings_rect
+{
+	int	x;
+	int	y;
+	int	width;
+	int	height;
+} settings_rect_t;
+
+/* Reference-coordinate geometry shared by bitmap composition and hit tests. */
+typedef struct s_settings_layout
+{
+	int			origin_y;
+	int			origin_x;
+	int			rows;
+	int			cols;
+	int			pixel_width;
+	int			pixel_height;
+	int			cell_px_x;
+	int			cell_px_y;
+	bool			opaque_background;
+	settings_rect_t	portrait;
+	settings_rect_t	profile;
+	settings_rect_t	characters;
+	settings_rect_t	themes;
+	settings_rect_t	stats[3];
+	settings_rect_t	buttons[SETTINGS_BUTTON_COUNT];
+	settings_rect_t	character_arrows[SETTINGS_CHARACTER_ARROW_COUNT];
+} settings_layout_t;
 
 typedef struct s_app_room_summary_view_model
 {
@@ -450,6 +593,7 @@ typedef union u_app_screen_data
 {
 	app_auth_view_model_t			auth;
 	app_profile_view_model_t		profile;
+	app_settings_view_model_t	settings;
 	app_catalogue_view_model_t		catalogue;
 	app_leaderboard_view_model_t	leaderboard;
 	app_lobby_view_model_t			lobby;
@@ -480,8 +624,12 @@ typedef struct s_app_data_provider
 			app_auth_view_model_t *view);
 	app_provider_result_t	(*load_profile)(void *userdata,
 			app_profile_view_model_t *view);
+	app_provider_result_t	(*load_settings)(void *userdata,
+			app_settings_view_model_t *view);
 	app_provider_result_t	(*load_catalogue)(void *userdata,
 			app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
+	app_provider_result_t	(*preview_login)(void *userdata,
+			app_auth_view_model_t *view);
 	app_provider_result_t	(*load_leaderboard)(void *userdata,
 			app_leaderboard_view_model_t *view);
 	app_provider_result_t	(*load_lobby)(void *userdata,
@@ -489,14 +637,6 @@ typedef struct s_app_data_provider
 	app_provider_result_t	(*load_room)(void *userdata, const char *room_id,
 			app_room_view_model_t *view);
 }	app_data_provider_t;
-
-typedef enum e_tetrisu_renderer_mode
-{
-	TETRISU_RENDERER_AUTO,
-	TETRISU_RENDERER_CELL,
-	TETRISU_RENDERER_STATIONARY,
-	TETRISU_RENDERER_PIXEL
-}	tetrisu_renderer_mode_t;
 
 // How far the terminal can be trusted with bitmap graphics. NONE is the
 // terminal-cell compatibility renderer; STATIONARY draws bitmaps but never
@@ -527,6 +667,7 @@ typedef enum e_auth_focus
 	AUTH_FOCUS_DOMAIN,
 	AUTH_FOCUS_PRIMARY,
 	AUTH_FOCUS_SECONDARY,
+	AUTH_FOCUS_PREVIEW,
 	AUTH_FOCUS_OFFLINE
 }	auth_focus_t;
 
@@ -552,6 +693,7 @@ typedef enum e_auth_action
 	AUTH_ACTION_CHECK_SERVER,
 	AUTH_ACTION_SUBMIT_LOGIN,
 	AUTH_ACTION_SUBMIT_SIGN_UP,
+	AUTH_ACTION_PREVIEW_LOGIN,
 	AUTH_ACTION_OPEN_LOGIN,
 	AUTH_ACTION_OPEN_SIGN_UP,
 	AUTH_ACTION_PLAY_OFFLINE,
@@ -634,11 +776,18 @@ typedef struct
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
+	struct ncplane		*settings_portrait_plane;
+	struct ncplane		*settings_controls_plane;
+	struct ncplane		*settings_character_plane;
+	struct ncplane		*settings_volume_plane;
+	struct ncplane		*settings_ability_plane;
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
 	struct ncvisual		*auth_background_visual;
 	struct ncvisual		*auth_font_visual;
+	struct ncvisual		*settings_background_visual;
+	struct ncvisual		*settings_font_visual;
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
@@ -654,6 +803,14 @@ typedef struct
 	int					bunny_rows;
 	int					bunny_cols;
 	uint64_t			auth_background_signature;
+	bool				settings_background_ready;
+	int				settings_background_rows;
+	int				settings_background_cols;
+	uint64_t			settings_static_signature;
+	uint64_t			settings_controls_signature;
+	uint64_t			settings_character_signature;
+	uint64_t			settings_volume_signature;
+	uint64_t			settings_ability_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	tetrisu_pixel_policy_t	pixels;
@@ -970,12 +1127,23 @@ app_screen_t	app_handle_key(app_screen_t current, uint32_t key);
 void			menu_move_selection(menu_selection_t *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
+bool			app_ui_preview_enabled(void);
 
 /* APP_PROVIDER.C */
 void			app_fixture_provider_init(app_data_provider_t *provider);
+app_provider_result_t	app_provider_preview_sign_in(
+					const app_data_provider_t *provider,
+					app_auth_view_model_t *view);
 app_provider_result_t	app_screen_view_load(
 					const app_data_provider_t *provider,
 					app_screen_t screen, app_screen_view_model_t *view);
+app_provider_result_t	app_screen_view_load_for_session(
+					const app_data_provider_t *provider,
+					app_screen_t screen, bool offline,
+					app_screen_view_model_t *view);
+void			app_settings_apply_local_controls(
+					app_settings_view_model_t *view, int music_volume,
+					tetrisu_renderer_mode_t renderer_mode);
 const char		*app_data_status_name(app_data_status_t status);
 const char		*app_game_mode_name(app_game_mode_t mode);
 
@@ -1029,6 +1197,8 @@ void				render_compatibility_badge_refresh(render_ctx_t *ctx);
 void				render_compatibility_badge_hide(render_ctx_t *ctx);
 void				render_notification_show_volume(render_ctx_t *ctx,
 					int volume);
+void				render_notification_queue_volume(render_ctx_t *ctx,
+					int volume);
 void				render_notification_tick(render_ctx_t *ctx);
 int					render_notification_next_wake_ms(
 					const render_ctx_t *ctx);
@@ -1070,6 +1240,21 @@ leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
 void			leaderboard_set_focus(leaderboard_state_t *state,
 					leaderboard_focus_t focus);
 
+/* SETTINGS_SCREEN.C */
+void			settings_state_init(settings_state_t *state, bool signed_in);
+void			settings_state_focus_next(settings_state_t *state);
+void			settings_state_focus_previous(settings_state_t *state);
+settings_action_t	settings_handle_key(settings_state_t *state,
+					uint32_t key);
+void			settings_set_focus(settings_state_t *state, settings_focus_t focus);
+bool			settings_select_character(app_settings_view_model_t *settings,
+					int direction);
+void			settings_layout_build(int origin_y, int origin_x, int rows,
+					int cols, int cell_px_y, int cell_px_x,
+					settings_layout_t *layout);
+bool			settings_layout_hit_test(const settings_layout_t *layout,
+					int terminal_y, int terminal_x, int *button_index);
+
 /* RENDER_LEADERBOARD.C */
 bool			render_leaderboard_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view,
@@ -1078,6 +1263,21 @@ bool			render_leaderboard_show(render_ctx_t *ctx,
 bool			render_leaderboard_hit_test(const render_ctx_t *ctx,
 					const ncinput *input, leaderboard_focus_t *focus);
 void			render_leaderboard_destroy(render_ctx_t *ctx);
+
+/* RENDER_SETTINGS.C */
+bool			render_settings_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const settings_state_t *state,
+					bool rebuild_background);
+bool			render_settings_hit_test(const render_ctx_t *ctx,
+					const ncinput *input, settings_focus_t *focus);
+bool			render_settings_portrait_hit_test(const render_ctx_t *ctx,
+					const ncinput *input);
+void			render_settings_destroy(render_ctx_t *ctx);
+bool			render_settings_pixel_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const settings_state_t *state, bool rebuild_background);
+void			render_settings_pixel_destroy(render_ctx_t *ctx);
 
 /* RENDER_AUTH.C */
 bool			render_auth_show(render_ctx_t *ctx, const auth_form_t *form,

@@ -11,8 +11,12 @@ static app_provider_result_t	fixture_sign_up(void *userdata,
 				app_auth_view_model_t *view);
 static app_provider_result_t	fixture_load_profile(void *userdata,
 				app_profile_view_model_t *view);
+static app_provider_result_t	fixture_load_settings(void *userdata,
+				app_settings_view_model_t *view);
 static app_provider_result_t	fixture_load_catalogue(void *userdata,
 				app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
+static app_provider_result_t	fixture_preview_login(void *userdata,
+				app_auth_view_model_t *view);
 static app_provider_result_t	fixture_load_leaderboard(void *userdata,
 				app_leaderboard_view_model_t *view);
 static app_provider_result_t	fixture_load_lobby(void *userdata,
@@ -22,10 +26,13 @@ static app_provider_result_t	fixture_load_room(void *userdata,
 static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
 				const char *id, const char *name, int price, bool owned,
 				bool equipped);
+static void	set_character_details(app_catalogue_item_view_model_t *item,
+				const char *portrait, const char *const abilities[4],
+				const char *const descriptions[4]);
 static app_data_status_t	status_from_result(app_provider_result_t result);
 static app_provider_result_t	load_provider_screen(
 				const app_data_provider_t *provider, app_screen_t screen,
-				app_screen_view_model_t *view);
+				bool offline, app_screen_view_model_t *view);
 static void	set_screen_copy(app_screen_view_model_t *view,
 				const char *subtitle);
 
@@ -45,7 +52,9 @@ void	app_fixture_provider_init(app_data_provider_t *provider)
 	provider->login = fixture_login;
 	provider->sign_up = fixture_sign_up;
 	provider->load_profile = fixture_load_profile;
+	provider->load_settings = fixture_load_settings;
 	provider->load_catalogue = fixture_load_catalogue;
+	provider->preview_login = fixture_preview_login;
 	provider->load_leaderboard = fixture_load_leaderboard;
 	provider->load_lobby = fixture_load_lobby;
 	provider->load_room = fixture_load_room;
@@ -58,6 +67,20 @@ app_provider_result_t	app_screen_view_load(
 	const app_data_provider_t *provider, app_screen_t screen,
 	app_screen_view_model_t *view)
 {
+	return (app_screen_view_load_for_session(provider, screen, false, view));
+}
+
+/**
+ * @brief Loads a screen model with the current authenticated/offline mode.
+ *
+ * Offline Settings intentionally never asks the provider for account data.
+ * This is the boundary that prevents a local terminal session from showing
+ * fixture username, inventory, wallet, score, or rank values.
+ */
+app_provider_result_t	app_screen_view_load_for_session(
+	const app_data_provider_t *provider, app_screen_t screen, bool offline,
+	app_screen_view_model_t *view)
+{
 	app_provider_result_t	result;
 
 	if (view == NULL || screen < APP_SCREEN_ENTRY
@@ -67,10 +90,34 @@ app_provider_result_t	app_screen_view_load(
 	view->screen = screen;
 	snprintf(view->title, sizeof(view->title), "%s", app_screen_name(screen));
 	view->local_preview = provider != NULL && provider->local_fixtures
-		&& screen != APP_SCREEN_SOLO && screen != APP_SCREEN_QUIT;
-	result = load_provider_screen(provider, screen, view);
+		&& !offline && screen != APP_SCREEN_SOLO && screen != APP_SCREEN_QUIT;
+	result = load_provider_screen(provider, screen, offline, view);
 	view->status = status_from_result(result);
 	return (result);
+}
+
+/**
+ * @brief Runs the explicitly gated fixture sign-in seam.
+ */
+app_provider_result_t	app_provider_preview_sign_in(
+	const app_data_provider_t *provider, app_auth_view_model_t *view)
+{
+	if (!app_ui_preview_enabled() || provider == NULL
+		|| provider->preview_login == NULL || view == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	return (provider->preview_login(provider->userdata, view));
+}
+
+/**
+ * @brief Copies current process-local controls into the Settings model.
+ */
+void	app_settings_apply_local_controls(app_settings_view_model_t *view,
+	int music_volume, tetrisu_renderer_mode_t renderer_mode)
+{
+	if (view == NULL)
+		return ;
+	view->music_volume = music_volume;
+	view->renderer_mode = renderer_mode;
 }
 
 /**
@@ -143,9 +190,55 @@ static app_provider_result_t	fixture_load_profile(void *userdata,
 	snprintf(view->username, sizeof(view->username), "PreviewPlayer");
 	snprintf(view->character, sizeof(view->character), "Mirurun");
 	snprintf(view->theme, sizeof(view->theme), "Classic Temple");
+	snprintf(view->portrait_asset, sizeof(view->portrait_asset),
+		DEFAULT_MIRURUN_PATH);
 	view->score = 125400;
 	view->wallet_points = 3200;
 	view->rank = 7;
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Combines profile, character inventory, and theme inventory.
+ */
+static app_provider_result_t	fixture_load_settings(void *userdata,
+	app_settings_view_model_t *view)
+{
+	app_provider_result_t	result;
+
+	(void)userdata;
+	if (view == NULL)
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	result = fixture_load_profile(NULL, &view->profile);
+	if (result != APP_PROVIDER_OK)
+		return (result);
+	result = fixture_load_catalogue(NULL, APP_CATALOGUE_CHARACTERS,
+		&view->characters);
+	if (result != APP_PROVIDER_OK)
+		return (result);
+	result = fixture_load_catalogue(NULL, APP_CATALOGUE_THEMES, &view->themes);
+	if (result != APP_PROVIDER_OK)
+		return (result);
+	view->signed_in = view->profile.signed_in;
+	snprintf(view->local_status, sizeof(view->local_status),
+		"LOCAL UI PREVIEW PROFILE");
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Supplies the deterministic account used only by the preview gate.
+ */
+static app_provider_result_t	fixture_preview_login(void *userdata,
+	app_auth_view_model_t *view)
+{
+	(void)userdata;
+	if (view == NULL || !app_ui_preview_enabled())
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	view->signed_in = true;
+	snprintf(view->username, sizeof(view->username), "PreviewPlayer");
+	snprintf(view->message, sizeof(view->message), "LOCAL UI PREVIEW SESSION");
 	return (APP_PROVIDER_OK);
 }
 
@@ -155,30 +248,84 @@ static app_provider_result_t	fixture_load_profile(void *userdata,
 static app_provider_result_t	fixture_load_catalogue(void *userdata,
 	app_catalogue_kind_t kind, app_catalogue_view_model_t *view)
 {
+	static const char	*mirurun_abilities[4] = {
+		"Mirurun", "Inversion", "Pentaris", "Sirtet"
+	};
+	static const char	*mirurun_descriptions[4] = {
+		"Removes player bottom 4 rows, not sent.",
+		"Inverts opponent controls next 3 pieces.",
+		"Sends 5 garbage lines.",
+		"Inverts filled/empty normal cells in all occupied opponent rows."
+	};
+	static const char	*halloween_abilities[4] = {
+		"Fry", "Dark", "Vampire", "Bomb"
+	};
+	static const char	*halloween_descriptions[4] = {
+		"Fills bottom 3 rows, then clears/sends them after next piece.",
+		"Blacks out opponent field except near active piece.",
+		"Steals opponent crystals.",
+		"Destroys random opponent-field blocks."
+	};
+	static const char	*princess_abilities[4] = {
+		"Sol", "Mirror", "Paralysis", "Copy"
+	};
+	static const char	*princess_descriptions[4] = {
+		"Clears 3 adjacent player-field columns, aimable, 3-second auto-fire.",
+		"Steals opponent's next crystal power.",
+		"Prevents opponent rotating next 3 pieces.",
+		"Replaces player field with copy of opponent's."
+	};
+	static const char	*wolfman_abilities[4] = {
+		"Cut", "Nue", "Pals", "Thwack"
+	};
+	static const char	*wolfman_descriptions[4] = {
+		"Clears player's top 4 rows.",
+		"Prevents opponent fast-dropping next 4 pieces.",
+		"Incoming normal garbage lowers player stack briefly (power-raised lines excluded).",
+		"For next 4 pieces, non-crystal blocks cascade after line clears."
+	};
+
 	(void)userdata;
 	if (view == NULL || (kind != APP_CATALOGUE_CHARACTERS
 			&& kind != APP_CATALOGUE_THEMES))
 		return (APP_PROVIDER_INVALID);
 	memset(view, 0, sizeof(*view));
 	view->kind = kind;
-	view->count = 3;
 	if (kind == APP_CATALOGUE_CHARACTERS)
 	{
+		view->count = 4;
 		set_catalogue_item(&view->items[0], "mirurun", "Mirurun", 0,
 			true, true);
-		set_catalogue_item(&view->items[1], "inversion", "Inversion", 1800,
-			false, false);
-		set_catalogue_item(&view->items[2], "pentarisu", "Pentarisu", 2400,
-			false, false);
+		set_character_details(&view->items[0], DEFAULT_MIRURUN_PATH,
+			mirurun_abilities, mirurun_descriptions);
+		set_catalogue_item(&view->items[1], "halloween", "Halloween", 0,
+			true, false);
+		set_character_details(&view->items[1], HALLOWEEN_PORTRAIT_PATH,
+			halloween_abilities, halloween_descriptions);
+		set_catalogue_item(&view->items[2], "princess", "Princess", 0,
+			true, false);
+		set_character_details(&view->items[2], PRINCESS_PORTRAIT_PATH,
+			princess_abilities, princess_descriptions);
+		set_catalogue_item(&view->items[3], "wolfman", "Wolf-man", 0,
+			true, false);
+		set_character_details(&view->items[3], WOLFMAN_PORTRAIT_PATH,
+			wolfman_abilities, wolfman_descriptions);
 	}
 	else
 	{
+		view->count = 6;
 		set_catalogue_item(&view->items[0], "temple", "Classic Temple", 0,
 			true, true);
 		set_catalogue_item(&view->items[1], "neon", "Neon Arcade", 1200,
 			true, false);
 		set_catalogue_item(&view->items[2], "moon", "Moon Shrine", 2200,
-			false, false);
+			true, false);
+		set_catalogue_item(&view->items[3], "claude", "Claude-ing", 0,
+			true, false);
+		set_catalogue_item(&view->items[4], "haoland", "Haoland", 0,
+			true, false);
+		set_catalogue_item(&view->items[5], "snowman", "Build a Snowman", 0,
+			true, false);
 	}
 	return (APP_PROVIDER_OK);
 }
@@ -281,6 +428,30 @@ static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
 }
 
 /**
+ * Character power copy is sourced from the Tetris Battle Gaiden reference on
+ * Tetris.wiki. Keeping it in the typed fixture makes hover UI data-driven.
+ */
+static void	set_character_details(app_catalogue_item_view_model_t *item,
+	const char *portrait, const char *const abilities[4],
+	const char *const descriptions[4])
+{
+	int	index;
+
+	snprintf(item->portrait_asset, sizeof(item->portrait_asset), "%s",
+		portrait);
+	index = 0;
+	while (index < APP_CHARACTER_ABILITY_COUNT)
+	{
+		snprintf(item->abilities[index].name,
+			sizeof(item->abilities[index].name), "%s", abilities[index]);
+		snprintf(item->abilities[index].description,
+			sizeof(item->abilities[index].description), "%s",
+			descriptions[index]);
+		index++;
+	}
+}
+
+/**
  * @brief Maps provider outcomes to screen presentation states.
  */
 static app_data_status_t	status_from_result(app_provider_result_t result)
@@ -301,7 +472,7 @@ static app_data_status_t	status_from_result(app_provider_result_t result)
  */
 static app_provider_result_t	load_provider_screen(
 	const app_data_provider_t *provider, app_screen_t screen,
-	app_screen_view_model_t *view)
+	bool offline, app_screen_view_model_t *view)
 {
 	app_provider_result_t	result;
 
@@ -314,13 +485,31 @@ static app_provider_result_t	load_provider_screen(
 		snprintf(view->data.auth.message, sizeof(view->data.auth.message),
 			"Provider awaiting credentials");
 	}
-	else if (screen == APP_SCREEN_HOME || screen == APP_SCREEN_SETTINGS)
+	else if (screen == APP_SCREEN_HOME)
 	{
 		set_screen_copy(view, "Profile and local settings model");
 		if (provider == NULL || provider->load_profile == NULL)
 			return (APP_PROVIDER_UNAVAILABLE);
 		result = provider->load_profile(provider->userdata,
 				&view->data.profile);
+	}
+	else if (screen == APP_SCREEN_SETTINGS)
+	{
+		if (offline)
+		{
+			set_screen_copy(view, "Local settings; account data unavailable");
+			memset(&view->data.settings, 0, sizeof(view->data.settings));
+			view->data.settings.offline = true;
+			snprintf(view->data.settings.local_status,
+				sizeof(view->data.settings.local_status),
+				"OFFLINE LOCAL SETTINGS - NO ACCOUNT DATA");
+			return (APP_PROVIDER_OK);
+		}
+		set_screen_copy(view, "Profile, inventory, and local settings");
+		if (provider == NULL || provider->load_settings == NULL)
+			return (APP_PROVIDER_UNAVAILABLE);
+		result = provider->load_settings(provider->userdata,
+			&view->data.settings);
 	}
 	else if (screen == APP_SCREEN_SOLO)
 		set_screen_copy(view, "Local endless Solo");

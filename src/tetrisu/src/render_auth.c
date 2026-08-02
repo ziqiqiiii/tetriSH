@@ -10,6 +10,7 @@ typedef struct s_auth_layout
 	int	secondary_row;
 	int	status_row;
 	int	left_button_x;
+	int	preview_button_x;
 	int	right_button_x;
 	int	button_width;
 	int	footer_row;
@@ -17,7 +18,8 @@ typedef struct s_auth_layout
 }	auth_layout_t;
 
 static bool			auth_art_available(const render_ctx_t *ctx);
-static auth_layout_t	auth_layout(const render_ctx_t *ctx);
+static auth_layout_t	auth_layout(const render_ctx_t *ctx,
+					auth_form_mode_t mode);
 static void			set_color(struct ncplane *plane, int red, int green,
 						int blue);
 static void			fill_line(struct ncplane *plane, int row, int x, int width,
@@ -112,7 +114,7 @@ bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
 	}
 	if (ctx->screen_plane == NULL)
 		return (false);
-	layout = auth_layout(ctx);
+	layout = auth_layout(ctx, form->mode);
 	channels = 0;
 	(void)ncchannels_set_fg_rgb8(&channels, 255, 236, 249);
 	if (layout.art)
@@ -144,7 +146,7 @@ bool	render_auth_hit_test(const render_ctx_t *ctx, const auth_form_t *form,
 
 	if (ctx == NULL || form == NULL || input == NULL || focus == NULL)
 		return (false);
-	layout = auth_layout(ctx);
+	layout = auth_layout(ctx, form->mode);
 	if (point_in_row(input, layout.field_rows[0], layout.field_x,
 			layout.field_width))
 		*focus = AUTH_FOCUS_USERNAME;
@@ -165,6 +167,10 @@ bool	render_auth_hit_test(const render_ctx_t *ctx, const auth_form_t *form,
 	else if (point_in_row(input, layout.secondary_row, layout.left_button_x,
 			layout.button_width))
 		*focus = AUTH_FOCUS_SECONDARY;
+	else if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN
+		&& point_in_row(input, layout.secondary_row,
+			layout.preview_button_x, layout.button_width))
+		*focus = AUTH_FOCUS_PREVIEW;
 	else if (point_in_row(input, layout.secondary_row, layout.right_button_x,
 			layout.button_width))
 		*focus = AUTH_FOCUS_OFFLINE;
@@ -195,7 +201,8 @@ static bool	auth_art_available(const render_ctx_t *ctx)
 	return (rows >= 24 && cols >= 64);
 }
 
-static auth_layout_t	auth_layout(const render_ctx_t *ctx)
+static auth_layout_t	auth_layout(const render_ctx_t *ctx,
+	auth_form_mode_t mode)
 {
 	auth_layout_t	layout;
 	unsigned		rows;
@@ -255,8 +262,20 @@ static auth_layout_t	auth_layout(const render_ctx_t *ctx)
 	if (layout.field_width < 30)
 		layout.field_width = 30;
 	layout.field_x = center - layout.field_width / 2;
-	layout.left_button_x = center - layout.button_width - 1;
-	layout.right_button_x = center + 1;
+	if (app_ui_preview_enabled() && mode == AUTH_FORM_LOGIN)
+	{
+		layout.button_width = (layout.field_width - 6) / 3;
+		layout.left_button_x = layout.field_x;
+		layout.preview_button_x = layout.left_button_x
+			+ layout.button_width + 2;
+		layout.right_button_x = layout.preview_button_x
+			+ layout.button_width + 2;
+	}
+	else
+	{
+		layout.left_button_x = center - layout.button_width - 1;
+		layout.right_button_x = center + 1;
+	}
 	return (layout);
 }
 
@@ -444,6 +463,7 @@ static void	draw_form(struct ncplane *plane, const auth_form_t *form,
 	char		title[48];
 	char		primary_text[48];
 	char		secondary_text[48];
+	char		preview_text[48];
 	char		offline_text[48];
 
 	snprintf(title, sizeof(title), ":: %s ::",
@@ -500,12 +520,23 @@ static void	draw_form(struct ncplane *plane, const auth_form_t *form,
 	put_box_text(plane, layout->secondary_row, layout->left_button_x,
 		layout->button_width, secondary_text,
 		form->focus == AUTH_FOCUS_SECONDARY, false);
+	if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN)
+	{
+		snprintf(preview_text, sizeof(preview_text), "%sPREVIEW%s",
+			form->focus == AUTH_FOCUS_PREVIEW ? "> " : "",
+			form->focus == AUTH_FOCUS_PREVIEW ? " <" : "");
+		put_box_text(plane, layout->secondary_row, layout->preview_button_x,
+			layout->button_width, preview_text,
+			form->focus == AUTH_FOCUS_PREVIEW, false);
+	}
 	put_box_text(plane, layout->secondary_row, layout->right_button_x,
 		layout->button_width, offline_text,
 		form->focus == AUTH_FOCUS_OFFLINE, false);
 	set_color(plane, 202, 178, 225);
 	put_centered(plane, layout->footer_row,
-		"UP/DOWN OR TAB MOVE  ENTER SELECT  ESC BACK", false);
+		app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN
+		? "P PREVIEW SIGN-IN  |  UP/DOWN/TAB MOVE  ENTER SELECT"
+		: "UP/DOWN OR TAB MOVE  ENTER SELECT  ESC BACK", false);
 }
 
 static bool	point_in_row(const ncinput *input, int row, int x, int width)

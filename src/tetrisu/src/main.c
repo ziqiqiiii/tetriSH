@@ -24,6 +24,9 @@ static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
 static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
+static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, const menu_selection_t *menu);
 static void	leaderboard_loading_view(const app_data_provider_t *provider,
 				app_screen_view_model_t *view);
 static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
@@ -94,6 +97,13 @@ int	main(void)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
+		if (navigation.current == APP_SCREEN_SETTINGS)
+		{
+			if (run_settings_screen(&ctx, &audio, &provider,
+					&navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
 		if (navigation.current != APP_SCREEN_HOME)
 		{
 			if (run_scaffold_step(&ctx, &audio, &provider,
@@ -102,6 +112,8 @@ int	main(void)
 			continue ;
 		}
 		key = render_wait_input(&ctx, &input);
+		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
+			continue ;
 		if (key == (uint32_t)-1)
 			(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 		else if (key == NCKEY_RESIZE || key == 12u)
@@ -160,6 +172,7 @@ int	main(void)
 	}
 	audio_teardown(&audio);
 	render_sign_in_destroy(&ctx, &sign_in);
+	render_settings_destroy(&ctx);
 	render_screen_destroy(&ctx);
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
@@ -314,6 +327,23 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 			"ACCOUNT CREATED - PLEASE SIGN IN");
 		return (true);
 	}
+	if (action == AUTH_ACTION_PREVIEW_LOGIN)
+	{
+		audio_play_menu_select(audio);
+		memset(&view, 0, sizeof(view));
+		result = app_provider_preview_sign_in(provider, &view);
+		if (result != APP_PROVIDER_OK)
+		{
+			form->feedback = AUTH_FEEDBACK_ERROR;
+			snprintf(form->status, sizeof(form->status),
+				"PREVIEW GATE UNAVAILABLE - SET TETRISU_UI_PREVIEW=1");
+			return (true);
+		}
+		form->feedback = AUTH_FEEDBACK_SUCCESS;
+		snprintf(form->status, sizeof(form->status),
+			"LOCAL UI PREVIEW SIGNED IN");
+		return (app_navigation_dispatch(navigation, APP_NAV_AUTHENTICATED));
+	}
 	audio_play_menu_select(audio);
 	if (action == AUTH_ACTION_OPEN_SIGN_UP)
 	{
@@ -465,6 +495,8 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		key = render_wait_input(ctx, &input);
 		action = LEADERBOARD_ACTION_NONE;
 		old_focus = state.focus;
+		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
+			continue ;
 		if (key == (uint32_t)-1)
 			action = LEADERBOARD_ACTION_QUIT;
 		else if (key == NCKEY_RESIZE || key == 12u)
@@ -541,6 +573,124 @@ static void	leaderboard_loading_view(const app_data_provider_t *provider,
 }
 
 /**
+ * @brief Runs the responsive Settings/Profile surface and local controls.
+ */
+static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	const menu_selection_t *menu)
+{
+	app_screen_view_model_t	view;
+	settings_state_t		state;
+	settings_focus_t		hovered;
+	settings_focus_t		old_focus;
+	bool				old_ability_info;
+	settings_action_t		action;
+	app_provider_result_t	result;
+	ncinput				input;
+	uint32_t			key;
+
+	result = app_screen_view_load_for_session(provider, APP_SCREEN_SETTINGS,
+		navigation->offline, &view);
+	if (result == APP_PROVIDER_INVALID)
+		return (-1);
+	app_settings_apply_local_controls(&view.data.settings,
+		audio->music_volume, tetrisu_renderer_mode_requested());
+	settings_state_init(&state, view.data.settings.signed_in);
+	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
+	if (!render_settings_show(ctx, &view, &state, true))
+		return (-1);
+	while (navigation->current == APP_SCREEN_SETTINGS)
+	{
+		key = render_wait_input(ctx, &input);
+		action = SETTINGS_ACTION_NONE;
+		old_focus = state.focus;
+		old_ability_info = state.ability_info_visible;
+		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
+			continue ;
+		if (key == (uint32_t)-1)
+			action = SETTINGS_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_settings_show(ctx, &view, &state, false))
+				return (-1);
+			continue ;
+		}
+		else if (nckey_mouse_p(key))
+		{
+			state.ability_info_visible = state.signed_in
+				&& render_settings_portrait_hit_test(ctx, &input);
+			if (render_settings_hit_test(ctx, &input, &hovered)
+				&& !(hovered == SETTINGS_FOCUS_MARKETPLACE
+					&& !state.signed_in))
+			{
+				settings_set_focus(&state, hovered);
+				if (key == NCKEY_BUTTON1 && (input.evtype == NCTYPE_PRESS
+						|| input.evtype == NCTYPE_UNKNOWN))
+					action = settings_handle_key(&state, NCKEY_ENTER);
+			}
+		}
+		else
+			action = settings_handle_key(&state, key);
+		if (state.focus != old_focus
+			|| state.ability_info_visible != old_ability_info)
+		{
+			audio_play_menu_move(audio);
+			if (!render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		if (action == SETTINGS_ACTION_VOLUME_UP)
+		{
+			audio_play_menu_select(audio);
+			audio_volume_up(audio);
+			view.data.settings.music_volume = audio->music_volume;
+			render_notification_queue_volume(ctx, audio->music_volume);
+			if (!render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == SETTINGS_ACTION_VOLUME_DOWN)
+		{
+			audio_play_menu_select(audio);
+			audio_volume_down(audio);
+			view.data.settings.music_volume = audio->music_volume;
+			render_notification_queue_volume(ctx, audio->music_volume);
+			if (!render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == SETTINGS_ACTION_CHARACTER_PREVIOUS
+			|| action == SETTINGS_ACTION_CHARACTER_NEXT)
+		{
+			audio_play_menu_select(audio);
+			if (settings_select_character(&view.data.settings,
+					action == SETTINGS_ACTION_CHARACTER_NEXT ? 1 : -1)
+				&& !render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == SETTINGS_ACTION_BACK)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == SETTINGS_ACTION_MARKETPLACE)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation,
+				APP_NAV_OPEN_MARKETPLACE);
+		}
+		else if (action == SETTINGS_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
+	render_settings_destroy(ctx);
+	if (navigation->current == APP_SCREEN_HOME)
+	{
+		if (reflow_home(ctx, menu) < 0)
+			return (-1);
+		enable_home_mouse(ctx);
+	}
+	return (0);
+}
+
+/**
  * @brief Presents and advances one scaffolded item-15 screen.
  */
 static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
@@ -552,7 +702,8 @@ static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 	ncinput					input;
 	uint32_t				key;
 
-	if (app_screen_view_load(provider, navigation->current, &view)
+	if (app_screen_view_load_for_session(provider, navigation->current,
+		navigation->offline, &view)
 		== APP_PROVIDER_INVALID || !render_screen_show(ctx, &view))
 		return (-1);
 	key = render_wait_input(ctx, &input);

@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 continues with item 18 complete and
-item 19 next.
+Phases 1 through 3 are complete. Phase 4 continues with item 19 complete and
+item 20 next.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -309,11 +309,21 @@ item 19 next.
       `TETRISU_RENDERER=cell` uses a lower-detail, bitmap-free 80 x 24 layout
       with the visible compatibility badge.
 
-19. **Add the settings and profile screen**
+19. **Add the settings and profile screen** — complete
 
     - Profile portrait, username, equipped character/theme, owned lists,
       wallet points, score, rank, and marketplace routing.
     - Offline mode shows local settings without invented account statistics.
+    - The combined Settings view model loads profile data plus character and
+      theme catalogues through one provider seam. All fixture data remains
+      live terminal text and is marked `LOCAL UI PREVIEW`.
+    - Settings has Back, Marketplace, volume controls, focus traversal,
+      keyboard shortcuts, pointer hover/click, resize reflow, loading/empty/
+      unavailable/error states, compatibility mode, and the existing
+      stationary/pixel portrait tiers.
+    - `TETRISU_UI_PREVIEW=1` exposes an explicit Login `PREVIEW` action that
+      signs into the fixture with `navigation.offline=false`; without the
+      gate, real/offline auth behavior is unchanged.
 
 20. **Add the character and theme marketplace**
 

@@ -78,7 +78,7 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load(&provider, APP_SCREEN_MARKETPLACE, &view)
 		== APP_PROVIDER_OK);
-	assert(view.local_preview && view.data.catalogue.count == 3);
+	assert(view.local_preview && view.data.catalogue.count == 4);
 	assert(strcmp(view.data.catalogue.items[0].name, "Mirurun") == 0);
 	assert(view.data.catalogue.items[0].owned);
 	assert(app_screen_view_load(&provider, APP_SCREEN_LEADERBOARD, &view)

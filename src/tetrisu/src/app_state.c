@@ -149,6 +149,21 @@ const char	*menu_stub_text(int selected_index)
 }
 
 /**
+ * @brief Returns whether the explicit local UI preview gate is enabled.
+ *
+ * The environment is intentionally strict: only TETRISU_UI_PREVIEW=1
+ * exposes the fixture sign-in action. This keeps the unavailable real server
+ * path and the offline path unchanged for normal runs.
+ */
+bool	app_ui_preview_enabled(void)
+{
+	const char	*value;
+
+	value = getenv("TETRISU_UI_PREVIEW");
+	return (value != NULL && strcmp(value, "1") == 0);
+}
+
+/**
  * @brief Resolves only routes allowed by the item-15 screen graph.
  */
 static bool	navigation_target(const app_navigation_t *navigation,
@@ -176,7 +191,8 @@ static bool	navigation_target(const app_navigation_t *navigation,
 	else if (action == APP_NAV_OPEN_SOLO && current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_SOLO;
 	else if (action == APP_NAV_OPEN_MARKETPLACE
-		&& current == APP_SCREEN_HOME)
+		&& !navigation->offline
+		&& (current == APP_SCREEN_HOME || current == APP_SCREEN_SETTINGS))
 		*target = APP_SCREEN_MARKETPLACE;
 	else if (action == APP_NAV_OPEN_SETTINGS && current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_SETTINGS;

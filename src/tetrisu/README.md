@@ -72,6 +72,18 @@ Battle while the authoritative `tetrisd` game loop is being built.
   labelled Solo test effect without mutating the board
 - Two-frame progressive clear animation: 200 ms through level 6, then
   175/150/125 ms at levels 7/8/9 and 100 ms from level 10 onward
+- Dedicated Settings/Profile screen with live fixture profile, portrait,
+  equipped character/theme, owned inventories, wallet, score, rank, and
+  Settings-to-Marketplace routing
+- Signed-in Settings can cycle Mirurun, Halloween, Princess, and Wolf-man
+  from the portrait arrows. Hover the portrait (or press `I`) for their four
+  canonical crystal powers, sourced from
+  [Tetris.wiki's Tetris Battle Gaiden reference](https://tetris.wiki/Tetris_Battle_Gaiden).
+- Settings keeps the large authored frame cached and repaints only compact
+  controls, character arrows, ability card, or volume value when they change.
+  The theme inventory uses a two-column by three-row layout for six full names.
+- Offline Settings keeps only current-run local controls/status and never
+  invents account identity, inventory, wallet, score, or rank
 
 HOLD is implemented under temporary local Solo authority. The
 [migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes how it
@@ -140,6 +152,19 @@ Makefile targets:
 ```bash
 ./bin/tetrisu
 ```
+
+For deterministic UI testing of the signed-in fixture path, opt in explicitly:
+
+```bash
+TETRISU_UI_PREVIEW=1 TETRISU_RENDERER=cell ./bin/tetrisu
+```
+
+On Login, move focus to the visible `PREVIEW` button and press `Enter`, click
+it, or press `P` while an action button is focused. This creates the marked
+`LOCAL UI PREVIEW` session with `navigation.offline=false`, so Home,
+Leaderboard, Settings, and Settings → Marketplace are reachable. Without
+`TETRISU_UI_PREVIEW=1`, the preview action is not rendered or accepted; real
+server sign-in and Play Offline retain their existing behavior.
 
 Or build and run in one step:
 
@@ -220,6 +245,11 @@ and graphics-protocol support at startup. It exits with
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
+| `Tab` / arrows in Settings | Move focus between Back, Marketplace, volume, and character arrows |
+| `M` in signed-in Settings | Open Marketplace; `Enter` on the visible button does the same |
+| `[` / `]` (or `,` / `.`) in signed-in Settings | Select the previous / next owned character |
+| `I` in signed-in Settings | Toggle the selected character's four-power info card |
+| `P` on Login with `TETRISU_UI_PREVIEW=1` | Sign into the clearly marked local UI fixture |
 | `Enter` on Single Player | Start local Endless Solo |
 | `←` / `→` | Move the active piece |
 | `↑` or `X` | Rotate clockwise |
@@ -254,7 +284,7 @@ and both Back and Refresh support mouse hover/click.
 | `Multiplayer` | Navigable lobby/create/waiting/match scaffolds |
 | `Marketplace` | Typed fixture-backed scaffold |
 | `Leaderboard` | Complete top-three podium and positions 4–10, with refresh/error states |
-| `Settings` | Typed profile/settings scaffold |
+| `Settings` | Dedicated live Profile/Settings screen; offline mode shows local controls only |
 
 ---
 
@@ -309,6 +339,7 @@ render_menu_create         after authentication/offline entry, draw home menu
      ├── ↑/↓   menu_move_selection + render_menu_move_bunny + move SFX
      ├── Enter Single Player -> solo_mode_run -> return to menu
      ├── Enter Leaderboard -> dedicated top-ten screen + refresh/back
+     ├── Enter Settings -> live Profile/Settings screen + local controls
      ├── Enter other item -> typed LOCAL UI PREVIEW scaffold
      ├── Esc    explicit parent screen
      ├── +/-   audio_volume_up / audio_volume_down
@@ -322,6 +353,7 @@ Modules (each a `.c` under `src/`):
 | `main.c` | Entry point; wires render + audio and runs the input loop |
 | `app_state.c` | Validate the complete screen graph, Back routes, menu state, and labels |
 | `app_provider.c` | Typed screen models and marked local fixture provider |
+| `settings_screen.c` | Pure Settings focus traversal and semantic actions |
 | `leaderboard_screen.c` | Pure leaderboard focus and action handling |
 | `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
@@ -329,7 +361,8 @@ Modules (each a `.c` under `src/`):
 | `render_intro.c` | Splash video streaming with skip-on-input |
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `render_auth.c` | Pixel-art login/sign-up frame and terminal-only fallback |
-| `render_screen.c` | Shared native-terminal scaffold for future dedicated screens |
+| `render_screen.c` | Shared native-terminal shell and plane cleanup |
+| `render_settings.c` | Live profile/inventory/settings panel, portrait, and controls |
 | `render_leaderboard.c` | Homepage-backed podium/table and cell compatibility renderer |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
@@ -360,6 +393,7 @@ tetrisu/
 │   ├── render_menu.c          Bunny selector + messages
 │   ├── render_auth.c          Auth artwork overlay + cell fallback
 │   ├── render_screen.c        Native-terminal screen scaffold
+│   ├── render_settings.c      Profile/settings screen + controls
 │   ├── render_leaderboard.c   Dedicated podium/table + compatibility view
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
 │   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition
@@ -387,6 +421,14 @@ tetrisu/
 ```bash
 make test
 ```
+
+The Settings and preview-auth tests are included in that command. For a
+manual signed-in Settings check, run the preview command above, choose
+`PREVIEW` on Login, select Settings on Home, exercise hover/click plus
+keyboard focus, resize the terminal, and open Marketplace before pressing
+Back. For offline separation, omit the environment variable, choose Play
+Offline, open Settings, and confirm that only local status, renderer mode, and
+music volume appear.
 
 The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
 strict component build without allowing dependency installation with:
