@@ -21,6 +21,7 @@ static void	test_load_reads_rc_file(void);
 static void	test_env_overrides_file(void);
 static void	test_resolve_rc_order(void);
 static void	test_validate_requires_certificates(void);
+static void	test_the_shipped_rc_file_loads(void);
 
 static void	write_file(const char *path, const char *text);
 static void	make_tmp_dir(char *out, size_t cap);
@@ -35,6 +36,7 @@ int	main(void)
 	test_env_overrides_file();
 	test_resolve_rc_order();
 	test_validate_requires_certificates();
+	test_the_shipped_rc_file_loads();
 	return (0);
 }
 
@@ -57,6 +59,22 @@ static void	test_defaults_are_complete(void)
 	printf("PASS test_defaults_are_complete\n");
 }
 
+/*
+** The .tetrishrc this repository ships is the one the daemon boots from, and
+** an unknown TETRISD_ key fails the whole load - so a setting documented in
+** the file but never wired into cfg_set stops tetrisd starting at all. Only
+** parsing the real file catches that; a hand-written fixture cannot.
+*/
+static void	test_the_shipped_rc_file_loads(void)
+{
+	t_cfg	cfg;
+
+	assert(cfg_load(&cfg, "../../.tetrishrc") == 0);
+	assert(cfg.input_burst == TD_DEF_INPUT_BURST);
+	assert(cfg.input_rate == TD_DEF_INPUT_RATE);
+	printf("PASS test_the_shipped_rc_file_loads\n");
+}
+
 static void	test_set_known_keys(void)
 {
 	t_cfg	cfg;
@@ -72,6 +90,10 @@ static void	test_set_known_keys(void)
 	assert(cfg.tick_ms == 16);
 	assert(cfg_set(&cfg, "TETRISD_BR_SLOTS", "8") == 0);
 	assert(cfg.br_slots == 8);
+	assert(cfg_set(&cfg, "TETRISD_INPUT_BURST", "40") == 0);
+	assert(cfg.input_burst == 40);
+	assert(cfg_set(&cfg, "TETRISD_INPUT_RATE", "20") == 0);
+	assert(cfg.input_rate == 20);
 	assert(cfg_set(&cfg, "PATH", "/usr/bin") == -1);
 	assert(cfg_set(&cfg, "TETRISD_NONSENSE", "x") == -1);
 	printf("PASS test_set_known_keys\n");

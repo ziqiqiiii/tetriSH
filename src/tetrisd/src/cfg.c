@@ -103,10 +103,10 @@ int	cfg_set(t_cfg *cfg, const char *key, const char *value)
 		return (set_int(&cfg->max_clients, value, 1, TD_MAX_CLIENT_CAP));
 	if (strcmp(key, "TICK_MS") == 0)
 		return (set_int(&cfg->tick_ms, value, TD_MIN_TICK_MS, TD_MAX_TICK_MS));
-	if (strcmp(key, TD_KEY_PREFIX "INPUT_BURST") == 0)
+	if (strcmp(key, "INPUT_BURST") == 0)
 		return (set_int(&cfg->input_burst, value, TD_MIN_INPUT_LIMIT,
 				TD_MAX_INPUT_LIMIT));
-	if (strcmp(key, TD_KEY_PREFIX "INPUT_RATE") == 0)
+	if (strcmp(key, "INPUT_RATE") == 0)
 		return (set_int(&cfg->input_rate, value, TD_MIN_INPUT_LIMIT,
 				TD_MAX_INPUT_LIMIT));
 	if (strcmp(key, "BR_SLOTS") == 0)
