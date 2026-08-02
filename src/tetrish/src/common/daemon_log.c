@@ -17,8 +17,7 @@ void	daemon_log(const char *project_root, const char *msg)
 
 	strncpy(log_path, project_root, sizeof(log_path) - 1);
 	log_path[sizeof(log_path) - 1] = '\0';
-	strncat(log_path, "/tmp/dspawn.log",
-		sizeof(log_path) - strlen(log_path) - 1);
+	strncat(log_path, "/tmp/dspawn.log", sizeof(log_path) - strlen(log_path) - 1);
 	fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
 	if (fd == -1)
 	{
