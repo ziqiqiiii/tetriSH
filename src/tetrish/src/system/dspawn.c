@@ -1,8 +1,9 @@
 #include "system_program.h"
 
 static void     daemon_register(const char *project_root, const char *name, char *out_name, size_t out_size);
-static void     daemon_spawn_log(const char *project_root);
-static void     daemon_work(const char *project_root);
+static void     redirect_stderr(const char *project_root, const char *registered);
+static void     daemon_spawn_log(const char *project_root, const char *name);
+static void		daemon_work(const char *project_root, const char *name);
 static int      target_is_executable(const char *target);
 static int      open_tty(void);
 static void     report_spawned(int tty, const char *registered);
@@ -60,8 +61,8 @@ int main(int argc, char **argv)
 	/* Validate the target before daemonising or touching the registry: a
 	 * failed execvp would otherwise leave a registry entry pointing at a
 	 * process that has already exited, which dcheck reports as "down".
-	 * Checking here also lets the error reach the user's terminal, since
-	 * daemon_spawn() redirects stdout/stderr to /dev/null. */
+	 * Checking here also lets the error reach the user's terminal, which
+	 * nothing after daemonisation can do: from there on stderr is a file. */
 	if (target && !target_is_executable(target[0]))
 	{
 		fprintf(stderr, "dspawn: %s: command not found\n", target[0]);
@@ -74,23 +75,24 @@ int main(int argc, char **argv)
 	tty = open_tty();
 	daemon_spawn(tty, &ready);
 	daemon_register(project_root, name, registered, sizeof(registered));
+	redirect_stderr(project_root, registered);
 	report_spawned(tty, registered);
 	/* Notice is on the terminal; let the originating process exit so the
 	 * shell prompt is drawn after it rather than racing against it. */
 	daemon_ready(ready);
-	daemon_spawn_log(project_root);
-	daemon_log(project_root, "start of new deamon before deamon work");
+	daemon_spawn_log(project_root, name);
+	daemon_log(project_root, name,"start of new deamon before deamon work");
 	if (target)
 	{
 		execvp(target[0], target);
 		/* Only reachable if the target vanished or became non-executable
 		 * between the check above and here; the registry entry is left for
 		 * dcheck to show as "down". */
-		daemon_log(project_root, "execvp of target daemon failed");
+		daemon_log(project_root, name,"execvp of target daemon failed");
 		free(project_root);
 		return (1);
 	}
-	daemon_work(project_root);
+	daemon_work(project_root, name);
 	free(project_root);
 	return (0);
 }
@@ -149,7 +151,7 @@ static int target_is_executable(const char *target)
  *
  * @param project_root Resolved project root containing the tmp directory.
  */
-static void daemon_spawn_log(const char *project_root)
+static void daemon_spawn_log(const char *project_root, const char *name)
 {
 	char	log_path[PATH_MAX];
 	int 	fd;
@@ -160,7 +162,7 @@ static void daemon_spawn_log(const char *project_root)
 
 	fd = ft_open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
 	now = time(NULL);
-	dprintf(fd, "%sStarted dspawn daemon [%d].\n", ctime(&now), getpid());
+	dprintf(fd, "%sStarted dspawn daemon %s [%d].\n", ctime(&now), name, getpid());
 	
 	close(fd);
 }
@@ -225,6 +227,52 @@ static void daemon_register(const char *project_root, const char *name,
 }
 
 /**
+ * @brief Point the daemon's stderr at tmp/<registered>.err.
+ *
+ * daemon_spawn() sends all three standard descriptors to /dev/null, which is
+ * right for stdin and stdout but throws away the one channel a daemon uses to
+ * say why it could not start: a tetrislogd that loses the race for its
+ * log-file lock exits with a message nobody ever sees, leaving a daemon that
+ * is simply absent with no record anywhere of it having tried.
+ *
+ * The file is keyed on the registry name rather than the target program, so
+ * the second instance writes to <name>.1.err and cannot overwrite the running
+ * one's account of itself. Records are appended, not truncated: the case worth
+ * catching is a daemon that fails at boot and is respawned, and truncating
+ * would erase the very failure being looked for.
+ *
+ * A file that cannot be opened leaves stderr on /dev/null. Losing the error
+ * log is not a reason to refuse to run.
+ *
+ * @param project_root Resolved project root containing the tmp directory.
+ * @param registered Final registry name of the daemon just spawned.
+ */
+static void redirect_stderr(const char *project_root, const char *registered)
+{
+	char	err_path[PATH_MAX];
+	int		fd;
+	time_t	now;
+	char	*ts;
+
+	if (snprintf(err_path, sizeof(err_path), "%s/tmp/%s.err", project_root, registered) >= (int)sizeof(err_path))
+		return ;
+	fd = open(err_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (fd < 0)
+		return ;
+	now = time(NULL);
+	ts = ctime(&now);
+	if (ts)
+		ts[strcspn(ts, "\n")] = 0;
+	/* Every spawn writes this banner, so an empty stretch under one is itself
+	 * the answer: dspawn got here and the daemon had nothing to complain
+	 * about. */
+	dprintf(fd, "--- %s [%d] %s ---\n", registered, getpid(), ts);
+	dup2(fd, STDERR_FILENO);
+	if (fd > STDERR_FILENO)
+		close(fd);
+}
+
+/**
  * @brief Open the controlling terminal for the spawn notice.
  *
  * Must be called before daemon_spawn(), while the terminal is still attached.
@@ -261,8 +309,7 @@ static void report_spawned(int tty, const char *registered)
 {
 	if (tty < 0)
 		return ;
-	dprintf(tty, "\n  %sspawned%s %-14s %s%d%s\n\n", CL_GREEN, CL_RESET,
-		registered, CL_BLUE, getpid(), CL_RESET);
+	dprintf(tty, "\n  %sspawned%s %-14s %s%d%s\n\n", CL_GREEN, CL_RESET, registered, CL_BLUE, getpid(), CL_RESET);
 	close(tty);
 }
 
@@ -274,11 +321,11 @@ static void report_spawned(int tty, const char *registered)
  *
  * @param project_root Resolved project root used for logging.
  */
-static void daemon_work(const char *project_root)
+static void daemon_work(const char *project_root, const char *name)
 {
 	while (1)
 	{
-		daemon_log(project_root, "deamon one work cycle");
+		daemon_log(project_root, name,"deamon one work cycle");
 		sleep(10);
 	}
 }

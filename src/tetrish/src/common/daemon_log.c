@@ -9,7 +9,7 @@
  * @param project_root Absolute path of the project root.
  * @param msg          Message string to record in the log.
  */
-void	daemon_log(const char *project_root, const char *msg)
+void	daemon_log(const char *project_root, const char *name, const char *msg)
 {
 	char	log_path[PATH_MAX];
 	int		fd;
@@ -26,7 +26,6 @@ void	daemon_log(const char *project_root, const char *msg)
 	}
 	now = time(NULL);
 	flock(fd, LOCK_EX);
-	dprintf(fd, "%sLogging dspawn daemon [%d] message: %s.\n", ctime(&now),
-		getpid(), msg);
+	dprintf(fd, "%sLogging dspawn daemon %s [%d] message: %s.\n", ctime(&now), name, getpid(), msg);
 	close(fd);
 }

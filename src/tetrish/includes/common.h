@@ -48,9 +48,8 @@ void	daemon_ready(int ready_fd);
 int		daemon_name_width(const char *names, int count, size_t stride);
 void	format_uptime(const char *ts, char *out, size_t out_size);
 void	daemon_table_header(const char *indent, int name_width);
-void	daemon_table_row(const char *indent, int name_width, const char *name,
-			int pid, int alive, const char *ts);
-void	daemon_log(const char *project_root, const char *msg);
+void	daemon_table_row(const char *indent, int name_width, const char *name, int pid, int alive, const char *ts);
+void	daemon_log(const char *project_root, const char *name, const char *msg);
 
 /* Filesystem helpers: create a dir/file only if it is missing. */
 int		create_dir_if_missing(const char *path, mode_t mode);
