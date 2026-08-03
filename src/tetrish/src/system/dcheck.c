@@ -115,10 +115,8 @@ static void dcheck(const char *project_root)
 		if (alive)
 			++active;
 
-		daemon_table_row("", width, daemons[i].name, daemons[i].pid, alive,
-			daemons[i].timestamp);
+		daemon_table_row("", width, daemons[i].name, daemons[i].pid, alive, daemons[i].timestamp);
 	}
-
 	printf("\n  %sactive: %d%s\n", CL_DIM, active, CL_RESET);
 }
 
@@ -148,8 +146,7 @@ static void dcheck_graveyard(const char *project_root)
 	printf("\n");
 
 	for (int i = 0; i < count; ++i)
-		daemon_table_row("", width, daemons[i].name, daemons[i].pid, 0,
-			daemons[i].timestamp);
+		daemon_table_row("", width, daemons[i].name, daemons[i].pid, 0, daemons[i].timestamp);
 
 	printf("\n  %sburied: %d%s\n\n", CL_DIM, count, CL_RESET);
 }
