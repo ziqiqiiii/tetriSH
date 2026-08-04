@@ -119,7 +119,7 @@ One record is one line, formatted by `lr_format_line`:
 
 Levels are `debug`, `info`, `warning`, `error`. The logger writes its own records the same way, under the component `tetrislogd`, and they go straight to the sink — a logger that logged to itself over IPC would deadlock against its own receive buffer.
 
-Counters are reported at four moments — `boot`, `rotated`, `dump`, `exit`:
+Counters are reported whenever the sink changes hands or the daemon is asked to account for itself — `boot`, `rotated`, `dump`, `sink recovered`, `sink replaced`, `exit`:
 
 ```text
 dump: 14812 written, 3 rejected, 0 degraded
@@ -139,7 +139,7 @@ The words are not interchangeable, and only two of them are counted here:
 | **Rejected** | Arrived here but failed `lr_validate`; discarded | `tetrislogd` |
 | **Degraded** | Valid, but the sink was unavailable; written to stderr | `tetrislogd` |
 
-A Degraded record went to stderr rather than to the sink. Where that lands depends on who started the daemon: run from a terminal it is on screen, and under `dspawn` it is appended to `tmp/<registered-name>.err` — the same file that catches a boot failure, since `dspawn` points the daemon's stderr there before `exec` (`dspawn.c`, `redirect_stderr`). Either way the record survives, and the counter says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
+A Degraded record went to stderr rather than to the sink. Where that lands depends on who started the daemon: run from a terminal it is on screen, and under `dspawn` it is appended to `tmp/<registered-name>.err` — the same file that catches a boot failure, since `dspawn` points the daemon's stderr there before `exec` (`dspawn.c`, `redirect_stderr`). That makes a degraded record recoverable, not retained: `.err` lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
 
 ### The loop
 
