@@ -127,7 +127,7 @@ Standalone C programs compiled into `./bin/` and resolved ahead of the system `$
 | `ldr`     | Recursively list all non-hidden files with permissions           |
 | `sys`     | Print system information alongside an ASCII logo (Linux only; excluded from the build on macOS) |
 | `backup`  | Archive the path in `$BACKUP_DIR` into a timestamped tarball      |
-| `dspawn`  | Daemonize a process (double-fork) and log spawn events           |
+| `dspawn`  | Daemonize a process (double-fork), log spawn events, and capture its stderr in `tmp/<name>.err` |
 | `dplant`  | Spawn a named "plant" daemon guarded by an exclusive lock         |
 | `dcheck`  | Display the status of all registered daemons                     |
 | `dkill`   | Interactively kill one or all registered daemons                 |

@@ -89,7 +89,7 @@ This runs `make deps`, builds every library under `lib/`, builds the shell, then
 | `make test` | Build, then run every available component test suite |
 | `make clean` | Remove object files from every component |
 | `make fclean` | Remove object files, binaries, and `./bin` |
-| `make reset` | `fclean` plus daemon runtime state (`tmp/`, `archive/`, `bin/`) |
+| `make reset` | Stop any running daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) |
 | `make re` | `fclean` + `all` |
 
 Each library is also self-contained — it owns its `Makefile` and builds and tests on its own:

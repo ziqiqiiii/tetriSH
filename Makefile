@@ -182,9 +182,16 @@ fclean:
 	@ $(RM) $(BIN)
 	@ echo "$(RED)Deleted $(BLUE)component binaries$(CLR_RMV) ✔️"
 
-# Like fclean but also wipes daemon runtime state: delegates to the shell's
-# own `reset` (drops its tmp/ and archive/) and clears the repo-level bin/tmp.
+# Like fclean but also wipes daemon runtime state: stops whatever is still
+# running, delegates to the shell's own `reset` (drops its tmp/ and archive/),
+# and clears the repo-level bin/tmp.
+#
+# The daemons are stopped first because the killer needs what the wipe removes:
+# it kills by the pid in tmp/daemons.reg, using the dkill binary under bin/.
+# Reversing these two lines leaves the daemons running with their state deleted
+# underneath them, which is the case tetrislogd's sink reclaim exists to survive.
 reset:
+	@ bash $(SHELL_DIR)/daemons_killer.sh >/dev/null 2>&1 || true
 	@ $(MAKE) $(MAKE_FLAGS) -C $(SHELL_DIR) reset >/dev/null 2>&1 || true
 	@ for d in $(LIB_DIRS) $(DAEMON_DIRS); do \
 		$(MAKE) $(MAKE_FLAGS) -C $$d fclean >/dev/null 2>&1 || true; \
