@@ -21,8 +21,10 @@ static void	test_an_oversized_datagram_is_rejected(void);
 static void	test_a_burst_drains_in_one_iteration(void);
 static void	test_records_degrade_when_the_sink_is_gone(void);
 static void	test_the_sink_recovers_on_the_idle_tick(void);
+static void	test_a_deleted_log_file_is_reclaimed(void);
 static void	test_a_second_instance_refuses_to_start(void);
 static void	test_stop_drains_what_is_still_queued(void);
+static void	test_stop_reclaims_a_deleted_log_before_signing_off(void);
 static void	test_stop_is_safe_on_a_blank_daemon(void);
 
 static int	boot(t_fixture *fx, t_logd *lg);
@@ -37,8 +39,10 @@ int	main(void)
 	test_a_burst_drains_in_one_iteration();
 	test_records_degrade_when_the_sink_is_gone();
 	test_the_sink_recovers_on_the_idle_tick();
+	test_a_deleted_log_file_is_reclaimed();
 	test_a_second_instance_refuses_to_start();
 	test_stop_drains_what_is_still_queued();
+	test_stop_reclaims_a_deleted_log_before_signing_off();
 	test_stop_is_safe_on_a_blank_daemon();
 	return (0);
 }
@@ -205,8 +209,8 @@ static void	test_a_burst_drains_in_one_iteration(void)
 /*
 ** Degraded is counted separately from Rejected because the two blame different
 ** things: a Rejected record was malformed, a Degraded one was fine and the sink
-** was not. Under dspawn stderr goes to /dev/null, so this counter is the only
-** evidence a degraded record ever existed.
+** was not. Under dspawn stderr is the daemon's own .err file, so the record
+** survives and this counter says how many took that route.
 */
 static void	test_records_degrade_when_the_sink_is_gone(void)
 {
@@ -262,6 +266,39 @@ static void	test_the_sink_recovers_on_the_idle_tick(void)
 }
 
 /*
+** `make reset` deletes tmp/ under a running logger. Writes to the unlinked
+** inode keep succeeding, so nothing fails and the log file simply does not
+** exist - which is what "dspawn tetrislogd writes no boot line" actually was.
+** The idle tick has to notice and reopen, and the records that follow have to
+** land in the file an operator can read.
+*/
+static void	test_a_deleted_log_file_is_reclaimed(void)
+{
+	t_fixture	fx;
+	struct stat	st;
+	t_logd		lg;
+	int			tx;
+
+	assert(boot(&fx, &lg) == 0);
+	assert(unlink(fx.file_path) == 0);
+	assert(stat(fx.file_path, &st) == -1);
+	assert(sink_is_stale(&lg.sink) == true);
+	assert(logd_run_once(&lg) == 0);
+	assert(sink_is_stale(&lg.sink) == false);
+	assert(stat(fx.file_path, &st) == 0);
+	assert(fx_contains(fx.file_path, "sink replaced") == 1);
+	tx = fx_producer(&fx);
+	assert(tx >= 0);
+	assert(fx_send(tx, CIPC_LOG_INFO, "after the wipe") == 0);
+	assert(logd_run_once(&lg) == 0);
+	assert(fx_contains(fx.file_path, "after the wipe") == 1);
+	close(tx);
+	logd_stop(&lg);
+	fx_destroy(&fx);
+	printf("PASS test_a_deleted_log_file_is_reclaimed\n");
+}
+
+/*
 ** us_dgram_bind unlinks the path before binding, so without the sink lock a
 ** second launch would silently steal the socket and leave the first logger
 ** deaf. The guard has to run before the bind, which is why the sink is
@@ -306,6 +343,27 @@ static void	test_stop_drains_what_is_still_queued(void)
 	assert(fx_contains(fx.file_path, "last words") == 1);
 	fx_destroy(&fx);
 	printf("PASS test_stop_drains_what_is_still_queued\n");
+}
+
+/*
+** A shutdown can arrive before any idle tick has run, so the stop path cannot
+** assume the sink is still on a file that exists. The exit line is the one an
+** operator goes looking for after a daemon disappears - signing off into a
+** deleted inode loses exactly that.
+*/
+static void	test_stop_reclaims_a_deleted_log_before_signing_off(void)
+{
+	t_fixture	fx;
+	struct stat	st;
+	t_logd		lg;
+
+	assert(boot(&fx, &lg) == 0);
+	assert(unlink(fx.file_path) == 0);
+	logd_stop(&lg);
+	assert(stat(fx.file_path, &st) == 0);
+	assert(fx_contains(fx.file_path, "exit") == 1);
+	fx_destroy(&fx);
+	printf("PASS test_stop_reclaims_a_deleted_log_before_signing_off\n");
 }
 
 static void	test_stop_is_safe_on_a_blank_daemon(void)

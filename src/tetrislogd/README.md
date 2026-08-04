@@ -139,7 +139,7 @@ The words are not interchangeable, and only two of them are counted here:
 | **Rejected** | Arrived here but failed `lr_validate`; discarded | `tetrislogd` |
 | **Degraded** | Valid, but the sink was unavailable; written to stderr | `tetrislogd` |
 
-A Degraded record went to stderr rather than to the sink. Whether that is loss depends on who started the daemon: run from a terminal it is on screen, but `dspawn` redirects stderr to `/dev/null` (`daemon_spawn.c`), so under the shell it is gone and the counter is the only trace it existed. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
+A Degraded record went to stderr rather than to the sink. Where that lands depends on who started the daemon: run from a terminal it is on screen, and under `dspawn` it is appended to `tmp/<registered-name>.err` — the same file that catches a boot failure, since `dspawn` points the daemon's stderr there before `exec` (`dspawn.c`, `redirect_stderr`). Either way the record survives, and the counter says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
 
 ### The loop
 
@@ -151,12 +151,24 @@ poll(socket, self-pipe, idle_ms)
      ├── socket ready      recv → logd_accept, repeated until EAGAIN
      │                     so a burst is handled in one pass, not one per poll
      │
-     └── timeout           sink_sync, and retry a closed sink
+     └── timeout           sink_sync, then reclaim the sink if it needs it
 ```
 
 The kernel's socket receive buffer is the only queue in the design. A full buffer returns `EAGAIN` to `tetrisd`'s shipper, which still holds a copy of the record — backpressure that reaches the sender is strictly better than a drop that does not. The rejected alternative, a receiver thread draining into a ring, moves only *who loses*; see [ADR-0005](../../docs/adr/0005-logger-keeps-no-internal-queue.md).
 
 One call to `logd_run_once` is exactly one poll iteration. That is the seam the tests drive: send a datagram or raise a signal, call it once, assert on the file — no thread, no fork.
+
+### Reclaiming the sink
+
+The sink can be lost two ways, and only one of them announces itself.
+
+A sink that is **closed** — the reopen failed, the disk was full — makes every write fail, so records degrade to stderr and the idle tick retries until the file comes back.
+
+A sink whose file was **deleted or replaced** fails at nothing. An open descriptor outlives the unlink that took its name away: `write` still returns success, the counters still climb, and the log file simply does not exist. `make reset` does exactly this — it wipes `tmp/` under a running logger — and the symptom is a `tetrislogd.log` with no boot line in it, because the boot line went into an inode nothing can open.
+
+So the sink remembers which file it holds (`dev`, `ino` at open time) and `sink_is_stale` compares that against whatever the path names now. The idle tick reopens on a mismatch and logs `sink replaced`, whose counters say how much went into the file that is gone. `logd_stop` reclaims too, before writing its `exit` line — a shutdown can arrive before any idle tick, and the exit line is the one an operator goes looking for.
+
+Reopening re-takes the `flock` on the live file, which is what puts the single-instance guard back: `flock` is per inode, so between the unlink and the reclaim the lock was guarding a file nobody could read, and a second logger could start.
 
 ### Boot order
 

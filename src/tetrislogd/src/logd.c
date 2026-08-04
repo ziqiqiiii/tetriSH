@@ -5,6 +5,7 @@ static int			bring_up(t_logd *lg, const t_cfg *cfg);
 static void			unwind(t_logd *lg);
 static void			apply_signals(t_logd *lg, int flags);
 static void			drain_socket(t_logd *lg);
+static void			resync_sink(t_logd *lg);
 static void			on_idle_tick(t_logd *lg);
 static uint64_t		now_ms(void);
 
@@ -105,7 +106,10 @@ int	logd_run_once(t_logd *lg)
  *
  * The final drain is not tidiness: those records are ones the kernel already
  * accepted on this process's behalf, so dropping them would lose exactly the
- * last few lines before a shutdown - the ones worth reading.
+ * last few lines before a shutdown - the ones worth reading. The sink is
+ * reclaimed before the exit report for the same reason: a logger whose file
+ * was deleted under it would otherwise sign off into the deleted inode, and
+ * the exit line is the one an operator goes looking for.
  *
  * @param lg Daemon to stop; safe on one that never started.
  */
@@ -116,6 +120,7 @@ void	logd_stop(t_logd *lg)
 	if (lg->sock_fd >= 0)
 	{
 		drain_socket(lg);
+		resync_sink(lg);
 		logd_report(lg, "exit");
 	}
 	sig_detach();
@@ -139,8 +144,8 @@ void	logd_stop(t_logd *lg)
  * is a file operators read line by line, and one malformed datagram must not
  * be able to corrupt a line of it. A valid record whose sink is unavailable
  * goes to stderr and counts as Degraded, which is still not a Dropped record:
- * Dropped means tetrisd never sent it. Under dspawn stderr is /dev/null, so a
- * degraded record is gone and its counter is the only evidence it existed.
+ * Dropped means tetrisd never sent it. Under dspawn stderr is a file per
+ * daemon, so a degraded record is recoverable from there rather than lost.
  *
  * @param lg Daemon whose sink and counters are used.
  * @param buf Raw datagram bytes.
@@ -325,6 +330,35 @@ static void	apply_signals(t_logd *lg, int flags)
 static void	on_idle_tick(t_logd *lg)
 {
 	sink_sync(&lg->sink);
+	resync_sink(lg);
+}
+
+/**
+ * @brief Gets the sink back onto the file its path names, whichever way it
+ * lost it.
+ *
+ * Two different losses, one recovery: the sink is closed and wants reopening,
+ * or it is open on a file that was deleted or replaced underneath it. The
+ * second is the one nothing else can catch - writes to an unlinked inode
+ * succeed, so a logger whose tmp/ was wiped by `make reset` goes on reporting
+ * success while its log file does not exist. Reopening also re-takes the lock
+ * on the live file, which is what restores the single-instance guard: flock is
+ * per inode, so between the unlink and this call the guard was protecting a
+ * file nobody could read.
+ *
+ * The report is written after the reopen, so it lands in the new file and
+ * says, in counters, how much went into the old one.
+ *
+ * @param lg Daemon whose sink is reclaimed.
+ */
+static void	resync_sink(t_logd *lg)
+{
+	if (sink_is_stale(&lg->sink))
+	{
+		if (sink_reopen(&lg->sink) == 0)
+			logd_report(lg, "sink replaced");
+		return ;
+	}
 	if (sink_retry(&lg->sink) == 0)
 		logd_report(lg, "sink recovered");
 }

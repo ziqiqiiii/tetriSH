@@ -20,6 +20,7 @@ static void	test_write_appends_verbatim(void);
 static void	test_write_fails_when_the_sink_is_closed(void);
 static void	test_reopen_starts_a_fresh_file(void);
 static void	test_reopen_failure_leaves_the_sink_closed(void);
+static void	test_staleness_tracks_the_file_behind_the_path(void);
 static void	test_teardown_is_safe_on_a_blank_sink(void);
 
 static void	touch(const char *path);
@@ -34,6 +35,7 @@ int	main(void)
 	test_write_fails_when_the_sink_is_closed();
 	test_reopen_starts_a_fresh_file();
 	test_reopen_failure_leaves_the_sink_closed();
+	test_staleness_tracks_the_file_behind_the_path();
 	test_teardown_is_safe_on_a_blank_sink();
 	return (0);
 }
@@ -196,6 +198,39 @@ static void	test_reopen_failure_leaves_the_sink_closed(void)
 	sink_close(&sk);
 	fx_destroy(&fx);
 	printf("PASS test_reopen_failure_leaves_the_sink_closed\n");
+}
+
+/*
+** Three ways the path can stop naming the file the descriptor holds, and the
+** sink must tell all three from the healthy case: the file deleted, the
+** directory above it deleted, and the name reused for a different file. A
+** write to any of them succeeds, so nothing else in the daemon can notice.
+** A closed sink is not stale - there is nothing to reclaim, only to reopen.
+*/
+static void	test_staleness_tracks_the_file_behind_the_path(void)
+{
+	t_fixture	fx;
+	t_sink		sk;
+	char		path[256];
+	char		cmd[640];
+
+	assert(fx_make(&fx) == 0);
+	snprintf(path, sizeof(path), "%s/sub/logd.log", fx.dir);
+	sink_blank(&sk);
+	assert(sink_is_stale(&sk) == false);
+	assert(sink_open(&sk, path) == 0);
+	assert(sink_is_stale(&sk) == false);
+	assert(unlink(path) == 0);
+	assert(sink_is_stale(&sk) == true);
+	assert(sink_reopen(&sk) == 0);
+	assert(sink_is_stale(&sk) == false);
+	snprintf(cmd, sizeof(cmd), "rm -f %s && touch %s", path, path);
+	assert(system(cmd) == 0);
+	assert(sink_is_stale(&sk) == true);
+	sink_close(&sk);
+	assert(sink_is_stale(&sk) == false);
+	fx_destroy(&fx);
+	printf("PASS test_staleness_tracks_the_file_behind_the_path\n");
 }
 
 /*

@@ -54,10 +54,11 @@
 # define TL_DIR_MODE		0755
 
 /*
-** Idle tick. The poll timeout doubles as the period of the fdatasync and of
-** the sink-reopen retry, so both only ever happen on a loop that had nothing
-** better to do. logd_start copies it into t_logd.idle_ms, which tests lower
-** to keep the timeout path fast.
+** Idle tick. The poll timeout doubles as the period of the fdatasync, of the
+** sink-reopen retry, and of the check for the log file having been deleted or
+** replaced, so none of the three ever happens on a loop that had records to
+** handle. logd_start copies it into t_logd.idle_ms, which tests lower to keep
+** the timeout path fast.
 */
 # define TL_IDLE_MS			1000
 
@@ -94,11 +95,19 @@ typedef struct s_counters
 ** logger writing it. fd is -1 while the sink is unavailable, which is a
 ** working state and not a fatal one - records go to stderr until a retry on
 ** the idle tick gets the file back.
+**
+** dev and ino are which file the descriptor actually holds, remembered so the
+** daemon can notice the path now names a different one. An open descriptor
+** outlives the unlink that took its name away, so `make reset` leaves a logger
+** writing happily into an inode nothing can open - the writes succeed and the
+** log is empty. Both are 0 when the sink has never been opened.
 */
 typedef struct s_sink
 {
 	int		fd;
 	bool	dirty;
+	dev_t	dev;
+	ino_t	ino;
 	char	path[TL_PATH_MAX];
 }	t_sink;
 
@@ -137,6 +146,7 @@ int		sink_reopen(t_sink *sk);
 int		sink_retry(t_sink *sk);
 void	sink_close(t_sink *sk);
 bool	sink_is_open(const t_sink *sk);
+bool	sink_is_stale(const t_sink *sk);
 
 /* LOGD.C */
 void	logd_blank(t_logd *lg);
