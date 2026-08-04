@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
 | `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean) |
-| `src/tetrislogd` | implemented — sink + lock, dgram receive, counters, signals; 4 suites (35 tests) pass, valgrind-clean |
+| `src/tetrislogd` | implemented — sink + lock + reclaim, dgram receive, counters, signals; 4 suites (38 tests) pass, valgrind-clean |
 | `tetrisctl` | not started — no `src/` directory yet |
 
 ## Build & Test
@@ -40,7 +40,7 @@ make stack        # build, then launch available daemons headless
 make deps         # check/install dependencies for this OS
 make check-deps   # verify dependencies without changing the system
 make clean / fclean / re
-make reset        # fclean + wipe daemon runtime state (tmp/, archive/, bin/)
+make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
 ```
 
 Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root

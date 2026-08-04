@@ -57,11 +57,25 @@ game — whether by top-out, by leaving, or by disconnection. All three are the
 same event; there is no grace period and no rejoining a game in progress.
 _Avoid_: quit, abandon, drop out
 
+### Processes
+
+**Daemon**:
+A tetriSH process that detaches from its terminal at start-up and runs
+unattended: `tetrisd` and `tetrislogd`. The shell's own background processes
+are not daemons in this sense and are no part of the game system.
+_Avoid_: service, background process
+
 ### Logging
 
 **Log record**:
 One fixed-size event — level, timestamp, component, pid, message — emitted by
 a daemon. The unit every counter below counts.
+
+**Component**:
+The subsystem a log record came from — `tetrisd`, `tetrislogd`, `chat`,
+`market`. Not a process: `chat` and `market` are subsystems of `tetrisd` and
+share its pid, and it is the pid that names the process.
+_Avoid_: daemon, service, module
 
 **Sink**:
 The file `tetrislogd` appends records to. Exactly one logger owns it at a time.
@@ -79,9 +93,10 @@ the system.
 
 **Degraded**:
 A valid record that could not reach the sink and went to stderr instead.
-Whether it survives depends on where stderr points — under `dspawn` it does
-not. Still never report it as Dropped: Dropped means the producer never sent
-it, and the two blame different halves of the system.
+Where it survives depends on where stderr points; for a detached daemon that
+is an error file rather than a terminal. Still never report it as Dropped:
+Dropped means the producer never sent it, and the two blame different halves
+of the system.
 
 ### Protocol
 
