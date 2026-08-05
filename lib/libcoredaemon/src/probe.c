@@ -1,5 +1,4 @@
 #include "coredaemon.h"
-#include <time.h>
 
 // Static Functions
 static int	lock_state(const char *path);
