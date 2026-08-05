@@ -119,8 +119,12 @@ static void	test_settings_focus_and_actions(void)
 	settings_state_focus_next(&state);
 	assert(state.focus == SETTINGS_FOCUS_VOLUME_DOWN);
 	assert(settings_handle_key(&state, 'm') == SETTINGS_ACTION_NONE);
-	settings_set_focus(&state, SETTINGS_FOCUS_MARKETPLACE);
-	assert(state.focus == SETTINGS_FOCUS_VOLUME_DOWN);
+	/* Signed-out traversal must skip Marketplace in both directions. */
+	settings_state_focus_next(&state);
+	settings_state_focus_next(&state);
+	assert(state.focus == SETTINGS_FOCUS_BACK);
+	settings_state_focus_previous(&state);
+	assert(state.focus == SETTINGS_FOCUS_VOLUME_UP);
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_SETTINGS));
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_MARKETPLACE));
@@ -175,35 +179,29 @@ static void	test_preview_gate_and_navigation(void)
 static void	test_settings_layout_contract(void)
 {
 	settings_layout_t	layout;
-	int				button;
-	int				center_x;
-	int				center_y;
+	int				index;
 
 	settings_layout_build(3, 5, 54, 144, 16, 8, &layout);
 	assert(layout.pixel_width == 1152);
 	assert(layout.pixel_height == 864);
+	assert(layout.origin_y == 3 && layout.origin_x == 5);
 	assert(layout.profile.x > 0);
 	assert(layout.characters.x < layout.themes.x);
 	assert(layout.stats[0].x < layout.stats[1].x);
 	assert(layout.stats[1].x < layout.stats[2].x);
-	center_x = layout.origin_x + (layout.buttons[0].x
-		+ layout.buttons[0].width / 2) / layout.cell_px_x;
-	center_y = layout.origin_y + (layout.buttons[0].y
-		+ layout.buttons[0].height / 2) / layout.cell_px_y;
-	assert(settings_layout_hit_test(&layout, center_y, center_x, &button));
-	assert(button == 0);
-	center_x = layout.origin_x + (layout.buttons[3].x
-		+ layout.buttons[3].width / 2) / layout.cell_px_x;
-	assert(settings_layout_hit_test(&layout, center_y, center_x, &button));
-	assert(button == 3);
-	center_x = layout.origin_x + (layout.character_arrows[0].x
-		+ layout.character_arrows[0].width / 2) / layout.cell_px_x;
-	center_y = layout.origin_y + (layout.character_arrows[0].y
-		+ layout.character_arrows[0].height / 2) / layout.cell_px_y;
-	assert(settings_layout_hit_test(&layout, center_y, center_x, &button));
-	assert(button == SETTINGS_BUTTON_COUNT);
-	assert(!settings_layout_hit_test(&layout, layout.origin_y + 1,
-		layout.origin_x + 1, &button));
+	assert(layout.portrait.width > 0 && layout.portrait.height > 0);
+	/* The four control rectangles share one row and stay left-to-right. */
+	index = 0;
+	while (index < SETTINGS_BUTTON_COUNT)
+	{
+		assert(layout.buttons[index].width > 0);
+		assert(layout.buttons[index].y == layout.buttons[0].y);
+		if (index > 0)
+			assert(layout.buttons[index - 1].x < layout.buttons[index].x);
+		index++;
+	}
+	assert(layout.character_arrows[0].x < layout.character_arrows[1].x);
+	assert(layout.character_arrows[0].height > 0);
 	printf("PASS test_settings_layout_contract\n");
 }
 

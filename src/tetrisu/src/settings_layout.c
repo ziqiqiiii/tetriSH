@@ -2,8 +2,6 @@
 
 static settings_rect_t	map_rect(int x, int y, int width, int height,
 		int pixel_width, int pixel_height);
-static bool	point_in_rect(const settings_layout_t *layout,
-		const settings_rect_t *rect, int terminal_y, int terminal_x);
 
 static settings_rect_t	map_rect(int x, int y, int width, int height,
 	int pixel_width, int pixel_height)
@@ -80,58 +78,4 @@ void	settings_layout_build(int origin_y, int origin_x, int rows, int cols,
 	layout->character_arrows[1] = map_rect(SETTINGS_REF_CHARACTER_NEXT_X,
 		SETTINGS_REF_CHARACTER_ARROW_Y, SETTINGS_REF_CHARACTER_ARROW_WIDTH,
 		SETTINGS_REF_CHARACTER_ARROW_HEIGHT, pixel_width, pixel_height);
-}
-
-/**
- * @brief Tests the same cell bounds that contain the rendered bitmap buttons.
- */
-bool	settings_layout_hit_test(const settings_layout_t *layout,
-	int terminal_y, int terminal_x, int *button_index)
-{
-	int	index;
-
-	if (layout == NULL || button_index == NULL || layout->rows <= 0
-		|| layout->cols <= 0)
-		return (false);
-	index = 0;
-	while (index < SETTINGS_BUTTON_COUNT)
-	{
-		if (point_in_rect(layout, &layout->buttons[index], terminal_y,
-				terminal_x))
-		{
-			*button_index = index;
-			return (true);
-		}
-		index++;
-	}
-	index = 0;
-	while (index < SETTINGS_CHARACTER_ARROW_COUNT)
-	{
-		if (point_in_rect(layout, &layout->character_arrows[index],
-				terminal_y, terminal_x))
-		{
-			*button_index = SETTINGS_BUTTON_COUNT + index;
-			return (true);
-		}
-		index++;
-	}
-	return (false);
-}
-
-static bool	point_in_rect(const settings_layout_t *layout,
-	const settings_rect_t *rect, int terminal_y, int terminal_x)
-{
-	int	left;
-	int	top;
-	int	right;
-	int	bottom;
-
-	left = layout->origin_x + rect->x / layout->cell_px_x;
-	top = layout->origin_y + rect->y / layout->cell_px_y;
-	right = layout->origin_x + (rect->x + rect->width
-		+ layout->cell_px_x - 1) / layout->cell_px_x;
-	bottom = layout->origin_y + (rect->y + rect->height
-		+ layout->cell_px_y - 1) / layout->cell_px_y;
-	return (terminal_x >= left && terminal_x < right
-		&& terminal_y >= top && terminal_y < bottom);
 }

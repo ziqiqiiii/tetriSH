@@ -824,7 +824,7 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 			g_settings_lavender, true);
 	else if (owned > limit)
 	{
-		char	more[16];
+		char	more[24];
 
 		snprintf(more, sizeof(more), "+%d MORE", owned - limit);
 		draw_text_ref(pixels, width, height, layout, font, more,
@@ -956,8 +956,14 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 		}
 		index++;
 	}
+	/*
+	 * Settings takes no pointer input, so the character arrows and the powers
+	 * card need their keys spelled out here or they are undiscoverable.
+	 */
 	draw_text_ref(pixels, width, height, layout, font,
-		"TAB / ARROWS FOCUS   ENTER SELECT   ESC BACK", 260,
+		settings->signed_in
+		? "TAB / ARROWS FOCUS   ENTER SELECT   [ ] CHARACTER   I POWERS   ESC BACK"
+		: "TAB / ARROWS FOCUS   ENTER SELECT   ESC BACK", 260,
 		SETTINGS_REF_BUTTON_Y + 139, 930, 12, g_settings_lavender, true);
 }
 
@@ -1048,7 +1054,7 @@ static void	draw_ability_card(uint32_t *pixels, int width, int height,
 {
 	const app_catalogue_item_view_model_t	*character;
 	color_t						panel;
-	char							heading[APP_TEXT_MAX + 16];
+	char							heading[APP_TEXT_MAX + 32];
 	int							x;
 	int							y;
 	int							index;

@@ -76,9 +76,12 @@ Battle while the authoritative `tetrisd` game loop is being built.
   equipped character/theme, owned inventories, wallet, score, rank, and
   Settings-to-Marketplace routing
 - Signed-in Settings can cycle Mirurun, Halloween, Princess, and Wolf-man
-  from the portrait arrows. Hover the portrait (or press `I`) for their four
+  from the portrait arrows with `[` / `]`. Press `I` for their four
   canonical crystal powers, sourced from
   [Tetris.wiki's Tetris Battle Gaiden reference](https://tetris.wiki/Tetris_Battle_Gaiden).
+- Settings is keyboard-only: it disables pointer reporting on entry, so no
+  hover or click reaches it, and the screens that use the pointer turn it back
+  on when they are entered
 - Settings keeps the large authored frame cached and repaints only compact
   controls, character arrows, ability card, or volume value when they change.
   The theme inventory uses a two-column by three-row layout for six full names.
@@ -245,7 +248,7 @@ and graphics-protocol support at startup. It exits with
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
-| `Tab` / arrows in Settings | Move focus between Back, Marketplace, volume, and character arrows |
+| `Tab` / arrows in Settings | Move focus between Back, Marketplace, volume, and character arrows (Settings takes no mouse input) |
 | `M` in signed-in Settings | Open Marketplace; `Enter` on the visible button does the same |
 | `[` / `]` (or `,` / `.`) in signed-in Settings | Select the previous / next owned character |
 | `I` in signed-in Settings | Toggle the selected character's four-power info card |
@@ -424,9 +427,9 @@ make test
 
 The Settings and preview-auth tests are included in that command. For a
 manual signed-in Settings check, run the preview command above, choose
-`PREVIEW` on Login, select Settings on Home, exercise hover/click plus
-keyboard focus, resize the terminal, and open Marketplace before pressing
-Back. For offline separation, omit the environment variable, choose Play
+`PREVIEW` on Login, select Settings on Home, exercise Tab/arrow focus, `[`/`]`
+character selection and `I`, confirm the mouse does nothing there, resize the
+terminal, and open Marketplace before pressing Back. For offline separation, omit the environment variable, choose Play
 Offline, open Settings, and confirm that only local status, renderer mode, and
 music volume appear.
 

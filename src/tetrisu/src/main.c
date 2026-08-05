@@ -581,7 +581,6 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 {
 	app_screen_view_model_t	view;
 	settings_state_t		state;
-	settings_focus_t		hovered;
 	settings_focus_t		old_focus;
 	bool				old_ability_info;
 	settings_action_t		action;
@@ -596,7 +595,12 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	app_settings_apply_local_controls(&view.data.settings,
 		audio->music_volume, tetrisu_renderer_mode_requested());
 	settings_state_init(&state, view.data.settings.signed_in);
-	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
+	/*
+	 * Settings is keyboard-only: pointer reporting is switched off for the
+	 * whole screen so no motion, drag, or click stream can reach it, and the
+	 * screens that do use the pointer re-enable it when they are entered.
+	 */
+	(void)notcurses_mice_disable(ctx->nc);
 	if (!render_settings_show(ctx, &view, &state, true))
 		return (-1);
 	while (navigation->current == APP_SCREEN_SETTINGS)
@@ -605,7 +609,12 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		action = SETTINGS_ACTION_NONE;
 		old_focus = state.focus;
 		old_ability_info = state.ability_info_visible;
-		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
+		/*
+		 * Pointer reporting is disabled here, but a terminal can still deliver
+		 * events queued before the disable sequence was written, so mouse keys
+		 * are dropped rather than routed anywhere.
+		 */
+		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
 			continue ;
 		if (key == (uint32_t)-1)
 			action = SETTINGS_ACTION_QUIT;
@@ -615,20 +624,6 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				|| !render_settings_show(ctx, &view, &state, false))
 				return (-1);
 			continue ;
-		}
-		else if (nckey_mouse_p(key))
-		{
-			state.ability_info_visible = state.signed_in
-				&& render_settings_portrait_hit_test(ctx, &input);
-			if (render_settings_hit_test(ctx, &input, &hovered)
-				&& !(hovered == SETTINGS_FOCUS_MARKETPLACE
-					&& !state.signed_in))
-			{
-				settings_set_focus(&state, hovered);
-				if (key == NCKEY_BUTTON1 && (input.evtype == NCTYPE_PRESS
-						|| input.evtype == NCTYPE_UNKNOWN))
-					action = settings_handle_key(&state, NCKEY_ENTER);
-			}
 		}
 		else
 			action = settings_handle_key(&state, key);

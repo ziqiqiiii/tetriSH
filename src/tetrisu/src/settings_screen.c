@@ -1,8 +1,5 @@
 #include "tetrisu.h"
 
-static bool	settings_focus_is_valid(const settings_state_t *state,
-			settings_focus_t focus);
-
 /**
  * @brief Starts Settings on the safe Back action.
  */
@@ -84,12 +81,13 @@ settings_action_t	settings_handle_key(settings_state_t *state, uint32_t key)
 		state->ability_info_visible = !state->ability_info_visible;
 		return (SETTINGS_ACTION_NONE);
 	}
-	if (key == NCKEY_UP || key == NCKEY_LEFT || key == NCKEY_TAB)
+	if (key == NCKEY_UP || key == NCKEY_LEFT)
 	{
 		settings_state_focus_previous(state);
 		return (SETTINGS_ACTION_NONE);
 	}
-	if (key == NCKEY_DOWN || key == NCKEY_RIGHT)
+	/* Tab advances, matching auth_form_handle_key() and the on-screen hint. */
+	if (key == NCKEY_DOWN || key == NCKEY_RIGHT || key == NCKEY_TAB)
 	{
 		settings_state_focus_next(state);
 		return (SETTINGS_ACTION_NONE);
@@ -115,27 +113,6 @@ settings_action_t	settings_handle_key(settings_state_t *state, uint32_t key)
 	if (state->focus == SETTINGS_FOCUS_CHARACTER_NEXT)
 		return (SETTINGS_ACTION_CHARACTER_NEXT);
 	return (SETTINGS_ACTION_NONE);
-}
-
-/**
- * @brief Applies pointer hover focus while rejecting unavailable actions.
- */
-void	settings_set_focus(settings_state_t *state, settings_focus_t focus)
-{
-	if (state != NULL && settings_focus_is_valid(state, focus))
-		state->focus = focus;
-}
-
-static bool	settings_focus_is_valid(const settings_state_t *state,
-	settings_focus_t focus)
-{
-	if (focus == SETTINGS_FOCUS_BACK || focus == SETTINGS_FOCUS_VOLUME_DOWN
-		|| focus == SETTINGS_FOCUS_VOLUME_UP)
-		return (true);
-	return (state != NULL && state->signed_in
-		&& (focus == SETTINGS_FOCUS_MARKETPLACE
-			|| focus == SETTINGS_FOCUS_CHARACTER_PREVIOUS
-			|| focus == SETTINGS_FOCUS_CHARACTER_NEXT));
 }
 
 /**

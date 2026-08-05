@@ -25,7 +25,24 @@
 # define SETTINGS_RED_G	111
 # define SETTINGS_RED_B	142
 
+/*
+ * draw_button() always emits "[ %-6s ]", so every control is exactly
+ * SETTINGS_BUTTON_CELLS wide and the row spans SETTINGS_BUTTON_SPAN. The
+ * minimum panel size is derived from that span plus the frame columns, so the
+ * compatibility panel is never asked to draw controls it cannot fit.
+ */
+# define SETTINGS_BUTTON_CELLS	10
+# define SETTINGS_BUTTON_GAP	1
+# define SETTINGS_BUTTON_SPAN	(4 * SETTINGS_BUTTON_CELLS \
+	+ 3 * SETTINGS_BUTTON_GAP)
+# define SETTINGS_COMPAT_MIN_COLS	(SETTINGS_BUTTON_SPAN + 3)
+# define SETTINGS_COMPAT_MIN_ROWS	14
+/* draw_controls() owns rows-5..rows-2; the two rows above carry the summary. */
+# define SETTINGS_CONTROLS_ROWS	5
+# define SETTINGS_SUMMARY_ROWS	2
+
 static bool	create_panel(render_ctx_t *ctx);
+static bool	show_too_small(render_ctx_t *ctx);
 static void	draw_settings(render_ctx_t *ctx,
 			const app_screen_view_model_t *view,
 			const settings_state_t *state);
@@ -48,8 +65,6 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 			const char *text, bool focused, bool enabled);
 static void	button_geometry(const struct ncplane *plane, int *row,
 			int *back_x, int *market_x, int *down_x, int *up_x);
-static bool	button_hit(const ncinput *input, int row, int x, int width,
-			int plane_y, int plane_x);
 static const char *renderer_mode_name(tetrisu_renderer_mode_t mode);
 static int	min_int(int first, int second);
 
@@ -67,105 +82,24 @@ bool	render_settings_show(render_ctx_t *ctx,
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
 		return (false);
 	render_menu_destroy(ctx);
-	if (!render_compatibility_mode(ctx))
-		return (render_settings_pixel_show(ctx, view, state,
-			rebuild_background));
+	if (!render_compatibility_mode(ctx)
+		&& render_settings_pixel_show(ctx, view, state, rebuild_background))
+		return (true);
+	/*
+	 * A failed bitmap composition degrades to the cell panel instead of
+	 * failing the screen: run_settings_screen() treats false as fatal, and
+	 * opening Settings must never be able to quit the client.
+	 */
 	render_screen_destroy(ctx);
 	render_settings_pixel_destroy(ctx);
 	render_background_destroy(ctx);
 	if (!create_panel(ctx))
-		return (false);
+		return (show_too_small(ctx));
 	draw_settings(ctx, view, state);
 	ncplane_move_top(ctx->screen_plane);
 	render_compatibility_badge_refresh(ctx);
 	render_notification_raise(ctx);
 	return (notcurses_render(ctx->nc) == 0);
-}
-
-/**
- * @brief Maps pointer coordinates to the same focus order as the keyboard.
- */
-bool	render_settings_hit_test(const render_ctx_t *ctx, const ncinput *input,
-	settings_focus_t *focus)
-{
-	settings_layout_t	layout;
-	int				button_index;
-	int	plane_y;
-	int	plane_x;
-	int	row;
-	int	back_x;
-	int	market_x;
-	int	down_x;
-	int	up_x;
-
-	if (ctx == NULL || input == NULL
-		|| focus == NULL)
-		return (false);
-	if (!render_compatibility_mode(ctx))
-	{
-		settings_layout_build(ctx->bg_row, ctx->bg_col, ctx->bg_rows,
-			ctx->bg_cols, ctx->cell_px_y, ctx->cell_px_x, &layout);
-		if (!settings_layout_hit_test(&layout, input->y, input->x,
-				&button_index))
-			return (false);
-		if (button_index == 0)
-			*focus = SETTINGS_FOCUS_BACK;
-		else if (button_index == 1)
-			*focus = SETTINGS_FOCUS_MARKETPLACE;
-		else if (button_index == 2)
-			*focus = SETTINGS_FOCUS_VOLUME_DOWN;
-		else if (button_index == 3)
-			*focus = SETTINGS_FOCUS_VOLUME_UP;
-		else if (button_index == 4)
-			*focus = SETTINGS_FOCUS_CHARACTER_PREVIOUS;
-		else
-			*focus = SETTINGS_FOCUS_CHARACTER_NEXT;
-		return (true);
-	}
-	if (ctx->screen_plane == NULL)
-		return (false);
-	ncplane_yx(ctx->screen_plane, &plane_y, &plane_x);
-	button_geometry(ctx->screen_plane, &row, &back_x, &market_x,
-		&down_x, &up_x);
-	if (button_hit(input, row, back_x, 8, plane_y, plane_x))
-		*focus = SETTINGS_FOCUS_BACK;
-	else if (button_hit(input, row, market_x, 10, plane_y, plane_x))
-		*focus = SETTINGS_FOCUS_MARKETPLACE;
-	else if (button_hit(input, row, down_x, 9, plane_y, plane_x))
-		*focus = SETTINGS_FOCUS_VOLUME_DOWN;
-	else if (button_hit(input, row, up_x, 9, plane_y, plane_x))
-		*focus = SETTINGS_FOCUS_VOLUME_UP;
-	else
-		return (false);
-	return (true);
-}
-
-/**
- * @brief Reports pointer presence over the live character portrait.
- */
-bool	render_settings_portrait_hit_test(const render_ctx_t *ctx,
-	const ncinput *input)
-{
-	settings_layout_t	layout;
-	settings_rect_t		*portrait;
-	int				left;
-	int				top;
-	int				right;
-	int				bottom;
-
-	if (ctx == NULL || input == NULL || render_compatibility_mode(ctx))
-		return (false);
-	settings_layout_build(ctx->bg_row, ctx->bg_col, ctx->bg_rows,
-		ctx->bg_cols, ctx->cell_px_y, ctx->cell_px_x, &layout);
-	portrait = &layout.portrait;
-	left = layout.origin_x + portrait->x / layout.cell_px_x;
-	top = layout.origin_y + portrait->y / layout.cell_px_y;
-	right = layout.origin_x + (portrait->x + portrait->width
-		+ layout.cell_px_x - 1) / layout.cell_px_x;
-	bottom = layout.origin_y + (portrait->y + portrait->height
-		+ layout.cell_px_y - 1) / layout.cell_px_y;
-	return (input->x >= left && input->x < right
-		&& input->y >= top && input->y < bottom);
 }
 
 /**
@@ -189,7 +123,8 @@ static bool	create_panel(render_ctx_t *ctx)
 	int				cols;
 
 	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
-	if (std_rows < 14 || std_cols < 32)
+	if (std_rows < SETTINGS_COMPAT_MIN_ROWS
+		|| std_cols < SETTINGS_COMPAT_MIN_COLS)
 		return (false);
 	memset(&options, 0, sizeof(options));
 	if (render_compatibility_mode(ctx))
@@ -219,6 +154,49 @@ static bool	create_panel(render_ctx_t *ctx)
 	(void)ncplane_set_base(ctx->screen_plane, " ", 0, channels);
 	ncplane_erase(ctx->screen_plane);
 	return (true);
+}
+
+/**
+ * @brief Explains that the terminal is smaller than the Settings panel needs.
+ *
+ * Shown instead of the panel so a small window degrades to a readable notice
+ * the user can resize or leave, rather than failing the screen.
+ */
+static bool	show_too_small(render_ctx_t *ctx)
+{
+	ncplane_options	options;
+	uint64_t		channels;
+	unsigned		std_rows;
+	unsigned		std_cols;
+	char			notice[64];
+
+	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
+	if (std_rows == 0 || std_cols == 0)
+		return (false);
+	memset(&options, 0, sizeof(options));
+	options.rows = (int)std_rows;
+	options.cols = (int)std_cols;
+	ctx->screen_plane = ncplane_create(ctx->std, &options);
+	if (ctx->screen_plane == NULL)
+		return (false);
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, SETTINGS_CREAM_R,
+		SETTINGS_CREAM_G, SETTINGS_CREAM_B);
+	(void)ncchannels_set_bg_rgb8(&channels, SETTINGS_BG_R, SETTINGS_BG_G,
+		SETTINGS_BG_B);
+	(void)ncplane_set_base(ctx->screen_plane, " ", 0, channels);
+	ncplane_erase(ctx->screen_plane);
+	snprintf(notice, sizeof(notice), "SETTINGS NEEDS %dx%d",
+		SETTINGS_COMPAT_MIN_COLS, SETTINGS_COMPAT_MIN_ROWS);
+	(void)ncplane_set_fg_rgb8(ctx->screen_plane, SETTINGS_GOLD_R,
+		SETTINGS_GOLD_G, SETTINGS_GOLD_B);
+	put_centered(ctx->screen_plane, 0, (int)std_cols, notice, true);
+	(void)ncplane_set_fg_rgb8(ctx->screen_plane, SETTINGS_LAVENDER_R,
+		SETTINGS_LAVENDER_G, SETTINGS_LAVENDER_B);
+	put_centered(ctx->screen_plane, 1, (int)std_cols, "RESIZE OR ESC", false);
+	ncplane_move_top(ctx->screen_plane);
+	render_notification_raise(ctx);
+	return (notcurses_render(ctx->nc) == 0);
 }
 
 static void	draw_settings(render_ctx_t *ctx,
@@ -297,8 +275,15 @@ static void	draw_profile(struct ncplane *plane,
 	int		info_x;
 	int		character_row;
 	int		theme_row;
+	int		theme_first;
+	int		content_limit;
+	int		summary_row;
 
 	info_x = cols >= 72 ? 28 : 3;
+	/* Inventory grows downwards, so it must stop before the two summary rows
+	 * and the control block rather than at fixed rows the lists can reach. */
+	content_limit = rows - SETTINGS_CONTROLS_ROWS - SETTINGS_SUMMARY_ROWS;
+	theme_row = content_limit - 1;
 	(void)ncplane_set_fg_rgb8(plane, SETTINGS_CREAM_R, SETTINGS_CREAM_G,
 		SETTINGS_CREAM_B);
 	snprintf(line, sizeof(line), "PROFILE PORTRAIT: %s",
@@ -313,67 +298,84 @@ static void	draw_profile(struct ncplane *plane,
 	put_line(plane, 6, info_x, cols - info_x - 2, "EQUIPPED THEME: ", false);
 	put_line(plane, 6, info_x + 16, cols - info_x - 18,
 		settings->profile.theme, true);
-	(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
-		SETTINGS_PINK_B);
-	put_line(plane, 8, 3, cols - 6, "OWNED CHARACTERS", true);
-	character_row = 9;
-	index = 0;
-	while (index < settings->characters.count && character_row < rows - 6)
+	if (8 < content_limit)
 	{
-		if (settings->characters.items[index].owned)
+		(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
+			SETTINGS_PINK_B);
+		put_line(plane, 8, 3, cols - 6, "OWNED CHARACTERS", true);
+		character_row = 9;
+		index = 0;
+		while (index < settings->characters.count
+			&& character_row < content_limit)
 		{
-			snprintf(line, sizeof(line), "%s%s",
-				settings->characters.items[index].equipped ? "> " : "  ",
-				settings->characters.items[index].name);
-			put_line(plane, character_row, 4, cols - 8, line,
-				settings->characters.items[index].equipped);
+			if (settings->characters.items[index].owned)
+			{
+				snprintf(line, sizeof(line), "%s%s",
+					settings->characters.items[index].equipped ? "> " : "  ",
+					settings->characters.items[index].name);
+				put_line(plane, character_row, 4, cols - 8, line,
+					settings->characters.items[index].equipped);
+				character_row++;
+			}
+			index++;
+		}
+		if (character_row == 9 && character_row < content_limit)
+		{
+			put_line(plane, character_row, 4, cols - 8,
+				"No owned characters", false);
 			character_row++;
 		}
-		index++;
-	}
-	if (character_row == 9)
-	{
-		put_line(plane, character_row, 4, cols - 8,
-			"No owned characters", false);
-		character_row++;
-	}
-	theme_row = character_row + 1;
-	(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
-		SETTINGS_PINK_B);
-	put_line(plane, theme_row, 3, cols - 6, "OWNED THEMES", true);
-	theme_row++;
-	index = 0;
-	while (index < settings->themes.count && theme_row < rows - 5)
-	{
-		if (settings->themes.items[index].owned)
+		theme_row = character_row + 1;
+		if (theme_row < content_limit)
 		{
-			snprintf(line, sizeof(line), "%s%s",
-				settings->themes.items[index].equipped ? "> " : "  ",
-				settings->themes.items[index].name);
-			put_line(plane, theme_row, 4, cols - 8, line,
-				settings->themes.items[index].equipped);
+			(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
+				SETTINGS_PINK_B);
+			put_line(plane, theme_row, 3, cols - 6, "OWNED THEMES", true);
 			theme_row++;
 		}
-		index++;
+		theme_first = theme_row;
+		index = 0;
+		while (index < settings->themes.count && theme_row < content_limit)
+		{
+			if (settings->themes.items[index].owned)
+			{
+				snprintf(line, sizeof(line), "%s%s",
+					settings->themes.items[index].equipped ? "> " : "  ",
+					settings->themes.items[index].name);
+				put_line(plane, theme_row, 4, cols - 8, line,
+					settings->themes.items[index].equipped);
+				theme_row++;
+			}
+			index++;
+		}
+		if (theme_row == theme_first && theme_row < content_limit)
+		{
+			put_line(plane, theme_row, 4, cols - 8, "No owned themes", false);
+			theme_row++;
+		}
 	}
-	if (theme_row == character_row + 2)
-		put_line(plane, theme_row, 4, cols - 8, "No owned themes", false);
+	summary_row = theme_row + 1;
+	if (summary_row > content_limit)
+		summary_row = content_limit;
 	(void)ncplane_set_fg_rgb8(plane, SETTINGS_GREEN_R, SETTINGS_GREEN_G,
 		SETTINGS_GREEN_B);
 	snprintf(line, sizeof(line), "WALLET POINTS: %d    SCORE: %" PRIu64
 		"    RANK: #%d", settings->profile.wallet_points,
 		settings->profile.score, settings->profile.rank);
-	put_line(plane, rows >= 24 ? 17 : rows - 7, 3, cols - 6, line, true);
+	put_line(plane, summary_row, 3, cols - 6, line, true);
 	snprintf(line, sizeof(line), "MUSIC VOLUME: %d%%    RENDERER: %s",
 		settings->music_volume * 100 / AUDIO_MAX_VOLUME,
 		renderer_mode_name(settings->renderer_mode));
-	put_line(plane, rows >= 24 ? 18 : rows - 6, 3, cols - 6, line, false);
+	put_line(plane, summary_row + 1, 3, cols - 6, line, false);
 }
 
 static void	draw_offline(struct ncplane *plane,
 	const app_settings_view_model_t *settings, int rows, int cols)
 {
 	char	line[APP_TEXT_MAX + 64];
+	int		last_row;
+	int		step;
+	int		info_row;
 
 	(void)ncplane_set_fg_rgb8(plane, SETTINGS_CREAM_R, SETTINGS_CREAM_G,
 		SETTINGS_CREAM_B);
@@ -381,16 +383,28 @@ static void	draw_offline(struct ncplane *plane,
 	put_line(plane, 7, 3, cols - 6,
 		"Username, wallet, score, rank, and inventory are unavailable offline.",
 		false);
+	/* Space the three local-control lines only while they still clear the
+	 * fixed text above and the control block below; drop what cannot fit. */
+	last_row = rows - SETTINGS_CONTROLS_ROWS - 1;
+	step = rows >= 24 ? 2 : 1;
+	info_row = last_row - step * 2;
+	if (info_row > 11)
+		info_row = 11;
+	if (info_row < 8)
+		info_row = 8;
 	(void)ncplane_set_fg_rgb8(plane, SETTINGS_GREEN_R, SETTINGS_GREEN_G,
 		SETTINGS_GREEN_B);
 	snprintf(line, sizeof(line), "MUSIC VOLUME: %d%%    RENDERER: %s",
 		settings->music_volume * 100 / AUDIO_MAX_VOLUME,
 		renderer_mode_name(settings->renderer_mode));
-	put_line(plane, rows >= 24 ? 11 : rows - 7, 3, cols - 6, line, true);
-	put_line(plane, rows >= 24 ? 13 : rows - 6, 3, cols - 6,
-		settings->local_status, false);
-	put_line(plane, rows >= 24 ? 15 : rows - 5, 3, cols - 6,
-		"Use +/- to adjust music volume for this run.", false);
+	if (info_row <= last_row)
+		put_line(plane, info_row, 3, cols - 6, line, true);
+	if (info_row + step <= last_row)
+		put_line(plane, info_row + step, 3, cols - 6,
+			settings->local_status, false);
+	if (info_row + step * 2 <= last_row)
+		put_line(plane, info_row + step * 2, 3, cols - 6,
+			"Use +/- to adjust music volume for this run.", false);
 }
 
 static void	draw_ability_compat(struct ncplane *plane,
@@ -580,26 +594,17 @@ static void	button_geometry(const struct ncplane *plane, int *row,
 	int *back_x, int *market_x, int *down_x, int *up_x)
 {
 	int	cols;
-	int	total;
 	int	start;
 
 	cols = (int)ncplane_dim_x(plane);
 	*row = (int)ncplane_dim_y(plane) - 4;
-	total = 8 + 2 + 10 + 2 + 9 + 2 + 9;
-	start = (cols - total) / 2;
+	start = (cols - SETTINGS_BUTTON_SPAN) / 2;
 	if (start < 1)
 		start = 1;
 	*back_x = start;
-	*market_x = *back_x + 10;
-	*down_x = *market_x + 12;
-	*up_x = *down_x + 11;
-}
-
-static bool	button_hit(const ncinput *input, int row, int x, int width,
-	int plane_y, int plane_x)
-{
-	return (input->y == plane_y + row && input->x >= plane_x + x
-		&& input->x < plane_x + x + width);
+	*market_x = *back_x + SETTINGS_BUTTON_CELLS + SETTINGS_BUTTON_GAP;
+	*down_x = *market_x + SETTINGS_BUTTON_CELLS + SETTINGS_BUTTON_GAP;
+	*up_x = *down_x + SETTINGS_BUTTON_CELLS + SETTINGS_BUTTON_GAP;
 }
 
 static const char *renderer_mode_name(tetrisu_renderer_mode_t mode)

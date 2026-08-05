@@ -1246,14 +1246,11 @@ void			settings_state_focus_next(settings_state_t *state);
 void			settings_state_focus_previous(settings_state_t *state);
 settings_action_t	settings_handle_key(settings_state_t *state,
 					uint32_t key);
-void			settings_set_focus(settings_state_t *state, settings_focus_t focus);
 bool			settings_select_character(app_settings_view_model_t *settings,
 					int direction);
 void			settings_layout_build(int origin_y, int origin_x, int rows,
 					int cols, int cell_px_y, int cell_px_x,
 					settings_layout_t *layout);
-bool			settings_layout_hit_test(const settings_layout_t *layout,
-					int terminal_y, int terminal_x, int *button_index);
 
 /* RENDER_LEADERBOARD.C */
 bool			render_leaderboard_show(render_ctx_t *ctx,
@@ -1269,10 +1266,6 @@ bool			render_settings_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view,
 					const settings_state_t *state,
 					bool rebuild_background);
-bool			render_settings_hit_test(const render_ctx_t *ctx,
-					const ncinput *input, settings_focus_t *focus);
-bool			render_settings_portrait_hit_test(const render_ctx_t *ctx,
-					const ncinput *input);
 void			render_settings_destroy(render_ctx_t *ctx);
 bool			render_settings_pixel_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view,
