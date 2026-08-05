@@ -189,7 +189,7 @@ static app_provider_result_t	fixture_load_profile(void *userdata,
 	view->signed_in = true;
 	snprintf(view->username, sizeof(view->username), "PreviewPlayer");
 	snprintf(view->character, sizeof(view->character), "Mirurun");
-	snprintf(view->theme, sizeof(view->theme), "Classic Temple");
+	snprintf(view->theme, sizeof(view->theme), "Classic");
 	snprintf(view->portrait_asset, sizeof(view->portrait_asset),
 		DEFAULT_MIRURUN_PATH);
 	view->score = 125400;
@@ -313,19 +313,42 @@ static app_provider_result_t	fixture_load_catalogue(void *userdata,
 	}
 	else
 	{
-		view->count = 6;
-		set_catalogue_item(&view->items[0], "temple", "Classic Temple", 0,
+		view->count = SETTINGS_THEME_SLOTS;
+		set_catalogue_item(&view->items[0], "classic", "Classic", 0,
 			true, true);
-		set_catalogue_item(&view->items[1], "neon", "Neon Arcade", 1200,
+		snprintf(view->items[0].portrait_asset,
+			sizeof(view->items[0].portrait_asset), "%s",
+			SETTINGS_THEME_CLASSIC_PREVIEW_PATH);
+		set_catalogue_item(&view->items[1], "design_ai_university",
+			"Design AI University", 0, true, false);
+		snprintf(view->items[1].portrait_asset,
+			sizeof(view->items[1].portrait_asset), "%s",
+			SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH);
+		set_catalogue_item(&view->items[2], "snowman",
+			"Do You Wanna Build a Snowman", 0, true, false);
+		snprintf(view->items[2].portrait_asset,
+			sizeof(view->items[2].portrait_asset), "%s",
+			SETTINGS_THEME_SNOWMAN_PREVIEW_PATH);
+		set_catalogue_item(&view->items[3], "haaland", "Haaland", 0,
 			true, false);
-		set_catalogue_item(&view->items[2], "moon", "Moon Shrine", 2200,
+		snprintf(view->items[3].portrait_asset,
+			sizeof(view->items[3].portrait_asset), "%s",
+			SETTINGS_THEME_HAALAND_PREVIEW_PATH);
+		set_catalogue_item(&view->items[4], "al_merqaedes",
+			"Al Merqaedes F1 Team", 0, true, false);
+		snprintf(view->items[4].portrait_asset,
+			sizeof(view->items[4].portrait_asset), "%s",
+			SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH);
+		set_catalogue_item(&view->items[5], "nuclear_ghandi",
+			"Nuclear Ghandi", 0, true, false);
+		snprintf(view->items[5].portrait_asset,
+			sizeof(view->items[5].portrait_asset), "%s",
+			SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH);
+		set_catalogue_item(&view->items[6], "clauding", "Clauding", 0,
 			true, false);
-		set_catalogue_item(&view->items[3], "claude", "Claude-ing", 0,
-			true, false);
-		set_catalogue_item(&view->items[4], "haoland", "Haoland", 0,
-			true, false);
-		set_catalogue_item(&view->items[5], "snowman", "Build a Snowman", 0,
-			true, false);
+		snprintf(view->items[6].portrait_asset,
+			sizeof(view->items[6].portrait_asset), "%s",
+			SETTINGS_THEME_CLAUDING_PREVIEW_PATH);
 	}
 	return (APP_PROVIDER_OK);
 }

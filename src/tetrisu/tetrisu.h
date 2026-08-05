@@ -44,6 +44,8 @@
 
 # define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
 # define SETTINGS_BACKGROUND_PATH \
+	ASSET_DIR "/settings_profile_background_v2.png"
+# define SETTINGS_BACKGROUND_LEGACY_PATH \
 	ASSET_DIR "/settings_profile_background_v1.png"
 # define AUTH_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/auth_screen.png"
@@ -71,6 +73,20 @@
 	ASSET_DIR "/default_theme/character_princess.png"
 # define WOLFMAN_PORTRAIT_PATH \
 	ASSET_DIR "/default_theme/character_wolfman.png"
+# define SETTINGS_THEME_CLASSIC_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_classic.png"
+# define SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_design_ai_university.png"
+# define SETTINGS_THEME_SNOWMAN_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_snowman.png"
+# define SETTINGS_THEME_HAALAND_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_haaland.png"
+# define SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_al_merqaedes.png"
+# define SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_nuclear_ghandi.png"
+# define SETTINGS_THEME_CLAUDING_PREVIEW_PATH \
+	ASSET_DIR "/settings_previews/theme_clauding.png"
 # define VOLUME_NOTIFICATION_PATH \
 	ASSET_DIR "/default_theme/volume_notification.png"
 # define ABILITY_POPOVER_PATH \
@@ -160,9 +176,9 @@
  * the focus arithmetic in settings_screen.c and the slot arithmetic in
  * draw_inventory() must agree on the same column count.
  */
-# define SETTINGS_INVENTORY_COLUMNS	2
+# define SETTINGS_INVENTORY_COLUMNS	4
 # define SETTINGS_CHARACTER_SLOTS	4
-# define SETTINGS_THEME_SLOTS	6
+# define SETTINGS_THEME_SLOTS	7
 # define SETTINGS_REF_PORTRAIT_X	270
 # define SETTINGS_REF_PORTRAIT_Y	145
 # define SETTINGS_REF_PORTRAIT_WIDTH	240
@@ -204,17 +220,32 @@
 
 /* Inventory slot geometry, shared by the bitmap and cell inventory drawing. */
 # define SETTINGS_REF_SLOT_INSET	10
-# define SETTINGS_REF_SLOT_FIRST_Y	51
-# define SETTINGS_REF_SLOT_STEP_Y	38
-/* Reserved column for the equipped star, so names never shift when it moves. */
-# define SETTINGS_REF_SLOT_TEXT_X	22
-# define SETTINGS_REF_SLOT_GLYPH	13
-# define SETTINGS_REF_SLOT_PAD_X	8
-# define SETTINGS_REF_SLOT_PAD_Y	6
+# define SETTINGS_REF_CHARACTER_SLOT_FIRST_Y	38
+# define SETTINGS_REF_CHARACTER_SLOT_STEP_Y	108
+# define SETTINGS_REF_CHARACTER_SLOT_THUMB_WIDTH	74
+# define SETTINGS_REF_CHARACTER_SLOT_THUMB_HEIGHT	58
+# define SETTINGS_REF_CHARACTER_SLOT_NAME_Y	63
+# define SETTINGS_REF_THEME_SLOT_FIRST_Y	38
+# define SETTINGS_REF_THEME_SLOT_STEP_Y	48
+# define SETTINGS_REF_THEME_SLOT_THUMB_WIDTH	74
+# define SETTINGS_REF_THEME_SLOT_THUMB_HEIGHT	30
+# define SETTINGS_REF_THEME_SLOT_NAME_Y	32
+# define SETTINGS_REF_SLOT_GLYPH	9
+# define SETTINGS_REF_INVENTORY_TITLE_Y	3
+# define SETTINGS_REF_INVENTORY_TITLE_GLYPH	12
+# define SETTINGS_REF_INVENTORY_DETAIL_Y	18
+# define SETTINGS_REF_INVENTORY_DETAIL_GLYPH	11
+# define SETTINGS_REF_INVENTORY_HINT_GLYPH	9
+# define SETTINGS_REF_SLOT_PAD_X	2
+# define SETTINGS_REF_SLOT_PAD_Y	3
 # define SETTINGS_REF_BUTTON_BACK_X	265
 # define SETTINGS_REF_BUTTON_MARKET_X	500
 # define SETTINGS_REF_BUTTON_VOLUME_DOWN_X	745
 # define SETTINGS_REF_BUTTON_VOLUME_UP_X	985
+# define SETTINGS_REF_BUTTON_BACK_CENTER_X	354
+# define SETTINGS_REF_BUTTON_MARKET_CENTER_X	596
+# define SETTINGS_REF_BUTTON_VOLUME_DOWN_CENTER_X	846
+# define SETTINGS_REF_BUTTON_VOLUME_UP_CENTER_X	1082
 # define SETTINGS_REF_BUTTON_Y	875
 # define SETTINGS_REF_BUTTON_WIDTH	190
 # define SETTINGS_REF_BUTTON_HEIGHT	135
@@ -834,6 +865,10 @@ typedef struct
 	 */
 	struct ncvisual		*settings_portrait_visual;
 	char				settings_portrait_source[APP_ASSET_PATH_MAX];
+	struct ncvisual		*settings_thumbnail_visuals[
+			APP_CATALOGUE_MAX_ITEMS * 2];
+	char				settings_thumbnail_sources[
+			APP_CATALOGUE_MAX_ITEMS * 2][APP_ASSET_PATH_MAX];
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];

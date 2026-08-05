@@ -26,8 +26,26 @@ int	main(void)
 
 static void	test_fixture_settings_model(void)
 {
+	static const char	*character_names[] = {
+		"Mirurun", "Halloween", "Princess", "Wolf-man"
+	};
+	static const char	*theme_names[] = {
+		"Classic", "Design AI University",
+		"Do You Wanna Build a Snowman", "Haaland",
+		"Al Merqaedes F1 Team", "Nuclear Ghandi", "Clauding"
+	};
+	static const char	*theme_preview_paths[] = {
+		SETTINGS_THEME_CLASSIC_PREVIEW_PATH,
+		SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH,
+		SETTINGS_THEME_SNOWMAN_PREVIEW_PATH,
+		SETTINGS_THEME_HAALAND_PREVIEW_PATH,
+		SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH,
+		SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH,
+		SETTINGS_THEME_CLAUDING_PREVIEW_PATH
+	};
 	app_data_provider_t	provider;
 	app_screen_view_model_t	view;
+	int				index;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
@@ -38,17 +56,36 @@ static void	test_fixture_settings_model(void)
 	assert(!view.data.settings.offline);
 	assert(strcmp(view.data.settings.profile.username, "PreviewPlayer") == 0);
 	assert(strcmp(view.data.settings.profile.character, "Mirurun") == 0);
-	assert(strcmp(view.data.settings.profile.theme, "Classic Temple") == 0);
+	assert(strcmp(view.data.settings.profile.theme, "Classic") == 0);
 	assert(strcmp(view.data.settings.profile.portrait_asset,
 		DEFAULT_MIRURUN_PATH) == 0);
 	assert(view.data.settings.characters.count == 4);
-	assert(view.data.settings.themes.count == 6);
+	assert(view.data.settings.themes.count == 7);
+	index = 0;
+	while (index < view.data.settings.characters.count)
+	{
+		assert(strcmp(view.data.settings.characters.items[index].name,
+			character_names[index]) == 0);
+		assert(view.data.settings.characters.items[index].owned);
+		index++;
+	}
+	index = 0;
+	while (index < view.data.settings.themes.count)
+	{
+		assert(strcmp(view.data.settings.themes.items[index].name,
+			theme_names[index]) == 0);
+		/* Theme thumbnails use the authored canonical preview paths. */
+		assert(view.data.settings.themes.items[index].portrait_asset[0] != '\0');
+		assert(strcmp(view.data.settings.themes.items[index].portrait_asset,
+			theme_preview_paths[index]) == 0);
+		assert(strstr(view.data.settings.themes.items[index].portrait_asset,
+			"settings_previews/") != NULL);
+		assert(view.data.settings.themes.items[index].owned);
+		index++;
+	}
 	assert(view.data.settings.characters.items[0].owned);
 	assert(view.data.settings.characters.items[0].equipped);
 	assert(view.data.settings.themes.items[1].owned);
-	assert(strcmp(view.data.settings.themes.items[5].name,
-		"Build a Snowman") == 0);
-	assert(view.data.settings.themes.items[5].owned);
 	assert(strcmp(view.data.settings.characters.items[1].name,
 		"Halloween") == 0);
 	assert(strcmp(view.data.settings.characters.items[1].portrait_asset,
@@ -97,7 +134,7 @@ static void	test_settings_focus_and_actions(void)
 	settings_state_t	state;
 	app_navigation_t	navigation;
 
-	settings_state_init(&state, true, 4, 6);
+	settings_state_init(&state, true, 4, 7);
 	assert(state.section == SETTINGS_SECTION_CONTROLS);
 	assert(state.focus == SETTINGS_FOCUS_BACK);
 	assert(settings_handle_key(&state, NCKEY_ENTER) == SETTINGS_ACTION_BACK);
@@ -227,52 +264,63 @@ static void	test_character_selection(void)
 	printf("PASS test_character_selection\n");
 }
 
-/*
- * The fixture owns four characters and six themes, so both panels are full
- * 2-column grids: characters are two rows, themes three.
- */
+/* The fixture uses four columns: one full character row and a partial theme row. */
 static void	test_inventory_grid_navigation(void)
 {
 	settings_state_t	state;
+	int				index;
 
-	settings_state_init(&state, true, 4, 6);
-	assert(settings_slot_rows(4) == 2 && settings_slot_rows(6) == 3);
+	settings_state_init(&state, true, 4, 7);
+	assert(settings_slot_rows(4) == 1 && settings_slot_rows(7) == 2);
 	/* Up from the control row lands in the characters panel. */
 	(void)settings_handle_key(&state, NCKEY_UP);
 	assert(state.section == SETTINGS_SECTION_CHARACTERS);
-	assert(state.character_slot == 2);
-	(void)settings_handle_key(&state, NCKEY_UP);
 	assert(state.character_slot == 0);
 	(void)settings_handle_key(&state, NCKEY_UP);
 	assert(state.character_slot == 0);
-	/* Right crosses the top row into the themes panel on the second step. */
-	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	/* Walk across the four-character row, then cross into themes. */
+	index = 0;
+	while (index < 3)
+	{
+		(void)settings_handle_key(&state, NCKEY_RIGHT);
+		index++;
+	}
 	assert(state.section == SETTINGS_SECTION_CHARACTERS);
-	assert(state.character_slot == 1);
+	assert(state.character_slot == 3);
 	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	assert(state.section == SETTINGS_SECTION_THEMES);
 	assert(state.theme_slot == 0);
-	(void)settings_handle_key(&state, NCKEY_RIGHT);
-	assert(state.theme_slot == 1);
-	(void)settings_handle_key(&state, NCKEY_RIGHT);
-	assert(state.theme_slot == 1);
-	/* Left from the theme column zero returns to the characters panel. */
-	(void)settings_handle_key(&state, NCKEY_LEFT);
-	assert(state.theme_slot == 0);
+	/* Left from theme column zero returns to the rightmost character. */
 	(void)settings_handle_key(&state, NCKEY_LEFT);
 	assert(state.section == SETTINGS_SECTION_CHARACTERS);
-	assert(state.character_slot == 1);
-	/* Down past the last inventory row falls through to the controls. */
-	(void)settings_handle_key(&state, NCKEY_DOWN);
 	assert(state.character_slot == 3);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(state.theme_slot == 0);
+	/* Column three entering the partial second row clamps to its final slot. */
+	index = 0;
+	while (index < 3)
+	{
+		(void)settings_handle_key(&state, NCKEY_RIGHT);
+		index++;
+	}
+	assert(state.theme_slot == 3);
+	(void)settings_handle_key(&state, NCKEY_DOWN);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(state.theme_slot == 6);
+	/* Down from the partial final row exits to the control strip. */
 	(void)settings_handle_key(&state, NCKEY_DOWN);
 	assert(state.section == SETTINGS_SECTION_CONTROLS);
 	/* Enter reports an equip only while an inventory panel holds focus. */
 	(void)settings_handle_key(&state, NCKEY_UP);
 	assert(settings_handle_key(&state, NCKEY_ENTER)
 		== SETTINGS_ACTION_EQUIP_CHARACTER);
-	(void)settings_handle_key(&state, NCKEY_RIGHT);
-	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	index = 0;
+	while (index < 4)
+	{
+		(void)settings_handle_key(&state, NCKEY_RIGHT);
+		index++;
+	}
 	assert(state.section == SETTINGS_SECTION_THEMES);
 	assert(settings_handle_key(&state, NCKEY_ENTER)
 		== SETTINGS_ACTION_EQUIP_THEME);
@@ -290,16 +338,16 @@ static void	test_slot_equipping(void)
 	assert(settings_owned_count(&view.data.settings.characters,
 			SETTINGS_CHARACTER_SLOTS) == 4);
 	assert(settings_owned_count(&view.data.settings.themes,
-			SETTINGS_THEME_SLOTS) == 6);
+			SETTINGS_THEME_SLOTS) == 7);
 	/* Re-equipping the current slot reports no change, so nothing repaints. */
 	assert(!settings_equip_character_slot(&view.data.settings, 0));
 	assert(settings_equip_character_slot(&view.data.settings, 3));
 	assert(strcmp(view.data.settings.profile.character, "Wolf-man") == 0);
 	assert(view.data.settings.characters.items[3].equipped);
 	assert(!view.data.settings.characters.items[0].equipped);
-	assert(settings_equip_theme_slot(&view.data.settings, 5));
-	assert(strcmp(view.data.settings.profile.theme, "Build a Snowman") == 0);
-	assert(view.data.settings.themes.items[5].equipped);
+	assert(settings_equip_theme_slot(&view.data.settings, 6));
+	assert(strcmp(view.data.settings.profile.theme, "Clauding") == 0);
+	assert(view.data.settings.themes.items[6].equipped);
 	assert(!view.data.settings.themes.items[0].equipped);
 	/* Slots past what the panels draw are rejected rather than clamped. */
 	assert(!settings_equip_theme_slot(&view.data.settings, 99));
@@ -320,7 +368,7 @@ static void	test_powers_card_follows_focus(void)
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
 		false, &view) == APP_PROVIDER_OK);
-	settings_state_init(&state, true, 4, 6);
+	settings_state_init(&state, true, 4, 7);
 	/* Controls focused: hidden until I asks for it, and shows the equipped. */
 	assert(!settings_card_visible(&state));
 	card = settings_card_character(&view.data.settings, &state);
@@ -332,7 +380,13 @@ static void	test_powers_card_follows_focus(void)
 	(void)settings_handle_key(&state, NCKEY_UP);
 	assert(state.section == SETTINGS_SECTION_CHARACTERS);
 	assert(settings_card_visible(&state));
-	assert(state.character_slot == 2);
+	assert(state.character_slot == 0);
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Mirurun") == 0);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Halloween") == 0);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	card = settings_card_character(&view.data.settings, &state);
 	assert(card != NULL && strcmp(card->name, "Princess") == 0);
 	(void)settings_handle_key(&state, NCKEY_RIGHT);

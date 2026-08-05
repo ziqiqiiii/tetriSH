@@ -78,10 +78,13 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Signed-in Settings navigates as a grid: the two inventory panels sit above
   the control row, arrows step through them, and `Enter` equips the focused
   character or theme. `[` / `]` remain a shortcut for cycling characters.
-- Gold means one thing on this screen: the keyboard focus is here. A panel the
-  focus has left draws entirely in cream, the equipped entry is marked with a
-  star in a reserved column, and every label in a panel shares one glyph size
-  taken from its longest entry, so nothing resizes or shifts as focus moves.
+- Inventory slots render catalogue thumbnails from their asset paths. The
+  character inventory is a four-column, one-row grid; the theme inventory is a
+  four-column, two-row grid, with the seventh theme occupying the partial
+  final row.
+- Inventory focus uses a centred gold-outlined plate and label; equipped state
+  is shown independently by a star. The focused item's full name appears in a
+  compact panel header, while narrow theme slots use short fitted captions.
 - Moving the focus onto a character opens its powers card automatically, the
   way the Solo ability meters describe themselves. `I` still pins the card for
   the equipped character from anywhere. The four canonical crystal powers are
@@ -90,16 +93,18 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Settings is keyboard-only: it disables pointer reporting on entry, so no
   hover or click reaches it, and the screens that use the pointer turn it back
   on when they are entered
-- Settings caches its composed static layer — backdrop, profile, portrait, and
-  stats — so a focus change never re-reads the portrait or redraws the text
-  above it. The movable tier cuts region planes from that layer; the stationary
-  tier stamps a full frame from it, because a Sixel plane laid over another
-  sprixel is re-emitted whenever the plane beneath it is damaged and the two
-  then blank each other out. Queued key repeats are drained into the state
-  before the repaint, so a held arrow cannot outrun the screen
+- Settings caches its composed static layer — the v2 backdrop, profile,
+  portrait, and stats — so a focus change never re-reads the portrait or
+  redraws the text above it. The movable tier cuts region planes from that
+  layer; the stationary tier stamps a full frame from it, because a Sixel
+  plane laid over another sprixel is re-emitted whenever the plane beneath it
+  is damaged and the two then blank each other out. Queued key repeats are
+  drained into the state before the repaint, so a held arrow cannot outrun the
+  screen.
 - Settings keeps the large authored frame cached and repaints only compact
-  controls, character arrows, ability card, or volume value when they change.
-  The theme inventory uses a two-column by three-row layout for six full names.
+  controls, inventory focus/equipped overlays, ability card, or volume value
+  when they change. Character and theme thumbnails are cached independently
+  by their catalogue asset path.
 - Offline Settings keeps only current-run local controls/status and never
   invents account identity, inventory, wallet, score, or rank
 - `+` / `-` drive one volume. Menu and gameplay effects are scaled by it
@@ -331,6 +336,15 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `DEFAULT_HUD_PATH` | Transparent 512 x 384 Solo HUD/frame |
 | `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
 | `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
+| `SETTINGS_BACKGROUND_PATH` | Cached 1448 x 1086 Settings/Profile backdrop (`settings_profile_background_v2.png`) |
+| `HALLOWEEN_PORTRAIT_PATH`, `PRINCESS_PORTRAIT_PATH`, `WOLFMAN_PORTRAIT_PATH` | Character inventory thumbnails; Mirurun uses `DEFAULT_MIRURUN_PATH` |
+| `SETTINGS_THEME_CLASSIC_PREVIEW_PATH` | `settings_previews/theme_classic.png` (192 x 192 Classic thumbnail) |
+| `SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH` | `settings_previews/theme_design_ai_university.png` (192 x 192 Design AI University thumbnail) |
+| `SETTINGS_THEME_SNOWMAN_PREVIEW_PATH` | `settings_previews/theme_snowman.png` (192 x 192 Do You Wanna Build a Snowman thumbnail) |
+| `SETTINGS_THEME_HAALAND_PREVIEW_PATH` | `settings_previews/theme_haaland.png` (192 x 192 Haaland thumbnail) |
+| `SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH` | `settings_previews/theme_al_merqaedes.png` (192 x 192 Al Merqaedes F1 Team thumbnail) |
+| `SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH` | `settings_previews/theme_nuclear_ghandi.png` (192 x 192 Nuclear Ghandi thumbnail) |
+| `SETTINGS_THEME_CLAUDING_PREVIEW_PATH` | `settings_previews/theme_clauding.png` (192 x 192 Clauding thumbnail) |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
@@ -381,6 +395,8 @@ Modules (each a `.c` under `src/`):
 | `app_state.c` | Validate the complete screen graph, Back routes, menu state, and labels |
 | `app_provider.c` | Typed screen models and marked local fixture provider |
 | `settings_screen.c` | Pure Settings focus traversal and semantic actions |
+| `render_settings.c` | Live profile/inventory/settings panel; chooses the pixel renderer or self-contained cell fallback |
+| `render_settings_font.c` | Composes the cached v2 Settings frame, catalogue thumbnails, and focus/equipped overlays |
 | `leaderboard_screen.c` | Pure leaderboard focus and action handling |
 | `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
@@ -389,7 +405,6 @@ Modules (each a `.c` under `src/`):
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `render_auth.c` | Pixel-art login/sign-up frame and terminal-only fallback |
 | `render_screen.c` | Shared native-terminal shell and plane cleanup |
-| `render_settings.c` | Live profile/inventory/settings panel, portrait, and controls |
 | `render_leaderboard.c` | Homepage-backed podium/table and cell compatibility renderer |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
@@ -451,13 +466,16 @@ make test
 
 The Settings and preview-auth tests are included in that command. For a
 manual signed-in Settings check, run the preview command above, choose
-`PREVIEW` on Login, select Settings on Home, walk the arrows from the control
-row up into both inventory panels and back, equip a character and a theme with
-`Enter`, hold an arrow down to confirm focus tracks the last key rather than
-lagging behind it, press `I`, confirm the mouse does nothing there, resize the
-terminal, and open Marketplace before pressing Back. For offline separation, omit the environment variable, choose Play
-Offline, open Settings, and confirm that only local status, renderer mode, and
-music volume appear.
+`PREVIEW` on Login, and select Settings on Home. Confirm the v2 profile
+backdrop and portrait appear, each inventory slot shows its thumbnail, and the
+character panel is one row of four while the theme panel is two rows of four
+with a three-slot final row. Move focus between slots and verify the focused
+selection plate/gold label is distinct from the equipped star, equip a
+character and a theme with `Enter`, hold an arrow to confirm focus tracks the
+last key, press `I`, confirm the mouse does nothing there, resize the terminal,
+and open Marketplace before pressing Back. For offline separation, omit the
+environment variable, choose Play Offline, open Settings, and confirm that
+only local status, renderer mode, and music volume appear.
 
 The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
 strict component build without allowing dependency installation with:

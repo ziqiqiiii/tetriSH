@@ -10,6 +10,7 @@ static void	move_vertical(settings_state_t *state, int step);
 static void	move_control(settings_state_t *state, int step);
 static settings_action_t	activate_focus(const settings_state_t *state);
 static int	clamp_int(int value, int low, int high);
+static int	min_int(int left, int right);
 
 /**
  * @brief Starts Settings on the safe Back action.
@@ -272,6 +273,11 @@ static void	move_vertical(settings_state_t *state, int step)
 {
 	int	slots;
 	int	*slot;
+	int	row;
+	int	column;
+	int	next_row;
+	int	next_first;
+	int	next_last;
 
 	if (state->section == SETTINGS_SECTION_CONTROLS)
 	{
@@ -284,12 +290,25 @@ static void	move_vertical(settings_state_t *state, int step)
 	slot = state->section == SETTINGS_SECTION_CHARACTERS
 		? &state->character_slot : &state->theme_slot;
 	slots = section_slots(state, state->section);
-	if (step > 0 && *slot + SETTINGS_INVENTORY_COLUMNS < slots)
-		*slot += SETTINGS_INVENTORY_COLUMNS;
-	else if (step > 0)
-		state->section = SETTINGS_SECTION_CONTROLS;
-	else if (*slot >= SETTINGS_INVENTORY_COLUMNS)
+	row = *slot / SETTINGS_INVENTORY_COLUMNS;
+	column = *slot % SETTINGS_INVENTORY_COLUMNS;
+	if (step > 0)
+	{
+		next_row = row + 1;
+		next_first = next_row * SETTINGS_INVENTORY_COLUMNS;
+		if (next_first >= slots)
+		{
+			state->section = SETTINGS_SECTION_CONTROLS;
+			return ;
+		}
+		next_last = min_int(slots - 1, next_first
+			+ SETTINGS_INVENTORY_COLUMNS - 1);
+		*slot = min_int(next_first + column, next_last);
+	}
+	else if (row > 0)
+	{
 		*slot -= SETTINGS_INVENTORY_COLUMNS;
+	}
 }
 
 /**
@@ -358,6 +377,11 @@ static int	clamp_int(int value, int low, int high)
 	if (value > high)
 		return (high);
 	return (value);
+}
+
+static int	min_int(int left, int right)
+{
+	return (left < right ? left : right);
 }
 
 /**

@@ -56,16 +56,20 @@ static void	draw_profile(uint32_t *pixels, int width, int height,
 static void	draw_inventory(uint32_t *pixels, int width, int height,
 		const app_catalogue_view_model_t *catalogue,
 		const settings_state_t *state, const settings_layout_t *layout,
-		struct ncvisual *font, bool characters);
+		struct ncvisual *font, bool characters, render_ctx_t *ctx);
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, int ref_x_value, int ref_y_value,
 		int ref_width, int ref_height, color_t tint, unsigned alpha);
-static int	panel_glyph_size(const app_catalogue_view_model_t *catalogue,
-		const settings_layout_t *layout, int limit, int ref_width,
-		int *spacing);
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, int ref_label_x, int ref_label_y,
-		int ref_slot_width);
+		int ref_slot_width, int ref_slot_height);
+static const char	*inventory_slot_label(
+		const app_catalogue_item_view_model_t *item, bool characters);
+static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
+		const settings_layout_t *layout, struct ncvisual *font,
+		render_ctx_t *ctx, int cache_slot,
+		const char *path, int ref_x_value, int ref_y_value, int ref_width,
+		int ref_height);
 static void	draw_stats(uint32_t *pixels, int width, int height,
 		const app_settings_view_model_t *settings,
 		const settings_layout_t *layout, struct ncvisual *font);
@@ -77,6 +81,8 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font);
 static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
 		int height, const settings_layout_t *layout, const char *path);
+static struct ncvisual	*cached_thumbnail(render_ctx_t *ctx, int cache_slot,
+		const char *path);
 static void	draw_ability_card(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font,
 		const app_catalogue_item_view_model_t *character);
@@ -104,10 +110,6 @@ static int	ref_size(const settings_layout_t *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
 static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
 		int ref_width, int ref_glyph, int *spacing);
-static void	draw_text_sized(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
-		const char *text, int ref_x_value, int ref_y_value, int glyph_size,
-		int spacing, color_t tint);
 static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static const char	*nonempty(const char *text);
@@ -267,6 +269,8 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
  */
 void	render_settings_pixel_destroy(render_ctx_t *ctx)
 {
+	int	index;
+
 	if (ctx == NULL)
 		return ;
 	if (ctx->settings_font_visual != NULL)
@@ -305,6 +309,15 @@ void	render_settings_pixel_destroy(render_ctx_t *ctx)
 		ctx->settings_portrait_visual = NULL;
 	}
 	ctx->settings_portrait_source[0] = '\0';
+	index = 0;
+	while (index < APP_CATALOGUE_MAX_ITEMS * 2)
+	{
+		if (ctx->settings_thumbnail_visuals[index] != NULL)
+			ncvisual_destroy(ctx->settings_thumbnail_visuals[index]);
+		ctx->settings_thumbnail_visuals[index] = NULL;
+		ctx->settings_thumbnail_sources[index][0] = '\0';
+		index++;
+	}
 	free(ctx->settings_background_pixels);
 	ctx->settings_background_pixels = NULL;
 	free(ctx->settings_static_pixels);
@@ -332,7 +345,8 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
 	if (!force && !geometry_changed && ctx->bg_plane != NULL)
 		return (true);
 	if (render_background_replace_exact(ctx, SETTINGS_BACKGROUND_PATH, false)
-		< 0)
+		< 0 && render_background_replace_exact(ctx,
+			SETTINGS_BACKGROUND_LEGACY_PATH, false) < 0)
 		return (false);
 	/*
 	 * Both caches are sized by the fitted geometry, so a resize invalidates
@@ -382,6 +396,8 @@ static bool	cache_background(render_ctx_t *ctx)
 		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
 		return (false);
 	visual = ncvisual_from_file(SETTINGS_BACKGROUND_PATH);
+	if (visual == NULL)
+		visual = ncvisual_from_file(SETTINGS_BACKGROUND_LEGACY_PATH);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
 		if (visual != NULL)
@@ -513,9 +529,9 @@ static bool	compose_stationary_frame(render_ctx_t *ctx,
 		&& !view->data.settings.offline)
 	{
 		draw_inventory(pixels, width, height, &view->data.settings.characters,
-			state, layout, font, true);
+			state, layout, font, true, ctx);
 		draw_inventory(pixels, width, height, &view->data.settings.themes,
-			state, layout, font, false);
+			state, layout, font, false, ctx);
 	}
 	draw_volume_value(pixels, width, height, &view->data.settings, layout,
 		font);
@@ -626,7 +642,7 @@ static bool	compose_inventory(render_ctx_t *ctx,
 		return (false);
 	draw_inventory(pixels, layout->pixel_width, layout->pixel_height,
 		characters ? &settings->characters : &settings->themes, state, layout,
-		font, characters);
+		font, characters, ctx);
 	region.x = ref_x(layout, characters ? SETTINGS_REF_CHARACTERS_X
 		: SETTINGS_REF_THEMES_X);
 	region.y = ref_y(layout, characters ? SETTINGS_REF_CHARACTERS_Y
@@ -950,20 +966,25 @@ static void	draw_profile(uint32_t *pixels, int width, int height,
 
 static void	draw_inventory(uint32_t *pixels, int width, int height,
 	const app_catalogue_view_model_t *catalogue, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font, bool characters)
+	const settings_layout_t *layout, struct ncvisual *font, bool characters,
+	render_ctx_t *ctx)
 {
 	int		owned;
 	int		index;
 	int		slot;
 	int		focused_slot;
+	int		focused_index;
 	int		ref_panel_x;
 	int		ref_panel_y;
 	int		ref_panel_width;
 	int		ref_slot_width;
-	int		ref_label_x;
-	int		ref_label_y;
-	int		glyph_size;
-	int		spacing;
+	int		ref_slot_x;
+	int		ref_slot_y;
+	int		ref_slot_step;
+	int		ref_slot_thumb_width;
+	int		ref_slot_thumb_height;
+	int		ref_slot_name_y;
+	int		ref_slot_content_height;
 	int		row;
 	int		column;
 	int		limit;
@@ -976,21 +997,53 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 		: SETTINGS_REF_THEMES_WIDTH;
 	limit = characters ? SETTINGS_CHARACTER_SLOTS : SETTINGS_THEME_SLOTS;
 	ref_slot_width = (ref_panel_width - 20) / SETTINGS_INVENTORY_COLUMNS;
+	ref_slot_step = characters ? SETTINGS_REF_CHARACTER_SLOT_STEP_Y
+		: SETTINGS_REF_THEME_SLOT_STEP_Y;
+	ref_slot_thumb_width = characters
+		? SETTINGS_REF_CHARACTER_SLOT_THUMB_WIDTH
+		: SETTINGS_REF_THEME_SLOT_THUMB_WIDTH;
+	ref_slot_thumb_height = characters
+		? SETTINGS_REF_CHARACTER_SLOT_THUMB_HEIGHT
+		: SETTINGS_REF_THEME_SLOT_THUMB_HEIGHT;
+	ref_slot_name_y = characters ? SETTINGS_REF_CHARACTER_SLOT_NAME_Y
+		: SETTINGS_REF_THEME_SLOT_NAME_Y;
+	ref_slot_content_height = max_int(ref_slot_thumb_height,
+			ref_slot_name_y + SETTINGS_REF_SLOT_GLYPH);
 	owned = settings_owned_count(catalogue, limit);
 	focused_slot = -1;
+	focused_index = -1;
 	if (state->section == (characters ? SETTINGS_SECTION_CHARACTERS
 			: SETTINGS_SECTION_THEMES))
 		focused_slot = characters ? state->character_slot : state->theme_slot;
+	/* Resolve the focused slot once so its full name can remain readable. */
+	slot = 0;
+	index = 0;
+	while (index < catalogue->count && slot < limit)
+	{
+		if (catalogue->items[index].owned)
+		{
+			if (slot == focused_slot)
+				focused_index = index;
+			slot++;
+		}
+		index++;
+	}
 	draw_text_ref(pixels, width, height, layout, font,
 		characters ? "OWNED CHARACTERS" : "OWNED THEMES", ref_panel_x + 10,
-		ref_panel_y, ref_panel_width - 20, 17, g_settings_pink, true);
-	/*
-	 * One glyph size for the whole panel, taken from the longest label it
-	 * will draw. Sizing each entry to its own text made names appear to grow
-	 * and shrink as the star moved between them.
-	 */
-	glyph_size = panel_glyph_size(catalogue, layout, limit,
-			ref_slot_width - SETTINGS_REF_SLOT_TEXT_X - 4, &spacing);
+		ref_panel_y + SETTINGS_REF_INVENTORY_TITLE_Y, ref_panel_width - 20,
+		SETTINGS_REF_INVENTORY_TITLE_GLYPH, g_settings_pink, true);
+	if (focused_index >= 0)
+		draw_text_ref(pixels, width, height, layout, font,
+			catalogue->items[focused_index].name, ref_panel_x + 10,
+			ref_panel_y + SETTINGS_REF_INVENTORY_DETAIL_Y,
+			ref_panel_width - 20, SETTINGS_REF_INVENTORY_DETAIL_GLYPH,
+			g_settings_gold, true);
+	else if (owned > 0)
+		draw_text_ref(pixels, width, height, layout, font,
+			"ARROWS TO INSPECT", ref_panel_x + 10,
+			ref_panel_y + SETTINGS_REF_INVENTORY_DETAIL_Y,
+			ref_panel_width - 20, SETTINGS_REF_INVENTORY_HINT_GLYPH,
+			g_settings_lavender, true);
 	slot = 0;
 	index = 0;
 	while (index < catalogue->count && slot < limit)
@@ -1000,69 +1053,38 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 			focused = slot == focused_slot;
 			row = slot / SETTINGS_INVENTORY_COLUMNS;
 			column = slot % SETTINGS_INVENTORY_COLUMNS;
-			ref_label_x = ref_panel_x + SETTINGS_REF_SLOT_INSET
+			ref_slot_x = ref_panel_x + SETTINGS_REF_SLOT_INSET
 				+ column * ref_slot_width;
-			ref_label_y = ref_panel_y + SETTINGS_REF_SLOT_FIRST_Y
-				+ row * SETTINGS_REF_SLOT_STEP_Y;
+			ref_slot_y = ref_panel_y + (characters
+				? SETTINGS_REF_CHARACTER_SLOT_FIRST_Y
+				: SETTINGS_REF_THEME_SLOT_FIRST_Y) + row * ref_slot_step;
 			if (focused)
 				draw_slot_highlight(pixels, width, height, layout,
-					ref_label_x, ref_label_y, ref_slot_width);
-			/*
-			 * The star occupies a reserved column instead of being prefixed to
-			 * the name, so equipping an entry never changes the string being
-			 * measured and the label never shifts or resizes under the cursor.
-			 */
+					ref_slot_x, ref_slot_y, ref_slot_width,
+					ref_slot_content_height);
+			draw_thumbnail(pixels, width, height, layout, font, ctx,
+				(characters ? 0 : APP_CATALOGUE_MAX_ITEMS) + slot,
+				catalogue->items[index].portrait_asset, ref_slot_x + 14,
+				ref_slot_y + 1, min_int(ref_slot_thumb_width,
+					ref_slot_width - 28), ref_slot_thumb_height);
 			if (catalogue->items[index].equipped)
-				draw_text_sized(pixels, width, height, layout, font, "*",
-					ref_label_x, ref_label_y, glyph_size, spacing,
-					focused ? g_settings_gold : g_settings_green);
-			draw_text_sized(pixels, width, height, layout, font,
-				catalogue->items[index].name,
-				ref_label_x + SETTINGS_REF_SLOT_TEXT_X, ref_label_y,
-				glyph_size, spacing,
-				focused ? g_settings_gold : g_settings_cream);
+				draw_text_ref(pixels, width, height, layout, font, "*",
+					ref_slot_x + 8, ref_slot_y + 2, 16, 16,
+					focused ? g_settings_gold : g_settings_green, false);
+			draw_text_ref(pixels, width, height, layout, font,
+				inventory_slot_label(&catalogue->items[index], characters),
+				ref_slot_x + 2,
+				ref_slot_y + ref_slot_name_y, ref_slot_width - 4,
+				SETTINGS_REF_SLOT_GLYPH,
+				focused ? g_settings_gold : g_settings_cream, true);
 			slot++;
 		}
 		index++;
 	}
 	if (owned == 0)
 		draw_text_ref(pixels, width, height, layout, font, "NONE OWNED",
-			ref_panel_x + 10, ref_panel_y + 82, ref_panel_width - 20, 13,
+			ref_panel_x + 10, ref_panel_y + 70, ref_panel_width - 20, 13,
 			g_settings_lavender, true);
-}
-
-/**
- * @brief Picks one glyph size that fits every label a panel will draw.
- */
-static int	panel_glyph_size(const app_catalogue_view_model_t *catalogue,
-	const settings_layout_t *layout, int limit, int ref_width, int *spacing)
-{
-	int	glyph_size;
-	int	candidate;
-	int	candidate_spacing;
-	int	index;
-	int	slot;
-
-	glyph_size = fit_glyph_size(layout, "", ref_width,
-			SETTINGS_REF_SLOT_GLYPH, spacing);
-	slot = 0;
-	index = 0;
-	while (index < catalogue->count && slot < limit)
-	{
-		if (catalogue->items[index].owned)
-		{
-			candidate = fit_glyph_size(layout, catalogue->items[index].name,
-					ref_width, SETTINGS_REF_SLOT_GLYPH, &candidate_spacing);
-			if (candidate < glyph_size)
-			{
-				glyph_size = candidate;
-				*spacing = candidate_spacing;
-			}
-			slot++;
-		}
-		index++;
-	}
-	return (glyph_size);
 }
 
 /**
@@ -1074,18 +1096,160 @@ static int	panel_glyph_size(const app_catalogue_view_model_t *catalogue,
  */
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
 	const settings_layout_t *layout, int ref_label_x, int ref_label_y,
-	int ref_slot_width)
+	int ref_slot_width, int ref_slot_height)
 {
 	const color_t	plate = {74, 40, 104};
+	int			focus_x;
+	int			focus_y;
+	int			focus_width;
+	int			focus_height;
 
+	focus_x = ref_label_x + SETTINGS_REF_SLOT_PAD_X;
+	focus_y = ref_label_y - SETTINGS_REF_SLOT_PAD_Y;
+	focus_width = ref_slot_width - 2 * SETTINGS_REF_SLOT_PAD_X;
+	focus_height = ref_slot_height + 2 * SETTINGS_REF_SLOT_PAD_Y;
 	fill_ref_rect(pixels, width, height, layout,
-		ref_label_x - SETTINGS_REF_SLOT_PAD_X,
-		ref_label_y - SETTINGS_REF_SLOT_PAD_Y,
-		ref_slot_width - 2, SETTINGS_REF_SLOT_STEP_Y - 6, plate, 224u);
+		focus_x, focus_y, focus_width, focus_height, plate, 224u);
+	/* A complete border keeps the focus weight centred around the slot. */
 	fill_ref_rect(pixels, width, height, layout,
-		ref_label_x - SETTINGS_REF_SLOT_PAD_X,
-		ref_label_y - SETTINGS_REF_SLOT_PAD_Y, 4,
-		SETTINGS_REF_SLOT_STEP_Y - 6, g_settings_gold, 255u);
+		focus_x, focus_y, focus_width, 2, g_settings_gold, 255u);
+	fill_ref_rect(pixels, width, height, layout,
+		focus_x, focus_y + focus_height - 2, focus_width, 2,
+		g_settings_gold, 255u);
+	fill_ref_rect(pixels, width, height, layout,
+		focus_x, focus_y, 2, focus_height, g_settings_gold, 255u);
+	fill_ref_rect(pixels, width, height, layout,
+		focus_x + focus_width - 2, focus_y, 2, focus_height,
+		g_settings_gold, 255u);
+}
+
+/**
+ * @brief Keeps four-column slot captions readable below their thumbnails.
+ *
+ * The full canonical item name remains in the focused panel header. Only the
+ * compact caption inside a 99-reference-pixel theme slot is shortened.
+ */
+static const char	*inventory_slot_label(
+	const app_catalogue_item_view_model_t *item, bool characters)
+{
+	if (item == NULL)
+		return ("");
+	if (characters)
+		return (item->name);
+	if (strcmp(item->id, "design_ai_university") == 0)
+		return ("Design AI");
+	if (strcmp(item->id, "snowman") == 0)
+		return ("Snowman");
+	if (strcmp(item->id, "al_merqaedes") == 0)
+		return ("Al-Merq.");
+	if (strcmp(item->id, "nuclear_ghandi") == 0)
+		return ("Nuclear G.");
+	return (item->name);
+}
+
+/**
+ * @brief Draws a catalogue thumbnail without making artwork a hard dependency.
+ *
+ * Preview art is optional during development and in cell-only installations.
+ * A framed placeholder keeps the slot geometry and focus treatment intact
+ * when a file is missing or cannot be decoded.
+ */
+static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
+	const settings_layout_t *layout, struct ncvisual *font, render_ctx_t *ctx,
+	int cache_slot, const char *path, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height)
+{
+	struct ncvisual	*visual;
+	ncvgeom		geom;
+	uint32_t	pixel;
+	color_t		fallback;
+	int		draw_width;
+	int		draw_height;
+	int		source_x;
+	int		source_y;
+	int		origin_x;
+	int		origin_y;
+	int		x;
+	int		y;
+	bool		drawn;
+
+	ref_width = max_int(1, ref_width);
+	ref_height = max_int(1, ref_height);
+	fallback = (color_t){39, 24, 62};
+	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
+		ref_width, ref_height, fallback, 255u);
+	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
+		ref_width, 2, g_settings_lavender, 220u);
+	fill_ref_rect(pixels, width, height, layout, ref_x_value,
+		ref_y_value + ref_height - 2, ref_width, 2, g_settings_lavender,
+		220u);
+	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
+		2, ref_height, g_settings_lavender, 220u);
+	fill_ref_rect(pixels, width, height, layout,
+		ref_x_value + ref_width - 2, ref_y_value, 2, ref_height,
+		g_settings_lavender, 220u);
+	visual = cached_thumbnail(ctx, cache_slot, path);
+	drawn = false;
+	if (visual != NULL)
+	{
+		memset(&geom, 0, sizeof(geom));
+		if (ncvisual_geom(NULL, visual, NULL, &geom) == 0
+			&& geom.pixx > 0 && geom.pixy > 0)
+		{
+			draw_width = ref_x(layout, ref_width) - 4;
+			draw_height = ref_y(layout, ref_height) - 4;
+			if (draw_width < 1)
+				draw_width = 1;
+			if (draw_height < 1)
+				draw_height = 1;
+			if ((uint64_t)draw_width * geom.pixy
+				> (uint64_t)draw_height * geom.pixx)
+				draw_width = (int)((uint64_t)draw_height * geom.pixx
+					/ geom.pixy);
+			else
+				draw_height = (int)((uint64_t)draw_width * geom.pixy
+					/ geom.pixx);
+			if (draw_width < 1)
+				draw_width = 1;
+			if (draw_height < 1)
+				draw_height = 1;
+			origin_x = ref_x(layout, ref_x_value)
+				+ (ref_x(layout, ref_width) - draw_width) / 2;
+			origin_y = ref_y(layout, ref_y_value)
+				+ (ref_y(layout, ref_height) - draw_height) / 2;
+			y = 0;
+			while (y < draw_height)
+			{
+				x = 0;
+				while (x < draw_width)
+				{
+					source_x = x * (int)geom.pixx / draw_width;
+					source_y = y * (int)geom.pixy / draw_height;
+					if (ncvisual_at_yx(visual, (unsigned)source_y,
+							(unsigned)source_x, &pixel) >= 0
+						&& ncpixel_a(pixel) != 0)
+					{
+						color_t tint;
+
+						tint.r = ncpixel_r(pixel);
+						tint.g = ncpixel_g(pixel);
+						tint.b = ncpixel_b(pixel);
+						put_pixel(pixels, width, height, origin_x + x,
+							origin_y + y, tint, ncpixel_a(pixel),
+							layout->opaque_background);
+					}
+					x++;
+				}
+				y++;
+			}
+			drawn = true;
+		}
+	}
+	if (!drawn && font != NULL)
+		draw_text_ref(pixels, width, height, layout, font, "?",
+			ref_x_value, ref_y_value + 6, ref_width, 16, g_settings_lavender,
+			true);
+	return (drawn);
 }
 
 static void	draw_stats(uint32_t *pixels, int width, int height,
@@ -1192,10 +1356,10 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 		enabled = index != 1 || settings->signed_in;
 		color = !enabled ? g_settings_disabled
 			: focused ? g_settings_gold : g_settings_cream;
-		center = (index == 0 ? SETTINGS_REF_BUTTON_BACK_X
-			: index == 1 ? SETTINGS_REF_BUTTON_MARKET_X
-			: index == 2 ? SETTINGS_REF_BUTTON_VOLUME_DOWN_X
-			: SETTINGS_REF_BUTTON_VOLUME_UP_X) + SETTINGS_REF_BUTTON_WIDTH / 2;
+		center = index == 0 ? SETTINGS_REF_BUTTON_BACK_CENTER_X
+			: index == 1 ? SETTINGS_REF_BUTTON_MARKET_CENTER_X
+			: index == 2 ? SETTINGS_REF_BUTTON_VOLUME_DOWN_CENTER_X
+			: SETTINGS_REF_BUTTON_VOLUME_UP_CENTER_X;
 		draw_text_ref(pixels, width, height, layout, font, labels[index],
 			center - 104, SETTINGS_REF_BUTTON_Y + 36, 208, 21, color, true);
 		draw_text_ref(pixels, width, height, layout, font, hints[index],
@@ -1246,6 +1410,38 @@ static struct ncvisual	*cached_portrait(render_ctx_t *ctx, const char *path)
 	snprintf(ctx->settings_portrait_source,
 		sizeof(ctx->settings_portrait_source), "%s", path);
 	return (ctx->settings_portrait_visual);
+}
+
+static struct ncvisual	*cached_thumbnail(render_ctx_t *ctx, int cache_slot,
+	const char *path)
+{
+	struct ncvisual	*visual;
+
+	if (ctx == NULL || cache_slot < 0
+		|| cache_slot >= APP_CATALOGUE_MAX_ITEMS * 2)
+		return (NULL);
+	if (path == NULL || path[0] == '\0')
+	{
+		if (ctx->settings_thumbnail_visuals[cache_slot] != NULL)
+		{
+			ncvisual_destroy(ctx->settings_thumbnail_visuals[cache_slot]);
+			ctx->settings_thumbnail_visuals[cache_slot] = NULL;
+		}
+		ctx->settings_thumbnail_sources[cache_slot][0] = '\0';
+		return (NULL);
+	}
+	if (strcmp(ctx->settings_thumbnail_sources[cache_slot], path) == 0)
+		return (ctx->settings_thumbnail_visuals[cache_slot]);
+	if (ctx->settings_thumbnail_visuals[cache_slot] != NULL)
+	{
+		ncvisual_destroy(ctx->settings_thumbnail_visuals[cache_slot]);
+		ctx->settings_thumbnail_visuals[cache_slot] = NULL;
+	}
+	snprintf(ctx->settings_thumbnail_sources[cache_slot],
+		sizeof(ctx->settings_thumbnail_sources[cache_slot]), "%s", path);
+	visual = ncvisual_from_file(path);
+	ctx->settings_thumbnail_visuals[cache_slot] = visual;
+	return (visual);
 }
 
 static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
@@ -1494,42 +1690,8 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
 }
 
 /**
- * @brief Draws left-aligned text at a caller-chosen glyph size.
- *
- * Used where several labels must share one size regardless of their own
- * lengths, so nothing appears to resize as the selection or the equipped entry
- * moves between them.
+ * @brief Draws a prepared glyph run with the supplied colour and spacing.
  */
-static void	draw_text_sized(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font, const char *text,
-	int ref_x_value, int ref_y_value, int glyph_size, int spacing,
-	color_t tint)
-{
-	char	visible[APP_TEXT_MAX * 2];
-	int		length;
-	int		shadow;
-	int		x;
-	int		y;
-
-	if (layout == NULL || font == NULL || text == NULL)
-		return ;
-	shadow = max_int(1, ref_size(layout, SETTINGS_FONT_SHADOW_REF));
-	length = 0;
-	while (text[length] != '\0' && length + 1 < (int)sizeof(visible))
-	{
-		visible[length] = (unsigned char)text[length] >= 32
-			&& (unsigned char)text[length] < 127 ? text[length] : '?';
-		length++;
-	}
-	visible[length] = '\0';
-	x = ref_x(layout, ref_x_value);
-	y = ref_y(layout, ref_y_value);
-	draw_text_run(pixels, width, height, layout, font, visible, x + shadow,
-		y + shadow, glyph_size, spacing, g_settings_shadow);
-	draw_text_run(pixels, width, height, layout, font, visible, x, y,
-		glyph_size, spacing, tint);
-}
-
 static void	draw_text_run(uint32_t *pixels, int width, int height,
 	const settings_layout_t *layout, struct ncvisual *font,
 	const char *text, int x, int y, int glyph_size, int spacing, color_t tint)
