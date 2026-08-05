@@ -52,6 +52,8 @@ static void	draw_profile(struct ncplane *plane,
 			const app_settings_view_model_t *settings,
 			const settings_state_t *state, int rows, int cols);
 static void	slot_prefix(char *out, size_t size, bool equipped, bool focused);
+static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
+			const char *text, int max_lines);
 static void	set_slot_colour(struct ncplane *plane, bool focused);
 static void	draw_offline(struct ncplane *plane,
 			const app_settings_view_model_t *settings, int rows, int cols);
@@ -460,6 +462,7 @@ static void	draw_ability_compat(struct ncplane *plane,
 	const app_catalogue_item_view_model_t	*character;
 	char							line[APP_ABILITY_TEXT_MAX + 80];
 	int							index;
+	int							step;
 	int							row;
 	int							x;
 
@@ -483,19 +486,67 @@ static void	draw_ability_compat(struct ncplane *plane,
 		SETTINGS_PINK_B);
 	snprintf(line, sizeof(line), "%s - CRYSTAL POWERS", character->name);
 	put_centered(plane, 3, cols, line, true);
+	/*
+	 * Give each ability a second description row wherever the panel is tall
+	 * enough for all four to keep one. put_line() clips rather than wraps, so
+	 * a single row silently swallowed the tail of the longer descriptions on
+	 * narrow terminals; the bitmap card has always wrapped to two.
+	 */
+	step = 2;
+	if (5 + APP_CHARACTER_ABILITY_COUNT * 3 <= rows - 5)
+		step = 3;
 	index = 0;
-	while (index < APP_CHARACTER_ABILITY_COUNT && 5 + index * 2 < rows - 5)
+	while (index < APP_CHARACTER_ABILITY_COUNT
+		&& 5 + index * step < rows - 5)
 	{
 		(void)ncplane_set_fg_rgb8(plane, SETTINGS_GOLD_R, SETTINGS_GOLD_G,
 			SETTINGS_GOLD_B);
 		snprintf(line, sizeof(line), "L%d %s", index + 1,
 			character->abilities[index].name);
-		put_line(plane, 5 + index * 2, 4, cols - 8, line, true);
+		put_line(plane, 5 + index * step, 4, cols - 8, line, true);
 		(void)ncplane_set_fg_rgb8(plane, SETTINGS_CREAM_R, SETTINGS_CREAM_G,
 			SETTINGS_CREAM_B);
-		put_line(plane, 6 + index * 2, 6, cols - 12,
-			character->abilities[index].description, false);
+		put_wrapped(plane, 6 + index * step, 6, cols - 12,
+			character->abilities[index].description,
+			min_int(step - 1, rows - 5 - (6 + index * step)));
 		index++;
+	}
+}
+
+/**
+ * @brief Word-wraps text across at most max_lines rows of the cell panel.
+ */
+static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
+	const char *text, int max_lines)
+{
+	char	chunk[APP_ABILITY_TEXT_MAX + 4];
+	int		start;
+	int		cursor;
+	int		last_space;
+	int		drawn;
+
+	if (text == NULL || width < 1)
+		return ;
+	start = 0;
+	drawn = 0;
+	while (text[start] != '\0' && drawn < max_lines)
+	{
+		cursor = start;
+		last_space = -1;
+		while (text[cursor] != '\0' && cursor - start < width)
+		{
+			if (text[cursor] == ' ')
+				last_space = cursor;
+			cursor++;
+		}
+		if (text[cursor] != '\0' && last_space > start)
+			cursor = last_space;
+		snprintf(chunk, sizeof(chunk), "%.*s", cursor - start, text + start);
+		put_line(plane, row + drawn, x, width, chunk, false);
+		start = cursor;
+		while (text[start] == ' ')
+			start++;
+		drawn++;
 	}
 }
 
