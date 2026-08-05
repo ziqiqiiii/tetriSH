@@ -1,0 +1,10 @@
+# clangd config for libtetrissh unit tests.
+#
+# clangd resolves relative -I flags from CompileFlags.Add against the directory
+# of the file being compiled, not against this file's directory, so these paths
+# are written relative to the sources sitting beside this config rather than
+# copied from the Makefile's INC. A .clangd at the component root cannot work
+# for sources in a subdirectory for exactly that reason.
+CompileFlags:
+  Add:
+    - -I../include
