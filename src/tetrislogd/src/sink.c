@@ -1,7 +1,7 @@
 #include "tetrislogd.h"
 
 // Static Functions
-static int	claim(const char *path);
+static int	open_sink(const char *path);
 static void	adopt(t_sink *sk, int fd);
 
 /**
@@ -44,7 +44,7 @@ int	sink_open(t_sink *sk, const char *path)
 		errno = EINVAL;
 		return (-1);
 	}
-	fd = claim(path);
+	fd = open_sink(path);
 	if (fd < 0)
 		return (-1);
 	snprintf(sk->path, TL_PATH_MAX, "%s", path);
@@ -133,7 +133,7 @@ int	sink_reopen(t_sink *sk)
 	if (sk->fd >= 0)
 		close(sk->fd);
 	sk->fd = -1;
-	fd = claim(sk->path);
+	fd = open_sink(sk->path);
 	if (fd < 0)
 		return (-1);
 	adopt(sk, fd);
@@ -223,7 +223,7 @@ bool	sink_is_stale(const t_sink *sk)
  * @param path Log file path.
  * @return The open fd on success, -1 with errno set on failure.
  */
-static int	claim(const char *path)
+static int	open_sink(const char *path)
 {
 	if (cfg_mkdir_parent(path) != 0)
 		return (-1);
@@ -231,7 +231,7 @@ static int	claim(const char *path)
 }
 
 /**
- * @brief Takes ownership of a freshly claimed descriptor.
+ * @brief Takes ownership of a freshly opened descriptor.
  *
  * Recording which file it is happens here rather than at either call site
  * because the two paths into a new descriptor - the first open and every
@@ -243,7 +243,7 @@ static int	claim(const char *path)
  * better than reopening a good one in a loop.
  *
  * @param sk Sink to update; sk->path must already be set.
- * @param fd Locked descriptor from claim.
+ * @param fd Freshly opened descriptor from open_sink.
  */
 static void	adopt(t_sink *sk, int fd)
 {

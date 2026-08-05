@@ -7,14 +7,12 @@ static int	run(t_logd *lg);
 /**
  * @brief Entry point: detach, claim the pidfile, then loop until stopped.
  *
- * The fork lives here and nowhere else. logd_start is the seam the test
- * suites drive in-process, so a start function that daemonised would make
- * every suite fork the moment it booted the daemon (docs/adr/0007).
+ * The fork lives here, never behind logd_start(), so the test suites can
+ * boot the daemon in-process without forking (docs/adr/0007).
  *
- * Everything up to cd_ready is boot, and boot still owns the terminal: a
- * logger that loses the pidfile race prints why and exits non-zero, and so
- * does the process that launched it. Only once the daemon is actually
- * listening does stderr move to its configured file.
+ * Boot owns the terminal: everything up to cd_ready reports failure on
+ * stderr and exits non-zero, so the operator who typed the command sees it.
+ * stderr only moves to the error file once the daemon is listening.
  *
  * @param argc Number of command-line arguments.
  * @param argv Optional argv[1]: the .tetrishrc to read.
@@ -43,6 +41,14 @@ int	main(int argc, char **argv)
 		cd_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
+	if (cd_stderr_redirect(cfg.err_path) != 0)
+	{
+		fprintf(stderr, "%s: cannot open %s: %s\n",
+			TL_COMPONENT, cfg.err_path, strerror(errno));
+		logd_stop(&lg);
+		cd_pid_release(&pf);
+		return (EXIT_FAILURE);
+	}
 	cd_ready(ready);
 	status = run(&lg);
 	logd_stop(&lg);
@@ -51,19 +57,15 @@ int	main(int argc, char **argv)
 }
 
 /**
- * @brief Detaches, claims the pidfile, and moves stderr off the terminal.
+ * @brief Detaches into the background and claims the pidfile.
  *
  * The order is the whole single-instance guard. Claiming comes after the
  * fork, because the pid written has to be the detached process's; it comes
  * before logd_start, because us_dgram_bind unlinks its socket path
- * unconditionally, so a second instance has to lose the pidfile race and
- * leave before it can steal a running logger's socket.
+ * unconditionally, so a second instance has to lose the race and leave
+ * before it can steal a running logger's socket.
  *
- * stderr moves last. Everything before this point can still fail, and a
- * failure that only reached the error file would be invisible to the operator
- * who just typed the command.
- *
- * @param cfg Configuration supplying the pidfile and error-file paths.
+ * @param cfg Configuration supplying the pidfile path.
  * @param pf Pidfile to claim.
  * @param ready Receives the readiness descriptor for cd_ready.
  * @return 0 on success, -1 after reporting why on stderr.
@@ -85,13 +87,6 @@ static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready)
 		else
 			fprintf(stderr, "%s: cannot claim %s: %s\n",
 				TL_COMPONENT, cfg->pid_path, strerror(errno));
-		return (-1);
-	}
-	if (cd_stderr_redirect(cfg->err_path) != 0)
-	{
-		fprintf(stderr, "%s: cannot open %s: %s\n",
-			TL_COMPONENT, cfg->err_path, strerror(errno));
-		cd_pid_release(pf);
 		return (-1);
 	}
 	return (0);

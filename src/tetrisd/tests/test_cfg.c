@@ -52,6 +52,8 @@ static void	test_defaults_are_complete(void)
 	assert(strcmp(cfg.key_path, TD_DEF_KEY) == 0);
 	assert(strcmp(cfg.ca_path, TD_DEF_CA) == 0);
 	assert(strcmp(cfg.log_ipc, TD_DEF_LOG_IPC) == 0);
+	assert(strcmp(cfg.pid_path, TD_DEF_PID) == 0);
+	assert(strcmp(cfg.err_path, TD_DEF_ERR) == 0);
 	assert(cfg.max_clients == TD_DEF_MAX_CLIENTS);
 	assert(cfg.tick_ms == TD_DEF_TICK_MS);
 	assert(cfg.br_slots == TD_DEF_BR_SLOTS);
@@ -94,6 +96,10 @@ static void	test_set_known_keys(void)
 	assert(cfg.input_burst == 40);
 	assert(cfg_set(&cfg, "TETRISD_INPUT_RATE", "20") == 0);
 	assert(cfg.input_rate == 20);
+	assert(cfg_set(&cfg, "TETRISD_PID_PATH", "/run/tetrisd.pid") == 0);
+	assert(strcmp(cfg.pid_path, "/run/tetrisd.pid") == 0);
+	assert(cfg_set(&cfg, "TETRISD_ERR_PATH", "/var/log/tetrisd.err") == 0);
+	assert(strcmp(cfg.err_path, "/var/log/tetrisd.err") == 0);
 	assert(cfg_set(&cfg, "PATH", "/usr/bin") == -1);
 	assert(cfg_set(&cfg, "TETRISD_NONSENSE", "x") == -1);
 	printf("PASS test_set_known_keys\n");

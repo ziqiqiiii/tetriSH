@@ -73,15 +73,17 @@ This builds the seven CoreStack archives in place and links them with OpenSSL, p
 make -C src/tetrisd run
 ```
 
-Or from inside the shell, once the root `bin-link` target has published `bin/tetrisd`:
+Or, the way `.tetrishrc` does it, through the lifecycle manager:
 
 ```bash
-dspawn tetrisd -- tetrisd
+tetrisctl start tetrisd
+tetrisctl status
+tetrisctl stop tetrisd
 ```
 
-The `--` is not optional: a bare `dspawn tetrisd` runs dspawn's placeholder loop instead of this binary. The program after it resolves via `PATH`.
+`tetrisd` daemonises itself: `main.c` double-forks, claims the pidfile named by `TETRISD_PID_PATH`, and reports itself ready only once the listener is up. Running the binary by name therefore returns to the prompt when the server is actually serving — and exits non-zero, with the reason printed, when it is not. It refuses to boot when `cert_path` or `key_path` cannot be read, so it can never silently serve players unauthenticated.
 
-`tetrisd` does not daemonise — `dspawn` already did that before exec'ing it. It refuses to boot when `cert_path` or `key_path` cannot be read, so it can never silently serve players unauthenticated.
+The fork lives in `main.c` alone and never behind `server_start`, or the integration suite — which runs a real server in-process on port 0 — would begin forking.
 
 ---
 
@@ -98,7 +100,7 @@ The `--` is not optional: a bare `dspawn tetrisd` runs dspawn's placeholder loop
 
 ## Configuration
 
-Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variables. Each is an ordinary `export` line, so the shell exports it for `dspawn`'d daemons and `tetrisd` parses the same file itself.
+Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variables. Each is an ordinary `export` line, so the shell exports it into the daemon's environment *and* `tetrisd` parses the same file itself. `tetrisctl` hands the file it resolved on as `argv[1]`, so both ends always read the same one.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -110,6 +112,8 @@ Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETR
 | `TETRISD_CA_PATH` | `certs/ca.crt` | CA clients verify the server against |
 | `TETRISD_LOG_IPC` | `tmp/tetrisd/tetrislogd.sock` | Datagram socket `tetrislogd` binds |
 | `TETRISD_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
+| `TETRISD_PID_PATH` | `tmp/tetrisd/tetrisd.pid` | Pidfile claimed and `flock`ed for the process's lifetime; the single-instance guard, and what `tetrisctl` signals |
+| `TETRISD_ERR_PATH` | `tmp/tetrisd/tetrisd.err` | Where stderr goes once boot has succeeded — the last-resort copy of records the logger could not take |
 | `TETRISD_MAX_CLIENTS` | `64` | Simultaneous connections; beyond it, accepts are refused |
 | `TETRISD_TICK_MS` | `12` | Room ticker period |
 | `TETRISD_BR_SLOTS` | `4` | Slots in a Battle Royale room (2–16) |
@@ -136,7 +140,7 @@ For now, the server serves Single mode. Every route below `LOGIN` requires a `Pl
 | `DROP` | `/room/<name>/player/<pid>` | `200` | as `MOVE` |
 | `STATE` | `/room/<name>/player/<pid>` | **server-pushed** | — |
 
-Rooms are never named by clients: the lobby assigns `S-01`, `D-02`, `BR-03`, so creation addresses the collection (`JOIN /rooms`) and every later call addresses the room by its assigned name. Finishing a game clears every slot (the room domain's rule), so the room empties and returns to the lobby — the next game means a fresh room, not a seat kept.
+Rooms are never named by clients: the lobby assigns `S-01`, `D-02`, `BR-03`, so creation addresses the collection (`JOIN /rooms`) and every later call addresses the room by its assigned name. Finishing a game clears every slot, so the room empties and returns to the lobby — the next game means a fresh room, not a seat kept.
 
 A refusal carries its verdict as a `reason <verdict>` body line: a player who cannot tell a full room from one already in game cannot act on the answer. A malformed message is `400`, an unknown method `501`. `413` answers a message that parses as oversized; a *frame* beyond the 64 KiB session cap cannot be decrypted at all, so `libtetrissh` drops that connection before HTTTP sees it.
 
@@ -185,7 +189,7 @@ lobby_mutex  >  room->mutex  >  registry rwlock  >  outbox mutex
 
 Strictly descending, never re-entered upward. No `db_*`, `session_*`, or IPC send happens under any lock — the outbox push is the sole exception, and it cannot block. Database writes (recording a finished game) happen after the room mutex is released.
 
-Two rules sit underneath the order and are easy to break without breaking it. A room is guarded by *its own* mutex everywhere, including while the lobby destroys it — holding only `lobby_mutex` there would protect one room with two different locks depending on the caller, a data race rather than an ordering bug. And the registry's client count and its `empty_cond` are published under one hold of `empty_mutex`, so a waiter cannot observe an empty registry and destroy the condition variable while a departing thread is still about to signal it. Both were found by `-fsanitize=thread`, not by lock-order review.
+Two rules sit underneath the order and are easy to break without breaking it. A room is guarded by *its own* mutex everywhere, including while the lobby destroys it. And the registry's client count and its `empty_cond` are published under one hold of `empty_mutex`, so a waiter cannot destroy the condition variable while a departing thread is still about to signal it. Both were found by `-fsanitize=thread`, not by lock-order review.
 
 ### Client lifetime
 
@@ -196,7 +200,7 @@ The registry's rwlock is the lifetime guard. An enqueuer holds the read lock acr
 3. `shutdown(fd)`, close the outbox, join the writer thread
 4. close the session and socket, free the client
 
-An empty room returns to the lobby, so a long-running server does not fill up with the ghosts of finished games. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older connection and waits for it to finish leaving before binding the new one.
+An empty room returns to the lobby. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older connection and waits for it to finish leaving before binding the new one.
 
 ### Logging
 
@@ -231,7 +235,7 @@ src/tetrisd/
 └── Makefile              → src/tetrisd/tetrisd
 ```
 
-`t_game` is the aggregate `libtetrisbrain` deliberately does not own — board, piece, bag, score, charge, and effects, with the ordering rules between them enforced in one place. `tetrisu` will consume the same shape through `STATE` rather than reinventing it.
+`t_game` is the aggregate `libtetrisbrain` deliberately does not own — board, piece, bag, score, charge, and effects, with the ordering rules between them enforced in one place.
 
 ---
 
@@ -258,7 +262,7 @@ make -C src/tetrisd test FLAGS="-Wall -Wextra -fsanitize=thread -g -O1" \
      LDLIBS="-lssl -lcrypto -lpthread -lrt -fsanitize=thread"
 ```
 
-Both are expected to be clean. TSan caught two real races that reading the code against the lock order did not — see [Lock order](#lock-order).
+Both are expected to be clean.
 
 ---
 

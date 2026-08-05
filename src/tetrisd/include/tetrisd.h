@@ -25,6 +25,7 @@
 # include <openssl/rand.h>
 # include <openssl/sha.h>
 
+# include "coredaemon.h"
 # include "coreipc.h"
 # include "htttp.h"
 # include "macminidb.h"
@@ -41,10 +42,16 @@
 ** writer thread (the sole session_send caller for that client); every
 ** in-game room owns a ticker thread driving gravity.
 **
-** Lock order is strictly descending and never violated:
+** Lock order is strictly descending:
 **     lobby_mutex > room->mutex > registry rwlock > outbox mutex
 ** No db_*, session_*, or IPC send happens under any lock - the outbox push
 ** is the sole exception, and it never blocks.
+**
+** It detaches itself and publishes a locked pidfile; tetrisctl starts,
+** inspects and stops it through that file (docs/adr/0007). Both the fork and
+** the claim live in main.c alone - server_start must stay the seam the tests
+** drive in-process, and a start function that forked would take every suite
+** with it.
 */
 
 # define TD_PATH_MAX		1024
@@ -58,6 +65,8 @@
 # define TD_DEF_KEY			"certs/server.key"
 # define TD_DEF_CA			"certs/ca.crt"
 # define TD_DEF_LOG_IPC		"tmp/tetrisd/tetrislogd.sock"
+# define TD_DEF_PID			"tmp/tetrisd/tetrisd.pid"
+# define TD_DEF_ERR			"tmp/tetrisd/tetrisd.err"
 # define TD_DEF_MAX_CLIENTS	64
 # define TD_DEF_TICK_MS		12
 # define TD_DEF_BR_SLOTS	4
@@ -128,6 +137,8 @@ typedef struct s_cfg
 	char	key_path[TD_PATH_MAX];
 	char	ca_path[TD_PATH_MAX];
 	char	log_ipc[TD_PATH_MAX];
+	char	pid_path[TD_PATH_MAX];
+	char	err_path[TD_PATH_MAX];
 	char	rc_path[TD_PATH_MAX];
 	int		log_level;
 	int		max_clients;

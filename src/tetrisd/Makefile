@@ -42,8 +42,8 @@ HEADER		:= $(INC_DIR)/tetrisd.h
 
 # One archive per CoreStack library, each with the include path that goes with
 # it. Adding a library here wires up its build, its -I and its link in one step.
-LIB_NAMES	:= libcoreipc libhtttp libtetrisbrain libmacminidb libtetrissh \
-			   libtetrisroom libstatusbody
+LIB_NAMES	:= libcoreipc libcoredaemon libhtttp libtetrisbrain libmacminidb \
+			   libtetrissh libtetrisroom libstatusbody
 LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
 LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
 LIB_INC		:= $(LIB_DIRS:%=-I%/include)

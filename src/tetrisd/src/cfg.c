@@ -30,6 +30,8 @@ void	cfg_defaults(t_cfg *cfg)
 	snprintf(cfg->key_path, TD_PATH_MAX, "%s", TD_DEF_KEY);
 	snprintf(cfg->ca_path, TD_PATH_MAX, "%s", TD_DEF_CA);
 	snprintf(cfg->log_ipc, TD_PATH_MAX, "%s", TD_DEF_LOG_IPC);
+	snprintf(cfg->pid_path, TD_PATH_MAX, "%s", TD_DEF_PID);
+	snprintf(cfg->err_path, TD_PATH_MAX, "%s", TD_DEF_ERR);
 	cfg->log_level = CIPC_LOG_INFO;
 	cfg->max_clients = TD_DEF_MAX_CLIENTS;
 	cfg->tick_ms = TD_DEF_TICK_MS;
@@ -97,6 +99,10 @@ int	cfg_set(t_cfg *cfg, const char *key, const char *value)
 		return (set_str(cfg->ca_path, TD_PATH_MAX, value));
 	if (strcmp(key, "LOG_IPC") == 0)
 		return (set_str(cfg->log_ipc, TD_PATH_MAX, value));
+	if (strcmp(key, "PID_PATH") == 0)
+		return (set_str(cfg->pid_path, TD_PATH_MAX, value));
+	if (strcmp(key, "ERR_PATH") == 0)
+		return (set_str(cfg->err_path, TD_PATH_MAX, value));
 	if (strcmp(key, "LOG_LEVEL") == 0)
 		return (set_level(&cfg->log_level, value));
 	if (strcmp(key, "MAX_CLIENTS") == 0)
@@ -350,6 +356,7 @@ static int	apply_env(t_cfg *cfg)
 		"TETRISD_PORT", "TETRISD_DATA_DIR",
 		"TETRISD_CONFIG_DIR", "TETRISD_CERT_PATH", "TETRISD_KEY_PATH",
 		"TETRISD_CA_PATH", "TETRISD_LOG_IPC", "TETRISD_LOG_LEVEL",
+		"TETRISD_PID_PATH", "TETRISD_ERR_PATH",
 		"TETRISD_MAX_CLIENTS", "TETRISD_TICK_MS", "TETRISD_BR_SLOTS", NULL
 	};
 	const char			*value;
