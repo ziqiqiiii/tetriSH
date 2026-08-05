@@ -583,6 +583,7 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	settings_state_t		state;
 	settings_state_t		previous;
 	settings_action_t		action;
+	settings_equip_result_t	equip_result;
 	app_provider_result_t	result;
 	ncinput				input;
 	uint32_t			key;
@@ -596,9 +597,9 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	app_settings_apply_local_controls(&view.data.settings,
 		audio->music_volume, tetrisu_renderer_mode_requested());
 	settings_state_init(&state, view.data.settings.signed_in,
-		settings_owned_count(&view.data.settings.characters,
+		settings_catalogue_count(&view.data.settings.characters,
 			SETTINGS_CHARACTER_SLOTS),
-		settings_owned_count(&view.data.settings.themes,
+		settings_catalogue_count(&view.data.settings.themes,
 			SETTINGS_THEME_SLOTS));
 	/*
 	 * Settings is keyboard-only: pointer reporting is switched off for the
@@ -699,15 +700,24 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		else if (action == SETTINGS_ACTION_EQUIP_CHARACTER)
 		{
 			audio_play_menu_select(audio);
-			if (settings_equip_character_slot(&view.data.settings,
-					state.character_slot)
+			equip_result = settings_equip_character_slot(&view.data.settings,
+					state.character_slot);
+			if (equip_result == SETTINGS_EQUIP_LOCKED)
+				render_notification_queue_ownership(ctx);
+			if ((equip_result == SETTINGS_EQUIP_CHANGED
+					|| equip_result == SETTINGS_EQUIP_LOCKED)
 				&& !render_settings_show(ctx, &view, &state, false))
 				return (-1);
 		}
 		else if (action == SETTINGS_ACTION_EQUIP_THEME)
 		{
 			audio_play_menu_select(audio);
-			if (settings_equip_theme_slot(&view.data.settings, state.theme_slot)
+			equip_result = settings_equip_theme_slot(&view.data.settings,
+					state.theme_slot);
+			if (equip_result == SETTINGS_EQUIP_LOCKED)
+				render_notification_queue_ownership(ctx);
+			if ((equip_result == SETTINGS_EQUIP_CHANGED
+					|| equip_result == SETTINGS_EQUIP_LOCKED)
 				&& !render_settings_show(ctx, &view, &state, false))
 				return (-1);
 		}

@@ -73,7 +73,7 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Two-frame progressive clear animation: 200 ms through level 6, then
   175/150/125 ms at levels 7/8/9 and 100 ms from level 10 onward
 - Dedicated Settings/Profile screen with live fixture profile, portrait,
-  equipped character/theme, owned inventories, wallet, score, rank, and
+  equipped character/theme, full catalogues, wallet, score, rank, and
   Settings-to-Marketplace routing
 - Signed-in Settings navigates as a grid: the two inventory panels sit above
   the control row, arrows step through them, and `Enter` equips the focused
@@ -85,6 +85,11 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Inventory focus uses a centred gold-outlined plate and label; equipped state
   is shown independently by a star. The focused item's full name appears in a
   compact panel header, while narrow theme slots use short fitted captions.
+- The preview fixture intentionally locks Princess, Wolf-man, Haaland, and
+  Clauding. Locked thumbnails are desaturated but remain focusable for visual
+  inspection; `Enter` refuses to equip them and raises an `ITEM NOT OWNED`
+  notification directing the user to the Marketplace. The same notification
+  has authored pixel art and a compatibility-mode presentation.
 - Moving the focus onto a character opens its powers card automatically, the
   way the Solo ability meters describe themselves. `I` still pins the card for
   the equipped character from anywhere. The four canonical crystal powers are
@@ -272,10 +277,10 @@ and graphics-protocol support at startup. It exits with
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
 | `←` / `→` in the Settings control row | Cycle Back, Marketplace, Volume -, Volume + (Settings takes no mouse input) |
-| `↑` from the Settings control row | Focus the owned-characters panel |
+| `↑` from the Settings control row | Focus the characters catalogue |
 | `←` / `→` at an inventory panel edge | Cross between the characters and themes panels |
 | `↓` past the last inventory row | Drop back to the control row |
-| `Enter` on an inventory slot | Equip the focused character or theme |
+| `Enter` on an inventory slot | Equip an owned item; locked items show Marketplace guidance |
 | Focus on a character slot | Opens that character's powers card automatically |
 | `Tab` in Settings | Step through every slot and control in one order |
 | `M` in signed-in Settings | Open Marketplace; `Enter` on the visible button does the same |
@@ -346,6 +351,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH` | `settings_previews/theme_nuclear_ghandi.png` (192 x 192 Nuclear Ghandi thumbnail) |
 | `SETTINGS_THEME_CLAUDING_PREVIEW_PATH` | `settings_previews/theme_clauding.png` (192 x 192 Clauding thumbnail) |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
+| `OWNERSHIP_NOTIFICATION_PATH` | Mirurun, lock, and shop-bag ownership-error card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |
@@ -471,9 +477,12 @@ backdrop and portrait appear, each inventory slot shows its thumbnail, and the
 character panel is one row of four while the theme panel is two rows of four
 with a three-slot final row. Move focus between slots and verify the focused
 selection plate/gold label is distinct from the equipped star, equip a
-character and a theme with `Enter`, hold an arrow to confirm focus tracks the
-last key, press `I`, confirm the mouse does nothing there, resize the terminal,
-and open Marketplace before pressing Back. For offline separation, omit the
+character and a theme with `Enter`, then press `Enter` on Princess, Wolf-man,
+Haaland, or Clauding and confirm the item stays unequipped while the top-right
+Marketplace notice appears. Repeat with `TETRISU_RENDERER=cell` to confirm its
+compatibility presentation. Hold an arrow to confirm focus tracks the last
+key, press `I`, confirm the mouse does nothing there, resize the terminal, and
+open Marketplace before pressing Back. For offline separation, omit the
 environment variable, choose Play Offline, open Settings, and confirm that
 only local status, renderer mode, and music volume appear.
 

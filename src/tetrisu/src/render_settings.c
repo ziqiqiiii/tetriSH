@@ -24,6 +24,9 @@
 # define SETTINGS_RED_R	255
 # define SETTINGS_RED_G	111
 # define SETTINGS_RED_B	142
+# define SETTINGS_DISABLED_R	105
+# define SETTINGS_DISABLED_G	99
+# define SETTINGS_DISABLED_B	120
 
 /*
  * draw_button() always emits "[ %-6s ]", so every control is exactly
@@ -51,10 +54,11 @@ static void	draw_frame(struct ncplane *plane, int rows, int cols,
 static void	draw_profile(struct ncplane *plane,
 			const app_settings_view_model_t *settings,
 			const settings_state_t *state, int rows, int cols);
-static void	slot_prefix(char *out, size_t size, bool equipped, bool focused);
+static void	slot_prefix(char *out, size_t size, bool equipped, bool focused,
+					bool owned);
 static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
 			const char *text, int max_lines);
-static void	set_slot_colour(struct ncplane *plane, bool focused);
+static void	set_slot_colour(struct ncplane *plane, bool focused, bool owned);
 static void	draw_offline(struct ncplane *plane,
 			const app_settings_view_model_t *settings, int rows, int cols);
 static void	draw_ability_compat(struct ncplane *plane,
@@ -313,26 +317,26 @@ static void	draw_profile(struct ncplane *plane,
 	{
 		(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
 			SETTINGS_PINK_B);
-		put_line(plane, 8, 3, cols - 6, "OWNED CHARACTERS", true);
+		put_line(plane, 8, 3, cols - 6, "CHARACTERS", true);
 		character_row = 9;
 		index = 0;
 		slot = 0;
 		while (index < settings->characters.count
 			&& character_row < content_limit)
 		{
-			if (settings->characters.items[index].owned)
-			{
-				focused = state->section == SETTINGS_SECTION_CHARACTERS
-					&& state->character_slot == slot;
-				slot_prefix(prefix, sizeof(prefix),
-					settings->characters.items[index].equipped, focused);
-				snprintf(line, sizeof(line), "%s%s", prefix,
-					settings->characters.items[index].name);
-				set_slot_colour(plane, focused);
-				put_line(plane, character_row, 4, cols - 8, line, focused);
-				character_row++;
-				slot++;
-			}
+			focused = state->section == SETTINGS_SECTION_CHARACTERS
+				&& state->character_slot == slot;
+			slot_prefix(prefix, sizeof(prefix),
+				settings->characters.items[index].equipped, focused,
+				settings->characters.items[index].owned);
+			snprintf(line, sizeof(line), "%s%s%s", prefix,
+				settings->characters.items[index].name,
+				settings->characters.items[index].owned ? "" : " [LOCKED]");
+			set_slot_colour(plane, focused,
+				settings->characters.items[index].owned);
+			put_line(plane, character_row, 4, cols - 8, line, focused);
+			character_row++;
+			slot++;
 			index++;
 		}
 		if (character_row == 9 && character_row < content_limit)
@@ -346,7 +350,7 @@ static void	draw_profile(struct ncplane *plane,
 		{
 			(void)ncplane_set_fg_rgb8(plane, SETTINGS_PINK_R, SETTINGS_PINK_G,
 				SETTINGS_PINK_B);
-			put_line(plane, theme_row, 3, cols - 6, "OWNED THEMES", true);
+			put_line(plane, theme_row, 3, cols - 6, "THEMES", true);
 			theme_row++;
 		}
 		theme_first = theme_row;
@@ -354,19 +358,19 @@ static void	draw_profile(struct ncplane *plane,
 		slot = 0;
 		while (index < settings->themes.count && theme_row < content_limit)
 		{
-			if (settings->themes.items[index].owned)
-			{
-				focused = state->section == SETTINGS_SECTION_THEMES
-					&& state->theme_slot == slot;
-				slot_prefix(prefix, sizeof(prefix),
-					settings->themes.items[index].equipped, focused);
-				snprintf(line, sizeof(line), "%s%s", prefix,
-					settings->themes.items[index].name);
-				set_slot_colour(plane, focused);
-				put_line(plane, theme_row, 4, cols - 8, line, focused);
-				theme_row++;
-				slot++;
-			}
+			focused = state->section == SETTINGS_SECTION_THEMES
+				&& state->theme_slot == slot;
+			slot_prefix(prefix, sizeof(prefix),
+				settings->themes.items[index].equipped, focused,
+				settings->themes.items[index].owned);
+			snprintf(line, sizeof(line), "%s%s%s", prefix,
+				settings->themes.items[index].name,
+				settings->themes.items[index].owned ? "" : " [LOCKED]");
+			set_slot_colour(plane, focused,
+				settings->themes.items[index].owned);
+			put_line(plane, theme_row, 4, cols - 8, line, focused);
+			theme_row++;
+			slot++;
 			index++;
 		}
 		if (theme_row == theme_first && theme_row < content_limit)
@@ -396,9 +400,11 @@ static void	draw_profile(struct ncplane *plane,
  * The cell panel has no colour budget to spare, so focus and equipped state
  * are encoded positionally: the cursor column, then the equipped column.
  */
-static void	slot_prefix(char *out, size_t size, bool equipped, bool focused)
+static void	slot_prefix(char *out, size_t size, bool equipped, bool focused,
+	bool owned)
 {
-	snprintf(out, size, "%c%c", focused ? '>' : ' ', equipped ? '*' : ' ');
+	snprintf(out, size, "%c%c", focused ? '>' : ' ',
+		owned ? (equipped ? '*' : ' ') : '!');
 }
 
 /**
@@ -407,9 +413,12 @@ static void	slot_prefix(char *out, size_t size, bool equipped, bool focused)
  * A panel the cursor has left draws entirely in cream, so only one line on the
  * screen is ever gold.
  */
-static void	set_slot_colour(struct ncplane *plane, bool focused)
+static void	set_slot_colour(struct ncplane *plane, bool focused, bool owned)
 {
-	if (focused)
+	if (!owned)
+		(void)ncplane_set_fg_rgb8(plane, SETTINGS_DISABLED_R,
+			SETTINGS_DISABLED_G, SETTINGS_DISABLED_B);
+	else if (focused)
 		(void)ncplane_set_fg_rgb8(plane, SETTINGS_GOLD_R, SETTINGS_GOLD_G,
 			SETTINGS_GOLD_B);
 	else

@@ -28,13 +28,16 @@ static void	draw_pixel_bar(struct ncvisual *visual, int y, int x,
 					int percent, int scale);
 static void	draw_pixel_rect(struct ncvisual *visual, int y, int x,
 					int height, int width, uint32_t color);
+static const char	*notification_asset_path(
+					const ui_notification_t *notification);
 static void	fade_visual(struct ncvisual *visual, int opacity);
 static void	draw_notification(struct ncplane *plane,
 					const ui_notification_t *notification, int opacity,
 					int row_offset);
 static void	draw_bar(struct ncplane *plane, int percent, int opacity,
 					int row);
-static void	draw_fallback_frame(struct ncplane *plane, int opacity);
+static void	draw_fallback_frame(struct ncplane *plane,
+					const ui_notification_t *notification, int opacity);
 static void	set_transparent_base(struct ncplane *plane);
 static void	set_color(struct ncplane *plane, unsigned r, unsigned g,
 					unsigned b, int opacity);
@@ -72,6 +75,20 @@ void	render_notification_queue_volume(render_ctx_t *ctx, int volume)
 	now_ms = ui_notification_now_ms();
 	ui_notification_show(&ctx->notifications, "MUSIC",
 		ui_notification_volume_percent(volume), now_ms);
+	refresh_notifications(ctx, now_ms);
+}
+
+/**
+ * @brief Queues the fixed Marketplace guidance shown for a locked item.
+ */
+void	render_notification_queue_ownership(render_ctx_t *ctx)
+{
+	uint64_t	now_ms;
+
+	if (ctx == NULL || ctx->nc == NULL)
+		return ;
+	now_ms = ui_notification_now_ms();
+	ui_notification_show_ownership(&ctx->notifications, now_ms);
 	refresh_notifications(ctx, now_ms);
 }
 
@@ -231,7 +248,7 @@ static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
 	int						pixel_rows;
 	int						pixel_cols;
 
-	visual = ncvisual_from_file(VOLUME_NOTIFICATION_PATH);
+	visual = ncvisual_from_file(notification_asset_path(notification));
 	*content_embedded = false;
 	if (visual == NULL)
 		return (NULL);
@@ -282,6 +299,7 @@ static void	draw_visual_content(struct ncvisual *visual,
 {
 	char		percent[8];
 	int			scale;
+	int			detail_scale;
 	int			title_x;
 	int			percent_x;
 	int			text_y;
@@ -300,6 +318,24 @@ static void	draw_visual_content(struct ncvisual *visual,
 	ncpixel_set_a(&gold, 255);
 	cream = ncpixel(255, 244, 250);
 	ncpixel_set_a(&cream, 255);
+	if (notification->kind == UI_NOTIFICATION_OWNERSHIP)
+	{
+		detail_scale = scale;
+		text_width = ((int)strlen(notification->message) * 4 - 1)
+			* detail_scale;
+		if (text_width > pixel_cols - title_x - detail_scale * 2)
+		{
+			detail_scale = (pixel_cols - title_x - detail_scale * 2)
+				/ ((int)strlen(notification->message) * 4 - 1);
+			if (detail_scale < 1)
+				detail_scale = 1;
+		}
+		draw_pixel_text(visual, text_y, title_x, notification->title,
+			scale, gold);
+		draw_pixel_text(visual, pixel_rows * 58 / 100, title_x,
+			notification->message, detail_scale, cream);
+		return ;
+	}
 	draw_pixel_text(visual, text_y, title_x, notification->title,
 		scale, gold);
 	snprintf(percent, sizeof(percent), "%d%%", notification->percent);
@@ -350,6 +386,12 @@ static void	draw_pixel_glyph(struct ncvisual *visual, int y, int x,
 
 static uint16_t	glyph_pattern(char glyph)
 {
+	static const uint16_t	letters[26] = {
+		0x2BED, 0x6BAE, 0x3923, 0x6B6E, 0x79A7, 0x79A4, 0x396B,
+		0x5BED, 0x7497, 0x126A, 0x5BAD, 0x4927, 0x5FED, 0x5FFD,
+		0x2B6A, 0x6BA4, 0x2B7B, 0x6BAD, 0x388E, 0x7492, 0x5B6F,
+		0x5B6A, 0x5BFD, 0x5AAD, 0x5A92, 0x72A7
+	};
 	static const uint16_t	digits[10] = {
 		0x7B6F, 0x2492, 0x73E7, 0x73CF, 0x5BC9,
 		0x79CF, 0x79EF, 0x7249, 0x7BEF, 0x7BCF
@@ -357,16 +399,8 @@ static uint16_t	glyph_pattern(char glyph)
 
 	if (glyph >= '0' && glyph <= '9')
 		return (digits[glyph - '0']);
-	if (glyph == 'M')
-		return (0x5FED);
-	if (glyph == 'U')
-		return (0x5B6F);
-	if (glyph == 'S')
-		return (0x79CF);
-	if (glyph == 'I')
-		return (0x7497);
-	if (glyph == 'C')
-		return (0x7927);
+	if (glyph >= 'A' && glyph <= 'Z')
+		return (letters[glyph - 'A']);
 	if (glyph == '%')
 		return (0x5225);
 	return (0);
@@ -449,7 +483,7 @@ static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
 	if (has_art)
 		set_transparent_base(plane);
 	else
-		draw_fallback_frame(plane, opacity);
+		draw_fallback_frame(plane, notification, opacity);
 	draw_notification(plane, notification, opacity, has_art ? 1 : 0);
 	return (plane);
 }
@@ -494,6 +528,14 @@ static void	draw_notification(struct ncplane *plane,
 	(void)ncplane_on_styles(plane, NCSTYLE_BOLD);
 	(void)ncplane_putstr_yx(plane, 1 + row_offset, NOTIFICATION_TEXT_LEFT,
 		notification->title);
+	if (notification->kind == UI_NOTIFICATION_OWNERSHIP)
+	{
+		set_color(plane, 255, 244, 250, opacity);
+		(void)ncplane_putstr_yx(plane, 2 + row_offset,
+			NOTIFICATION_TEXT_LEFT, notification->message);
+		(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
+		return ;
+	}
 	snprintf(percent, sizeof(percent), "%d%%", notification->percent);
 	percent_x = NOTIFICATION_COLS - (int)strlen(percent) - 3;
 	set_color(plane, 255, 244, 250, opacity);
@@ -533,7 +575,8 @@ static void	draw_bar(struct ncplane *plane, int percent, int opacity, int row)
 	}
 }
 
-static void	draw_fallback_frame(struct ncplane *plane, int opacity)
+static void	draw_fallback_frame(struct ncplane *plane,
+	const ui_notification_t *notification, int opacity)
 {
 	uint64_t	channels;
 	int			x;
@@ -560,10 +603,28 @@ static void	draw_fallback_frame(struct ncplane *plane, int opacity)
 	(void)ncplane_putstr_yx(plane, NOTIFICATION_ROWS - 1, 0, "╰");
 	(void)ncplane_putstr_yx(plane, NOTIFICATION_ROWS - 1,
 		NOTIFICATION_COLS - 1, "╯");
-	(void)ncplane_putstr_yx(plane, 1, 0, "│ /\\_/\\");
-	(void)ncplane_putstr_yx(plane, 2, 0, "│( ^.^ )");
+	if (notification != NULL
+		&& notification->kind == UI_NOTIFICATION_OWNERSHIP)
+	{
+		(void)ncplane_putstr_yx(plane, 1, 0, "│  .---.   ");
+		(void)ncplane_putstr_yx(plane, 2, 0, "│  |LOCK|  ");
+	}
+	else
+	{
+		(void)ncplane_putstr_yx(plane, 1, 0, "│ /\\_/\\");
+		(void)ncplane_putstr_yx(plane, 2, 0, "│( ^.^ )");
+	}
 	(void)ncplane_putstr_yx(plane, 1, NOTIFICATION_COLS - 1, "│");
 	(void)ncplane_putstr_yx(plane, 2, NOTIFICATION_COLS - 1, "│");
+}
+
+static const char	*notification_asset_path(
+	const ui_notification_t *notification)
+{
+	if (notification != NULL
+		&& notification->kind == UI_NOTIFICATION_OWNERSHIP)
+		return (OWNERSHIP_NOTIFICATION_PATH);
+	return (VOLUME_NOTIFICATION_PATH);
 }
 
 static void	set_transparent_base(struct ncplane *plane)

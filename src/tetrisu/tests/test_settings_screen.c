@@ -43,6 +43,10 @@ static void	test_fixture_settings_model(void)
 		SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH,
 		SETTINGS_THEME_CLAUDING_PREVIEW_PATH
 	};
+	static const bool	character_owned[] = {true, true, false, false};
+	static const bool	theme_owned[] = {
+		true, true, true, false, true, true, false
+	};
 	app_data_provider_t	provider;
 	app_screen_view_model_t	view;
 	int				index;
@@ -66,7 +70,8 @@ static void	test_fixture_settings_model(void)
 	{
 		assert(strcmp(view.data.settings.characters.items[index].name,
 			character_names[index]) == 0);
-		assert(view.data.settings.characters.items[index].owned);
+		assert(view.data.settings.characters.items[index].owned
+			== character_owned[index]);
 		index++;
 	}
 	index = 0;
@@ -80,12 +85,17 @@ static void	test_fixture_settings_model(void)
 			theme_preview_paths[index]) == 0);
 		assert(strstr(view.data.settings.themes.items[index].portrait_asset,
 			"settings_previews/") != NULL);
-		assert(view.data.settings.themes.items[index].owned);
+		assert(view.data.settings.themes.items[index].owned
+			== theme_owned[index]);
 		index++;
 	}
 	assert(view.data.settings.characters.items[0].owned);
 	assert(view.data.settings.characters.items[0].equipped);
 	assert(view.data.settings.themes.items[1].owned);
+	assert(!view.data.settings.characters.items[2].owned);
+	assert(view.data.settings.characters.items[2].price == 1400);
+	assert(!view.data.settings.themes.items[3].owned);
+	assert(view.data.settings.themes.items[3].price == 1200);
 	assert(strcmp(view.data.settings.characters.items[1].name,
 		"Halloween") == 0);
 	assert(strcmp(view.data.settings.characters.items[1].portrait_asset,
@@ -335,22 +345,37 @@ static void	test_slot_equipping(void)
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
 		false, &view) == APP_PROVIDER_OK);
-	assert(settings_owned_count(&view.data.settings.characters,
+	assert(settings_catalogue_count(&view.data.settings.characters,
 			SETTINGS_CHARACTER_SLOTS) == 4);
-	assert(settings_owned_count(&view.data.settings.themes,
+	assert(settings_catalogue_count(&view.data.settings.themes,
 			SETTINGS_THEME_SLOTS) == 7);
+	assert(settings_owned_count(&view.data.settings.characters,
+			SETTINGS_CHARACTER_SLOTS) == 2);
+	assert(settings_owned_count(&view.data.settings.themes,
+			SETTINGS_THEME_SLOTS) == 5);
 	/* Re-equipping the current slot reports no change, so nothing repaints. */
-	assert(!settings_equip_character_slot(&view.data.settings, 0));
-	assert(settings_equip_character_slot(&view.data.settings, 3));
-	assert(strcmp(view.data.settings.profile.character, "Wolf-man") == 0);
-	assert(view.data.settings.characters.items[3].equipped);
+	assert(settings_equip_character_slot(&view.data.settings, 0)
+		== SETTINGS_EQUIP_UNCHANGED);
+	assert(settings_equip_character_slot(&view.data.settings, 1)
+		== SETTINGS_EQUIP_CHANGED);
+	assert(strcmp(view.data.settings.profile.character, "Halloween") == 0);
+	assert(view.data.settings.characters.items[1].equipped);
 	assert(!view.data.settings.characters.items[0].equipped);
-	assert(settings_equip_theme_slot(&view.data.settings, 6));
-	assert(strcmp(view.data.settings.profile.theme, "Clauding") == 0);
-	assert(view.data.settings.themes.items[6].equipped);
+	assert(settings_equip_theme_slot(&view.data.settings, 5)
+		== SETTINGS_EQUIP_CHANGED);
+	assert(strcmp(view.data.settings.profile.theme, "Nuclear Ghandi") == 0);
+	assert(view.data.settings.themes.items[5].equipped);
 	assert(!view.data.settings.themes.items[0].equipped);
+	/* Locked entries remain visible but never mutate equipped profile state. */
+	assert(settings_equip_character_slot(&view.data.settings, 2)
+		== SETTINGS_EQUIP_LOCKED);
+	assert(strcmp(view.data.settings.profile.character, "Halloween") == 0);
+	assert(settings_equip_theme_slot(&view.data.settings, 6)
+		== SETTINGS_EQUIP_LOCKED);
+	assert(strcmp(view.data.settings.profile.theme, "Nuclear Ghandi") == 0);
 	/* Slots past what the panels draw are rejected rather than clamped. */
-	assert(!settings_equip_theme_slot(&view.data.settings, 99));
+	assert(settings_equip_theme_slot(&view.data.settings, 99)
+		== SETTINGS_EQUIP_INVALID);
 	printf("PASS test_slot_equipping\n");
 }
 

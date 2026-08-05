@@ -2,8 +2,10 @@
 
 The Settings catalogue currently exposes seven theme labels and their preview
 thumbnails. This document records the canonical labels and the four-character
-power reference used by the client fixture. It does not assign prices, colors,
-nicknames, or additional gameplay behavior to a theme.
+power reference used by the client fixture. Preview ownership is deliberately
+mixed so the Settings screen can demonstrate its Marketplace flow: Haaland and
+Clauding are locked, while the other five themes are owned. These fixture flags
+do not add theme gameplay behavior.
 
 ## Theme List
 
@@ -20,8 +22,10 @@ nicknames, or additional gameplay behavior to a theme.
 ## Classic character and power reference
 
 The four character entries and their four powers are the canonical character
-material used by the Settings fixture. See the [Tetris Battle Gaiden character
-list](https://tetris.wiki/Tetris_Battle_Gaiden) for the reference source.
+material used by the Settings fixture. Mirurun and Halloween are owned in the
+preview; Princess and Wolf-man remain visible but locked. See the
+[Tetris Battle Gaiden character list](https://tetris.wiki/Tetris_Battle_Gaiden)
+for the reference source.
 
 ### 1. Princess
 

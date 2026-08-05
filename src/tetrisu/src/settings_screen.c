@@ -92,6 +92,20 @@ int	settings_owned_count(const app_catalogue_view_model_t *catalogue, int limit)
 }
 
 /**
+ * @brief Counts catalogue entries visible in a bounded Settings panel.
+ *
+ * Ownership is intentionally not considered: locked preview entries remain
+ * visible and navigable so the user can inspect what the Marketplace offers.
+ */
+int	settings_catalogue_count(const app_catalogue_view_model_t *catalogue,
+	int limit)
+{
+	if (catalogue == NULL || limit <= 0 || catalogue->count <= 0)
+		return (0);
+	return (min_int(min_int(catalogue->count, APP_CATALOGUE_MAX_ITEMS), limit));
+}
+
+/**
  * @brief Advances one step through sections, then through the focused row.
  *
  * Tab remains a single linear escape hatch so the whole screen is reachable
@@ -433,31 +447,14 @@ bool	settings_select_character(app_settings_view_model_t *settings,
 }
 
 /**
- * @brief Resolves a drawn panel slot back to its catalogue entry.
- *
- * The panels only draw owned items, so the nth focused slot is the nth owned
- * entry rather than catalogue index n.
+ * @brief Resolves a visible panel slot back to its catalogue entry.
  */
 static int	slot_to_index(const app_catalogue_view_model_t *catalogue, int slot)
 {
-	int	index;
-	int	owned;
-
-	if (catalogue == NULL || slot < 0)
+	if (catalogue == NULL || slot < 0 || slot >= catalogue->count
+		|| slot >= APP_CATALOGUE_MAX_ITEMS)
 		return (-1);
-	index = 0;
-	owned = 0;
-	while (index < catalogue->count && index < APP_CATALOGUE_MAX_ITEMS)
-	{
-		if (catalogue->items[index].owned)
-		{
-			if (owned == slot)
-				return (index);
-			owned++;
-		}
-		index++;
-	}
-	return (-1);
+	return (slot);
 }
 
 /**
@@ -506,9 +503,10 @@ bool	settings_card_visible(const settings_state_t *state)
 /**
  * @brief Equips the character occupying the focused panel slot.
  *
- * @return true when the equipped entry changed and the screen must repaint.
+ * @return Changed, unchanged, locked, or invalid selection result.
  */
-bool	settings_equip_character_slot(app_settings_view_model_t *settings,
+settings_equip_result_t	settings_equip_character_slot(
+	app_settings_view_model_t *settings,
 	int slot)
 {
 	app_catalogue_view_model_t	*catalogue;
@@ -516,11 +514,15 @@ bool	settings_equip_character_slot(app_settings_view_model_t *settings,
 	int					index;
 
 	if (settings == NULL || !settings->signed_in)
-		return (false);
+		return (SETTINGS_EQUIP_INVALID);
 	catalogue = &settings->characters;
 	target = slot_to_index(catalogue, slot);
-	if (target < 0 || catalogue->items[target].equipped)
-		return (false);
+	if (target < 0)
+		return (SETTINGS_EQUIP_INVALID);
+	if (!catalogue->items[target].owned)
+		return (SETTINGS_EQUIP_LOCKED);
+	if (catalogue->items[target].equipped)
+		return (SETTINGS_EQUIP_UNCHANGED);
 	index = 0;
 	while (index < catalogue->count && index < APP_CATALOGUE_MAX_ITEMS)
 	{
@@ -533,26 +535,31 @@ bool	settings_equip_character_slot(app_settings_view_model_t *settings,
 	snprintf(settings->profile.portrait_asset,
 		sizeof(settings->profile.portrait_asset), "%s",
 		catalogue->items[target].portrait_asset);
-	return (true);
+	return (SETTINGS_EQUIP_CHANGED);
 }
 
 /**
  * @brief Equips the theme occupying the focused panel slot.
  *
- * @return true when the equipped entry changed and the screen must repaint.
+ * @return Changed, unchanged, locked, or invalid selection result.
  */
-bool	settings_equip_theme_slot(app_settings_view_model_t *settings, int slot)
+settings_equip_result_t	settings_equip_theme_slot(
+	app_settings_view_model_t *settings, int slot)
 {
 	app_catalogue_view_model_t	*catalogue;
 	int					target;
 	int					index;
 
 	if (settings == NULL || !settings->signed_in)
-		return (false);
+		return (SETTINGS_EQUIP_INVALID);
 	catalogue = &settings->themes;
 	target = slot_to_index(catalogue, slot);
-	if (target < 0 || catalogue->items[target].equipped)
-		return (false);
+	if (target < 0)
+		return (SETTINGS_EQUIP_INVALID);
+	if (!catalogue->items[target].owned)
+		return (SETTINGS_EQUIP_LOCKED);
+	if (catalogue->items[target].equipped)
+		return (SETTINGS_EQUIP_UNCHANGED);
 	index = 0;
 	while (index < catalogue->count && index < APP_CATALOGUE_MAX_ITEMS)
 	{
@@ -562,5 +569,5 @@ bool	settings_equip_theme_slot(app_settings_view_model_t *settings, int slot)
 	catalogue->items[target].equipped = true;
 	snprintf(settings->profile.theme, sizeof(settings->profile.theme), "%s",
 		catalogue->items[target].name);
-	return (true);
+	return (SETTINGS_EQUIP_CHANGED);
 }

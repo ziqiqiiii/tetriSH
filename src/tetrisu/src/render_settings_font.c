@@ -69,7 +69,7 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font,
 		render_ctx_t *ctx, int cache_slot,
 		const char *path, int ref_x_value, int ref_y_value, int ref_width,
-		int ref_height);
+		int ref_height, bool owned);
 static void	draw_stats(uint32_t *pixels, int width, int height,
 		const app_settings_view_model_t *settings,
 		const settings_layout_t *layout, struct ncvisual *font);
@@ -969,7 +969,7 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 	const settings_layout_t *layout, struct ncvisual *font, bool characters,
 	render_ctx_t *ctx)
 {
-	int		owned;
+	int		visible;
 	int		index;
 	int		slot;
 	int		focused_slot;
@@ -989,6 +989,7 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 	int		column;
 	int		limit;
 	bool	focused;
+	char	focused_name[APP_TEXT_MAX + 16];
 
 	ref_panel_x = characters ? SETTINGS_REF_CHARACTERS_X
 		: SETTINGS_REF_THEMES_X;
@@ -1009,36 +1010,34 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 		: SETTINGS_REF_THEME_SLOT_NAME_Y;
 	ref_slot_content_height = max_int(ref_slot_thumb_height,
 			ref_slot_name_y + SETTINGS_REF_SLOT_GLYPH);
-	owned = settings_owned_count(catalogue, limit);
+	visible = settings_catalogue_count(catalogue, limit);
 	focused_slot = -1;
 	focused_index = -1;
 	if (state->section == (characters ? SETTINGS_SECTION_CHARACTERS
 			: SETTINGS_SECTION_THEMES))
 		focused_slot = characters ? state->character_slot : state->theme_slot;
-	/* Resolve the focused slot once so its full name can remain readable. */
-	slot = 0;
-	index = 0;
-	while (index < catalogue->count && slot < limit)
-	{
-		if (catalogue->items[index].owned)
-		{
-			if (slot == focused_slot)
-				focused_index = index;
-			slot++;
-		}
-		index++;
-	}
+	if (focused_slot >= 0 && focused_slot < visible)
+		focused_index = focused_slot;
 	draw_text_ref(pixels, width, height, layout, font,
-		characters ? "OWNED CHARACTERS" : "OWNED THEMES", ref_panel_x + 10,
+		characters ? "CHARACTERS" : "THEMES", ref_panel_x + 10,
 		ref_panel_y + SETTINGS_REF_INVENTORY_TITLE_Y, ref_panel_width - 20,
 		SETTINGS_REF_INVENTORY_TITLE_GLYPH, g_settings_pink, true);
 	if (focused_index >= 0)
+	{
+		if (catalogue->items[focused_index].owned)
+			snprintf(focused_name, sizeof(focused_name), "%s",
+				catalogue->items[focused_index].name);
+		else
+			snprintf(focused_name, sizeof(focused_name), "LOCKED - %s",
+				catalogue->items[focused_index].name);
 		draw_text_ref(pixels, width, height, layout, font,
-			catalogue->items[focused_index].name, ref_panel_x + 10,
+			focused_name, ref_panel_x + 10,
 			ref_panel_y + SETTINGS_REF_INVENTORY_DETAIL_Y,
 			ref_panel_width - 20, SETTINGS_REF_INVENTORY_DETAIL_GLYPH,
-			g_settings_gold, true);
-	else if (owned > 0)
+			catalogue->items[focused_index].owned ? g_settings_gold
+				: g_settings_disabled, true);
+	}
+	else if (visible > 0)
 		draw_text_ref(pixels, width, height, layout, font,
 			"ARROWS TO INSPECT", ref_panel_x + 10,
 			ref_panel_y + SETTINGS_REF_INVENTORY_DETAIL_Y,
@@ -1046,42 +1045,42 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 			g_settings_lavender, true);
 	slot = 0;
 	index = 0;
-	while (index < catalogue->count && slot < limit)
+	while (index < visible)
 	{
-		if (catalogue->items[index].owned)
-		{
-			focused = slot == focused_slot;
-			row = slot / SETTINGS_INVENTORY_COLUMNS;
-			column = slot % SETTINGS_INVENTORY_COLUMNS;
-			ref_slot_x = ref_panel_x + SETTINGS_REF_SLOT_INSET
-				+ column * ref_slot_width;
-			ref_slot_y = ref_panel_y + (characters
-				? SETTINGS_REF_CHARACTER_SLOT_FIRST_Y
-				: SETTINGS_REF_THEME_SLOT_FIRST_Y) + row * ref_slot_step;
-			if (focused)
-				draw_slot_highlight(pixels, width, height, layout,
-					ref_slot_x, ref_slot_y, ref_slot_width,
-					ref_slot_content_height);
-			draw_thumbnail(pixels, width, height, layout, font, ctx,
-				(characters ? 0 : APP_CATALOGUE_MAX_ITEMS) + slot,
-				catalogue->items[index].portrait_asset, ref_slot_x + 14,
-				ref_slot_y + 1, min_int(ref_slot_thumb_width,
-					ref_slot_width - 28), ref_slot_thumb_height);
-			if (catalogue->items[index].equipped)
-				draw_text_ref(pixels, width, height, layout, font, "*",
-					ref_slot_x + 8, ref_slot_y + 2, 16, 16,
-					focused ? g_settings_gold : g_settings_green, false);
-			draw_text_ref(pixels, width, height, layout, font,
-				inventory_slot_label(&catalogue->items[index], characters),
-				ref_slot_x + 2,
-				ref_slot_y + ref_slot_name_y, ref_slot_width - 4,
-				SETTINGS_REF_SLOT_GLYPH,
-				focused ? g_settings_gold : g_settings_cream, true);
-			slot++;
-		}
+		focused = slot == focused_slot;
+		row = slot / SETTINGS_INVENTORY_COLUMNS;
+		column = slot % SETTINGS_INVENTORY_COLUMNS;
+		ref_slot_x = ref_panel_x + SETTINGS_REF_SLOT_INSET
+			+ column * ref_slot_width;
+		ref_slot_y = ref_panel_y + (characters
+			? SETTINGS_REF_CHARACTER_SLOT_FIRST_Y
+			: SETTINGS_REF_THEME_SLOT_FIRST_Y) + row * ref_slot_step;
+		if (focused)
+			draw_slot_highlight(pixels, width, height, layout,
+				ref_slot_x, ref_slot_y, ref_slot_width,
+				ref_slot_content_height);
+		draw_thumbnail(pixels, width, height, layout, font, ctx,
+			(characters ? 0 : APP_CATALOGUE_MAX_ITEMS) + slot,
+			catalogue->items[index].portrait_asset, ref_slot_x + 14,
+			ref_slot_y + 1, min_int(ref_slot_thumb_width,
+				ref_slot_width - 28), ref_slot_thumb_height,
+			catalogue->items[index].owned);
+		if (catalogue->items[index].equipped)
+			draw_text_ref(pixels, width, height, layout, font, "*",
+				ref_slot_x + 8, ref_slot_y + 2, 16, 16,
+				focused ? g_settings_gold : g_settings_green, false);
+		draw_text_ref(pixels, width, height, layout, font,
+			inventory_slot_label(&catalogue->items[index], characters),
+			ref_slot_x + 2,
+			ref_slot_y + ref_slot_name_y, ref_slot_width - 4,
+			SETTINGS_REF_SLOT_GLYPH,
+			catalogue->items[index].owned
+				? (focused ? g_settings_gold : g_settings_cream)
+				: g_settings_disabled, true);
+		slot++;
 		index++;
 	}
-	if (owned == 0)
+	if (visible == 0)
 		draw_text_ref(pixels, width, height, layout, font, "NONE OWNED",
 			ref_panel_x + 10, ref_panel_y + 70, ref_panel_width - 20, 13,
 			g_settings_lavender, true);
@@ -1157,7 +1156,7 @@ static const char	*inventory_slot_label(
 static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 	const settings_layout_t *layout, struct ncvisual *font, render_ctx_t *ctx,
 	int cache_slot, const char *path, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height)
+	int ref_width, int ref_height, bool owned)
 {
 	struct ncvisual	*visual;
 	ncvgeom		geom;
@@ -1179,15 +1178,15 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
 		ref_width, ref_height, fallback, 255u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
-		ref_width, 2, g_settings_lavender, 220u);
+		ref_width, 2, owned ? g_settings_lavender : g_settings_disabled, 220u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value,
-		ref_y_value + ref_height - 2, ref_width, 2, g_settings_lavender,
-		220u);
+		ref_y_value + ref_height - 2, ref_width, 2,
+		owned ? g_settings_lavender : g_settings_disabled, 220u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
-		2, ref_height, g_settings_lavender, 220u);
+		2, ref_height, owned ? g_settings_lavender : g_settings_disabled, 220u);
 	fill_ref_rect(pixels, width, height, layout,
 		ref_x_value + ref_width - 2, ref_y_value, 2, ref_height,
-		g_settings_lavender, 220u);
+		owned ? g_settings_lavender : g_settings_disabled, 220u);
 	visual = cached_thumbnail(ctx, cache_slot, path);
 	drawn = false;
 	if (visual != NULL)
@@ -1234,6 +1233,16 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 						tint.r = ncpixel_r(pixel);
 						tint.g = ncpixel_g(pixel);
 						tint.b = ncpixel_b(pixel);
+						if (!owned)
+						{
+							unsigned gray;
+
+							gray = (30u * tint.r + 59u * tint.g
+								+ 11u * tint.b) / 100u;
+							tint.r = gray * 2u / 3u;
+							tint.g = gray * 2u / 3u;
+							tint.b = gray * 2u / 3u;
+						}
 						put_pixel(pixels, width, height, origin_x + x,
 							origin_y + y, tint, ncpixel_a(pixel),
 							layout->opaque_background);
@@ -1247,7 +1256,8 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 	}
 	if (!drawn && font != NULL)
 		draw_text_ref(pixels, width, height, layout, font, "?",
-			ref_x_value, ref_y_value + 6, ref_width, 16, g_settings_lavender,
+			ref_x_value, ref_y_value + 6, ref_width, 16,
+			owned ? g_settings_lavender : g_settings_disabled,
 			true);
 	return (drawn);
 }

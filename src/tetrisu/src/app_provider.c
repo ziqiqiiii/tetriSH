@@ -302,12 +302,12 @@ static app_provider_result_t	fixture_load_catalogue(void *userdata,
 			true, false);
 		set_character_details(&view->items[1], HALLOWEEN_PORTRAIT_PATH,
 			halloween_abilities, halloween_descriptions);
-		set_catalogue_item(&view->items[2], "princess", "Princess", 0,
-			true, false);
+		set_catalogue_item(&view->items[2], "princess", "Princess", 1400,
+			false, false);
 		set_character_details(&view->items[2], PRINCESS_PORTRAIT_PATH,
 			princess_abilities, princess_descriptions);
-		set_catalogue_item(&view->items[3], "wolfman", "Wolf-man", 0,
-			true, false);
+		set_catalogue_item(&view->items[3], "wolfman", "Wolf-man", 1800,
+			false, false);
 		set_character_details(&view->items[3], WOLFMAN_PORTRAIT_PATH,
 			wolfman_abilities, wolfman_descriptions);
 	}
@@ -329,8 +329,8 @@ static app_provider_result_t	fixture_load_catalogue(void *userdata,
 		snprintf(view->items[2].portrait_asset,
 			sizeof(view->items[2].portrait_asset), "%s",
 			SETTINGS_THEME_SNOWMAN_PREVIEW_PATH);
-		set_catalogue_item(&view->items[3], "haaland", "Haaland", 0,
-			true, false);
+		set_catalogue_item(&view->items[3], "haaland", "Haaland", 1200,
+			false, false);
 		snprintf(view->items[3].portrait_asset,
 			sizeof(view->items[3].portrait_asset), "%s",
 			SETTINGS_THEME_HAALAND_PREVIEW_PATH);
@@ -344,8 +344,8 @@ static app_provider_result_t	fixture_load_catalogue(void *userdata,
 		snprintf(view->items[5].portrait_asset,
 			sizeof(view->items[5].portrait_asset), "%s",
 			SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH);
-		set_catalogue_item(&view->items[6], "clauding", "Clauding", 0,
-			true, false);
+		set_catalogue_item(&view->items[6], "clauding", "Clauding", 1600,
+			false, false);
 		snprintf(view->items[6].portrait_asset,
 			sizeof(view->items[6].portrait_asset), "%s",
 			SETTINGS_THEME_CLAUDING_PREVIEW_PATH);

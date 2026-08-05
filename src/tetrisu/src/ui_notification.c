@@ -1,6 +1,9 @@
 #include "tetrisu.h"
 
 static int	clamp_int(int value, int min, int max);
+static void	show_notification(ui_notification_stack_t *stack,
+					ui_notification_kind_t kind, const char *title,
+					const char *message, int percent, uint64_t now_ms);
 static int	find_title(const ui_notification_stack_t *stack,
 				const char *title);
 static void	move_to_front(ui_notification_stack_t *stack, int index);
@@ -33,6 +36,28 @@ void	ui_notification_stack_init(ui_notification_stack_t *stack)
 void	ui_notification_show(ui_notification_stack_t *stack,
 	const char *title, int percent, uint64_t now_ms)
 {
+	show_notification(stack, UI_NOTIFICATION_VOLUME, title, "", percent,
+		now_ms);
+}
+
+/**
+ * @brief Adds or refreshes the fixed ownership-error notification.
+ *
+ * Keeping this copy in the model makes bitmap and compatibility renderers
+ * present the same Marketplace guidance without duplicating strings.
+ */
+void	ui_notification_show_ownership(ui_notification_stack_t *stack,
+	uint64_t now_ms)
+{
+	show_notification(stack, UI_NOTIFICATION_OWNERSHIP,
+		UI_NOTIFICATION_OWNERSHIP_TITLE, UI_NOTIFICATION_OWNERSHIP_MESSAGE,
+		0, now_ms);
+}
+
+static void	show_notification(ui_notification_stack_t *stack,
+	ui_notification_kind_t kind, const char *title, const char *message,
+	int percent, uint64_t now_ms)
+{
 	int	index;
 	int	insert;
 
@@ -55,8 +80,12 @@ void	ui_notification_show(ui_notification_stack_t *stack,
 			stack->count++;
 	}
 	memset(&stack->items[0], 0, sizeof(stack->items[0]));
+	stack->items[0].kind = kind;
 	snprintf(stack->items[0].title, sizeof(stack->items[0].title),
 		"%.*s", UI_NOTIFICATION_TITLE_MAX, title);
+	if (message != NULL)
+		snprintf(stack->items[0].message, sizeof(stack->items[0].message),
+			"%.*s", UI_NOTIFICATION_MESSAGE_MAX, message);
 	stack->items[0].percent = clamp_int(percent, 0, 100);
 	stack->items[0].shown_at_ms = now_ms;
 }

@@ -89,6 +89,8 @@
 	ASSET_DIR "/settings_previews/theme_clauding.png"
 # define VOLUME_NOTIFICATION_PATH \
 	ASSET_DIR "/default_theme/volume_notification.png"
+# define OWNERSHIP_NOTIFICATION_PATH \
+	ASSET_DIR "/default_theme/ownership_notification.png"
 # define ABILITY_POPOVER_PATH \
 	ASSET_DIR "/default_theme/ability_popover.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
@@ -160,6 +162,9 @@
 /* UI_NOTIFICATION.C */
 # define UI_NOTIFICATION_STACK_MAX	3
 # define UI_NOTIFICATION_TITLE_MAX	15
+# define UI_NOTIFICATION_MESSAGE_MAX	31
+# define UI_NOTIFICATION_OWNERSHIP_TITLE	"ITEM NOT OWNED"
+# define UI_NOTIFICATION_OWNERSHIP_MESSAGE	"VISIT MARKETPLACE TO BUY"
 # define UI_NOTIFICATION_HOLD_MS	900
 # define UI_NOTIFICATION_FADE_MS	180
 # define UI_NOTIFICATION_FRAME_MS	33
@@ -580,6 +585,14 @@ typedef enum e_settings_action
 	SETTINGS_ACTION_QUIT
 }	settings_action_t;
 
+typedef enum e_settings_equip_result
+{
+	SETTINGS_EQUIP_INVALID,
+	SETTINGS_EQUIP_UNCHANGED,
+	SETTINGS_EQUIP_CHANGED,
+	SETTINGS_EQUIP_LOCKED
+}	settings_equip_result_t;
+
 typedef struct s_settings_state
 {
 	settings_section_t	section;
@@ -822,9 +835,17 @@ typedef struct
 	char	pending_music_path[AUDIO_PATH_MAX];
 }	audio_ctx_t;
 
+typedef enum e_ui_notification_kind
+{
+	UI_NOTIFICATION_VOLUME,
+	UI_NOTIFICATION_OWNERSHIP
+}	ui_notification_kind_t;
+
 typedef struct s_ui_notification
 {
+	ui_notification_kind_t	kind;
 	char		title[UI_NOTIFICATION_TITLE_MAX + 1];
+	char		message[UI_NOTIFICATION_MESSAGE_MAX + 1];
 	int			percent;
 	uint64_t	shown_at_ms;
 }	ui_notification_t;
@@ -1261,6 +1282,8 @@ bool			auth_form_mask_password(const char *password, char *masked,
 void			ui_notification_stack_init(ui_notification_stack_t *stack);
 void			ui_notification_show(ui_notification_stack_t *stack,
 					const char *title, int percent, uint64_t now_ms);
+void			ui_notification_show_ownership(
+					ui_notification_stack_t *stack, uint64_t now_ms);
 bool			ui_notification_update(ui_notification_stack_t *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const ui_notification_t *notification,
@@ -1293,6 +1316,7 @@ void				render_notification_show_volume(render_ctx_t *ctx,
 					int volume);
 void				render_notification_queue_volume(render_ctx_t *ctx,
 					int volume);
+void				render_notification_queue_ownership(render_ctx_t *ctx);
 void				render_notification_tick(render_ctx_t *ctx);
 int					render_notification_next_wake_ms(
 					const render_ctx_t *ctx);
@@ -1345,13 +1369,15 @@ bool			settings_state_view_changed(const settings_state_t *before,
 					const settings_state_t *after);
 int				settings_owned_count(
 					const app_catalogue_view_model_t *catalogue, int limit);
+int				settings_catalogue_count(
+					const app_catalogue_view_model_t *catalogue, int limit);
 int				settings_slot_rows(int slots);
 bool			settings_select_character(app_settings_view_model_t *settings,
 					int direction);
-bool			settings_equip_character_slot(
+settings_equip_result_t	settings_equip_character_slot(
 					app_settings_view_model_t *settings, int slot);
-bool			settings_equip_theme_slot(app_settings_view_model_t *settings,
-					int slot);
+settings_equip_result_t	settings_equip_theme_slot(
+					app_settings_view_model_t *settings, int slot);
 const app_catalogue_item_view_model_t	*settings_card_character(
 					const app_settings_view_model_t *settings,
 					const settings_state_t *state);
