@@ -264,4 +264,5 @@ Both are expected to be clean. TSan caught two real races that reading the code 
 
 ## References
 
-- [HTTP Server: What do you need to know to build a simple HTTP server from scratch?](https://medium.com/from-the-scratch/http-server-what-do-you-need-to-know-to-build-a-simple-http-server-from-scratch-d1ef8945e4fa) — walkthrough of the socket accept loop and request parsing a from-scratch HTTP server needs; background for the listener and HTTTP handling here.
+- [HTTP Server from scratch in C](https://medium.com/from-the-scratch/http-server-what-do-you-need-to-know-to-build-a-simple-http-server-from-scratch-d1ef8945e4fa)
+- [Concurrent Servers Design](https://eli.thegreenplace.net/2017/concurrent-servers-part-1-introduction/)
