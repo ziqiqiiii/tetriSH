@@ -62,9 +62,12 @@ _Avoid_: quit, abandon, drop out
 **Daemon**:
 A tetriSH process that runs detached from any terminal, unattended:
 `tetrisd` and `tetrislogd`. Being detached is the definition, not who did the
-detaching — today `dspawn` does it before exec'ing either binary. The shell's
-own background processes are not daemons in this sense and are no part of the
-game system.
+detaching — each of them now does it to itself, in `main.c`, and publishes a
+locked pidfile that `tetrisctl` starts, inspects and stops it through
+([ADR-0007](adr/0007-daemons-detach-themselves.md)). The shell's `dspawn` still
+daemonises arbitrary programs, but not these two; and the shell's own
+background processes are not daemons in this sense and are no part of the game
+system.
 _Avoid_: service, background process
 
 ### Logging

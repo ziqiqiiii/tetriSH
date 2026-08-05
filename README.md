@@ -34,7 +34,7 @@ The sections below describe the target design; this table says what exists today
 | `src/tetrisu` | Partial — notcurses intro, menu, and audio; no gameplay or networking |
 | `src/tetrisd` | Implemented — Single mode end to end: accounts, lobby, rooms, live games, `STATE` push; integration tested |
 | `src/tetrislogd` | Implemented — receives, validates, writes, rotates on `SIGHUP`; 35 tests across four suites, valgrind-clean |
-| `tetrisctl` | Not started — no source directory |
+| `tetrisctl` | Partial — `start`/`status`/`stop`/`restart` by pidfile and signal; the control socket is a later step |
 | `lib/libtetrisbrain` | Implemented — nine modules, unit tested |
 | `lib/libtetrisroom` | Implemented — room/slot/lobby domain, unit tested |
 | `lib/libmacminidb` | Implemented — in-memory store, WAL, catalogues, unit tested |
@@ -121,17 +121,18 @@ make run
 
 **2. Launch the daemons from inside the shell:**
 ```
-tetrish$ dspawn tetrislogd -- tetrislogd
-tetrish$ dspawn tetrisd -- tetrisd
+tetrish$ tetrisctl start
 ```
 
-`dspawn` daemonises the program, registers it in `tmp/daemons.reg`, then execs it. Uncomment the matching lines in `.tetrishrc` to start them automatically. Launch order is logger first, then game server.
+`.tetrishrc` already ends with that line, so the daemons come up before the first prompt. Each binary double-forks itself and reports over a readiness pipe, so `tetrisctl start` returns only once they are actually up — and non-zero, with the reason on the terminal, if one is not. Which daemons run and in what order is `TETRISCTL_DAEMONS` in `.tetrishrc`; launch order is logger first, then game server.
 
 **3. Inspect and stop running daemons:**
 ```
-tetrish$ dcheck
-tetrish$ dkill <pid>
+tetrish$ tetrisctl status
+tetrish$ tetrisctl stop            # reverse of launch order
 ```
+
+`stop` blocks until each daemon has finished tearing down.
 
 **4. Connect a client (in a separate terminal):**
 ```bash
@@ -141,10 +142,10 @@ tetrish$ dkill <pid>
 **5. Query and shut down the server:**
 ```bash
 ./bin/tetrisctl status
-./bin/tetrisctl shutdown
+./bin/tetrisctl stop
 ```
 
-Steps 2, 4, and 5 depend on components that are not finished yet — see [Status](#status).
+Steps 4 and 5 depend on components that are not finished yet — see [Status](#status). `tetrisctl`'s richer admin queries (`kick`, `rooms`, `players`, `dropped-logs`) need `tetrisd`'s control socket, which has not landed.
 
 ---
 
@@ -160,7 +161,7 @@ Steps 2, 4, and 5 depend on components that are not finished yet — see [Status
 
 ### tetrish
 
-`tetrish` is the entry shell, built as `src/tetrish/macmini_shell`. It implements the full REPL — `fork()` + `execvp()`, pipes, redirections, `$VAR` expansion, signal handling, and builtins — executes `.tetrishrc` on startup, and ships standalone system programs into `src/tetrish/bin/`, which `make bin-link` symlinks into `./bin`. Daemon lifecycle runs through its `dspawn`, `dcheck`, and `dkill` programs. See [`src/tetrish/README.md`](src/tetrish/README.md).
+`tetrish` is the entry shell, built as `src/tetrish/macmini_shell`. It implements the full REPL — `fork()` + `execvp()`, pipes, redirections, `$VAR` expansion, signal handling, and builtins — executes `.tetrishrc` on startup, and ships standalone system programs into `src/tetrish/bin/`, which `make bin-link` symlinks into `./bin`. Its `dspawn`, `dcheck` and `dkill` daemonise arbitrary programs; the game daemons daemonise themselves and are managed by `tetrisctl`. See [`src/tetrish/README.md`](src/tetrish/README.md).
 
 ### tetrisd
 
@@ -172,7 +173,7 @@ Steps 2, 4, and 5 depend on components that are not finished yet — see [Status
 
 ### tetrisctl
 
-`tetrisctl` issues commands to a running `tetrisd` over a local-only IPC channel rather than the public TCP port, so the control plane stays reachable even when the public listener is saturated. At minimum it supports `status`, `shutdown`, and `dropped-logs`.
+`tetrisctl` owns both daemons' lifecycle. Its first version drives them by pidfile and signal — `start` forks and execs the binary and reports what its readiness pipe said, `status` reads the pidfile lock, `stop` sends `SIGTERM` and blocks until that lock comes free — so nothing about starting and stopping the stack waits on a protocol being built. A local-only control channel to `tetrisd`, carrying `status`, `kick`, `rooms`, `players` and `dropped-logs` over HTTTP rather than the public TCP port, is the second step. See [`src/tetrisctl/README.md`](src/tetrisctl/README.md).
 
 ### tetrisu
 
@@ -190,7 +191,8 @@ Every library is a self-contained directory with its own `Makefile`, `include/`,
 | `libtetrisroom` | Pure lobby domain: seating, ownership succession, start verdicts, room listing | `tetrisd` |
 | `libmacminidb` | In-memory player/character/theme store with an append-only log and crash recovery | `tetrisd` |
 | `libtetrissh` | Secure session: cert auth, RSA-wrapped AES key exchange, encrypted framing | `tetrisd`, `tetrisu` |
-| `libcoreipc` | IPC primitives: log records, ring buffer, `AF_UNIX` helpers, self-pipe, POSIX message queues | `tetrisd`, `tetrislogd`, `tetrisctl` |
+| `libcoreipc` | IPC primitives: log records, ring buffer, `AF_UNIX` helpers, self-pipe, POSIX message queues | `tetrisd`, `tetrislogd` |
+| `libcoredaemon` | Detach, readiness pipe and pidfile claim for the daemons; pidfile read, probe and wait-for-exit for the CLI | `tetrisd`, `tetrislogd`, `tetrisctl` |
 | `libhtttp` | HTTTP parser, serialiser, validation, and method dispatch | `tetrisd`, `tetrisu` |
 | `libstatusbody` | HTTTP message-body codec — `tetrisd` encodes, `tetrisu` decodes | `tetrisd`, `tetrisu` |
 
@@ -228,7 +230,7 @@ frame_len[4] || nonce[12] || tag[16] || ciphertext
 
 ### Processes and IPC
 
-`tetrisd` forwards every log record to `tetrislogd` through `libcoreipc`'s non-blocking ring buffer: game-critical threads enqueue, a shipper thread drains, and records are dropped rather than blocked when the buffer is full. The drop counter is observable via `tetrisctl dropped-logs`. The `tetrisctl` control plane is a separate local-only channel.
+`tetrisd` forwards every log record to `tetrislogd` through `libcoreipc`'s non-blocking ring buffer: game-critical threads enqueue, a shipper thread drains, and records are dropped rather than blocked when the buffer is full. The drop counter will be observable via `tetrisctl dropped-logs` once `tetrisd`'s control socket lands; the counters `tetrislogd` owns surface in the log file itself at boot, on rotation, on `SIGUSR1` and at shutdown.
 
 ### Battle Royale
 
@@ -277,16 +279,16 @@ The full grammar and method table live in [`lib/libhtttp/README.md`](lib/libhttt
 
 `.tetrishrc` is the shell start-up file, executed one command per line; blank lines and lines starting with `#` are ignored. The shell reads the project-local `.tetrishrc` first, then `$HOME/.tetrishrc`, and creates an empty project file if neither exists. Set `$TETRISHRC` to override the path.
 
-Its role at startup is to launch the daemons in dependency order:
+Its role at startup is to declare the daemons and launch them in dependency order:
 
 ```
-dspawn tetrislogd -- tetrislogd   # logger first, so it captures everything
-dspawn tetrisd -- tetrisd         # game server (also serves chat and the marketplace)
+export TETRISCTL_DAEMONS="tetrislogd tetrisd"   # logger first, so it captures everything
+tetrisctl start                                 # blocks until both are actually up
 ```
 
-Both lines ship commented out until the binaries land.
+`TETRISCTL_DAEMONS` is the only place launch order is written down; `tetrisctl stop` reverses it.
 
-Daemon settings live in the same file as `export` lines, so each one is both an ordinary shell command — inherited by anything `dspawn` launches — and a line the daemon parses out of the file itself at boot. `tetrisd` re-reads them on `SIGHUP`:
+Daemon settings live in the same file as `export` lines, so each one is both an ordinary shell command — inherited by anything the shell launches — and a line the daemon parses out of the file itself at boot. `tetrisd` re-reads them on `SIGHUP`:
 
 ```
 export TETRISD_PORT=4242                             # TCP port
@@ -356,7 +358,7 @@ MacMini_tetriSH/
 └── README.md
 ```
 
-`src/tetrisctl/` will follow the same pattern as it lands; the umbrella `Makefile` already looks for it.
+`src/tetrisctl/` follows the same pattern; the umbrella `Makefile` picks it up by wildcard.
 
 ---
 

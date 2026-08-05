@@ -1,7 +1,7 @@
 #include "tetrisctl.h"
 
 // Static Functions
-static int	selected(const t_ctl *ctl, const char *only);
+static int	check_selection(const t_ctl *ctl, const char *only);
 static int	skip(const t_daemon *d, const char *only);
 static int	start_one(const t_ctl *ctl, const t_daemon *d);
 static int	stop_one(const t_ctl *ctl, const t_daemon *d);
@@ -24,7 +24,7 @@ int	cmd_start(const t_ctl *ctl, const char *only)
 	int	rc;
 	int	i;
 
-	if (selected(ctl, only) != 0)
+	if (check_selection(ctl, only) != 0)
 		return (-1);
 	rc = 0;
 	i = 0;
@@ -59,7 +59,7 @@ int	cmd_status(const t_ctl *ctl, const char *only)
 	int		rc;
 	int		i;
 
-	if (selected(ctl, only) != 0)
+	if (check_selection(ctl, only) != 0)
 		return (-1);
 	rc = 0;
 	i = 0;
@@ -94,7 +94,7 @@ int	cmd_stop(const t_ctl *ctl, const char *only)
 	int	rc;
 	int	i;
 
-	if (selected(ctl, only) != 0)
+	if (check_selection(ctl, only) != 0)
 		return (-1);
 	rc = 0;
 	i = ctl->count - 1;
@@ -135,7 +135,7 @@ int	cmd_restart(const t_ctl *ctl, const char *only)
  * @param only One daemon's name, or NULL for all of them.
  * @return 0 when the command can proceed, -1 after reporting why.
  */
-static int	selected(const t_ctl *ctl, const char *only)
+static int	check_selection(const t_ctl *ctl, const char *only)
 {
 	if (ctl == NULL || ctl->count == 0)
 	{

@@ -18,12 +18,13 @@ Implementation status:
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
 | `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX` dgram/stream, self-pipe, mqueue + tests (7 of 7 suites pass) |
+| `lib/libcoredaemon` | implemented — detach + readiness pipe, pidfile claim/probe/wait + tests (3 of 3 suites pass, valgrind-clean) |
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
 | `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean) |
-| `src/tetrislogd` | implemented — sink + lock + reclaim, dgram receive, counters, signals; 4 suites (38 tests) pass, valgrind-clean |
-| `tetrisctl` | not started — no `src/` directory yet |
+| `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
+| `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
 ## Build & Test
 
@@ -81,19 +82,24 @@ TCP (POSIX sockets)
 
 **Binaries:**
 
-- `tetrish` — interactive shell (REPL, builtins, `.tetrishrc`, daemon lifecycle via `dspawn`/`dcheck`/`dkill`). Builds as `src/tetrish/macmini_shell`; its system programs land in `src/tetrish/bin/` and are symlinked into `./bin` by the root `bin-link` target.
+- `tetrish` — interactive shell (REPL, builtins, `.tetrishrc`). Builds as `src/tetrish/macmini_shell`; its system programs land in `src/tetrish/bin/` and are symlinked into `./bin` by the root `bin-link` target. Its `dspawn`/`dcheck`/`dkill` are generic tools for daemonising arbitrary programs and are *not* the lifecycle manager for the game daemons (ADR-0007).
 - `tetrisd` — concurrent game server; server-authoritative; manages rooms, game logic, clients
 - `tetrislogd` — separate logger process; receives log records over IPC; survives `tetrisd` restarts
-- `tetrisctl` — admin CLI; talks to `tetrisd` over a local-only control-plane IPC channel (not the public TCP port)
+- `tetrisctl` — admin CLI; owns both daemons' lifecycle (`start`/`status`/`stop`/`restart`) through their locked pidfiles. A local-only control-plane IPC channel to `tetrisd` (not the public TCP port) is a later step
 - `tetrisu` — terminal client; renders board, handles input + network simultaneously
 
 Room chat, narration, and the marketplace (buy/equip/profile/leaderboard) are
 served by `tetrisd` itself over the same authenticated session — there are no
 separate social-layer daemons.
 
-Daemons are launched from inside the shell via `dspawn` (see `.tetrishrc`), never
-from the root Makefile. `.tetrishrc` keeps the launch lines commented out until
-each binary lands; launch order is logger → game server.
+Both daemons perform their own double-fork at start-up and publish a locked
+pidfile; the fork lives in each one's `main.c` only, never behind
+`server_start`/`logd_start`, or the in-process test suites would begin forking
+(ADR-0007). They are launched by `tetrisctl start` from inside the shell (see
+`.tetrishrc`), never from the root Makefile. `TETRISCTL_DAEMONS` in
+`.tetrishrc` is the only place launch order is written down — logger → game
+server — and teardown is that order reversed, because stopping the logger first
+would push `tetrisd`'s whole shutdown into its error file instead of the log.
 
 **Libraries (statically linked):** each is a self-contained directory with its
 own `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libXXX.a`.
@@ -103,6 +109,7 @@ own `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libX
 - `libmacminidb/` — in-memory NoSQL store ("NoSQLite") for player/character/theme state, with an append-only log and crash recovery
 - `libtetrissh/` — secure session handshake and encrypted framing; linked into both `tetrisd` and `tetrisu`
 - `libcoreipc/` — IPC primitives (log records, ring buffer, `AF_UNIX` helpers, self-pipe, POSIX message queues); no internal dependencies, built first
+- `libcoredaemon/` — both sides of daemonising: detach, readiness pipe and pidfile claim for the daemons; pidfile read, probe and wait-for-exit for `tetrisctl`. Never logs — it is the path a daemon uses to report that it cannot start
 - `libhtttp/` — HTTTP parser and serialiser; linked into both `tetrisd` and `tetrisu`
 - `libstatusbody/` — HTTTP message-body codec — encodes the bodies `tetrisd` sends, decodes the ones `tetrisu` receives
 
@@ -230,6 +237,8 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - `libtetrisbrain` and `libtetrisroom` have **no I/O, no side effects** — pure logic only. Where a room decision needs external facts (is a player still connected?), the caller supplies a probe callback.
 - `libcoreipc` must not log, `printf`, or `exit()` — it *is* the log path and must never recurse into itself. Errno-style returns only.
 - No hard-coded paths anywhere; all paths come from `.tetrishrc` or are passed in by the caller.
+- The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `us_dgram_bind`, which unlinks its socket path unconditionally.
+- A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
 - `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
 - No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.

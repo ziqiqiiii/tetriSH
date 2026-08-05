@@ -9,7 +9,7 @@
 
 # tetriSH umbrella Makefile. Recurses into the self-contained libraries and the
 # vendored shell, then provides a shell-driven `run` entry point. Daemons are
-# launched from inside the shell via dspawn (see .tetrishrc), not from here.
+# launched by tetrisctl from inside the shell (see .tetrishrc), not from here.
 #
 #   make / make all   install missing dependencies, then build everything
 #   make deps         check/install dependencies for this OS
@@ -76,7 +76,7 @@ COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrisu/Makefile)
 DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
 TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd \
-							  src/tetrislogd,$(DAEMON_DIRS))
+							  src/tetrislogd src/tetrisctl,$(DAEMON_DIRS))
 
 ################################################################################
 #                                   BUILD                                      #
@@ -99,8 +99,8 @@ daemons: libs | deps
 	done
 
 # Collect every built binary into a single ./bin. The shell prepends $PWD/bin
-# to PATH, and dspawn resolves its target through PATH exactly as execvp does,
-# so a daemon missing from ./bin cannot be launched by name at all. Each
+# to PATH, and tetrisctl resolves each daemon through PATH exactly as execvp
+# does, so a daemon missing from ./bin cannot be launched by name at all. Each
 # component's binary is named after its directory; unbuilt ones are skipped.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
@@ -110,7 +110,8 @@ bin-link: shell daemons
 		if [ -x $$d/$$n ]; then ln -sf $(CURDIR)/$$d/$$n $(BIN)/; fi; \
 	done
 
-# Idiomatic launch: the shell sources .tetrishrc, which dspawns the daemons.
+# Idiomatic launch: the shell sources .tetrishrc, whose last line is
+# `tetrisctl start` - so the daemons come up before the first prompt.
 run: all bin-link
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
@@ -120,13 +121,14 @@ run: all bin-link
 certs:
 	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
 
-# Headless stack for integration tests (no interactive shell). Launches only
-# the daemons that have been built.
+# Headless stack for integration tests (no interactive shell). tetrisctl reads
+# the roster and its order from .tetrishrc, and each daemon detaches itself, so
+# this returns only once they are actually up - and non-zero if one is not.
 stack: all bin-link certs
-	@ for d in tetrislogd tetrisd; do \
-		if [ -x $(BIN)/$$d ]; then $(BIN)/$$d & fi; \
-	done; \
-	echo "Started available daemons; inspect with 'dcheck' or tmp/daemons.reg"
+	@ PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
+		$(BIN)/tetrisctl start
+	@ PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
+		$(BIN)/tetrisctl status
 
 # --- component tests --------------------------------------------------------
 test: all
@@ -186,11 +188,17 @@ fclean:
 # running, delegates to the shell's own `reset` (drops its tmp/ and archive/),
 # and clears the repo-level bin/tmp.
 #
-# The daemons are stopped first because the killer needs what the wipe removes:
-# it kills by the pid in tmp/daemons.reg, using the dkill binary under bin/.
-# Reversing these two lines leaves the daemons running with their state deleted
-# underneath them, which is the case tetrislogd's sink reclaim exists to survive.
+# The daemons are stopped first, and stopping them is what this target owes
+# them: tetrisctl blocks until each has finished tearing down, so the wipe
+# cannot delete tmp/ out from under a logger that is still writing into it.
+# Reversing these lines is the self-inflicted wound tetrislogd's sink reclaim
+# was written to survive - reclaim stays, because a log file can still be
+# rotated or removed by hand, but it stops being a patch for this.
 reset:
+	@ if [ -x $(BIN)/tetrisctl ]; then \
+		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
+			$(BIN)/tetrisctl stop >/dev/null 2>&1 || true; \
+	fi
 	@ bash $(SHELL_DIR)/daemons_killer.sh >/dev/null 2>&1 || true
 	@ $(MAKE) $(MAKE_FLAGS) -C $(SHELL_DIR) reset >/dev/null 2>&1 || true
 	@ for d in $(LIB_DIRS) $(DAEMON_DIRS); do \

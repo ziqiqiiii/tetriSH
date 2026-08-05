@@ -3,35 +3,26 @@
 /*
 ** Static Variables
 **
-** The daemons tetrisctl knows how to manage, and the .tetrishrc key each one
-** publishes its pidfile under. This much is compiled in on purpose: what
-** must not be is *which* of them run and in what order, and that is
-** TETRISCTL_DAEMONS's job (docs/adr/0007).
+** The daemons this build knows how to manage, and the .tetrishrc key each one
+** publishes its pidfile under. This is the only thing compiled in, and it is
+** knowledge about the programs rather than about a deployment of them: which
+** of them run, in what order, and where their pidfiles actually live are all
+** read from the start-up file (docs/adr/0007).
 **
-** The key names differ because each daemon keeps its own prefix's existing
-** habit - tetrisd already had CERT_PATH and KEY_PATH, tetrislogd already had
-** SOCK and FILE - and a daemon reading its own settings is the one place
-** consistency actually matters.
-**
-** The fallbacks repeat each daemon's own compiled default, so tetrisctl
-** answers the same way its target does when .tetrishrc says nothing. They are
-** the one piece of duplication here; test_cfg pins them against the shipped
-** start-up file so the two cannot drift apart quietly.
+** No default path appears here on purpose. Repeating each daemon's own
+** compiled default would put the same path in a third place and let the two
+** drift apart silently, which is the failure this table exists to avoid.
 */
-static const struct s_known
-{
-	const char	*name;
-	const char	*pid_key;
-	const char	*pid_default;
-}	g_known[] = {
-	{"tetrislogd", "TETRISLOGD_PID", "tmp/tetrislogd/tetrislogd.pid"},
-	{"tetrisd", "TETRISD_PID_PATH", "tmp/tetrisd/tetrisd.pid"},
-	{NULL, NULL, NULL}
+static const t_known	g_known[] = {
+{"tetrislogd", "TETRISLOGD_PID"},
+{"tetrisd", "TETRISD_PID_PATH"},
+{NULL, NULL}
 };
 
 // Static Functions
 static int			known_index(const char *key);
 static int			name_index(const char *name);
+static int			add_daemon(t_ctl *ctl, const char *name);
 static int			set_str(char *dst, size_t cap, const char *value);
 static int			split_assignment(const char *line, char *key,
 						size_t key_cap, char *value, size_t value_cap);
@@ -40,16 +31,20 @@ static void			strip_quotes(char *value);
 static int			apply_env(t_ctl *ctl);
 
 /**
- * @brief Fills a roster with what tetrisctl manages when .tetrishrc is silent.
+ * @brief Empties a roster, ready for a start-up file to fill it.
  *
- * @param ctl Roster to fill (ignored when NULL).
+ * There is deliberately no default set of daemons and no default pidfile. A
+ * roster that was never declared is an error rather than a guess, because the
+ * launch order this program exists to take from a file would otherwise be
+ * sitting in this one instead.
+ *
+ * @param ctl Roster to blank (ignored when NULL).
  */
 void	cfg_defaults(t_ctl *ctl)
 {
 	if (ctl == NULL)
 		return ;
 	memset(ctl, 0, sizeof(*ctl));
-	snprintf(ctl->order, TC_LINE_MAX, "%s", TC_DEF_DAEMONS);
 	snprintf(ctl->rc_path, TC_PATH_MAX, "%s", "./" TC_RC_NAME);
 	ctl->stop_ms = TC_STOP_MS;
 }
@@ -117,45 +112,49 @@ int	cfg_parse_line(t_ctl *ctl, const char *line)
  * the answer. Everything is resolved once, here, when the whole file has been
  * read.
  *
+ * Every failure here is loud. An unknown *key* in the start-up file is
+ * skipped, because the file is a shell script full of lines that are none of
+ * this program's business - but a daemon named with no pidfile to find it by,
+ * or a name nothing manages, would produce a stack that is half up under a
+ * zero exit code.
+ *
  * @param ctl Roster holding an order line and any pidfile paths read.
- * @return 0 on success, -1 when the roster names a daemon tetrisctl does not
- * manage or lists more than it can hold.
+ * @return 0 on success, -1 after reporting which daemon could not be resolved.
  */
 int	cfg_resolve(t_ctl *ctl)
 {
 	char	work[TC_LINE_MAX];
 	char	*token;
-	int		i;
 
 	if (ctl == NULL)
 		return (-1);
 	ctl->count = 0;
+	if (ctl->order[0] == '\0')
+	{
+		fprintf(stderr, "%s: %sDAEMONS is not set in %s\n",
+			TC_COMPONENT, TC_KEY_PREFIX, ctl->rc_path);
+		return (-1);
+	}
 	snprintf(work, TC_LINE_MAX, "%s", ctl->order);
 	token = strtok(work, " \t");
 	while (token != NULL)
 	{
-		i = name_index(token);
-		if (i < 0 || ctl->count >= TC_MAX_DAEMONS)
+		if (add_daemon(ctl, token) != 0)
 			return (-1);
-		snprintf(ctl->daemons[ctl->count].name, TC_NAME_MAX, "%s", token);
-		if (ctl->paths[i][0] != '\0')
-			snprintf(ctl->daemons[ctl->count].pid_path, TC_PATH_MAX, "%s",
-				ctl->paths[i]);
-		else
-			snprintf(ctl->daemons[ctl->count].pid_path, TC_PATH_MAX, "%s",
-				g_known[i].pid_default);
-		ctl->count++;
 		token = strtok(NULL, " \t");
 	}
 	return (0);
 }
 
 /**
- * @brief Loads the whole roster: defaults, then the rc file, then env.
+ * @brief Loads the whole roster: the rc file, then the environment.
  *
- * A missing rc file is not an error - the defaults name both daemons in the
- * right order. The environment is applied last so an exported override beats
- * the file, which is the same precedence both daemons use.
+ * A missing or silent rc file *is* an error, unlike in either daemon, and the
+ * asymmetry is deliberate: a daemon with no settings has working defaults to
+ * fall back on, whereas a lifecycle manager with no roster has nothing to
+ * manage and would exit 0 having done nothing. The environment is applied
+ * last so an exported override beats the file, which is the same precedence
+ * both daemons use.
  *
  * @param ctl Roster to fill.
  * @param rc_override Path from argv, or NULL to resolve the usual way.
@@ -237,6 +236,43 @@ const t_daemon	*ctl_find(const t_ctl *ctl, const char *name)
 		i++;
 	}
 	return (NULL);
+}
+
+/**
+ * @brief Appends one named daemon to the roster, resolving its pidfile.
+ *
+ * @param ctl Roster to append to.
+ * @param name Daemon name from the order line.
+ * @return 0 on success, -1 after reporting why the name could not be used.
+ */
+static int	add_daemon(t_ctl *ctl, const char *name)
+{
+	int	i;
+
+	i = name_index(name);
+	if (i < 0)
+	{
+		fprintf(stderr, "%s: %s is not a daemon this build manages\n",
+			TC_COMPONENT, name);
+		return (-1);
+	}
+	if (ctl->count >= TC_MAX_DAEMONS)
+	{
+		fprintf(stderr, "%s: more than %d daemons in %sDAEMONS\n",
+			TC_COMPONENT, TC_MAX_DAEMONS, TC_KEY_PREFIX);
+		return (-1);
+	}
+	if (ctl->paths[i][0] == '\0')
+	{
+		fprintf(stderr, "%s: %s is not set in %s, so %s has no pidfile\n",
+			TC_COMPONENT, g_known[i].pid_key, ctl->rc_path, name);
+		return (-1);
+	}
+	snprintf(ctl->daemons[ctl->count].name, TC_NAME_MAX, "%s", name);
+	snprintf(ctl->daemons[ctl->count].pid_path, TC_PATH_MAX, "%s",
+		ctl->paths[i]);
+	ctl->count++;
+	return (0);
 }
 
 /**

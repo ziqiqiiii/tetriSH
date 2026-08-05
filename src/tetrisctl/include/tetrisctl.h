@@ -16,18 +16,20 @@
 /*
 ** tetrisctl - the admin CLI that owns the game daemons' lifecycle.
 **
-** This is the first version, and it drives both daemons by pidfile and
-** signal: start forks and execs the binary and reports what the binary's own
-** readiness pipe says, status reads the pidfile lock, stop sends SIGTERM and
-** blocks until that lock comes free (docs/adr/0007). Nothing here waits on a
-** protocol being built - tetrisd's control socket lands as a second step and
-** buys something a signal cannot, an admin channel that still answers while
-** the public port is flooded.
+** This first version drives both daemons by pidfile and signal: start forks
+** and execs the binary and reports what its readiness pipe says, status reads
+** the pidfile lock, stop sends SIGTERM and waits for that lock to come free
+** (docs/adr/0007). tetrisd's control socket lands as a second step, buying an
+** admin channel that still answers while the public port is flooded.
 **
-** Two things are deliberately not compiled in. The set of daemons and the
-** order they start in come from TETRISCTL_DAEMONS in .tetrishrc; teardown is
-** that order reversed, because stopping the logger first would push tetrisd's
-** entire shutdown into its error file instead of the log.
+** No deployment detail is compiled in: the daemon set and start order come
+** from TETRISCTL_DAEMONS in .tetrishrc, and each pidfile path from the key its
+** own daemon publishes it under, so no path is written down twice. Teardown is
+** that order reversed - stopping the logger first would push tetrisd's whole
+** shutdown into its error file instead of the log.
+**
+** Compiled in is only the daemon name -> pidfile key mapping, which is
+** knowledge about the programs rather than about a deployment of them.
 */
 
 # define TC_COMPONENT		"tetrisctl"
@@ -37,9 +39,6 @@
 # define TC_LINE_MAX		2048
 # define TC_NAME_MAX		32
 # define TC_MAX_DAEMONS		8
-
-/* launch order used when .tetrishrc names none: the logger, then the server */
-# define TC_DEF_DAEMONS		"tetrislogd tetrisd"
 
 /*
 ** How long stop waits for a daemon to finish tearing down. Generous on
@@ -61,6 +60,19 @@ typedef enum e_state
 }	t_state;
 
 /*
+** A daemon this build knows how to manage, and the .tetrishrc key it publishes
+** its pidfile under. The key names differ between the two because each daemon
+** keeps its own prefix's existing habit - tetrisd already had CERT_PATH and
+** KEY_PATH, tetrislogd already had SOCK and FILE - and a daemon reading its
+** own settings is the one place that consistency actually matters.
+*/
+typedef struct s_known
+{
+	const char	*name;
+	const char	*pid_key;
+}	t_known;
+
+/*
 ** One managed daemon: the name .tetrishrc listed and the pidfile that name
 ** resolved to. The pidfile is the whole handle - it is what gets signalled,
 ** what gets waited on, and what says whether a second start may proceed.
@@ -76,7 +88,9 @@ typedef struct s_daemon
 **
 ** `order` and `paths` are kept raw until cfg_resolve runs, because a start-up
 ** file may name the daemons before or after it names their pidfiles and
-** neither ordering should change the answer.
+** neither ordering should change the answer. Both start empty: a roster that
+** was never declared is an error, not a default, or the order this program
+** exists to take from a file would be sitting in this one instead.
 */
 typedef struct s_ctl
 {

@@ -222,6 +222,7 @@ static void	arrange(t_ctl *ctl, char *dir, size_t cap)
 	setenv("TETRISLOGD_PID", path, 1);
 	snprintf(path, sizeof(path), "%s/tetrisd.pid", dir);
 	setenv("TETRISD_PID_PATH", path, 1);
+	setenv("TETRISCTL_DAEMONS", "tetrislogd tetrisd", 1);
 	assert(cfg_load(ctl, "/dev/null") == 0);
 	ctl->stop_ms = 5000;
 	ctl->rc_path[0] = '\0';
