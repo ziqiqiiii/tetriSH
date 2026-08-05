@@ -17,6 +17,7 @@ The concurrent, server-authoritative game server for tetriSH. Owns accounts, the
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
+- [References](#references)
 
 ---
 
@@ -258,3 +259,9 @@ make -C src/tetrisd test FLAGS="-Wall -Wextra -fsanitize=thread -g -O1" \
 ```
 
 Both are expected to be clean. TSan caught two real races that reading the code against the lock order did not — see [Lock order](#lock-order).
+
+---
+
+## References
+
+- [HTTP Server: What do you need to know to build a simple HTTP server from scratch?](https://medium.com/from-the-scratch/http-server-what-do-you-need-to-know-to-build-a-simple-http-server-from-scratch-d1ef8945e4fa) — walkthrough of the socket accept loop and request parsing a from-scratch HTTP server needs; background for the listener and HTTTP handling here.
