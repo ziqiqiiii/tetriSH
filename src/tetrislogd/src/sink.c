@@ -23,13 +23,13 @@ void	sink_blank(t_sink *sk)
 }
 
 /**
- * @brief Opens the log file and claims it exclusively for this process.
+ * @brief Opens the log file for appending.
  *
- * The lock is what makes a second tetrislogd exit instead of interleaving
- * into the same file - dspawn does not prevent a double launch, it registers
- * the second process as tetrislogd.1 and runs it anyway. Failing the lock
- * leaves errno at EWOULDBLOCK, so the caller can tell "already running" from
- * "cannot open".
+ * No lock is taken. This used to hold the exclusive flock that stopped a
+ * second tetrislogd interleaving into the same file, which made the sink the
+ * single-instance guard as well as the sink - so deleting tmp/ removed both
+ * at once and the reclaim path had to restore both. The pidfile is the guard
+ * now (docs/adr/0007), claimed in main.c before the daemon opens anything.
  *
  * @param sk Sink to open.
  * @param path Log file path.
@@ -112,10 +112,10 @@ int	sink_sync(t_sink *sk)
 /**
  * @brief Reopens the log file at its configured path, for rotation.
  *
- * Closing the old descriptor releases the flock, so the reopen can genuinely
- * fail - and when it does the sink stays closed rather than the process
- * exiting. The caller reads that as "degrade to stderr and retry", because a
- * logger that quits over a disk hiccup takes the whole log path with it.
+ * The reopen can genuinely fail - the directory may be gone - and when it
+ * does the sink stays closed rather than the process exiting. The caller
+ * reads that as "degrade to stderr and retry", because a logger that quits
+ * over a disk hiccup takes the whole log path with it.
  *
  * @param sk Sink to reopen.
  * @return 0 on success, -1 with errno set on failure.
@@ -158,7 +158,7 @@ int	sink_retry(t_sink *sk)
 }
 
 /**
- * @brief Syncs, closes, and releases the lock on the log file.
+ * @brief Syncs and closes the log file.
  *
  * Safe on a blanked or already-closed sink, because teardown is shared
  * between a clean stop and a boot that failed before the sink was opened.
@@ -214,29 +214,20 @@ bool	sink_is_stale(const t_sink *sk)
 }
 
 /**
- * @brief Opens one log file and takes the exclusive lock that goes with it.
+ * @brief Opens one log file for appending, creating the directory above it.
+ *
+ * O_APPEND rather than a seek, so a log file rotated out from under the
+ * daemon and a fresh one behave identically: every write lands at the end of
+ * whatever the descriptor currently names.
  *
  * @param path Log file path.
- * @return The locked fd on success, -1 with errno set on failure.
+ * @return The open fd on success, -1 with errno set on failure.
  */
 static int	claim(const char *path)
 {
-	int	fd;
-	int	saved;
-
 	if (cfg_mkdir_parent(path) != 0)
 		return (-1);
-	fd = open(path, O_WRONLY | O_APPEND | O_CREAT, TL_FILE_MODE);
-	if (fd < 0)
-		return (-1);
-	if (flock(fd, LOCK_EX | LOCK_NB) != 0)
-	{
-		saved = errno;
-		close(fd);
-		errno = saved;
-		return (-1);
-	}
-	return (fd);
+	return (open(path, O_WRONLY | O_APPEND | O_CREAT, TL_FILE_MODE));
 }
 
 /**

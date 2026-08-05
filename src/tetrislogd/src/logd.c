@@ -31,16 +31,15 @@ void	logd_blank(t_logd *lg)
 }
 
 /**
- * @brief Brings the logger up: sink, lock, self-pipe, signals, socket.
+ * @brief Brings the logger up: sink, self-pipe, signals, socket.
  *
- * The sink is claimed before the socket is bound, and that order is the whole
- * single-instance guard: us_dgram_bind unlinks its path unconditionally, so a
- * second instance has to lose the lock race and leave before it can steal a
- * running logger's socket.
+ * This is the seam the test suites drive: a real daemon in-process, with no
+ * fork and no pidfile, because the single-instance guard belongs to main.c
+ * and a start function that claimed it would take every suite with it.
  *
  * @param lg Daemon to start.
  * @param cfg Configuration supplying both paths.
- * @return 0 on success, -1 when another instance holds the sink or the socket
+ * @return 0 on success, -1 when the sink cannot be opened or the socket
  * cannot be bound.
  */
 int	logd_start(t_logd *lg, const t_cfg *cfg)
@@ -231,6 +230,11 @@ void	logd_report(t_logd *lg, const char *event)
 
 /**
  * @brief Opens everything logd_start needs, in the order that order matters.
+ *
+ * The socket is bound last, and that is the part worth guarding: us_dgram_bind
+ * unlinks its path unconditionally, so binding it is the point of no return
+ * for anyone else's socket. Nothing here excludes a second instance any more
+ * - main.c's pidfile claim did that before this function ran (docs/adr/0007).
  *
  * @param lg Daemon being started.
  * @param cfg Configuration supplying both paths.

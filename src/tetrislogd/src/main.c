@@ -1,12 +1,20 @@
 #include "tetrislogd.h"
 
+// Static Functions
+static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready);
+static int	run(t_logd *lg);
+
 /**
- * @brief Entry point: a shim over logd_start, the loop, and logd_stop.
+ * @brief Entry point: detach, claim the pidfile, then loop until stopped.
  *
- * Every decision lives behind those three calls, so the tests drive the real
- * daemon in-process and this function stays the one piece of the program no
- * test exercises. tetrislogd does not daemonise itself - dspawn already did
- * that before exec'ing it.
+ * The fork lives here and nowhere else. logd_start is the seam the test
+ * suites drive in-process, so a start function that daemonised would make
+ * every suite fork the moment it booted the daemon (docs/adr/0007).
+ *
+ * Everything up to cd_ready is boot, and boot still owns the terminal: a
+ * logger that loses the pidfile race prints why and exits non-zero, and so
+ * does the process that launched it. Only once the daemon is actually
+ * listening does stderr move to its configured file.
  *
  * @param argc Number of command-line arguments.
  * @param argv Optional argv[1]: the .tetrishrc to read.
@@ -14,35 +22,97 @@
  */
 int	main(int argc, char **argv)
 {
+	t_pidfile	pf;
 	t_logd		lg;
 	t_cfg		cfg;
-	const char	*rc;
+	int			ready;
+	int			status;
 
-	rc = NULL;
-	if (argc > 1)
-		rc = argv[1];
-	if (cfg_load(&cfg, rc) != 0)
+	if (cfg_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
 	{
 		fprintf(stderr, "%s: cannot load configuration: %s\n",
 			TL_COMPONENT, strerror(errno));
 		return (EXIT_FAILURE);
 	}
+	if (go_background(&cfg, &pf, &ready) != 0)
+		return (EXIT_FAILURE);
 	if (logd_start(&lg, &cfg) != 0)
 	{
 		fprintf(stderr, "%s: cannot start: %s\n",
 			TL_COMPONENT, strerror(errno));
+		cd_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
-	while (lg.running)
+	cd_ready(ready);
+	status = run(&lg);
+	logd_stop(&lg);
+	cd_pid_release(&pf);
+	return (status);
+}
+
+/**
+ * @brief Detaches, claims the pidfile, and moves stderr off the terminal.
+ *
+ * The order is the whole single-instance guard. Claiming comes after the
+ * fork, because the pid written has to be the detached process's; it comes
+ * before logd_start, because us_dgram_bind unlinks its socket path
+ * unconditionally, so a second instance has to lose the pidfile race and
+ * leave before it can steal a running logger's socket.
+ *
+ * stderr moves last. Everything before this point can still fail, and a
+ * failure that only reached the error file would be invisible to the operator
+ * who just typed the command.
+ *
+ * @param cfg Configuration supplying the pidfile and error-file paths.
+ * @param pf Pidfile to claim.
+ * @param ready Receives the readiness descriptor for cd_ready.
+ * @return 0 on success, -1 after reporting why on stderr.
+ */
+static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready)
+{
+	cd_pid_blank(pf);
+	if (cd_detach(ready) != 0)
 	{
-		if (logd_run_once(&lg) != 0)
+		fprintf(stderr, "%s: cannot detach: %s\n",
+			TL_COMPONENT, strerror(errno));
+		return (-1);
+	}
+	if (cd_pid_claim(pf, cfg->pid_path) != 0)
+	{
+		if (errno == EWOULDBLOCK || errno == EAGAIN)
+			fprintf(stderr, "%s: already running (%s)\n",
+				TL_COMPONENT, cfg->pid_path);
+		else
+			fprintf(stderr, "%s: cannot claim %s: %s\n",
+				TL_COMPONENT, cfg->pid_path, strerror(errno));
+		return (-1);
+	}
+	if (cd_stderr_redirect(cfg->err_path) != 0)
+	{
+		fprintf(stderr, "%s: cannot open %s: %s\n",
+			TL_COMPONENT, cfg->err_path, strerror(errno));
+		cd_pid_release(pf);
+		return (-1);
+	}
+	return (0);
+}
+
+/**
+ * @brief Steps the daemon loop until a signal stops it or the loop fails.
+ *
+ * @param lg Started daemon.
+ * @return EXIT_SUCCESS on a clean shutdown, EXIT_FAILURE on a loop error.
+ */
+static int	run(t_logd *lg)
+{
+	while (lg->running)
+	{
+		if (logd_run_once(lg) != 0)
 		{
 			fprintf(stderr, "%s: loop failed: %s\n",
 				TL_COMPONENT, strerror(errno));
-			logd_stop(&lg);
 			return (EXIT_FAILURE);
 		}
 	}
-	logd_stop(&lg);
 	return (EXIT_SUCCESS);
 }

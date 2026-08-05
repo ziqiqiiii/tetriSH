@@ -21,6 +21,7 @@ typedef struct s_fixture
 	char	dir[96];
 	char	sock_path[192];
 	char	file_path[192];
+	char	pid_path[192];
 	t_cfg	cfg;
 }	t_fixture;
 

@@ -40,8 +40,9 @@ INC_DIR		:= include
 
 # One archive per CoreStack library, each with the include path that goes with
 # it. Adding a library here wires up its build, its -I and its link in one step.
-# The logger is the log path itself, so it links libcoreipc and nothing else.
-LIB_NAMES	:= libcoreipc
+# The logger is the log path itself, so it links only what it needs to receive
+# records (libcoreipc) and to detach and hold its pidfile (libcoredaemon).
+LIB_NAMES	:= libcoreipc libcoredaemon
 LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
 LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
 LIB_INC		:= $(LIB_DIRS:%=-I%/include)

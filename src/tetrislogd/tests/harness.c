@@ -23,8 +23,11 @@ int	fx_make(t_fixture *fx)
 		return (-1);
 	snprintf(fx->sock_path, sizeof(fx->sock_path), "%s/logd.sock", fx->dir);
 	snprintf(fx->file_path, sizeof(fx->file_path), "%s/logd.log", fx->dir);
+	snprintf(fx->pid_path, sizeof(fx->pid_path), "%s/logd.pid", fx->dir);
 	snprintf(fx->cfg.sock_path, TL_PATH_MAX, "%s", fx->sock_path);
 	snprintf(fx->cfg.file_path, TL_PATH_MAX, "%s", fx->file_path);
+	snprintf(fx->cfg.pid_path, TL_PATH_MAX, "%s", fx->pid_path);
+	snprintf(fx->cfg.err_path, TL_PATH_MAX, "%s/logd.err", fx->dir);
 	snprintf(fx->cfg.rc_path, TL_PATH_MAX, "%s", "./" TL_RC_NAME);
 	return (0);
 }

@@ -49,6 +49,8 @@ static void	test_defaults_are_complete(void)
 	cfg_defaults(&cfg);
 	assert(strcmp(cfg.sock_path, TL_DEF_SOCK) == 0);
 	assert(strcmp(cfg.file_path, TL_DEF_FILE) == 0);
+	assert(strcmp(cfg.pid_path, TL_DEF_PID) == 0);
+	assert(strcmp(cfg.err_path, TL_DEF_ERR) == 0);
 	printf("PASS test_defaults_are_complete\n");
 }
 
@@ -66,6 +68,10 @@ static void	test_set_known_keys(void)
 	assert(strcmp(cfg.sock_path, "/run/logd.sock") == 0);
 	assert(cfg_set(&cfg, "TETRISLOGD_FILE", "/var/log/logd.log") == 0);
 	assert(strcmp(cfg.file_path, "/var/log/logd.log") == 0);
+	assert(cfg_set(&cfg, "TETRISLOGD_PID", "/run/logd.pid") == 0);
+	assert(strcmp(cfg.pid_path, "/run/logd.pid") == 0);
+	assert(cfg_set(&cfg, "TETRISLOGD_ERR", "/var/log/logd.err") == 0);
+	assert(strcmp(cfg.err_path, "/var/log/logd.err") == 0);
 	assert(cfg_set(&cfg, "TETRISD_LOG_IPC", "/run/other.sock") == -1);
 	assert(cfg_set(&cfg, "PATH", "/usr/bin") == -1);
 	assert(cfg_set(&cfg, "TETRISLOGD_NONSENSE", "x") == -1);

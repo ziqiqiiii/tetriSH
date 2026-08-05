@@ -1,11 +1,11 @@
 /* ************************************************************************** */
 /*                                                                            */
-/*   test_sink.c - the log file and the lock that guards it                   */
+/*   test_sink.c - the log file, and only the log file                       */
 /*                                                                            */
-/*   The sink is the one resource that must have exactly one owner. These     */
-/*   cases pin the exclusive lock, the verbatim append, the rotation reopen,   */
-/*   and the rule that an unavailable sink is a working state rather than a    */
-/*   fatal one.                                                               */
+/*   These cases pin the verbatim append, the rotation reopen, noticing that   */
+/*   the path no longer names the open file, and the rule that an unavailable  */
+/*   sink is a working state rather than a fatal one. What they no longer pin  */
+/*   is a lock: the single-instance guard moved to the pidfile (ADR-0007).    */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,7 +14,7 @@
 
 // Static Functions
 static void	test_open_creates_file_and_parents(void);
-static void	test_open_takes_an_exclusive_lock(void);
+static void	test_open_takes_no_lock(void);
 static void	test_open_fails_when_the_parent_is_a_file(void);
 static void	test_write_appends_verbatim(void);
 static void	test_write_fails_when_the_sink_is_closed(void);
@@ -29,7 +29,7 @@ static void	put(t_sink *sk, const char *line);
 int	main(void)
 {
 	test_open_creates_file_and_parents();
-	test_open_takes_an_exclusive_lock();
+	test_open_takes_no_lock();
 	test_open_fails_when_the_parent_is_a_file();
 	test_write_appends_verbatim();
 	test_write_fails_when_the_sink_is_closed();
@@ -60,14 +60,17 @@ static void	test_open_creates_file_and_parents(void)
 }
 
 /*
-** dspawn does not stop a double launch - it registers the second process as
-** tetrislogd.1 and runs it. Without this lock that second process would
-** unlink the live socket (us_dgram_bind unlinks unconditionally) and leave
-** the first logger holding a descriptor nobody sends to. The lock has to be
-** distinguishable from an ordinary open failure, because "already running"
-** and "cannot write here" call for different messages.
+** The sink used to hold the exclusive flock that was the single-instance
+** guard, and this case used to pin it. The guard is the pidfile now
+** (docs/adr/0007), so what is pinned here is the deliberate absence: opening
+** the sink excludes nobody, and the sink is only about the sink.
+**
+** This is not merely a relaxation. `make reset` deletes tmp/ under a running
+** logger, and while the guard lived here the reclaim path had to restore a
+** lock as well as a file - so the same code both wrote records and decided
+** who was allowed to.
 */
-static void	test_open_takes_an_exclusive_lock(void)
+static void	test_open_takes_no_lock(void)
 {
 	t_fixture	fx;
 	t_sink		first;
@@ -77,15 +80,12 @@ static void	test_open_takes_an_exclusive_lock(void)
 	sink_blank(&first);
 	sink_blank(&second);
 	assert(sink_open(&first, fx.file_path) == 0);
-	errno = 0;
-	assert(sink_open(&second, fx.file_path) == -1);
-	assert(errno == EWOULDBLOCK || errno == EAGAIN);
-	assert(sink_is_open(&second) == false);
-	sink_close(&first);
 	assert(sink_open(&second, fx.file_path) == 0);
+	assert(sink_is_open(&second) == true);
+	sink_close(&first);
 	sink_close(&second);
 	fx_destroy(&fx);
-	printf("PASS test_open_takes_an_exclusive_lock\n");
+	printf("PASS test_open_takes_no_lock\n");
 }
 
 static void	test_open_fails_when_the_parent_is_a_file(void)
@@ -173,7 +173,7 @@ static void	test_reopen_starts_a_fresh_file(void)
 }
 
 /*
-** Closing to rotate releases the flock, so the reopen can genuinely fail. The
+** A reopen can genuinely fail - the directory above the log may be gone. The
 ** sink must then report itself closed rather than pretend - the caller reads
 ** that as "degrade to stderr and retry", which is the whole reason a failed
 ** reopen is not fatal.

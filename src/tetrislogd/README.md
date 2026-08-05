@@ -1,6 +1,6 @@
 # tetrislogd
 
-The standalone logger daemon for tetriSH. Receives log records from `tetrisd` over an `AF_UNIX` datagram socket, validates them, and writes them to one exclusively-locked file.
+The standalone logger daemon for tetriSH. Receives log records from `tetrisd` over an `AF_UNIX` datagram socket, validates them, and writes them to a log file. It detaches itself and publishes a locked pidfile; `tetrisctl` starts, inspects and stops it through that file.
 
 ---
 
@@ -23,7 +23,8 @@ The standalone logger daemon for tetriSH. Receives log records from `tetrisd` ov
 
 - One process, one thread, one loop — no internal queue, no shared state, no lock order ([ADR-0005](../../docs/adr/0005-logger-keeps-no-internal-queue.md))
 - Survives `tetrisd` restarts; a producer that goes away simply stops sending
-- Exclusive `flock` on the sink, so a second instance refuses to start rather than interleaving lines
+- Detaches itself and holds a locked pidfile, so a second instance refuses to start rather than interleaving lines ([ADR-0007](../../docs/adr/0007-daemons-detach-themselves.md))
+- Reports its own boot over a readiness pipe, so a launch that failed exits non-zero with the reason on the terminal
 - Keeps running with the sink unavailable — records go to stderr and are counted Degraded until an idle-tick retry gets the file back
 - `fdatasync` on the idle tick, never per record, so disk latency is not the ceiling on log throughput
 - Malformed datagrams are Rejected and counted, never written — a bad record cannot corrupt a line operators read
@@ -38,7 +39,7 @@ Install the shared build dependencies from the repository root:
 make -C ../.. deps
 ```
 
-The logger links `libcoreipc` and nothing else — no OpenSSL, no certificates.
+The logger links `libcoreipc` and `libcoredaemon` — no OpenSSL, no certificates.
 
 ---
 
@@ -70,15 +71,17 @@ This builds `lib/libcoreipc` in place and links it into `src/tetrislogd/tetrislo
 make -C src/tetrislogd run
 ```
 
-Or from inside the shell, once the root `bin-link` target has published `bin/tetrislogd`:
+Or, the way `.tetrishrc` does it, through the lifecycle manager:
 
 ```bash
-dspawn tetrislogd -- tetrislogd
+tetrisctl start tetrislogd
+tetrisctl status
+tetrisctl stop tetrislogd
 ```
 
-The `--` is not optional: a bare `dspawn tetrislogd` runs dspawn's placeholder loop instead of this binary.
+The binary daemonises itself, so running it by name returns to the prompt once the logger is actually up. That return is meaningful: the command exits `0` only after the daemon has bound its socket and opened its sink, and non-zero — with the reason printed — if it did not.
 
-**Start the logger before `tetrisd`.** It binds the socket the game server sends to; started second, it unlinks and rebinds that path, and `tetrisd` keeps sending into the old inode until it retries. `tetrislogd` does not daemonise — `dspawn` already did that before exec'ing it.
+**Start the logger before `tetrisd`.** It binds the socket the game server sends to; started second, it unlinks and rebinds that path, and `tetrisd` keeps sending into the old inode until it retries. `tetrisctl` takes that order from `TETRISCTL_DAEMONS` in `.tetrishrc` and stops in the reverse.
 
 ---
 
@@ -97,12 +100,14 @@ Signals set a flag and write one byte down the self-pipe; the loop asks `sig_tak
 
 ## Configuration
 
-Both settings come from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variable. A missing rc file is not an error — the defaults are a working setup.
+Every setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variable. A missing rc file is not an error — the defaults are a working setup.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `TETRISLOGD_SOCK` | `tmp/tetrisd/tetrislogd.sock` | Datagram socket to bind; must equal `TETRISD_LOG_IPC` |
 | `TETRISLOGD_FILE` | `tmp/tetrislogd/tetrislogd.log` | Log file to write; parent directories are created |
+| `TETRISLOGD_PID` | `tmp/tetrislogd/tetrislogd.pid` | Pidfile to claim and hold; the single-instance guard, and what `tetrisctl` signals |
+| `TETRISLOGD_ERR` | `tmp/tetrislogd/tetrislogd.err` | Where stderr goes after boot — Degraded records land here |
 
 Config is cold: paths are resolved once at boot and change only by restarting the daemon. An unknown `TETRISLOGD_*` key fails the boot rather than being ignored, so a setting documented but never wired up cannot silently do nothing.
 
@@ -139,7 +144,7 @@ The words are not interchangeable, and only two of them are counted here:
 | **Rejected** | Arrived here but failed `lr_validate`; discarded | `tetrislogd` |
 | **Degraded** | Valid, but the sink was unavailable; written to stderr | `tetrislogd` |
 
-A Degraded record went to stderr rather than to the sink. Where that lands depends on who started the daemon: run from a terminal it is on screen, and under `dspawn` it is appended to `tmp/<registered-name>.err` — the same file that catches a boot failure, since `dspawn` points the daemon's stderr there before `exec` (`dspawn.c`, `redirect_stderr`). That makes a degraded record recoverable, not retained: `.err` lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
+A Degraded record went to stderr rather than to the sink. Once the daemon has detached, stderr is the file named by `TETRISLOGD_ERR`; the daemon reopens it onto that path itself, after boot succeeds, which is why a boot *failure* still reaches the terminal instead. That makes a degraded record recoverable, not retained: the error file lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
 
 ### The loop
 
@@ -168,11 +173,13 @@ A sink whose file was **deleted or replaced** fails at nothing. An open descript
 
 So the sink remembers which file it holds (`dev`, `ino` at open time) and `sink_is_stale` compares that against whatever the path names now. The idle tick reopens on a mismatch and logs `sink replaced`, whose counters say how much went into the file that is gone. `logd_stop` reclaims too, before writing its `exit` line — a shutdown can arrive before any idle tick, and the exit line is the one an operator goes looking for.
 
-Reopening re-takes the `flock` on the live file, which is what puts the single-instance guard back: `flock` is per inode, so between the unlink and the reclaim the lock was guarding a file nobody could read, and a second logger could start.
+Reclaim is now only about the sink. It used to have to restore the `flock` as well, because the sink carried the single-instance guard: `flock` is per inode, so between the unlink and the reclaim the guard was on a file nobody could open and a second logger could start. With the guard on the pidfile that second job is gone, and reclaim stays for the reason it was always worth having — a log file can be rotated or removed by hand.
 
 ### Boot order
 
-`logd_start` claims the sink *before* binding the socket. `us_dgram_bind` unlinks its path unconditionally, so a second instance has to lose the `flock` race and exit while the running logger's socket is still intact. Reversing these two lines is silent: both instances start, and the older one goes deaf.
+`main.c` claims the pidfile *before* calling `logd_start`, and that ordering is the guard. `us_dgram_bind` unlinks its path unconditionally, so binding the socket is the point at which a second instance would damage the first; losing the pidfile race happens before the bind is ever reached, while the running logger's socket is still intact. Reversing those two lines is silent: both instances start, and the older one goes deaf.
+
+The claim also comes *after* `cd_detach`, because the pid written has to be the detached process's and the lock has to be held by the process that will still be there to hold it. Both the fork and the claim live in `main.c` alone — behind `logd_start` they would make every in-process test suite fork.
 
 ---
 
@@ -182,9 +189,9 @@ Reopening re-takes the `flock` on the live file, which is what puts the single-i
 src/tetrislogd/
 ├── include/tetrislogd.h  Every type and prototype; src/*.c include only this
 ├── src/
-│   ├── main.c            Thin shim over logd_start / logd_run_once / logd_stop
+│   ├── main.c            Detach, claim the pidfile, then loop until stopped
 │   ├── cfg.c             .tetrishrc parsing, rc resolution, mkdir -p
-│   ├── sink.c            The log file: open, exclusive lock, write, sync, rotate
+│   ├── sink.c            The log file: open, write, sync, rotate, reclaim
 │   ├── logd.c            Bring-up, the poll loop, record acceptance, counters
 │   └── signals.c         Handlers: a flag and one byte down the self-pipe
 ├── tests/                harness.c builds each suite's throwaway socket and file

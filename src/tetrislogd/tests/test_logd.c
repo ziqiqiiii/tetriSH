@@ -299,24 +299,34 @@ static void	test_a_deleted_log_file_is_reclaimed(void)
 }
 
 /*
-** us_dgram_bind unlinks the path before binding, so without the sink lock a
-** second launch would silently steal the socket and leave the first logger
-** deaf. The guard has to run before the bind, which is why the sink is
-** claimed first.
+** us_dgram_bind unlinks the path before binding, so a second launch that got
+** as far as logd_start would silently steal the socket and leave the first
+** logger deaf. Nothing inside logd_start prevents that any more - the guard
+** is the pidfile main.c claims first (docs/adr/0007), and this case pins the
+** ordering that makes it a guard at all: the claim fails, so the bind that
+** would have done the damage is never reached.
+**
+** flock is held per open file description, so a second claim fails even from
+** this same process - which is what lets the case stay in-process.
 */
 static void	test_a_second_instance_refuses_to_start(void)
 {
 	t_fixture	fx;
 	struct stat	st;
+	t_pidfile	held;
+	t_pidfile	loser;
 	t_logd		first;
-	t_logd		second;
 
 	assert(boot(&fx, &first) == 0);
-	logd_blank(&second);
-	assert(logd_start(&second, &fx.cfg) == -1);
+	cd_pid_blank(&held);
+	cd_pid_blank(&loser);
+	assert(cd_pid_claim(&held, fx.cfg.pid_path) == 0);
+	errno = 0;
+	assert(cd_pid_claim(&loser, fx.cfg.pid_path) == -1);
+	assert(errno == EWOULDBLOCK || errno == EAGAIN);
 	assert(stat(fx.sock_path, &st) == 0 && S_ISSOCK(st.st_mode));
 	assert(sink_is_open(&first.sink) == true);
-	logd_stop(&second);
+	cd_pid_release(&held);
 	logd_stop(&first);
 	fx_destroy(&fx);
 	printf("PASS test_a_second_instance_refuses_to_start\n");

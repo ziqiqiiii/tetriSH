@@ -23,6 +23,8 @@ void	cfg_defaults(t_cfg *cfg)
 	memset(cfg, 0, sizeof(*cfg));
 	snprintf(cfg->sock_path, TL_PATH_MAX, "%s", TL_DEF_SOCK);
 	snprintf(cfg->file_path, TL_PATH_MAX, "%s", TL_DEF_FILE);
+	snprintf(cfg->pid_path, TL_PATH_MAX, "%s", TL_DEF_PID);
+	snprintf(cfg->err_path, TL_PATH_MAX, "%s", TL_DEF_ERR);
 	snprintf(cfg->rc_path, TL_PATH_MAX, "%s", "./" TL_RC_NAME);
 }
 
@@ -50,6 +52,10 @@ int	cfg_set(t_cfg *cfg, const char *key, const char *value)
 		return (set_str(cfg->sock_path, TL_PATH_MAX, value));
 	if (strcmp(key, "FILE") == 0)
 		return (set_str(cfg->file_path, TL_PATH_MAX, value));
+	if (strcmp(key, "PID") == 0)
+		return (set_str(cfg->pid_path, TL_PATH_MAX, value));
+	if (strcmp(key, "ERR") == 0)
+		return (set_str(cfg->err_path, TL_PATH_MAX, value));
 	return (-1);
 }
 
@@ -305,7 +311,8 @@ static void	strip_quotes(char *value)
 static int	apply_env(t_cfg *cfg)
 {
 	static const char	*names[] = {
-		TL_KEY_PREFIX "SOCK", TL_KEY_PREFIX "FILE", NULL
+		TL_KEY_PREFIX "SOCK", TL_KEY_PREFIX "FILE",
+		TL_KEY_PREFIX "PID", TL_KEY_PREFIX "ERR", NULL
 	};
 	const char			*value;
 	int					rc;

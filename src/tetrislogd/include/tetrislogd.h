@@ -17,6 +17,7 @@
 # include <time.h>
 # include <unistd.h>
 
+# include "coredaemon.h"
 # include "coreipc.h"
 
 /*
@@ -37,6 +38,12 @@
 **
 ** The logger survives tetrisd restarts and never exits because of one: a
 ** producer that goes away simply stops sending.
+**
+** It detaches itself and publishes a locked pidfile, and tetrisctl starts,
+** inspects and stops it through that file (docs/adr/0007). Both the fork and
+** the claim live in main.c and nowhere else: logd_start must stay the seam
+** the tests drive in-process, and a start function that forked would take
+** every suite with it.
 */
 
 # define TL_COMPONENT		"tetrislogd"
@@ -45,9 +52,11 @@
 # define TL_PATH_MAX		1024
 # define TL_LINE_MAX		2048
 
-/* config defaults - both overridable from .tetrishrc */
+/* config defaults - all overridable from .tetrishrc */
 # define TL_DEF_SOCK		"tmp/tetrisd/tetrislogd.sock"
 # define TL_DEF_FILE		"tmp/tetrislogd/tetrislogd.log"
+# define TL_DEF_PID			"tmp/tetrislogd/tetrislogd.pid"
+# define TL_DEF_ERR			"tmp/tetrislogd/tetrislogd.err"
 
 # define TL_SOCK_MODE		0600
 # define TL_FILE_MODE		0644
@@ -76,6 +85,8 @@ typedef struct s_cfg
 {
 	char	sock_path[TL_PATH_MAX];
 	char	file_path[TL_PATH_MAX];
+	char	pid_path[TL_PATH_MAX];
+	char	err_path[TL_PATH_MAX];
 	char	rc_path[TL_PATH_MAX];
 }	t_cfg;
 
@@ -91,10 +102,14 @@ typedef struct s_counters
 }	t_counters;
 
 /*
-** The log file, plus the exclusive lock that makes this process the only
-** logger writing it. fd is -1 while the sink is unavailable, which is a
-** working state and not a fatal one - records go to stderr until a retry on
-** the idle tick gets the file back.
+** The log file. fd is -1 while the sink is unavailable, which is a working
+** state and not a fatal one - records go to stderr until a retry on the idle
+** tick gets the file back.
+**
+** No lock is taken here. The sink used to carry the single-instance guard as
+** well, which conflated two things: deleting tmp/ took away the sink and the
+** guard in one stroke, and the reclaim path had to restore both. The guard is
+** the pidfile now (docs/adr/0007), so the sink is only about the sink.
 **
 ** dev and ino are which file the descriptor actually holds, remembered so the
 ** daemon can notice the path now names a different one. An open descriptor
