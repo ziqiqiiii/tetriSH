@@ -148,38 +148,35 @@ bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
 			field_x, field_width, form->focus == AUTH_FOCUS_PRIMARY,
 			!auth_form_online_enabled(form)))
 		return (false);
+	/*
+	 * Sign Up and Play Offline are painted into the backdrop as two boxes
+	 * meeting at the centre line, so their focus marks are placed to match the
+	 * art and never resized. Squeezing a third button into that row is what
+	 * pushed all three out of their frames.
+	 */
 	button_width = (ctx->bg_cols * 29) / 100;
 	button_x = center - button_width - 1;
-	if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN)
-	{
-		button_width = (field_width - 6) / 3;
-		button_x = field_x;
-	}
 	if (!add_focus_sprites(ctx,
 		ctx->bg_row + (ctx->bg_rows * 82) / 100,
 		button_x, button_width,
 		form->focus == AUTH_FOCUS_SECONDARY, false))
 		return (false);
-	if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN)
-	{
-		if (!add_text_sprite(ctx, "PREVIEW",
-				ctx->bg_row + (ctx->bg_rows * 82) / 100,
-				button_x + button_width + 2, button_width,
-				form->focus == AUTH_FOCUS_PREVIEW
-				? g_auth_gold : g_auth_value, true)
-			|| !add_focus_sprites(ctx,
-				ctx->bg_row + (ctx->bg_rows * 82) / 100,
-				button_x + button_width + 2, button_width,
-				form->focus == AUTH_FOCUS_PREVIEW, false))
-			return (false);
-		button_x += (button_width + 2) * 2;
-	}
 	if (!add_focus_sprites(ctx,
 		ctx->bg_row + (ctx->bg_rows * 82) / 100,
-		app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN
-		? button_x : center + 1, button_width,
-		form->focus == AUTH_FOCUS_OFFLINE,
-		false))
+		center + 1, button_width,
+		form->focus == AUTH_FOCUS_OFFLINE, false))
+		return (false);
+	/*
+	 * Preview has no box in the art, so it gets the clear row above the pair
+	 * rather than a share of their width. It is a development gate, opt-in
+	 * through TETRISU_UI_PREVIEW, and stays out of the authored layout.
+	 */
+	if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN
+		&& !add_text_sprite(ctx, "P  PREVIEW SIGN-IN",
+			ctx->bg_row + (ctx->bg_rows * 76) / 100,
+			center - field_width / 4, field_width / 2,
+			form->focus == AUTH_FOCUS_PREVIEW
+			? g_auth_gold : g_auth_value, true))
 		return (false);
 	return (true);
 }

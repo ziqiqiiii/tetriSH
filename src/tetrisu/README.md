@@ -75,18 +75,36 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - Dedicated Settings/Profile screen with live fixture profile, portrait,
   equipped character/theme, owned inventories, wallet, score, rank, and
   Settings-to-Marketplace routing
-- Signed-in Settings can cycle Mirurun, Halloween, Princess, and Wolf-man
-  from the portrait arrows with `[` / `]`. Press `I` for their four
-  canonical crystal powers, sourced from
+- Signed-in Settings navigates as a grid: the two inventory panels sit above
+  the control row, arrows step through them, and `Enter` equips the focused
+  character or theme. `[` / `]` remain a shortcut for cycling characters.
+- Gold means one thing on this screen: the keyboard focus is here. A panel the
+  focus has left draws entirely in cream, the equipped entry is marked with a
+  star in a reserved column, and every label in a panel shares one glyph size
+  taken from its longest entry, so nothing resizes or shifts as focus moves.
+- Moving the focus onto a character opens its powers card automatically, the
+  way the Solo ability meters describe themselves. `I` still pins the card for
+  the equipped character from anywhere. The four canonical crystal powers are
+  sourced from
   [Tetris.wiki's Tetris Battle Gaiden reference](https://tetris.wiki/Tetris_Battle_Gaiden).
 - Settings is keyboard-only: it disables pointer reporting on entry, so no
   hover or click reaches it, and the screens that use the pointer turn it back
   on when they are entered
+- Settings caches its composed static layer — backdrop, profile, portrait, and
+  stats — so a focus change never re-reads the portrait or redraws the text
+  above it. The movable tier cuts region planes from that layer; the stationary
+  tier stamps a full frame from it, because a Sixel plane laid over another
+  sprixel is re-emitted whenever the plane beneath it is damaged and the two
+  then blank each other out. Queued key repeats are drained into the state
+  before the repaint, so a held arrow cannot outrun the screen
 - Settings keeps the large authored frame cached and repaints only compact
   controls, character arrows, ability card, or volume value when they change.
   The theme inventory uses a two-column by three-row layout for six full names.
 - Offline Settings keeps only current-run local controls/status and never
   invents account identity, inventory, wallet, score, or rank
+- `+` / `-` drive one volume. Menu and gameplay effects are scaled by it
+  alongside the music, so the per-effect constants stay purely as the mix
+  balance; at full volume the balance is exactly what it was before
 
 HOLD is implemented under temporary local Solo authority. The
 [migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes how it
@@ -248,7 +266,13 @@ and graphics-protocol support at startup. It exits with
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
-| `Tab` / arrows in Settings | Move focus between Back, Marketplace, volume, and character arrows (Settings takes no mouse input) |
+| `←` / `→` in the Settings control row | Cycle Back, Marketplace, Volume -, Volume + (Settings takes no mouse input) |
+| `↑` from the Settings control row | Focus the owned-characters panel |
+| `←` / `→` at an inventory panel edge | Cross between the characters and themes panels |
+| `↓` past the last inventory row | Drop back to the control row |
+| `Enter` on an inventory slot | Equip the focused character or theme |
+| Focus on a character slot | Opens that character's powers card automatically |
+| `Tab` in Settings | Step through every slot and control in one order |
 | `M` in signed-in Settings | Open Marketplace; `Enter` on the visible button does the same |
 | `[` / `]` (or `,` / `.`) in signed-in Settings | Select the previous / next owned character |
 | `I` in signed-in Settings | Toggle the selected character's four-power info card |
@@ -427,8 +451,10 @@ make test
 
 The Settings and preview-auth tests are included in that command. For a
 manual signed-in Settings check, run the preview command above, choose
-`PREVIEW` on Login, select Settings on Home, exercise Tab/arrow focus, `[`/`]`
-character selection and `I`, confirm the mouse does nothing there, resize the
+`PREVIEW` on Login, select Settings on Home, walk the arrows from the control
+row up into both inventory panels and back, equip a character and a theme with
+`Enter`, hold an arrow down to confirm focus tracks the last key rather than
+lagging behind it, press `I`, confirm the mouse does nothing there, resize the
 terminal, and open Marketplace before pressing Back. For offline separation, omit the environment variable, choose Play
 Offline, open Settings, and confirm that only local status, renderer mode, and
 music volume appear.

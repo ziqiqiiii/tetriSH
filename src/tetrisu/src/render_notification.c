@@ -40,6 +40,7 @@ static void	set_color(struct ncplane *plane, unsigned r, unsigned g,
 					unsigned b, int opacity);
 static unsigned	fade_component(unsigned component, int opacity);
 static void	destroy_notification_planes(render_ctx_t *ctx);
+static void	raise_planes(render_ctx_t *ctx);
 
 /**
  * @brief Shows or refreshes the global music-volume notification.
@@ -125,10 +126,29 @@ void	render_notification_reflow(render_ctx_t *ctx)
  */
 void	render_notification_raise(render_ctx_t *ctx)
 {
-	int	index;
-
 	if (ctx == NULL)
 		return ;
+	/*
+	 * Restacking is enough where bitmap planes hold their own z-order. On the
+	 * stationary tier it is not: the screen underneath is one full-size Sixel
+	 * that the caller has just re-emitted, and Sixel writes pixels at the
+	 * cursor with no z-index, so anything previously drawn on top of it has
+	 * been overwritten. Rebuilding the notification marks it dirty again, and
+	 * because it sits higher in the pile it is emitted after the screen.
+	 */
+	if (ctx->notifications.count > 0 && render_pixels_available(ctx)
+		&& !render_pixel_planes_reliable(ctx))
+	{
+		refresh_notifications(ctx, ui_notification_now_ms());
+		return ;
+	}
+	raise_planes(ctx);
+}
+
+static void	raise_planes(render_ctx_t *ctx)
+{
+	int	index;
+
 	index = ctx->notifications.count - 1;
 	while (index >= 0)
 	{
@@ -181,7 +201,7 @@ static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms)
 		}
 		index++;
 	}
-	render_notification_raise(ctx);
+	raise_planes(ctx);
 }
 
 static bool	notification_position(render_ctx_t *ctx, int index,
@@ -218,14 +238,21 @@ static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
 	blitter = NCBLIT_4x2;
 	pixel_rows = NOTIFICATION_ROWS * 4;
 	pixel_cols = NOTIFICATION_COLS * 2;
-	if (!render_compatibility_mode(ctx)
-		&& render_pixel_planes_reliable(ctx)
+	/*
+	 * Every bitmap tier gets the authored art. The stationary tier can carry
+	 * an overlay sprixel provided two things hold: it is opaque, because Sixel
+	 * cannot blend over what is already on screen, and it is re-emitted after
+	 * anything below it is redrawn, which render_notification_raise() handles.
+	 */
+	if (render_pixels_available(ctx)
 		&& ctx->cell_px_y > 0 && ctx->cell_px_x > 0)
 	{
 		blitter = NCBLIT_PIXEL;
 		*content_embedded = true;
 		pixel_rows = NOTIFICATION_ROWS * ctx->cell_px_y;
 		pixel_cols = NOTIFICATION_COLS * ctx->cell_px_x;
+		if (!render_pixel_planes_reliable(ctx))
+			opacity = 255;
 	}
 	if (ncvisual_resize_noninterpolative(visual,
 			pixel_rows, pixel_cols) != 0)

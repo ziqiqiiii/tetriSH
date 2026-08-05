@@ -155,7 +155,14 @@
 # define SETTINGS_REFERENCE_WIDTH	1448
 # define SETTINGS_REFERENCE_HEIGHT	1086
 # define SETTINGS_BUTTON_COUNT	4
-# define SETTINGS_CHARACTER_ARROW_COUNT	2
+/*
+ * The two inventory panels are navigated as row-major grids of this width, so
+ * the focus arithmetic in settings_screen.c and the slot arithmetic in
+ * draw_inventory() must agree on the same column count.
+ */
+# define SETTINGS_INVENTORY_COLUMNS	2
+# define SETTINGS_CHARACTER_SLOTS	4
+# define SETTINGS_THEME_SLOTS	6
 # define SETTINGS_REF_PORTRAIT_X	270
 # define SETTINGS_REF_PORTRAIT_Y	145
 # define SETTINGS_REF_PORTRAIT_WIDTH	240
@@ -184,11 +191,26 @@
 # define SETTINGS_REF_RANK_Y	731
 # define SETTINGS_REF_RANK_WIDTH	300
 # define SETTINGS_REF_RANK_HEIGHT	77
-# define SETTINGS_REF_CHARACTER_PREVIOUS_X	194
-# define SETTINGS_REF_CHARACTER_NEXT_X	518
-# define SETTINGS_REF_CHARACTER_ARROW_Y	232
-# define SETTINGS_REF_CHARACTER_ARROW_WIDTH	68
-# define SETTINGS_REF_CHARACTER_ARROW_HEIGHT	96
+/*
+ * The crystal-powers card is inset inside the authored profile frame, so it
+ * never paints over the gold border. Four abilities of one name row plus two
+ * wrapped description lines fit inside SETTINGS_REF_CARD_HEIGHT at this step.
+ */
+# define SETTINGS_REF_CARD_X	(SETTINGS_REF_PROFILE_X + 8)
+# define SETTINGS_REF_CARD_Y	(SETTINGS_REF_PROFILE_Y + 8)
+# define SETTINGS_REF_CARD_WIDTH	(SETTINGS_REF_PROFILE_WIDTH - 16)
+# define SETTINGS_REF_CARD_HEIGHT	(SETTINGS_REF_PROFILE_HEIGHT - 16)
+# define SETTINGS_REF_CARD_STEP	62
+
+/* Inventory slot geometry, shared by the bitmap and cell inventory drawing. */
+# define SETTINGS_REF_SLOT_INSET	10
+# define SETTINGS_REF_SLOT_FIRST_Y	51
+# define SETTINGS_REF_SLOT_STEP_Y	38
+/* Reserved column for the equipped star, so names never shift when it moves. */
+# define SETTINGS_REF_SLOT_TEXT_X	22
+# define SETTINGS_REF_SLOT_GLYPH	13
+# define SETTINGS_REF_SLOT_PAD_X	8
+# define SETTINGS_REF_SLOT_PAD_Y	6
 # define SETTINGS_REF_BUTTON_BACK_X	265
 # define SETTINGS_REF_BUTTON_MARKET_X	500
 # define SETTINGS_REF_BUTTON_VOLUME_DOWN_X	745
@@ -492,14 +514,25 @@ typedef struct s_leaderboard_state
 	leaderboard_focus_t	focus;
 }	leaderboard_state_t;
 
+/*
+ * Settings is navigated as three stacked regions rather than one focus ring:
+ * the two inventory grids sit side by side above the control row, so Left and
+ * Right cross between them at the panel edges and Up/Down step between rows
+ * before falling through to the controls.
+ */
+typedef enum e_settings_section
+{
+	SETTINGS_SECTION_CHARACTERS,
+	SETTINGS_SECTION_THEMES,
+	SETTINGS_SECTION_CONTROLS
+}	settings_section_t;
+
 typedef enum e_settings_focus
 {
 	SETTINGS_FOCUS_BACK,
 	SETTINGS_FOCUS_MARKETPLACE,
 	SETTINGS_FOCUS_VOLUME_DOWN,
-	SETTINGS_FOCUS_VOLUME_UP,
-	SETTINGS_FOCUS_CHARACTER_PREVIOUS,
-	SETTINGS_FOCUS_CHARACTER_NEXT
+	SETTINGS_FOCUS_VOLUME_UP
 }	settings_focus_t;
 
 typedef enum e_settings_action
@@ -511,12 +544,19 @@ typedef enum e_settings_action
 	SETTINGS_ACTION_VOLUME_UP,
 	SETTINGS_ACTION_CHARACTER_PREVIOUS,
 	SETTINGS_ACTION_CHARACTER_NEXT,
+	SETTINGS_ACTION_EQUIP_CHARACTER,
+	SETTINGS_ACTION_EQUIP_THEME,
 	SETTINGS_ACTION_QUIT
 }	settings_action_t;
 
 typedef struct s_settings_state
 {
+	settings_section_t	section;
 	settings_focus_t	focus;
+	int			character_slot;
+	int			theme_slot;
+	int			character_slots;
+	int			theme_slots;
 	bool			signed_in;
 	bool			ability_info_visible;
 }	settings_state_t;
@@ -547,7 +587,6 @@ typedef struct s_settings_layout
 	settings_rect_t	themes;
 	settings_rect_t	stats[3];
 	settings_rect_t	buttons[SETTINGS_BUTTON_COUNT];
-	settings_rect_t	character_arrows[SETTINGS_CHARACTER_ARROW_COUNT];
 } settings_layout_t;
 
 typedef struct s_app_room_summary_view_model
@@ -778,7 +817,8 @@ typedef struct
 	struct ncplane		*screen_plane;
 	struct ncplane		*settings_portrait_plane;
 	struct ncplane		*settings_controls_plane;
-	struct ncplane		*settings_character_plane;
+	struct ncplane		*settings_characters_plane;
+	struct ncplane		*settings_themes_plane;
 	struct ncplane		*settings_volume_plane;
 	struct ncplane		*settings_ability_plane;
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
@@ -786,8 +826,14 @@ typedef struct
 	struct ncvisual		*bunny_visual;
 	struct ncvisual		*auth_background_visual;
 	struct ncvisual		*auth_font_visual;
-	struct ncvisual		*settings_background_visual;
 	struct ncvisual		*settings_font_visual;
+	/*
+	 * The stationary tier recomposes the whole frame on every focus change, so
+	 * the equipped portrait is kept decoded rather than re-read from disk each
+	 * time. The source path is the cache key.
+	 */
+	struct ncvisual		*settings_portrait_visual;
+	char				settings_portrait_source[APP_ASSET_PATH_MAX];
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
@@ -806,9 +852,22 @@ typedef struct
 	bool				settings_background_ready;
 	int				settings_background_rows;
 	int				settings_background_cols;
+	/*
+	 * Two full-resolution RGBA caches keep Settings responsive on the
+	 * stationary tier. settings_background_pixels holds the resized backdrop
+	 * so recomposing the static frame is a memcpy instead of a per-pixel walk
+	 * of an ncvisual, and settings_static_pixels holds the composed frame so
+	 * every small region plane can be prefilled from it without redrawing or
+	 * reblitting the whole screen on a focus change.
+	 */
+	uint32_t			*settings_background_pixels;
+	uint32_t			*settings_static_pixels;
+	int				settings_pixels_width;
+	int				settings_pixels_height;
 	uint64_t			settings_static_signature;
 	uint64_t			settings_controls_signature;
-	uint64_t			settings_character_signature;
+	uint64_t			settings_characters_signature;
+	uint64_t			settings_themes_signature;
 	uint64_t			settings_volume_signature;
 	uint64_t			settings_ability_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
@@ -1241,13 +1300,27 @@ void			leaderboard_set_focus(leaderboard_state_t *state,
 					leaderboard_focus_t focus);
 
 /* SETTINGS_SCREEN.C */
-void			settings_state_init(settings_state_t *state, bool signed_in);
+void			settings_state_init(settings_state_t *state, bool signed_in,
+					int character_slots, int theme_slots);
 void			settings_state_focus_next(settings_state_t *state);
 void			settings_state_focus_previous(settings_state_t *state);
 settings_action_t	settings_handle_key(settings_state_t *state,
 					uint32_t key);
+bool			settings_state_view_changed(const settings_state_t *before,
+					const settings_state_t *after);
+int				settings_owned_count(
+					const app_catalogue_view_model_t *catalogue, int limit);
+int				settings_slot_rows(int slots);
 bool			settings_select_character(app_settings_view_model_t *settings,
 					int direction);
+bool			settings_equip_character_slot(
+					app_settings_view_model_t *settings, int slot);
+bool			settings_equip_theme_slot(app_settings_view_model_t *settings,
+					int slot);
+const app_catalogue_item_view_model_t	*settings_card_character(
+					const app_settings_view_model_t *settings,
+					const settings_state_t *state);
+bool			settings_card_visible(const settings_state_t *state);
 void			settings_layout_build(int origin_y, int origin_x, int rows,
 					int cols, int cell_px_y, int cell_px_x,
 					settings_layout_t *layout);
@@ -1306,6 +1379,7 @@ void			audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx);
 void			audio_play_menu_move(audio_ctx_t *audio);
 void			audio_play_menu_select(audio_ctx_t *audio);
 void			audio_set_music_volume(audio_ctx_t *audio, int volume);
+void			audio_apply_effect_volume(audio_ctx_t *audio);
 void			audio_volume_up(audio_ctx_t *audio);
 void			audio_volume_down(audio_ctx_t *audio);
 void			audio_teardown(audio_ctx_t *audio);

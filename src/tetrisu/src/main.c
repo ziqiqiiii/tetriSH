@@ -581,12 +581,13 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 {
 	app_screen_view_model_t	view;
 	settings_state_t		state;
-	settings_focus_t		old_focus;
-	bool				old_ability_info;
+	settings_state_t		previous;
 	settings_action_t		action;
 	app_provider_result_t	result;
 	ncinput				input;
 	uint32_t			key;
+	int					drained;
+	bool				repaint;
 
 	result = app_screen_view_load_for_session(provider, APP_SCREEN_SETTINGS,
 		navigation->offline, &view);
@@ -594,7 +595,11 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		return (-1);
 	app_settings_apply_local_controls(&view.data.settings,
 		audio->music_volume, tetrisu_renderer_mode_requested());
-	settings_state_init(&state, view.data.settings.signed_in);
+	settings_state_init(&state, view.data.settings.signed_in,
+		settings_owned_count(&view.data.settings.characters,
+			SETTINGS_CHARACTER_SLOTS),
+		settings_owned_count(&view.data.settings.themes,
+			SETTINGS_THEME_SLOTS));
 	/*
 	 * Settings is keyboard-only: pointer reporting is switched off for the
 	 * whole screen so no motion, drag, or click stream can reach it, and the
@@ -607,8 +612,8 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	{
 		key = render_wait_input(ctx, &input);
 		action = SETTINGS_ACTION_NONE;
-		old_focus = state.focus;
-		old_ability_info = state.ability_info_visible;
+		previous = state;
+		repaint = false;
 		/*
 		 * Pointer reporting is disabled here, but a terminal can still deliver
 		 * events queued before the disable sequence was written, so mouse keys
@@ -627,13 +632,43 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 		else
 			action = settings_handle_key(&state, key);
-		if (state.focus != old_focus
-			|| state.ability_info_visible != old_ability_info)
+		/*
+		 * Held arrow keys arrive far faster than a bitmap repaint completes.
+		 * Collapsing every queued movement into the state before painting once
+		 * keeps focus level with the key that was actually pressed last, which
+		 * is what stops a burst of repeats from appearing to move backwards.
+		 */
+		drained = 0;
+		while (action == SETTINGS_ACTION_NONE && drained < 64)
+		{
+			memset(&input, 0, sizeof(input));
+			key = notcurses_get_nblock(ctx->nc, &input);
+			if (key == 0)
+				break ;
+			drained++;
+			if (key == (uint32_t)-1)
+			{
+				action = SETTINGS_ACTION_QUIT;
+				break ;
+			}
+			if (key == NCKEY_RESIZE || key == 12u)
+			{
+				if (render_geometry_refresh(ctx, true) < 0)
+					return (-1);
+				repaint = true;
+				continue ;
+			}
+			if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+				continue ;
+			action = settings_handle_key(&state, key);
+		}
+		if (settings_state_view_changed(&previous, &state))
 		{
 			audio_play_menu_move(audio);
-			if (!render_settings_show(ctx, &view, &state, false))
-				return (-1);
+			repaint = true;
 		}
+		if (repaint && !render_settings_show(ctx, &view, &state, false))
+			return (-1);
 		if (action == SETTINGS_ACTION_VOLUME_UP)
 		{
 			audio_play_menu_select(audio);
@@ -658,6 +693,21 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_play_menu_select(audio);
 			if (settings_select_character(&view.data.settings,
 					action == SETTINGS_ACTION_CHARACTER_NEXT ? 1 : -1)
+				&& !render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == SETTINGS_ACTION_EQUIP_CHARACTER)
+		{
+			audio_play_menu_select(audio);
+			if (settings_equip_character_slot(&view.data.settings,
+					state.character_slot)
+				&& !render_settings_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == SETTINGS_ACTION_EQUIP_THEME)
+		{
+			audio_play_menu_select(audio);
+			if (settings_equip_theme_slot(&view.data.settings, state.theme_slot)
 				&& !render_settings_show(ctx, &view, &state, false))
 				return (-1);
 		}

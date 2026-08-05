@@ -72,10 +72,4 @@ void	settings_layout_build(int origin_y, int origin_x, int rows, int cols,
 	layout->buttons[3] = map_rect(SETTINGS_REF_BUTTON_VOLUME_UP_X,
 		SETTINGS_REF_BUTTON_Y, SETTINGS_REF_BUTTON_WIDTH,
 		SETTINGS_REF_BUTTON_HEIGHT, pixel_width, pixel_height);
-	layout->character_arrows[0] = map_rect(SETTINGS_REF_CHARACTER_PREVIOUS_X,
-		SETTINGS_REF_CHARACTER_ARROW_Y, SETTINGS_REF_CHARACTER_ARROW_WIDTH,
-		SETTINGS_REF_CHARACTER_ARROW_HEIGHT, pixel_width, pixel_height);
-	layout->character_arrows[1] = map_rect(SETTINGS_REF_CHARACTER_NEXT_X,
-		SETTINGS_REF_CHARACTER_ARROW_Y, SETTINGS_REF_CHARACTER_ARROW_WIDTH,
-		SETTINGS_REF_CHARACTER_ARROW_HEIGHT, pixel_width, pixel_height);
 }

@@ -94,10 +94,15 @@ void	render_screen_destroy(render_ctx_t *ctx)
 		ncplane_destroy(ctx->settings_controls_plane);
 		ctx->settings_controls_plane = NULL;
 	}
-	if (ctx != NULL && ctx->settings_character_plane != NULL)
+	if (ctx != NULL && ctx->settings_characters_plane != NULL)
 	{
-		ncplane_destroy(ctx->settings_character_plane);
-		ctx->settings_character_plane = NULL;
+		ncplane_destroy(ctx->settings_characters_plane);
+		ctx->settings_characters_plane = NULL;
+	}
+	if (ctx != NULL && ctx->settings_themes_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_themes_plane);
+		ctx->settings_themes_plane = NULL;
 	}
 	if (ctx != NULL && ctx->settings_volume_plane != NULL)
 	{

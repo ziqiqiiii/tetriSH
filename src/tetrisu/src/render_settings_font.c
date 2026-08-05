@@ -27,9 +27,15 @@ static bool	compose_controls(render_ctx_t *ctx,
 		const app_settings_view_model_t *settings,
 		const settings_state_t *state, const settings_layout_t *layout,
 		struct ncvisual *font);
-static bool	compose_character_controls(render_ctx_t *ctx,
+static bool	compose_inventory(render_ctx_t *ctx,
+		const app_settings_view_model_t *settings,
 		const settings_state_t *state, const settings_layout_t *layout,
-		struct ncvisual *font);
+		struct ncvisual *font, bool characters);
+static bool	compose_stationary_frame(render_ctx_t *ctx,
+		const app_screen_view_model_t *view, const settings_state_t *state,
+		const settings_layout_t *layout, struct ncvisual *font);
+static uint32_t	*region_canvas(render_ctx_t *ctx,
+		const settings_layout_t *layout);
 static bool	compose_volume(render_ctx_t *ctx,
 		const app_settings_view_model_t *settings,
 		const settings_layout_t *layout, struct ncvisual *font);
@@ -49,8 +55,17 @@ static void	draw_profile(uint32_t *pixels, int width, int height,
 		struct ncvisual *font);
 static void	draw_inventory(uint32_t *pixels, int width, int height,
 		const app_catalogue_view_model_t *catalogue,
-		const settings_rect_t *panel, const settings_layout_t *layout,
+		const settings_state_t *state, const settings_layout_t *layout,
 		struct ncvisual *font, bool characters);
+static void	fill_ref_rect(uint32_t *pixels, int width, int height,
+		const settings_layout_t *layout, int ref_x_value, int ref_y_value,
+		int ref_width, int ref_height, color_t tint, unsigned alpha);
+static int	panel_glyph_size(const app_catalogue_view_model_t *catalogue,
+		const settings_layout_t *layout, int limit, int ref_width,
+		int *spacing);
+static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
+		const settings_layout_t *layout, int ref_label_x, int ref_label_y,
+		int ref_slot_width);
 static void	draw_stats(uint32_t *pixels, int width, int height,
 		const app_settings_view_model_t *settings,
 		const settings_layout_t *layout, struct ncvisual *font);
@@ -60,20 +75,15 @@ static void	draw_volume_value(uint32_t *pixels, int width, int height,
 static void	draw_buttons(uint32_t *pixels, int width, int height,
 		const app_settings_view_model_t *settings, const settings_state_t *state,
 		const settings_layout_t *layout, struct ncvisual *font);
-static void	draw_portrait(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, const char *path);
-static void	draw_character_arrows(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
-		const settings_state_t *state);
+static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
+		int height, const settings_layout_t *layout, const char *path);
 static void	draw_ability_card(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font,
-		const app_settings_view_model_t *settings);
+		const app_catalogue_item_view_model_t *character);
 static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font,
 		const char *text, int ref_x, int ref_y, int ref_width,
 		int ref_glyph, color_t tint, int max_lines);
-static const app_catalogue_item_view_model_t	*equipped_character(
-		const app_settings_view_model_t *settings);
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
 		const settings_layout_t *layout, struct ncvisual *font,
 		const char *text, int ref_x, int ref_y, int ref_width,
@@ -92,6 +102,12 @@ static int	ref_x(const settings_layout_t *layout, int value);
 static int	ref_y(const settings_layout_t *layout, int value);
 static int	ref_size(const settings_layout_t *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
+static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
+		int ref_width, int ref_glyph, int *spacing);
+static void	draw_text_sized(uint32_t *pixels, int width, int height,
+		const settings_layout_t *layout, struct ncvisual *font,
+		const char *text, int ref_x_value, int ref_y_value, int glyph_size,
+		int spacing, color_t tint);
 static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static const char	*nonempty(const char *text);
@@ -101,6 +117,8 @@ static const char	*renderer_name(tetrisu_renderer_mode_t mode);
 static uint64_t	settings_hash(const void *data, size_t size, uint64_t hash);
 static uint64_t	static_signature(const app_screen_view_model_t *view,
 		const settings_layout_t *layout);
+static uint64_t	dynamic_signature(const settings_state_t *state,
+		uint64_t hash);
 static bool	settings_render_failed(const char *stage);
 
 /**
@@ -124,7 +142,8 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 		render_screen_destroy(ctx);
 		ctx->settings_static_signature = 0;
 		ctx->settings_controls_signature = 0;
-		ctx->settings_character_signature = 0;
+		ctx->settings_characters_signature = 0;
+		ctx->settings_themes_signature = 0;
 		ctx->settings_volume_signature = 0;
 		ctx->settings_ability_signature = 0;
 	}
@@ -133,18 +152,31 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	layout.opaque_background = ctx->pixels == TETRISU_PIXELS_STATIONARY;
 	if (!load_font(ctx, &font))
 		return (settings_render_failed("font"));
+	/*
+	 * The stationary tier composes everything into one full-screen bitmap.
+	 * Small region planes are not an option there: a Sixel plane laid over
+	 * another is re-emitted whenever the plane below it is marked damaged, so
+	 * overlapping sprixels blank each other out unpredictably as focus moves.
+	 * What used to make that path slow was the work per compose, not the
+	 * compose itself, so the cost is attacked with the background and portrait
+	 * caches instead of by splitting the frame up.
+	 */
 	if (layout.opaque_background)
 	{
-		signature = settings_hash(&view->data.settings,
-			sizeof(view->data.settings),
-			(uint64_t)layout.pixel_width << 32
-				| (unsigned)layout.pixel_height);
-		signature = settings_hash(state, sizeof(*state), signature);
-		if ((ctx->screen_plane == NULL
+		signature = static_signature(view, &layout);
+		if ((ctx->settings_static_pixels == NULL
 				|| signature != ctx->settings_static_signature)
 			&& !compose_settings(ctx, view, state, &layout, font))
-			return (settings_render_failed("stationary frame"));
+			return (settings_render_failed("static layer"));
 		ctx->settings_static_signature = signature;
+		signature = dynamic_signature(state, signature);
+		signature = settings_hash(&view->data.settings.music_volume,
+			sizeof(view->data.settings.music_volume), signature);
+		if ((ctx->screen_plane == NULL
+				|| signature != ctx->settings_controls_signature)
+			&& !compose_stationary_frame(ctx, view, state, &layout, font))
+			return (settings_render_failed("stationary frame"));
+		ctx->settings_controls_signature = signature;
 		ncplane_move_top(ctx->screen_plane);
 		render_compatibility_badge_hide(ctx);
 		render_notification_raise(ctx);
@@ -157,16 +189,38 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	ctx->settings_static_signature = signature;
 	signature = settings_hash(&state->focus, sizeof(state->focus),
 		(uint64_t)layout.pixel_width << 32 | (unsigned)layout.pixel_height);
+	signature = settings_hash(&state->section, sizeof(state->section),
+		signature);
 	signature = settings_hash(&view->data.settings.signed_in,
 		sizeof(view->data.settings.signed_in), signature);
 	if (ctx->settings_controls_plane == NULL
 		|| signature != ctx->settings_controls_signature)
 	{
-		if (!compose_controls(ctx, &view->data.settings, state, &layout, font)
-			|| !compose_character_controls(ctx, state, &layout, font))
+		if (!compose_controls(ctx, &view->data.settings, state, &layout, font))
 			return (settings_render_failed("controls"));
 		ctx->settings_controls_signature = signature;
-		ctx->settings_character_signature = signature;
+	}
+	signature = settings_hash(&state->character_slot,
+		sizeof(state->character_slot), ctx->settings_static_signature);
+	signature = settings_hash(&state->section, sizeof(state->section),
+		signature);
+	if (signature != ctx->settings_characters_signature)
+	{
+		if (!compose_inventory(ctx, &view->data.settings, state, &layout,
+				font, true))
+			return (settings_render_failed("characters"));
+		ctx->settings_characters_signature = signature;
+	}
+	signature = settings_hash(&state->theme_slot, sizeof(state->theme_slot),
+		ctx->settings_static_signature);
+	signature = settings_hash(&state->section, sizeof(state->section),
+		signature);
+	if (signature != ctx->settings_themes_signature)
+	{
+		if (!compose_inventory(ctx, &view->data.settings, state, &layout,
+				font, false))
+			return (settings_render_failed("themes"));
+		ctx->settings_themes_signature = signature;
 	}
 	signature = settings_hash(&view->data.settings.music_volume,
 		sizeof(view->data.settings.music_volume),
@@ -180,6 +234,10 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	}
 	signature = settings_hash(&state->ability_info_visible,
 		sizeof(state->ability_info_visible), ctx->settings_static_signature);
+	signature = settings_hash(&state->section, sizeof(state->section),
+		signature);
+	signature = settings_hash(&state->character_slot,
+		sizeof(state->character_slot), signature);
 	if (signature != ctx->settings_ability_signature)
 	{
 		if (!compose_ability(ctx, &view->data.settings, state, &layout, font))
@@ -189,8 +247,10 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	ncplane_move_top(ctx->screen_plane);
 	if (ctx->settings_controls_plane != NULL)
 		ncplane_move_top(ctx->settings_controls_plane);
-	if (ctx->settings_character_plane != NULL)
-		ncplane_move_top(ctx->settings_character_plane);
+	if (ctx->settings_characters_plane != NULL)
+		ncplane_move_top(ctx->settings_characters_plane);
+	if (ctx->settings_themes_plane != NULL)
+		ncplane_move_top(ctx->settings_themes_plane);
 	if (ctx->settings_volume_plane != NULL)
 		ncplane_move_top(ctx->settings_volume_plane);
 	if (ctx->settings_ability_plane != NULL)
@@ -209,11 +269,6 @@ void	render_settings_pixel_destroy(render_ctx_t *ctx)
 {
 	if (ctx == NULL)
 		return ;
-	if (ctx->settings_background_visual != NULL)
-	{
-		ncvisual_destroy(ctx->settings_background_visual);
-		ctx->settings_background_visual = NULL;
-	}
 	if (ctx->settings_font_visual != NULL)
 	{
 		ncvisual_destroy(ctx->settings_font_visual);
@@ -224,10 +279,15 @@ void	render_settings_pixel_destroy(render_ctx_t *ctx)
 		ncplane_destroy(ctx->settings_controls_plane);
 		ctx->settings_controls_plane = NULL;
 	}
-	if (ctx->settings_character_plane != NULL)
+	if (ctx->settings_characters_plane != NULL)
 	{
-		ncplane_destroy(ctx->settings_character_plane);
-		ctx->settings_character_plane = NULL;
+		ncplane_destroy(ctx->settings_characters_plane);
+		ctx->settings_characters_plane = NULL;
+	}
+	if (ctx->settings_themes_plane != NULL)
+	{
+		ncplane_destroy(ctx->settings_themes_plane);
+		ctx->settings_themes_plane = NULL;
 	}
 	if (ctx->settings_volume_plane != NULL)
 	{
@@ -239,12 +299,25 @@ void	render_settings_pixel_destroy(render_ctx_t *ctx)
 		ncplane_destroy(ctx->settings_ability_plane);
 		ctx->settings_ability_plane = NULL;
 	}
+	if (ctx->settings_portrait_visual != NULL)
+	{
+		ncvisual_destroy(ctx->settings_portrait_visual);
+		ctx->settings_portrait_visual = NULL;
+	}
+	ctx->settings_portrait_source[0] = '\0';
+	free(ctx->settings_background_pixels);
+	ctx->settings_background_pixels = NULL;
+	free(ctx->settings_static_pixels);
+	ctx->settings_static_pixels = NULL;
+	ctx->settings_pixels_width = 0;
+	ctx->settings_pixels_height = 0;
 	ctx->settings_background_ready = false;
 	ctx->settings_background_rows = 0;
 	ctx->settings_background_cols = 0;
 	ctx->settings_static_signature = 0;
 	ctx->settings_controls_signature = 0;
-	ctx->settings_character_signature = 0;
+	ctx->settings_characters_signature = 0;
+	ctx->settings_themes_signature = 0;
 	ctx->settings_volume_signature = 0;
 	ctx->settings_ability_signature = 0;
 }
@@ -261,14 +334,20 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
 	if (render_background_replace_exact(ctx, SETTINGS_BACKGROUND_PATH, false)
 		< 0)
 		return (false);
-	if (ctx->pixels == TETRISU_PIXELS_STATIONARY
-		&& !cache_background(ctx))
+	/*
+	 * Both caches are sized by the fitted geometry, so a resize invalidates
+	 * them before anything can prefill from a buffer of the previous size.
+	 */
+	free(ctx->settings_static_pixels);
+	ctx->settings_static_pixels = NULL;
+	ctx->settings_pixels_width = 0;
+	ctx->settings_pixels_height = 0;
+	if (ctx->pixels == TETRISU_PIXELS_STATIONARY && !cache_background(ctx))
 		return (false);
-	if (ctx->pixels != TETRISU_PIXELS_STATIONARY
-		&& ctx->settings_background_visual != NULL)
+	if (ctx->pixels != TETRISU_PIXELS_STATIONARY)
 	{
-		ncvisual_destroy(ctx->settings_background_visual);
-		ctx->settings_background_visual = NULL;
+		free(ctx->settings_background_pixels);
+		ctx->settings_background_pixels = NULL;
 	}
 	ctx->settings_background_ready = true;
 	ctx->settings_background_rows = ctx->bg_rows;
@@ -276,11 +355,22 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
 	return (true);
 }
 
+/**
+ * @brief Flattens the fitted backdrop into a reusable opaque RGBA buffer.
+ *
+ * ncvisual_at_yx() is a per-call lookup, so walking a full-screen visual costs
+ * millions of them. Doing that walk once per geometry change and keeping the
+ * result turns every later frame prefill into a memcpy.
+ */
 static bool	cache_background(render_ctx_t *ctx)
 {
 	struct ncvisual	*visual;
+	uint32_t		*buffer;
+	uint32_t		pixel;
 	int			width;
 	int			height;
+	int			y;
+	int			x;
 
 	if (ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
 		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x
@@ -288,6 +378,9 @@ static bool	cache_background(render_ctx_t *ctx)
 		return (false);
 	width = ctx->bg_cols * ctx->cell_px_x;
 	height = ctx->bg_rows * ctx->cell_px_y;
+	if (width <= 0 || height <= 0
+		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
+		return (false);
 	visual = ncvisual_from_file(SETTINGS_BACKGROUND_PATH);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
@@ -295,9 +388,29 @@ static bool	cache_background(render_ctx_t *ctx)
 			ncvisual_destroy(visual);
 		return (false);
 	}
-	if (ctx->settings_background_visual != NULL)
-		ncvisual_destroy(ctx->settings_background_visual);
-	ctx->settings_background_visual = visual;
+	buffer = malloc((size_t)width * (size_t)height * sizeof(*buffer));
+	if (buffer == NULL)
+	{
+		ncvisual_destroy(visual);
+		return (false);
+	}
+	y = 0;
+	while (y < height)
+	{
+		x = 0;
+		while (x < width)
+		{
+			if (ncvisual_at_yx(visual, (unsigned)y, (unsigned)x, &pixel) < 0)
+				pixel = ncpixel(8, 8, 31);
+			ncpixel_set_a(&pixel, 255u);
+			buffer[(size_t)y * width + x] = pixel;
+			x++;
+		}
+		y++;
+	}
+	ncvisual_destroy(visual);
+	free(ctx->settings_background_pixels);
+	ctx->settings_background_pixels = buffer;
 	return (true);
 }
 
@@ -351,23 +464,66 @@ static bool	compose_settings(render_ctx_t *ctx,
 		free(pixels);
 		return (false);
 	}
+	(void)state;
 	draw_profile(pixels, width, height, view, layout, font);
 	if (view->status == APP_DATA_READY && view->data.settings.signed_in
 		&& !view->data.settings.offline)
-		draw_portrait(pixels, width, height, layout,
+		draw_portrait(ctx, pixels, width, height, layout,
 			view->data.settings.profile.portrait_asset);
 	draw_stats(pixels, width, height, &view->data.settings, layout, font);
+	/*
+	 * Keep the composed layer. On the movable tier every region plane is cut
+	 * from it, so each one lands on the artwork genuinely underneath; on the
+	 * stationary tier it is the base each full frame is stamped from, which is
+	 * what keeps the portrait scaling and profile text off the input path.
+	 */
+	free(ctx->settings_static_pixels);
+	ctx->settings_static_pixels = pixels;
+	ctx->settings_pixels_width = width;
+	ctx->settings_pixels_height = height;
 	if (layout->opaque_background)
+		return (true);
+	if (ctx->screen_plane != NULL)
+		ncplane_destroy(ctx->screen_plane);
+	ctx->screen_plane = NULL;
+	return (create_settings_plane(ctx, pixels, width, height));
+}
+
+/**
+ * @brief Stamps one complete stationary frame from the cached static layer.
+ *
+ * Only the focus-sensitive elements are redrawn here; everything above them in
+ * the frame comes from the cached copy, so a keystroke costs a memcpy plus a
+ * few hundred glyphs rather than a full recomposition.
+ */
+static bool	compose_stationary_frame(render_ctx_t *ctx,
+	const app_screen_view_model_t *view, const settings_state_t *state,
+	const settings_layout_t *layout, struct ncvisual *font)
+{
+	uint32_t	*pixels;
+	int			width;
+	int			height;
+
+	width = layout->pixel_width;
+	height = layout->pixel_height;
+	pixels = region_canvas(ctx, layout);
+	if (pixels == NULL)
+		return (false);
+	if (view->status == APP_DATA_READY && view->data.settings.signed_in
+		&& !view->data.settings.offline)
 	{
-		draw_volume_value(pixels, width, height, &view->data.settings,
-			layout, font);
-		draw_character_arrows(pixels, width, height, layout, font, state);
-		draw_buttons(pixels, width, height, &view->data.settings, state,
-			layout, font);
-		if (state->ability_info_visible)
-			draw_ability_card(pixels, width, height, layout, font,
-				&view->data.settings);
+		draw_inventory(pixels, width, height, &view->data.settings.characters,
+			state, layout, font, true);
+		draw_inventory(pixels, width, height, &view->data.settings.themes,
+			state, layout, font, false);
 	}
+	draw_volume_value(pixels, width, height, &view->data.settings, layout,
+		font);
+	draw_buttons(pixels, width, height, &view->data.settings, state, layout,
+		font);
+	if (settings_card_visible(state))
+		draw_ability_card(pixels, width, height, layout, font,
+			settings_card_character(&view->data.settings, state));
 	if (ctx->screen_plane != NULL)
 		ncplane_destroy(ctx->screen_plane);
 	ctx->screen_plane = NULL;
@@ -380,16 +536,47 @@ static bool	compose_settings(render_ctx_t *ctx,
 	return (true);
 }
 
+/**
+ * @brief Allocates a full-frame canvas seeded with the composed static frame.
+ *
+ * Region composition draws onto a copy of what is already on screen, so the
+ * cropped result is opaque wherever the frame is. That is what lets the
+ * stationary tier use small planes at all: Sixel cannot write transparency
+ * over existing content, but it can overwrite it.
+ */
+static uint32_t	*region_canvas(render_ctx_t *ctx,
+	const settings_layout_t *layout)
+{
+	size_t	count;
+
+	if (layout->pixel_width <= 0 || layout->pixel_height <= 0)
+		return (NULL);
+	count = (size_t)layout->pixel_width * (size_t)layout->pixel_height;
+	if (count > SIZE_MAX / sizeof(uint32_t))
+		return (NULL);
+	if (ctx->settings_static_pixels != NULL
+		&& ctx->settings_pixels_width == layout->pixel_width
+		&& ctx->settings_pixels_height == layout->pixel_height)
+	{
+		uint32_t	*canvas;
+
+		canvas = malloc(count * sizeof(*canvas));
+		if (canvas != NULL)
+			memcpy(canvas, ctx->settings_static_pixels,
+				count * sizeof(*canvas));
+		return (canvas);
+	}
+	return (calloc(count, sizeof(uint32_t)));
+}
+
 static bool	compose_controls(render_ctx_t *ctx,
 	const app_settings_view_model_t *settings, const settings_state_t *state,
 	const settings_layout_t *layout, struct ncvisual *font)
 {
 	settings_rect_t	region;
 	uint32_t		*pixels;
-	size_t			count;
 
-	count = (size_t)layout->pixel_width * (size_t)layout->pixel_height;
-	pixels = calloc(count, sizeof(*pixels));
+	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
 	draw_buttons(pixels, layout->pixel_width, layout->pixel_height, settings,
@@ -408,26 +595,48 @@ static bool	compose_controls(render_ctx_t *ctx,
 	return (true);
 }
 
-static bool	compose_character_controls(render_ctx_t *ctx,
-	const settings_state_t *state, const settings_layout_t *layout,
-	struct ncvisual *font)
+/**
+ * @brief Repaints one inventory panel with its current focus highlight.
+ *
+ * Both panels live on their own region planes rather than in the static frame
+ * because focus moves through them: baking them into the frame would make
+ * every arrow key a full-screen recomposition.
+ */
+static bool	compose_inventory(render_ctx_t *ctx,
+	const app_settings_view_model_t *settings, const settings_state_t *state,
+	const settings_layout_t *layout, struct ncvisual *font, bool characters)
 {
 	settings_rect_t	region;
 	uint32_t		*pixels;
-	size_t			count;
+	struct ncplane	**slot;
 
-	count = (size_t)layout->pixel_width * (size_t)layout->pixel_height;
-	pixels = calloc(count, sizeof(*pixels));
+	slot = characters ? &ctx->settings_characters_plane
+		: &ctx->settings_themes_plane;
+	if (!settings->signed_in || settings->offline)
+	{
+		if (*slot != NULL)
+		{
+			ncplane_destroy(*slot);
+			*slot = NULL;
+		}
+		return (true);
+	}
+	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
-	draw_character_arrows(pixels, layout->pixel_width, layout->pixel_height,
-		layout, font, state);
-	region.x = ref_x(layout, 180);
-	region.y = ref_y(layout, 210);
-	region.width = ref_x(layout, 430);
-	region.height = ref_y(layout, 150);
+	draw_inventory(pixels, layout->pixel_width, layout->pixel_height,
+		characters ? &settings->characters : &settings->themes, state, layout,
+		font, characters);
+	region.x = ref_x(layout, characters ? SETTINGS_REF_CHARACTERS_X
+		: SETTINGS_REF_THEMES_X);
+	region.y = ref_y(layout, characters ? SETTINGS_REF_CHARACTERS_Y
+		: SETTINGS_REF_THEMES_Y);
+	region.width = ref_x(layout, characters ? SETTINGS_REF_CHARACTERS_WIDTH
+		: SETTINGS_REF_THEMES_WIDTH);
+	region.height = ref_y(layout, characters ? SETTINGS_REF_CHARACTERS_HEIGHT
+		: SETTINGS_REF_THEMES_HEIGHT);
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
-			layout->pixel_height, &region, &ctx->settings_character_plane))
+			layout->pixel_height, &region, slot))
 	{
 		free(pixels);
 		return (false);
@@ -442,10 +651,8 @@ static bool	compose_volume(render_ctx_t *ctx,
 {
 	settings_rect_t	region;
 	uint32_t		*pixels;
-	size_t			count;
 
-	count = (size_t)layout->pixel_width * (size_t)layout->pixel_height;
-	pixels = calloc(count, sizeof(*pixels));
+	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
 	draw_volume_value(pixels, layout->pixel_width, layout->pixel_height,
@@ -480,9 +687,9 @@ static bool	compose_ability(render_ctx_t *ctx,
 {
 	settings_rect_t	region;
 	uint32_t		*pixels;
-	size_t			count;
 
-	if (!state->ability_info_visible)
+	if (!settings_card_visible(state)
+		|| settings_card_character(settings, state) == NULL)
 	{
 		if (ctx->settings_ability_plane != NULL)
 		{
@@ -491,16 +698,15 @@ static bool	compose_ability(render_ctx_t *ctx,
 		}
 		return (true);
 	}
-	count = (size_t)layout->pixel_width * (size_t)layout->pixel_height;
-	pixels = calloc(count, sizeof(*pixels));
+	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
 	draw_ability_card(pixels, layout->pixel_width, layout->pixel_height,
-		layout, font, settings);
-	region.x = ref_x(layout, 570);
-	region.y = ref_y(layout, 118);
-	region.width = ref_x(layout, 652);
-	region.height = ref_y(layout, 370);
+		layout, font, settings_card_character(settings, state));
+	region.x = ref_x(layout, SETTINGS_REF_CARD_X);
+	region.y = ref_y(layout, SETTINGS_REF_CARD_Y);
+	region.width = ref_x(layout, SETTINGS_REF_CARD_WIDTH);
+	region.height = ref_y(layout, SETTINGS_REF_CARD_HEIGHT);
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
 			layout->pixel_height, &region, &ctx->settings_ability_plane))
 	{
@@ -514,27 +720,12 @@ static bool	compose_ability(render_ctx_t *ctx,
 static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
 	int width, int height)
 {
-	uint32_t	pixel;
-	int		y;
-	int		x;
-
-	if (ctx->settings_background_visual == NULL)
+	if (ctx->settings_background_pixels == NULL
+		|| ctx->bg_cols * ctx->cell_px_x != width
+		|| ctx->bg_rows * ctx->cell_px_y != height)
 		return (false);
-	y = 0;
-	while (y < height)
-	{
-		x = 0;
-		while (x < width)
-		{
-			if (ncvisual_at_yx(ctx->settings_background_visual,
-					(unsigned)y, (unsigned)x, &pixel) < 0)
-				pixel = ncpixel(8, 8, 31);
-			ncpixel_set_a(&pixel, 255u);
-			pixels[(size_t)y * width + x] = pixel;
-			x++;
-		}
-		y++;
-	}
+	memcpy(pixels, ctx->settings_background_pixels,
+		(size_t)width * (size_t)height * sizeof(*pixels));
 	return (true);
 }
 
@@ -751,69 +942,85 @@ static void	draw_profile(uint32_t *pixels, int width, int height,
 			renderer_name(settings->renderer_mode), SETTINGS_REF_PROFILE_X + 400,
 			SETTINGS_REF_PROFILE_Y + 263, 150, 14, g_settings_green, false);
 	}
-	if (view->status == APP_DATA_READY && settings->signed_in
-		&& !settings->offline)
-	{
-		draw_inventory(pixels, width, height, &settings->characters,
-			&layout->characters, layout, font, true);
-		draw_inventory(pixels, width, height, &settings->themes,
-			&layout->themes, layout, font, false);
-	}
+	/*
+	 * The inventory panels are deliberately absent here: they carry the focus
+	 * highlight, so they are composed onto their own region planes instead.
+	 */
 }
 
 static void	draw_inventory(uint32_t *pixels, int width, int height,
-	const app_catalogue_view_model_t *catalogue, const settings_rect_t *panel,
+	const app_catalogue_view_model_t *catalogue, const settings_state_t *state,
 	const settings_layout_t *layout, struct ncvisual *font, bool characters)
 {
 	int		owned;
 	int		index;
 	int		slot;
+	int		focused_slot;
 	int		ref_panel_x;
 	int		ref_panel_y;
 	int		ref_panel_width;
 	int		ref_slot_width;
+	int		ref_label_x;
+	int		ref_label_y;
+	int		glyph_size;
+	int		spacing;
 	int		row;
 	int		column;
 	int		limit;
-	color_t	color;
-	char	label[APP_TEXT_MAX + 4];
+	bool	focused;
 
-	owned = 0;
-	index = 0;
-	while (index < catalogue->count)
-	{
-		if (catalogue->items[index].owned)
-			owned++;
-		index++;
-	}
 	ref_panel_x = characters ? SETTINGS_REF_CHARACTERS_X
 		: SETTINGS_REF_THEMES_X;
 	ref_panel_y = characters ? SETTINGS_REF_CHARACTERS_Y : SETTINGS_REF_THEMES_Y;
 	ref_panel_width = characters ? SETTINGS_REF_CHARACTERS_WIDTH
 		: SETTINGS_REF_THEMES_WIDTH;
-	(void)panel;
+	limit = characters ? SETTINGS_CHARACTER_SLOTS : SETTINGS_THEME_SLOTS;
+	ref_slot_width = (ref_panel_width - 20) / SETTINGS_INVENTORY_COLUMNS;
+	owned = settings_owned_count(catalogue, limit);
+	focused_slot = -1;
+	if (state->section == (characters ? SETTINGS_SECTION_CHARACTERS
+			: SETTINGS_SECTION_THEMES))
+		focused_slot = characters ? state->character_slot : state->theme_slot;
 	draw_text_ref(pixels, width, height, layout, font,
 		characters ? "OWNED CHARACTERS" : "OWNED THEMES", ref_panel_x + 10,
 		ref_panel_y, ref_panel_width - 20, 17, g_settings_pink, true);
-	ref_slot_width = (ref_panel_width - 20) / 2;
-	limit = characters ? 4 : 6;
+	/*
+	 * One glyph size for the whole panel, taken from the longest label it
+	 * will draw. Sizing each entry to its own text made names appear to grow
+	 * and shrink as the star moved between them.
+	 */
+	glyph_size = panel_glyph_size(catalogue, layout, limit,
+			ref_slot_width - SETTINGS_REF_SLOT_TEXT_X - 4, &spacing);
 	slot = 0;
 	index = 0;
 	while (index < catalogue->count && slot < limit)
 	{
 		if (catalogue->items[index].owned)
 		{
-			color = catalogue->items[index].equipped
-				? g_settings_gold : g_settings_cream;
-			row = slot / 2;
-			column = slot % 2;
-			snprintf(label, sizeof(label), "%s%s",
-				catalogue->items[index].equipped ? "* " : "",
-				catalogue->items[index].name);
-			draw_text_ref(pixels, width, height, layout, font,
-				label, ref_panel_x + 10 + column * ref_slot_width,
-				ref_panel_y + 51 + row * 38, ref_slot_width - 4, 12,
-				color, true);
+			focused = slot == focused_slot;
+			row = slot / SETTINGS_INVENTORY_COLUMNS;
+			column = slot % SETTINGS_INVENTORY_COLUMNS;
+			ref_label_x = ref_panel_x + SETTINGS_REF_SLOT_INSET
+				+ column * ref_slot_width;
+			ref_label_y = ref_panel_y + SETTINGS_REF_SLOT_FIRST_Y
+				+ row * SETTINGS_REF_SLOT_STEP_Y;
+			if (focused)
+				draw_slot_highlight(pixels, width, height, layout,
+					ref_label_x, ref_label_y, ref_slot_width);
+			/*
+			 * The star occupies a reserved column instead of being prefixed to
+			 * the name, so equipping an entry never changes the string being
+			 * measured and the label never shifts or resizes under the cursor.
+			 */
+			if (catalogue->items[index].equipped)
+				draw_text_sized(pixels, width, height, layout, font, "*",
+					ref_label_x, ref_label_y, glyph_size, spacing,
+					focused ? g_settings_gold : g_settings_green);
+			draw_text_sized(pixels, width, height, layout, font,
+				catalogue->items[index].name,
+				ref_label_x + SETTINGS_REF_SLOT_TEXT_X, ref_label_y,
+				glyph_size, spacing,
+				focused ? g_settings_gold : g_settings_cream);
 			slot++;
 		}
 		index++;
@@ -822,15 +1029,63 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 		draw_text_ref(pixels, width, height, layout, font, "NONE OWNED",
 			ref_panel_x + 10, ref_panel_y + 82, ref_panel_width - 20, 13,
 			g_settings_lavender, true);
-	else if (owned > limit)
-	{
-		char	more[24];
+}
 
-		snprintf(more, sizeof(more), "+%d MORE", owned - limit);
-		draw_text_ref(pixels, width, height, layout, font, more,
-			ref_panel_x + ref_panel_width - 120, ref_panel_y + 4, 110, 11,
-			g_settings_lavender, true);
+/**
+ * @brief Picks one glyph size that fits every label a panel will draw.
+ */
+static int	panel_glyph_size(const app_catalogue_view_model_t *catalogue,
+	const settings_layout_t *layout, int limit, int ref_width, int *spacing)
+{
+	int	glyph_size;
+	int	candidate;
+	int	candidate_spacing;
+	int	index;
+	int	slot;
+
+	glyph_size = fit_glyph_size(layout, "", ref_width,
+			SETTINGS_REF_SLOT_GLYPH, spacing);
+	slot = 0;
+	index = 0;
+	while (index < catalogue->count && slot < limit)
+	{
+		if (catalogue->items[index].owned)
+		{
+			candidate = fit_glyph_size(layout, catalogue->items[index].name,
+					ref_width, SETTINGS_REF_SLOT_GLYPH, &candidate_spacing);
+			if (candidate < glyph_size)
+			{
+				glyph_size = candidate;
+				*spacing = candidate_spacing;
+			}
+			slot++;
+		}
+		index++;
 	}
+	return (glyph_size);
+}
+
+/**
+ * @brief Draws the selection row: a soft plate with a gold edge on its left.
+ *
+ * The plate is deliberately darker than the panel rather than brighter, so the
+ * gold label stays the brightest thing in the row and the eye lands on the
+ * text rather than on the marker.
+ */
+static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
+	const settings_layout_t *layout, int ref_label_x, int ref_label_y,
+	int ref_slot_width)
+{
+	const color_t	plate = {74, 40, 104};
+
+	fill_ref_rect(pixels, width, height, layout,
+		ref_label_x - SETTINGS_REF_SLOT_PAD_X,
+		ref_label_y - SETTINGS_REF_SLOT_PAD_Y,
+		ref_slot_width - 2, SETTINGS_REF_SLOT_STEP_Y - 6, plate, 224u);
+	fill_ref_rect(pixels, width, height, layout,
+		ref_label_x - SETTINGS_REF_SLOT_PAD_X,
+		ref_label_y - SETTINGS_REF_SLOT_PAD_Y, 4,
+		SETTINGS_REF_SLOT_STEP_Y - 6, g_settings_gold, 255u);
 }
 
 static void	draw_stats(uint32_t *pixels, int width, int height,
@@ -945,30 +1200,56 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 			center - 104, SETTINGS_REF_BUTTON_Y + 36, 208, 21, color, true);
 		draw_text_ref(pixels, width, height, layout, font, hints[index],
 			center - 52, SETTINGS_REF_BUTTON_Y + 77, 104, 15, color, true);
-		if (focused)
-		{
-			draw_text_ref(pixels, width, height, layout, font, ">",
-				center - 112, SETTINGS_REF_BUTTON_Y + 38, 18, 20,
-				g_settings_gold, true);
-			draw_text_ref(pixels, width, height, layout, font, "<",
-				center + 94, SETTINGS_REF_BUTTON_Y + 38, 18, 20,
-				g_settings_gold, true);
-		}
+		/*
+		 * No chevrons. The buttons sit 240 reference units apart and the label
+		 * box is 208 wide, so a bracket on either side lands close enough to
+		 * the neighbouring label to read as belonging to it. Gold already
+		 * means focus everywhere else on this screen, so it carries it here.
+		 */
 		index++;
 	}
 	/*
-	 * Settings takes no pointer input, so the character arrows and the powers
+	 * Settings takes no pointer input, so the inventory grids and the powers
 	 * card need their keys spelled out here or they are undiscoverable.
 	 */
 	draw_text_ref(pixels, width, height, layout, font,
 		settings->signed_in
-		? "TAB / ARROWS FOCUS   ENTER SELECT   [ ] CHARACTER   I POWERS   ESC BACK"
-		: "TAB / ARROWS FOCUS   ENTER SELECT   ESC BACK", 260,
+		? "ARROWS MOVE   UP ENTERS INVENTORY   ENTER EQUIPS   I POWERS   ESC BACK"
+		: "ARROWS MOVE   ENTER SELECT   ESC BACK", 260,
 		SETTINGS_REF_BUTTON_Y + 139, 930, 12, g_settings_lavender, true);
 }
 
-static void	draw_portrait(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, const char *path)
+/**
+ * @brief Returns the decoded portrait for a path, decoding it at most once.
+ *
+ * The stationary tier redraws the whole frame per keystroke, so re-reading and
+ * re-decoding the PNG each time would put file I/O on the input path.
+ */
+static struct ncvisual	*cached_portrait(render_ctx_t *ctx, const char *path)
+{
+	if (path == NULL || path[0] == '\0')
+		return (NULL);
+	if (ctx->settings_portrait_visual != NULL
+		&& strcmp(ctx->settings_portrait_source, path) == 0)
+		return (ctx->settings_portrait_visual);
+	if (ctx->settings_portrait_visual != NULL)
+	{
+		ncvisual_destroy(ctx->settings_portrait_visual);
+		ctx->settings_portrait_visual = NULL;
+	}
+	ctx->settings_portrait_visual = ncvisual_from_file(path);
+	if (ctx->settings_portrait_visual == NULL)
+	{
+		ctx->settings_portrait_source[0] = '\0';
+		return (NULL);
+	}
+	snprintf(ctx->settings_portrait_source,
+		sizeof(ctx->settings_portrait_source), "%s", path);
+	return (ctx->settings_portrait_visual);
+}
+
+static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
+	int height, const settings_layout_t *layout, const char *path)
 {
 	struct ncvisual	*portrait;
 	ncvgeom			geom;
@@ -982,17 +1263,11 @@ static void	draw_portrait(uint32_t *pixels, int width, int height,
 	int				origin_x;
 	int				origin_y;
 
-	if (path == NULL || path[0] == '\0')
-		return ;
-	portrait = ncvisual_from_file(path);
+	portrait = cached_portrait(ctx, path);
 	memset(&geom, 0, sizeof(geom));
 	if (portrait == NULL || ncvisual_geom(NULL, portrait, NULL, &geom) != 0
 		|| geom.pixx == 0 || geom.pixy == 0)
-	{
-		if (portrait != NULL)
-			ncvisual_destroy(portrait);
 		return ;
-	}
 	draw_width = layout->portrait.width;
 	draw_height = (int)((uint64_t)draw_width * geom.pixy / geom.pixx);
 	if (draw_height > layout->portrait.height)
@@ -1026,68 +1301,88 @@ static void	draw_portrait(uint32_t *pixels, int width, int height,
 		}
 		y++;
 	}
-	ncvisual_destroy(portrait);
 }
 
-static void	draw_character_arrows(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font,
-	const settings_state_t *state)
+/**
+ * @brief Fills a reference-space rectangle, used for the focus highlight bar.
+ */
+static void	fill_ref_rect(uint32_t *pixels, int width, int height,
+	const settings_layout_t *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, color_t tint, unsigned alpha)
 {
-	color_t	previous_color;
-	color_t	next_color;
+	int	left;
+	int	top;
+	int	right;
+	int	bottom;
+	int	y;
+	int	x;
 
-	previous_color = state->focus == SETTINGS_FOCUS_CHARACTER_PREVIOUS
-		? g_settings_gold : g_settings_cream;
-	next_color = state->focus == SETTINGS_FOCUS_CHARACTER_NEXT
-		? g_settings_gold : g_settings_cream;
-	draw_text_ref(pixels, width, height, layout, font, "<--",
-		SETTINGS_REF_CHARACTER_PREVIOUS_X, SETTINGS_REF_CHARACTER_ARROW_Y + 25,
-		SETTINGS_REF_CHARACTER_ARROW_WIDTH, 20, previous_color, true);
-	draw_text_ref(pixels, width, height, layout, font, "-->",
-		SETTINGS_REF_CHARACTER_NEXT_X, SETTINGS_REF_CHARACTER_ARROW_Y + 25,
-		SETTINGS_REF_CHARACTER_ARROW_WIDTH, 20, next_color, true);
+	left = ref_x(layout, ref_x_value);
+	top = ref_y(layout, ref_y_value);
+	right = left + ref_x(layout, ref_width);
+	bottom = top + ref_y(layout, ref_height);
+	y = top;
+	while (y < bottom)
+	{
+		x = left;
+		while (x < right)
+		{
+			put_pixel(pixels, width, height, x, y, tint, alpha,
+				layout->opaque_background);
+			x++;
+		}
+		y++;
+	}
 }
 
 static void	draw_ability_card(uint32_t *pixels, int width, int height,
 	const settings_layout_t *layout, struct ncvisual *font,
-	const app_settings_view_model_t *settings)
+	const app_catalogue_item_view_model_t *character)
 {
-	const app_catalogue_item_view_model_t	*character;
 	color_t						panel;
 	char							heading[APP_TEXT_MAX + 32];
 	int							x;
 	int							y;
 	int							index;
 
-	character = equipped_character(settings);
 	if (character == NULL)
 		return ;
+	/*
+	 * The card is inset inside the authored profile frame rather than sized to
+	 * the region around it, so its fill stops short of the gold border instead
+	 * of painting over it. Every row below is measured from the same inset.
+	 */
 	panel = (color_t){24, 10, 38};
-	y = ref_y(layout, 118);
-	while (y < ref_y(layout, 488))
+	y = ref_y(layout, SETTINGS_REF_CARD_Y);
+	while (y < ref_y(layout, SETTINGS_REF_CARD_Y + SETTINGS_REF_CARD_HEIGHT))
 	{
-		x = ref_x(layout, 570);
-		while (x < ref_x(layout, 1222))
+		x = ref_x(layout, SETTINGS_REF_CARD_X);
+		while (x < ref_x(layout, SETTINGS_REF_CARD_X + SETTINGS_REF_CARD_WIDTH))
 		{
-			put_pixel(pixels, width, height, x, y, panel, 244u, true);
+			put_pixel(pixels, width, height, x, y, panel, 255u, true);
 			x++;
 		}
 		y++;
 	}
 	snprintf(heading, sizeof(heading), "%s - CRYSTAL POWERS",
 		character->name);
-	draw_text_ref(pixels, width, height, layout, font, heading, 590, 136,
-		612, 21, g_settings_pink, true);
+	draw_text_ref(pixels, width, height, layout, font, heading,
+		SETTINGS_REF_CARD_X + 10, SETTINGS_REF_CARD_Y + 12,
+		SETTINGS_REF_CARD_WIDTH - 20, 19, g_settings_pink, true);
 	index = 0;
 	while (index < APP_CHARACTER_ABILITY_COUNT)
 	{
 		snprintf(heading, sizeof(heading), "L%d  %s", index + 1,
 			character->abilities[index].name);
-		draw_text_ref(pixels, width, height, layout, font, heading, 594,
-			182 + index * 73, 592, 13, g_settings_gold, false);
+		draw_text_ref(pixels, width, height, layout, font, heading,
+			SETTINGS_REF_CARD_X + 14,
+			SETTINGS_REF_CARD_Y + 46 + index * SETTINGS_REF_CARD_STEP,
+			SETTINGS_REF_CARD_WIDTH - 28, 13, g_settings_gold, false);
 		draw_wrapped_text_ref(pixels, width, height, layout, font,
-			character->abilities[index].description, 594,
-			203 + index * 73, 592, 9, g_settings_cream, 2);
+			character->abilities[index].description,
+			SETTINGS_REF_CARD_X + 24,
+			SETTINGS_REF_CARD_Y + 65 + index * SETTINGS_REF_CARD_STEP,
+			SETTINGS_REF_CARD_WIDTH - 48, 9, g_settings_cream, 2);
 		index++;
 	}
 }
@@ -1131,22 +1426,29 @@ static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
 	}
 }
 
-static const app_catalogue_item_view_model_t	*equipped_character(
-	const app_settings_view_model_t *settings)
-{
-	int	index;
 
-	if (settings == NULL)
-		return (NULL);
-	index = 0;
-	while (index < settings->characters.count
-		&& index < APP_CATALOGUE_MAX_ITEMS)
+/**
+ * @brief Shrinks a glyph size until the text fits its reference-space box.
+ *
+ * Split out so a caller drawing a column of related labels can size them all
+ * from the longest one. Sizing each label independently makes them visibly
+ * change size as their text changes, which reads as a rendering glitch.
+ */
+static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
+	int ref_width, int ref_glyph, int *spacing)
+{
+	int	glyph_size;
+
+	glyph_size = max_int(3, ref_size(layout, ref_glyph));
+	*spacing = max_int(1, ref_size(layout, SETTINGS_FONT_SPACING_REF));
+	while (glyph_size > max_int(3, ref_size(layout, 7))
+		&& text_width(text, glyph_size, *spacing) > ref_x(layout, ref_width))
 	{
-		if (settings->characters.items[index].equipped)
-			return (&settings->characters.items[index]);
-		index++;
+		glyph_size--;
+		if (*spacing > max_int(1, ref_size(layout, 2)))
+			*spacing -= 1;
 	}
-	return (NULL);
+	return (glyph_size);
 }
 
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
@@ -1166,16 +1468,8 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
 
 	if (layout == NULL || font == NULL || text == NULL || ref_width <= 0)
 		return ;
-	glyph_size = max_int(3, ref_size(layout, ref_glyph));
-	spacing = max_int(1, ref_size(layout, SETTINGS_FONT_SPACING_REF));
+	glyph_size = fit_glyph_size(layout, text, ref_width, ref_glyph, &spacing);
 	shadow = max_int(1, ref_size(layout, SETTINGS_FONT_SHADOW_REF));
-	while (glyph_size > max_int(3, ref_size(layout, 7))
-		&& text_width(text, glyph_size, spacing) > ref_x(layout, ref_width))
-	{
-		glyph_size--;
-		if (spacing > max_int(1, ref_size(layout, 2)))
-			spacing--;
-	}
 	/* The final glyph has no trailing spacing, so exact-fit labels count it. */
 	max_chars = max_int(1, (ref_x(layout, ref_width) + spacing)
 		/ max_int(1, glyph_size + spacing));
@@ -1192,6 +1486,43 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
 	x = ref_x(layout, ref_x_value);
 	if (centered)
 		x += (ref_x(layout, ref_width) - text_pixels) / 2;
+	y = ref_y(layout, ref_y_value);
+	draw_text_run(pixels, width, height, layout, font, visible, x + shadow,
+		y + shadow, glyph_size, spacing, g_settings_shadow);
+	draw_text_run(pixels, width, height, layout, font, visible, x, y,
+		glyph_size, spacing, tint);
+}
+
+/**
+ * @brief Draws left-aligned text at a caller-chosen glyph size.
+ *
+ * Used where several labels must share one size regardless of their own
+ * lengths, so nothing appears to resize as the selection or the equipped entry
+ * moves between them.
+ */
+static void	draw_text_sized(uint32_t *pixels, int width, int height,
+	const settings_layout_t *layout, struct ncvisual *font, const char *text,
+	int ref_x_value, int ref_y_value, int glyph_size, int spacing,
+	color_t tint)
+{
+	char	visible[APP_TEXT_MAX * 2];
+	int		length;
+	int		shadow;
+	int		x;
+	int		y;
+
+	if (layout == NULL || font == NULL || text == NULL)
+		return ;
+	shadow = max_int(1, ref_size(layout, SETTINGS_FONT_SHADOW_REF));
+	length = 0;
+	while (text[length] != '\0' && length + 1 < (int)sizeof(visible))
+	{
+		visible[length] = (unsigned char)text[length] >= 32
+			&& (unsigned char)text[length] < 127 ? text[length] : '?';
+		length++;
+	}
+	visible[length] = '\0';
+	x = ref_x(layout, ref_x_value);
 	y = ref_y(layout, ref_y_value);
 	draw_text_run(pixels, width, height, layout, font, visible, x + shadow,
 		y + shadow, glyph_size, spacing, g_settings_shadow);
@@ -1405,6 +1736,25 @@ static uint64_t	static_signature(const app_screen_view_model_t *view,
 	hash = settings_hash(&view->local_preview, sizeof(view->local_preview), hash);
 	hash = settings_hash(&layout->pixel_width, sizeof(layout->pixel_width), hash);
 	hash = settings_hash(&layout->pixel_height, sizeof(layout->pixel_height), hash);
+	return (hash);
+}
+
+/**
+ * @brief Folds the focus-visible state into a hash, field by field.
+ *
+ * Hashing the state struct wholesale would fold in its padding bytes, which
+ * are never written and would make the signature unstable enough to recompose
+ * the frame on keystrokes that changed nothing.
+ */
+static uint64_t	dynamic_signature(const settings_state_t *state, uint64_t hash)
+{
+	hash = settings_hash(&state->section, sizeof(state->section), hash);
+	hash = settings_hash(&state->focus, sizeof(state->focus), hash);
+	hash = settings_hash(&state->character_slot,
+			sizeof(state->character_slot), hash);
+	hash = settings_hash(&state->theme_slot, sizeof(state->theme_slot), hash);
+	hash = settings_hash(&state->ability_info_visible,
+			sizeof(state->ability_info_visible), hash);
 	return (hash);
 }
 

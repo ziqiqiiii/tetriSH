@@ -6,6 +6,9 @@ static void	test_settings_focus_and_actions(void);
 static void	test_preview_gate_and_navigation(void);
 static void	test_settings_layout_contract(void);
 static void	test_character_selection(void);
+static void	test_inventory_grid_navigation(void);
+static void	test_slot_equipping(void);
+static void	test_powers_card_follows_focus(void);
 
 int	main(void)
 {
@@ -15,6 +18,9 @@ int	main(void)
 	test_preview_gate_and_navigation();
 	test_settings_layout_contract();
 	test_character_selection();
+	test_inventory_grid_navigation();
+	test_slot_equipping();
+	test_powers_card_follows_focus();
 	return (0);
 }
 
@@ -91,35 +97,34 @@ static void	test_settings_focus_and_actions(void)
 	settings_state_t	state;
 	app_navigation_t	navigation;
 
-	settings_state_init(&state, true);
+	settings_state_init(&state, true, 4, 6);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
 	assert(state.focus == SETTINGS_FOCUS_BACK);
 	assert(settings_handle_key(&state, NCKEY_ENTER) == SETTINGS_ACTION_BACK);
-	settings_state_focus_next(&state);
+	/* Right walks the control strip and wraps back to Back. */
+	assert(settings_handle_key(&state, NCKEY_RIGHT) == SETTINGS_ACTION_NONE);
 	assert(state.focus == SETTINGS_FOCUS_MARKETPLACE);
 	assert(settings_handle_key(&state, 'm') == SETTINGS_ACTION_MARKETPLACE);
-	settings_state_focus_next(&state);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	assert(state.focus == SETTINGS_FOCUS_VOLUME_DOWN);
 	assert(settings_handle_key(&state, NCKEY_ENTER)
 		== SETTINGS_ACTION_VOLUME_DOWN);
-	settings_state_focus_next(&state);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	assert(state.focus == SETTINGS_FOCUS_VOLUME_UP);
 	assert(settings_handle_key(&state, '+') == SETTINGS_ACTION_VOLUME_UP);
-	settings_state_focus_next(&state);
-	assert(state.focus == SETTINGS_FOCUS_CHARACTER_PREVIOUS);
-	assert(settings_handle_key(&state, NCKEY_ENTER)
-		== SETTINGS_ACTION_CHARACTER_PREVIOUS);
-	settings_state_focus_next(&state);
-	assert(state.focus == SETTINGS_FOCUS_CHARACTER_NEXT);
-	assert(settings_handle_key(&state, ']')
-		== SETTINGS_ACTION_CHARACTER_NEXT);
-	settings_state_focus_next(&state);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	assert(state.focus == SETTINGS_FOCUS_BACK);
+	assert(settings_handle_key(&state, NCKEY_LEFT) == SETTINGS_ACTION_NONE);
+	assert(state.focus == SETTINGS_FOCUS_VOLUME_UP);
 
-	settings_state_init(&state, false);
-	settings_state_focus_next(&state);
+	settings_state_init(&state, false, 4, 6);
+	/* Offline sessions have no inventory and must skip Marketplace. */
+	assert(state.character_slots == 0 && state.theme_slots == 0);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
 	assert(state.focus == SETTINGS_FOCUS_VOLUME_DOWN);
 	assert(settings_handle_key(&state, 'm') == SETTINGS_ACTION_NONE);
-	/* Signed-out traversal must skip Marketplace in both directions. */
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
 	settings_state_focus_next(&state);
 	settings_state_focus_next(&state);
 	assert(state.focus == SETTINGS_FOCUS_BACK);
@@ -200,8 +205,7 @@ static void	test_settings_layout_contract(void)
 			assert(layout.buttons[index - 1].x < layout.buttons[index].x);
 		index++;
 	}
-	assert(layout.character_arrows[0].x < layout.character_arrows[1].x);
-	assert(layout.character_arrows[0].height > 0);
+	assert(layout.characters.width > 0 && layout.themes.width > 0);
 	printf("PASS test_settings_layout_contract\n");
 }
 
@@ -221,4 +225,124 @@ static void	test_character_selection(void)
 	assert(settings_select_character(&view.data.settings, -1));
 	assert(strcmp(view.data.settings.profile.character, "Mirurun") == 0);
 	printf("PASS test_character_selection\n");
+}
+
+/*
+ * The fixture owns four characters and six themes, so both panels are full
+ * 2-column grids: characters are two rows, themes three.
+ */
+static void	test_inventory_grid_navigation(void)
+{
+	settings_state_t	state;
+
+	settings_state_init(&state, true, 4, 6);
+	assert(settings_slot_rows(4) == 2 && settings_slot_rows(6) == 3);
+	/* Up from the control row lands in the characters panel. */
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(state.character_slot == 2);
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(state.character_slot == 0);
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(state.character_slot == 0);
+	/* Right crosses the top row into the themes panel on the second step. */
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(state.character_slot == 1);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(state.theme_slot == 0);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.theme_slot == 1);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.theme_slot == 1);
+	/* Left from the theme column zero returns to the characters panel. */
+	(void)settings_handle_key(&state, NCKEY_LEFT);
+	assert(state.theme_slot == 0);
+	(void)settings_handle_key(&state, NCKEY_LEFT);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(state.character_slot == 1);
+	/* Down past the last inventory row falls through to the controls. */
+	(void)settings_handle_key(&state, NCKEY_DOWN);
+	assert(state.character_slot == 3);
+	(void)settings_handle_key(&state, NCKEY_DOWN);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
+	/* Enter reports an equip only while an inventory panel holds focus. */
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(settings_handle_key(&state, NCKEY_ENTER)
+		== SETTINGS_ACTION_EQUIP_CHARACTER);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(settings_handle_key(&state, NCKEY_ENTER)
+		== SETTINGS_ACTION_EQUIP_THEME);
+	printf("PASS test_inventory_grid_navigation\n");
+}
+
+static void	test_slot_equipping(void)
+{
+	app_data_provider_t		provider;
+	app_screen_view_model_t	view;
+
+	app_fixture_provider_init(&provider);
+	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
+		false, &view) == APP_PROVIDER_OK);
+	assert(settings_owned_count(&view.data.settings.characters,
+			SETTINGS_CHARACTER_SLOTS) == 4);
+	assert(settings_owned_count(&view.data.settings.themes,
+			SETTINGS_THEME_SLOTS) == 6);
+	/* Re-equipping the current slot reports no change, so nothing repaints. */
+	assert(!settings_equip_character_slot(&view.data.settings, 0));
+	assert(settings_equip_character_slot(&view.data.settings, 3));
+	assert(strcmp(view.data.settings.profile.character, "Wolf-man") == 0);
+	assert(view.data.settings.characters.items[3].equipped);
+	assert(!view.data.settings.characters.items[0].equipped);
+	assert(settings_equip_theme_slot(&view.data.settings, 5));
+	assert(strcmp(view.data.settings.profile.theme, "Build a Snowman") == 0);
+	assert(view.data.settings.themes.items[5].equipped);
+	assert(!view.data.settings.themes.items[0].equipped);
+	/* Slots past what the panels draw are rejected rather than clamped. */
+	assert(!settings_equip_theme_slot(&view.data.settings, 99));
+	printf("PASS test_slot_equipping\n");
+}
+
+/*
+ * The powers card follows the cursor through the characters panel and falls
+ * back to the equipped character everywhere else.
+ */
+static void	test_powers_card_follows_focus(void)
+{
+	app_data_provider_t		provider;
+	app_screen_view_model_t	view;
+	settings_state_t		state;
+	const app_catalogue_item_view_model_t	*card;
+
+	app_fixture_provider_init(&provider);
+	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
+		false, &view) == APP_PROVIDER_OK);
+	settings_state_init(&state, true, 4, 6);
+	/* Controls focused: hidden until I asks for it, and shows the equipped. */
+	assert(!settings_card_visible(&state));
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Mirurun") == 0);
+	(void)settings_handle_key(&state, 'i');
+	assert(settings_card_visible(&state));
+	(void)settings_handle_key(&state, 'i');
+	/* Entering the characters panel shows it without pressing anything. */
+	(void)settings_handle_key(&state, NCKEY_UP);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(settings_card_visible(&state));
+	assert(state.character_slot == 2);
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Princess") == 0);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Wolf-man") == 0);
+	/* The themes panel has no powers to show, so it falls back to equipped. */
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(!settings_card_visible(&state));
+	card = settings_card_character(&view.data.settings, &state);
+	assert(card != NULL && strcmp(card->name, "Mirurun") == 0);
+	printf("PASS test_powers_card_follows_focus\n");
 }

@@ -49,11 +49,15 @@ static void	draw_settings(render_ctx_t *ctx,
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 			bool compatibility);
 static void	draw_profile(struct ncplane *plane,
-			const app_settings_view_model_t *settings, int rows, int cols);
+			const app_settings_view_model_t *settings,
+			const settings_state_t *state, int rows, int cols);
+static void	slot_prefix(char *out, size_t size, bool equipped, bool focused);
+static void	set_slot_colour(struct ncplane *plane, bool focused);
 static void	draw_offline(struct ncplane *plane,
 			const app_settings_view_model_t *settings, int rows, int cols);
 static void	draw_ability_compat(struct ncplane *plane,
-			const app_settings_view_model_t *settings, int rows, int cols);
+			const app_settings_view_model_t *settings,
+			const settings_state_t *state, int rows, int cols);
 static void	draw_controls(struct ncplane *plane,
 			const app_settings_view_model_t *settings,
 			const settings_state_t *state);
@@ -260,18 +264,23 @@ static void	draw_settings(render_ctx_t *ctx,
 		draw_offline(plane, &view->data.settings, rows, cols);
 	else
 	{
-		draw_profile(plane, &view->data.settings, rows, cols);
-		if (state->ability_info_visible)
-			draw_ability_compat(plane, &view->data.settings, rows, cols);
+		draw_profile(plane, &view->data.settings, state, rows, cols);
+		if (settings_card_visible(state))
+			draw_ability_compat(plane, &view->data.settings, state, rows,
+				cols);
 	}
 	draw_controls(plane, &view->data.settings, state);
 }
 
 static void	draw_profile(struct ncplane *plane,
-	const app_settings_view_model_t *settings, int rows, int cols)
+	const app_settings_view_model_t *settings, const settings_state_t *state,
+	int rows, int cols)
 {
 	char		line[APP_TEXT_MAX + 96];
+	char		prefix[4];
+	bool		focused;
 	int		index;
+	int		slot;
 	int		info_x;
 	int		character_row;
 	int		theme_row;
@@ -305,17 +314,22 @@ static void	draw_profile(struct ncplane *plane,
 		put_line(plane, 8, 3, cols - 6, "OWNED CHARACTERS", true);
 		character_row = 9;
 		index = 0;
+		slot = 0;
 		while (index < settings->characters.count
 			&& character_row < content_limit)
 		{
 			if (settings->characters.items[index].owned)
 			{
-				snprintf(line, sizeof(line), "%s%s",
-					settings->characters.items[index].equipped ? "> " : "  ",
+				focused = state->section == SETTINGS_SECTION_CHARACTERS
+					&& state->character_slot == slot;
+				slot_prefix(prefix, sizeof(prefix),
+					settings->characters.items[index].equipped, focused);
+				snprintf(line, sizeof(line), "%s%s", prefix,
 					settings->characters.items[index].name);
-				put_line(plane, character_row, 4, cols - 8, line,
-					settings->characters.items[index].equipped);
+				set_slot_colour(plane, focused);
+				put_line(plane, character_row, 4, cols - 8, line, focused);
 				character_row++;
+				slot++;
 			}
 			index++;
 		}
@@ -335,16 +349,21 @@ static void	draw_profile(struct ncplane *plane,
 		}
 		theme_first = theme_row;
 		index = 0;
+		slot = 0;
 		while (index < settings->themes.count && theme_row < content_limit)
 		{
 			if (settings->themes.items[index].owned)
 			{
-				snprintf(line, sizeof(line), "%s%s",
-					settings->themes.items[index].equipped ? "> " : "  ",
+				focused = state->section == SETTINGS_SECTION_THEMES
+					&& state->theme_slot == slot;
+				slot_prefix(prefix, sizeof(prefix),
+					settings->themes.items[index].equipped, focused);
+				snprintf(line, sizeof(line), "%s%s", prefix,
 					settings->themes.items[index].name);
-				put_line(plane, theme_row, 4, cols - 8, line,
-					settings->themes.items[index].equipped);
+				set_slot_colour(plane, focused);
+				put_line(plane, theme_row, 4, cols - 8, line, focused);
 				theme_row++;
+				slot++;
 			}
 			index++;
 		}
@@ -367,6 +386,33 @@ static void	draw_profile(struct ncplane *plane,
 		settings->music_volume * 100 / AUDIO_MAX_VOLUME,
 		renderer_mode_name(settings->renderer_mode));
 	put_line(plane, summary_row + 1, 3, cols - 6, line, false);
+}
+
+/**
+ * @brief Builds the two-column marker that opens an inventory line.
+ *
+ * The cell panel has no colour budget to spare, so focus and equipped state
+ * are encoded positionally: the cursor column, then the equipped column.
+ */
+static void	slot_prefix(char *out, size_t size, bool equipped, bool focused)
+{
+	snprintf(out, size, "%c%c", focused ? '>' : ' ', equipped ? '*' : ' ');
+}
+
+/**
+ * @brief Colours one inventory line: gold marks the cursor and nothing else.
+ *
+ * A panel the cursor has left draws entirely in cream, so only one line on the
+ * screen is ever gold.
+ */
+static void	set_slot_colour(struct ncplane *plane, bool focused)
+{
+	if (focused)
+		(void)ncplane_set_fg_rgb8(plane, SETTINGS_GOLD_R, SETTINGS_GOLD_G,
+			SETTINGS_GOLD_B);
+	else
+		(void)ncplane_set_fg_rgb8(plane, SETTINGS_CREAM_R, SETTINGS_CREAM_G,
+			SETTINGS_CREAM_B);
 }
 
 static void	draw_offline(struct ncplane *plane,
@@ -408,7 +454,8 @@ static void	draw_offline(struct ncplane *plane,
 }
 
 static void	draw_ability_compat(struct ncplane *plane,
-	const app_settings_view_model_t *settings, int rows, int cols)
+	const app_settings_view_model_t *settings, const settings_state_t *state,
+	int rows, int cols)
 {
 	const app_catalogue_item_view_model_t	*character;
 	char							line[APP_ABILITY_TEXT_MAX + 80];
@@ -416,14 +463,7 @@ static void	draw_ability_compat(struct ncplane *plane,
 	int							row;
 	int							x;
 
-	character = NULL;
-	index = 0;
-	while (index < settings->characters.count)
-	{
-		if (settings->characters.items[index].equipped)
-			character = &settings->characters.items[index];
-		index++;
-	}
+	character = settings_card_character(settings, state);
 	if (character == NULL)
 		return ;
 	(void)ncplane_set_bg_rgb8(plane, SETTINGS_INNER_R, SETTINGS_INNER_G,
@@ -481,11 +521,11 @@ static void	draw_controls(struct ncplane *plane,
 		SETTINGS_LAVENDER_G, SETTINGS_LAVENDER_B);
 	if (settings->signed_in)
 		put_centered(plane, row - 1, (int)ncplane_dim_x(plane),
-			"[ / ] PREVIOUS / NEXT CHARACTER    I POWER INFO", false);
+			"UP INTO INVENTORY    ENTER EQUIPS    I POWER INFO", false);
 	put_centered(plane, row + 2, (int)ncplane_dim_x(plane),
 		settings->signed_in
-		? "TAB/ARROWS FOCUS  ENTER SELECT  M MARKETPLACE  +/- VOLUME  ESC BACK"
-		: "TAB/ARROWS FOCUS  ENTER SELECT  +/- VOLUME  ESC BACK", false);
+		? "ARROWS MOVE  ENTER SELECT  M MARKETPLACE  +/- VOLUME  ESC BACK"
+		: "ARROWS MOVE  ENTER SELECT  +/- VOLUME  ESC BACK", false);
 }
 
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
