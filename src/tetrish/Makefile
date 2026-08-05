@@ -40,6 +40,10 @@ ifeq ($(UNAME), Darwin)
 	INC_RL		 = -I$(RL_PREFIX)/include
 endif
 
+
+LSAN_SUPP	:= $(CURDIR)/readline.supp
+LSAN_ENV	:= LSAN_OPTIONS=suppressions=$(LSAN_SUPP)
+
 ################################################################################
 #                                DIRECTORIES                                   #
 ################################################################################
@@ -92,7 +96,7 @@ check-dependencies:
 	fi
 
 run: all
-	@ LSAN_OPTIONS=suppressions=readline.supp ./$(NAME)
+	@ $(LSAN_ENV) ./$(NAME)
 
 # --- shell object rule (ASan-instrumented, mirrors src/ tree under obj/) -----
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies
