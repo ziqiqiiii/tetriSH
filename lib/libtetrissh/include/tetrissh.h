@@ -26,10 +26,8 @@ typedef struct s_session
 }	t_session;
 
 /* HANDSHAKE.C */
-int		session_handshake_server(int fd, t_session *sess,
-			const char *cert_path, const char *key_path);
-int		session_handshake_client(int fd, t_session *sess,
-			const char *ca_path);
+int		session_handshake_server(int fd, t_session *sess, const char *cert_path, const char *key_path);
+int		session_handshake_client(int fd, t_session *sess, const char *ca_path);
 
 /* SESSION.C */
 ssize_t	session_send(t_session *sess, const void *buf, size_t len);

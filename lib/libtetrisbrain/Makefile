@@ -16,7 +16,7 @@
 
 NAME		:= libtetrisbrain.a
 CC			:= gcc
-FLAGS		:= -Wall -Wextra -Werror
+FLAGS		:= -std=c11 -Wall -Wextra -Werror -pedantic
 AR			:= ar
 ARFLAGS		:= rcs
 RM			:= rm -rf
@@ -100,4 +100,10 @@ fclean: clean
 
 re: fclean all
 
+################################################################################
+#                              PHONY && PRECIOUS                               #
+################################################################################
+
 .PHONY:		all test clean fclean re
+
+.PRECIOUS:	$(OBJ_DIR)/%.o

@@ -40,6 +40,10 @@ ifeq ($(UNAME), Darwin)
 	INC_RL		 = -I$(RL_PREFIX)/include
 endif
 
+
+LSAN_SUPP	:= $(CURDIR)/readline.supp
+LSAN_ENV	:= LSAN_OPTIONS=suppressions=$(LSAN_SUPP)
+
 ################################################################################
 #                                DIRECTORIES                                   #
 ################################################################################
@@ -88,11 +92,11 @@ all: check-dependencies $(NAME) system-programs
 # installer. The umbrella build sets DEPS_READY=1 because it has already run it.
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
-		$(MAKE) --no-print-directory -C ../.. deps; \
+		$(MAKE) --no-print-directory -s -C ../.. deps; \
 	fi
 
 run: all
-	@ LSAN_OPTIONS=suppressions=readline.supp ./$(NAME)
+	@ $(LSAN_ENV) ./$(NAME)
 
 # --- shell object rule (ASan-instrumented, mirrors src/ tree under obj/) -----
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies

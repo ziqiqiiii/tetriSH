@@ -1,16 +1,463 @@
 #include "tetrisu.h"
 
-#define BACKGROUND_SOURCE_PIXELS_Y	1086
-#define BACKGROUND_SOURCE_PIXELS_X	1448
+// Static Functions
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx);
+static void	refresh_cell_geometry(t_render_ctx *ctx);
+static void	fit_background_to_terminal(t_render_ctx *ctx,
+	int std_rows, int std_cols);
+static int	max_int(int a, int b);
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
+	int rows, int cols);
+static void	set_opaque_backdrop(struct ncplane *plane);
 
-static int	max_int(int a, int b)
+/**
+ * @brief Starts notcurses and renders the initial background image.
+ *
+ * The background owns a child plane below menu/game overlays so later modes
+ * can replace it without restarting the terminal session.
+ *
+ * @param image_path Image rendered behind the home screen.
+ * @return Fully initialised render context; exits when setup cannot recover.
+ */
+t_render_ctx	render_init(const char *image_path)
 {
-	if (a > b)
-		return (a);
-	return (b);
+	t_render_ctx		ctx;
+	notcurses_options	opts;
+	const char			*term;
+
+	memset(&ctx, 0, sizeof(ctx));
+	memset(&opts, 0, sizeof(opts));
+	ctx.nc = notcurses_init(&opts, NULL);
+	if (ctx.nc == NULL)
+	{
+		term = getenv("TERM");
+		fprintf(stderr, "tetrisu: notcurses_core_init failed (TERM=%s) — "
+			"check terminfo for this terminal type\n",
+			term != NULL ? term : "unset");
+		exit(1);
+	}
+	ctx.std = notcurses_stdplane(ctx.nc);
+	ctx.pixels = detect_pixel_policy(&ctx);
+	if (render_geometry_refresh(&ctx, false) < 0)
+	{
+		notcurses_stop(ctx.nc);
+		fprintf(stderr, "tetrisu: could not read terminal geometry\n");
+		exit(1);
+	}
+	if (render_background_replace(&ctx, image_path, false) < 0)
+	{
+		notcurses_stop(ctx.nc);
+		fprintf(stderr, "tetrisu: failed to load image %s\n", image_path);
+		exit(1);
+	}
+	return (ctx);
 }
 
-static void	fit_background_to_terminal(render_ctx_t *ctx,
+/**
+ * @brief Reports whether bitmap planes may be moved and overlapped freely.
+ *
+ * Only the Kitty-protocol tier can restack a sprixel or slide it a cell without
+ * tearing, so per-piece board planes and the animated selector are limited to
+ * it. Sixel and the Linux framebuffer still draw bitmaps, but stationary ones.
+ *
+ * @param ctx Active render context.
+ * @return true when bitmap planes may move, overlap, and restack.
+ */
+bool	render_pixel_planes_reliable(const t_render_ctx *ctx)
+{
+	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_MOVABLE);
+}
+
+/**
+ * @brief Reports whether this session may draw bitmaps at all.
+ *
+ * @param ctx Active render context.
+ * @return true for every tier above the terminal-cell renderer.
+ */
+bool	render_pixels_available(const t_render_ctx *ctx)
+{
+	return (ctx != NULL && ctx->pixels != TETRISU_PIXELS_NONE);
+}
+
+/**
+ * @brief Reports whether this session uses the terminal-native renderer.
+ *
+ * Automatic mode only falls back to cells when the terminal reports no bitmap
+ * support, or when its bitmap registry is known to grow without bound;
+ * TETRISU_RENDERER=cell makes the same polished path deterministic.
+ *
+ * @param ctx Active render context.
+ * @return true when all changing UI surfaces must remain terminal cells.
+ */
+bool	render_compatibility_mode(const t_render_ctx *ctx)
+{
+	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_NONE);
+}
+
+/**
+ * @brief Shows the compact terminal-native mode badge at the top of the grid.
+ *
+ * The badge is intentionally opaque and high-contrast so users understand why
+ * the presentation differs from bitmap-capable screenshots.
+ *
+ * @param ctx Active render context.
+ */
+void	render_compatibility_badge_refresh(t_render_ctx *ctx)
+{
+	ncplane_options	opts;
+	const char		*text;
+	uint64_t		channels;
+	unsigned		rows;
+	unsigned		cols;
+	int				width;
+
+	render_compatibility_badge_hide(ctx);
+	if (!render_compatibility_mode(ctx) || ctx->std == NULL)
+		return ;
+	ncplane_dim_yx(ctx->std, &rows, &cols);
+	if (rows == 0 || cols < 12)
+		return ;
+	text = COMPATIBILITY_BADGE_TEXT;
+	if (cols < strlen(text) + 4)
+		text = COMPATIBILITY_BADGE_SHORT;
+	width = (int)strlen(text) + 4;
+	if (width > (int)cols)
+		width = (int)cols;
+	memset(&opts, 0, sizeof(opts));
+	opts.y = 0;
+	opts.x = ((int)cols - width) / 2;
+	opts.rows = 1;
+	opts.cols = width;
+	ctx->compatibility_plane = ncplane_create(ctx->std, &opts);
+	if (ctx->compatibility_plane == NULL)
+		return ;
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 203, 102);
+	(void)ncchannels_set_bg_rgb8(&channels, 28, 13, 39);
+	(void)ncplane_set_base(ctx->compatibility_plane, " ", 0, channels);
+	ncplane_erase(ctx->compatibility_plane);
+	(void)ncplane_set_fg_rgb8(ctx->compatibility_plane, 255, 203, 102);
+	(void)ncplane_set_bg_rgb8(ctx->compatibility_plane, 28, 13, 39);
+	(void)ncplane_on_styles(ctx->compatibility_plane, NCSTYLE_BOLD);
+	(void)ncplane_putstr_aligned(ctx->compatibility_plane, 0,
+		NCALIGN_CENTER, text);
+	ncplane_move_top(ctx->compatibility_plane);
+}
+
+/**
+ * @brief Removes the compatibility badge when a screen has no spare top row.
+ *
+ * @param ctx Active render context.
+ */
+void	render_compatibility_badge_hide(t_render_ctx *ctx)
+{
+	if (ctx != NULL && ctx->compatibility_plane != NULL)
+	{
+		ncplane_destroy(ctx->compatibility_plane);
+		ctx->compatibility_plane = NULL;
+	}
+}
+
+/**
+ * @brief Refreshes terminal and background geometry.
+ *
+ * @param ctx Context whose dimensions are updated.
+ * @param repaint Whether notcurses must query and repaint the terminal first.
+ * @return 0 on success, -1 when notcurses refresh fails.
+ */
+int	render_geometry_refresh(t_render_ctx *ctx, bool repaint)
+{
+	unsigned	rows;
+	unsigned	cols;
+
+	if (repaint)
+	{
+		if (notcurses_refresh(ctx->nc, &rows, &cols) != 0)
+			return (-1);
+	}
+	else
+		ncplane_dim_yx(ctx->std, &rows, &cols);
+	refresh_cell_geometry(ctx);
+	fit_background_to_terminal(ctx, (int)rows, (int)cols);
+	return (0);
+}
+
+/**
+ * @brief Detects terminal geometry changes missing from the input stream.
+ *
+ * Ghostty can resize its drawable grid without emitting NCKEY_RESIZE. Comparing
+ * the tty geometry with Notcurses' current standard plane lets every screen
+ * recover without requiring a key press.
+ *
+ * @param ctx Pointer to the render context.
+ * @return true when the tty and standard-plane dimensions differ.
+ */
+bool	render_terminal_geometry_changed(const t_render_ctx *ctx)
+{
+	struct winsize	terminal;
+	unsigned		plane_rows;
+	unsigned		plane_cols;
+
+	if (ctx == NULL || ctx->std == NULL)
+		return (false);
+	memset(&terminal, 0, sizeof(terminal));
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal) != 0
+		|| terminal.ws_row == 0 || terminal.ws_col == 0)
+		return (false);
+	ncplane_dim_yx(ctx->std, &plane_rows, &plane_cols);
+	return (terminal.ws_row != plane_rows || terminal.ws_col != plane_cols);
+}
+
+/**
+ * @brief Destroys the currently owned background plane.
+ *
+ * @param ctx Context whose background pointer is cleared.
+ */
+void	render_background_destroy(t_render_ctx *ctx)
+{
+	if (ctx->bg_plane != NULL)
+	{
+		ncplane_destroy(ctx->bg_plane);
+		ctx->bg_plane = NULL;
+	}
+}
+
+/**
+ * @brief Replaces only the backdrop within the active notcurses session.
+ *
+ * AI-assisted: the replacement is rendered before the old plane is destroyed,
+ * so a failed image transfer leaves the previous screen recoverable.
+ *
+ * @param ctx Active render context.
+ * @param image_path Image to load into the replacement plane.
+ * @param stretch Whether to fill the entire terminal instead of letterboxing.
+ * @return 0 on success, -1 when loading, allocation, or rendering fails.
+ */
+int	render_background_replace(t_render_ctx *ctx, const char *image_path,
+	bool stretch)
+{
+	struct ncvisual			*ncv;
+	struct ncvisual_options	vopts;
+	ncplane_options			bg_opts;
+	struct ncplane			*new_plane;
+	struct ncplane			*old_plane;
+	unsigned				std_rows;
+	unsigned				std_cols;
+
+	ncv = ncvisual_from_file(image_path);
+	if (ncv == NULL)
+		return (-1);
+	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
+	refresh_cell_geometry(ctx);
+	if (stretch)
+	{
+		ctx->bg_row = 0;
+		ctx->bg_col = 0;
+		ctx->bg_rows = (int)std_rows;
+		ctx->bg_cols = (int)std_cols;
+	}
+	else
+		fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
+	memset(&bg_opts, 0, sizeof(bg_opts));
+	bg_opts.y = ctx->bg_row;
+	bg_opts.x = ctx->bg_col;
+	bg_opts.rows = ctx->bg_rows;
+	bg_opts.cols = ctx->bg_cols;
+	new_plane = ncplane_create(ctx->std, &bg_opts);
+	if (new_plane == NULL)
+	{
+		ncvisual_destroy(ncv);
+		return (-1);
+	}
+	memset(&vopts, 0, sizeof(vopts));
+	vopts.n = new_plane;
+	vopts.scaling = NCSCALE_STRETCH;
+	vopts.blitter = preferred_blitter(ctx, ctx->bg_rows, ctx->bg_cols);
+	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
+	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
+	{
+		ncvisual_destroy(ncv);
+		ncplane_destroy(new_plane);
+		return (-1);
+	}
+	ncvisual_destroy(ncv);
+	old_plane = ctx->bg_plane;
+	if (old_plane != NULL)
+		(void)ncplane_move_above(new_plane, old_plane);
+	else
+		(void)ncplane_move_above(new_plane, ctx->std);
+	set_opaque_backdrop(ctx->std);
+	if (notcurses_render(ctx->nc) != 0)
+	{
+		ncplane_destroy(new_plane);
+		if (old_plane != NULL)
+			(void)notcurses_render(ctx->nc);
+		return (-1);
+	}
+	ctx->bg_plane = new_plane;
+	if (old_plane != NULL)
+		ncplane_destroy(old_plane);
+	return (0);
+}
+
+/**
+ * @brief Blocks until one input event is available, returning its key id.
+ *
+ * @param ctx Pointer to the render context.
+ * @return The Unicode codepoint or NCKEY_* constant for the event, or
+ * (uint32_t)-1 on input error.
+ */
+uint32_t	render_wait_key(t_render_ctx *ctx)
+{
+	return (render_wait_input(ctx, NULL));
+}
+
+/**
+ * @brief Blocks until one non-release input event is available.
+ *
+ * Supplying the full event lets screens use mouse coordinates and, later,
+ * terminal protocols with distinct press/repeat/release states. Callers which
+ * only need a key id can continue using render_wait_key().
+ *
+ * @param ctx Pointer to the render context.
+ * @param input Optional destination for the complete Notcurses input event.
+ * @return The Unicode codepoint or NCKEY_* constant for the event, or
+ * (uint32_t)-1 on input error.
+ */
+uint32_t	render_wait_input(t_render_ctx *ctx, ncinput *input)
+{
+	ncinput		local;
+	ncinput		*event;
+	struct pollfd	input_fd;
+	int			poll_result;
+	int			wait_ms;
+	int			notification_wait_ms;
+	uint32_t	key;
+
+	event = input;
+	if (event == NULL)
+		event = &local;
+	memset(&input_fd, 0, sizeof(input_fd));
+	input_fd.fd = notcurses_inputready_fd(ctx->nc);
+	input_fd.events = POLLIN;
+	while (1)
+	{
+		memset(event, 0, sizeof(*event));
+		wait_ms = RENDER_RESIZE_POLL_MS;
+		notification_wait_ms = render_notification_next_wake_ms(ctx);
+		if (notification_wait_ms >= 0 && notification_wait_ms < wait_ms)
+			wait_ms = notification_wait_ms;
+		poll_result = poll(&input_fd, 1, wait_ms);
+		if (poll_result < 0)
+		{
+			if (errno == EINTR)
+				continue ;
+			return ((uint32_t)-1);
+		}
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
+		if (poll_result == 0)
+		{
+			if (render_terminal_geometry_changed(ctx))
+				return (NCKEY_RESIZE);
+			continue ;
+		}
+		if ((input_fd.revents & POLLIN) == 0)
+			return ((uint32_t)-1);
+		errno = 0;
+		key = notcurses_get_nblock(ctx->nc, event);
+		if (key == 0)
+			continue ;
+		if (key == (uint32_t)-1)
+		{
+			if (errno == EINTR)
+				continue ;
+			return (key);
+		}
+		/* Ignore keyboard key-up events so one arrow tap moves once. Mouse
+		 * motion can legitimately arrive with release/no-button state and
+		 * must still reach the menu for hover selection. */
+		if (event->evtype != NCTYPE_RELEASE || nckey_mouse_p(key))
+			return (key);
+	}
+}
+
+/**
+ * @brief Stops notcurses, restoring the terminal to normal mode.
+ *
+ * @param ctx Pointer to the render context to tear down.
+ */
+void	render_teardown(t_render_ctx *ctx)
+{
+	if (ctx->nc != NULL)
+	{
+		render_notification_destroy(ctx);
+		render_compatibility_badge_hide(ctx);
+		/* Runs before notcurses_stop() because the menu owns a decoded sprite
+		 * that no plane teardown would release. */
+		render_menu_destroy(ctx);
+		notcurses_stop(ctx->nc);
+		ctx->nc = NULL;
+		ctx->std = NULL;
+		ctx->bg_plane = NULL;
+		ctx->menu_plane = NULL;
+		ctx->menu_labels_plane = NULL;
+		ctx->bunny_plane = NULL;
+		ctx->pixels = TETRISU_PIXELS_NONE;
+	}
+}
+
+/**
+ * @brief Probes the terminal once and resolves the renderer capability tier.
+ *
+ * @param ctx Render context holding a started notcurses instance.
+ * @return The tier every later render decision is derived from.
+ */
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx)
+{
+	t_tetrisu_pixel_policy	policy;
+	char					*term;
+
+	term = notcurses_detected_terminal(ctx->nc);
+	policy = tetrisu_pixel_policy_for(notcurses_check_pixel_support(ctx->nc),
+			term, tetrisu_renderer_mode_requested());
+	free(term);
+	return (policy);
+}
+
+/**
+ * @brief Records the terminal cell dimensions in physical pixels.
+ *
+ * @param ctx Render context updated with a portable 2:1 fallback when the
+ * terminal exposes no bitmap geometry.
+ */
+static void	refresh_cell_geometry(t_render_ctx *ctx)
+{
+	unsigned	cell_px_y;
+	unsigned	cell_px_x;
+
+	cell_px_y = 0;
+	cell_px_x = 0;
+	ncplane_pixel_geom(ctx->std, NULL, NULL, &cell_px_y, &cell_px_x,
+		NULL, NULL);
+	/* A non-bitmap terminal may not report pixels. A 2:1 cell is the safest
+	 * portable fallback for keeping the 4:3 art physically proportional. */
+	if (cell_px_y == 0)
+		cell_px_y = 2;
+	if (cell_px_x == 0)
+		cell_px_x = 1;
+	ctx->cell_px_y = (int)cell_px_y;
+	ctx->cell_px_x = (int)cell_px_x;
+}
+
+/**
+ * @brief Fits the authored background inside terminal geometry.
+ *
+ * @param ctx Context receiving fitted origin and dimensions.
+ * @param std_rows Available terminal rows.
+ * @param std_cols Available terminal columns.
+ */
+static void	fit_background_to_terminal(t_render_ctx *ctx,
 	int std_rows, int std_cols)
 {
 	double	image_ratio;
@@ -35,109 +482,50 @@ static void	fit_background_to_terminal(render_ctx_t *ctx,
 }
 
 /**
- * @brief Starts notcurses and blits image_path across the standard plane.
+ * @brief Returns the greater of two integers.
  *
- * The standard plane is notcurses' full-screen base plane; blitting the
- * image directly onto it (rather than a separate plane) makes it the
- * backdrop everything else renders on top of. notcurses installs its own
- * signal handlers by default (restores the screen on SIGINT/SIGTERM/etc.
- * before chaining to the previous handler), so no custom SIGINT handling
- * is needed here.
- *
- * @param image_path Path to the image file to render as the background.
- * @return A render_ctx_t with nc/std populated; menu_plane and bunny_plane
- * are NULL until render_menu_create() is called.
+ * @param a First value.
+ * @param b Second value.
+ * @return The greater value.
  */
-render_ctx_t	render_init(const char *image_path)
+static int	max_int(int a, int b)
 {
-	render_ctx_t			ctx;
-	notcurses_options		opts;
-	struct ncvisual			*ncv;
-	struct ncvisual_options	vopts;
-	ncplane_options			bg_opts;
-	unsigned				std_rows;
-	unsigned				std_cols;
-	unsigned				cell_px_y;
-	unsigned				cell_px_x;
-
-	memset(&opts, 0, sizeof(opts));
-	ctx.nc = notcurses_init(&opts, NULL);
-	if (ctx.nc == NULL)
-	{
-		fprintf(stderr, "tetrisu: notcurses_core_init failed (TERM=%s) — "
-			"check terminfo for this terminal type\n", getenv("TERM"));
-		exit(1);
-	}
-	ctx.std = notcurses_stdplane(ctx.nc);
-	ctx.bg_plane = NULL;
-	ctx.menu_plane = NULL;
-	ctx.bunny_plane = NULL;
-	ncplane_dim_yx(ctx.std, &std_rows, &std_cols);
-	cell_px_y = 2;
-	cell_px_x = 1;
-	ncplane_pixel_geom(ctx.std, NULL, NULL, &cell_px_y, &cell_px_x,
-		NULL, NULL);
-	ctx.cell_px_y = (int)cell_px_y;
-	ctx.cell_px_x = (int)cell_px_x;
-	fit_background_to_terminal(&ctx, (int)std_rows, (int)std_cols);
-	ctx.menu_row = 0;
-	ctx.menu_col = 0;
-	ctx.bunny_rows = 0;
-	ctx.bunny_cols = 0;
-	ncv = ncvisual_from_file(image_path);
-	if (ncv == NULL)
-	{
-		notcurses_stop(ctx.nc);
-		fprintf(stderr, "tetrisu: failed to load image %s\n", image_path);
-		exit(1);
-	}
-	memset(&bg_opts, 0, sizeof(bg_opts));
-	bg_opts.y = ctx.bg_row;
-	bg_opts.x = ctx.bg_col;
-	bg_opts.rows = ctx.bg_rows;
-	bg_opts.cols = ctx.bg_cols;
-	ctx.bg_plane = ncplane_create(ctx.std, &bg_opts);
-	memset(&vopts, 0, sizeof(vopts));
-	vopts.n = ctx.bg_plane;
-	vopts.scaling = NCSCALE_STRETCH;
-	vopts.blitter = NCBLIT_4x2;
-	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
-	ncvisual_blit(ctx.nc, ncv, &vopts);
-	ncvisual_destroy(ncv);
-	notcurses_render(ctx.nc);
-	return (ctx);
+	if (a > b)
+		return (a);
+	return (b);
 }
 
 /**
- * @brief Blocks until one input event is available, returning its key id.
+ * @brief Selects the low-bandwidth blitter used for decorative backgrounds.
  *
- * @param ctx Pointer to the render context.
- * @return The Unicode codepoint or NCKEY_* constant for the event, or
- * (uint32_t)-1 on input error.
+ * @param ctx Active render context (unused).
+ * @param rows Destination row count (unused).
+ * @param cols Destination column count (unused).
+ * @return The 4x2 cell blitter.
  */
-uint32_t	render_wait_key(render_ctx_t *ctx)
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
+	int rows, int cols)
 {
-	ncinput	ni;
-	uint32_t	key;
-
-	while (1)
-	{
-		key = notcurses_get(ctx->nc, NULL, &ni);
-		if (key == (uint32_t)-1)
-			return (key);
-		/* Ignore key-up events: terminals/notcurses can report both press and
-		 * release for one arrow tap, and selection should move once per tap. */
-		if (ni.evtype != NCTYPE_RELEASE)
-			return (key);
-	}
+	(void)ctx;
+	(void)rows;
+	(void)cols;
+	/* Decorative backdrops are intentionally cell-rendered. This leaves the
+	 * bitmap layer for stationary crisp characters, pieces, and text. */
+	return (NCBLIT_4x2);
 }
 
 /**
- * @brief Stops notcurses, restoring the terminal to normal mode.
+ * @brief Clears a plane to the playfield fallback colour.
  *
- * @param ctx Pointer to the render context to tear down.
+ * @param plane Plane whose base cell and contents are replaced.
  */
-void	render_teardown(render_ctx_t *ctx)
+static void	set_opaque_backdrop(struct ncplane *plane)
 {
-	notcurses_stop(ctx->nc);
+	uint64_t	channels;
+
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 7, 13, 23);
+	(void)ncchannels_set_bg_rgb8(&channels, 7, 13, 23);
+	(void)ncplane_set_base(plane, " ", 0, channels);
+	ncplane_erase(plane);
 }

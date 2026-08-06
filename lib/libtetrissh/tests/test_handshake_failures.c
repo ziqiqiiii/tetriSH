@@ -57,12 +57,12 @@ static void	test_invalid_arguments_reset_session(void)
 static void	*oversized_cert_peer(void *arg)
 {
 	t_peer_args		*peer;
-	unsigned char	nonce[TSH_NONCE_LEN];
+	unsigned char	nonce[SESSIONIO_NONCE_LEN];
 
 	peer = arg;
-	assert(tsh_read_exact(peer->fd, nonce, sizeof(nonce)) == TSH_IO_OK);
-	assert(tsh_write_u32(peer->fd, TETRISSH_MAX_PLAINTEXT + 1u) == 0);
-	assert(tsh_write_exact(peer->fd, "C", 1) == 0);
+	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_OK);
+	assert(sessionio_write_u32(peer->fd, TETRISSH_MAX_PLAINTEXT + 1u) == 0);
+	assert(sessionio_write_exact(peer->fd, "C", 1) == 0);
 	assert(shutdown(peer->fd, SHUT_WR) == 0);
 	return (NULL);
 }
@@ -80,7 +80,9 @@ static void	test_oversized_certificate_rejected_before_body(void)
 	assert(pthread_create(&thread, NULL, oversized_cert_peer, &peer) == 0);
 	assert(session_handshake_client(fds[0], &sess, "unused-ca") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[0], &leftover, 1, MSG_DONTWAIT) == 1);
+	/* The peer has joined and shut down its write side, so this cannot block;
+	 * flags=0 keeps the test portable where MSG_DONTWAIT is not exposed. */
+	assert(recv(fds[0], &leftover, 1, 0) == 1);
 	assert(leftover == 'C');
 	assert_session_reset(&sess);
 	close(fds[0]);
@@ -111,19 +113,19 @@ static unsigned char	*read_fixture(const char *path, uint32_t *len)
 static void	*wrong_signature_length_peer(void *arg)
 {
 	t_peer_args		*peer;
-	unsigned char	nonce[TSH_NONCE_LEN];
+	unsigned char	nonce[SESSIONIO_NONCE_LEN];
 	unsigned char	*cert;
 	uint32_t		cert_len;
 
 	peer = arg;
-	assert(tsh_read_exact(peer->fd, nonce, sizeof(nonce)) == TSH_IO_OK);
+	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_OK);
 	cert = read_fixture("tests/tmp/certs/server.crt", &cert_len);
-	assert(tsh_write_u32(peer->fd, cert_len) == 0);
-	assert(tsh_write_exact(peer->fd, cert, cert_len) == 0);
+	assert(sessionio_write_u32(peer->fd, cert_len) == 0);
+	assert(sessionio_write_exact(peer->fd, cert, cert_len) == 0);
 	free(cert);
 	/* Test fixture's 1024-bit RSA signature must be exactly 128 bytes. */
-	assert(tsh_write_u32(peer->fd, 129u) == 0);
-	assert(tsh_write_exact(peer->fd, "S", 1) == 0);
+	assert(sessionio_write_u32(peer->fd, 129u) == 0);
+	assert(sessionio_write_exact(peer->fd, "S", 1) == 0);
 	assert(shutdown(peer->fd, SHUT_WR) == 0);
 	return (NULL);
 }
@@ -144,7 +146,7 @@ static void	test_wrong_signature_length_rejected_before_body(void)
 	assert(session_handshake_client(fds[0], &sess,
 		"tests/tmp/certs/ca.crt") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[0], &leftover, 1, MSG_DONTWAIT) == 1);
+	assert(recv(fds[0], &leftover, 1, 0) == 1);
 	assert(leftover == 'S');
 	assert_session_reset(&sess);
 	close(fds[0]);
@@ -157,26 +159,26 @@ static void	read_discard_blob(int fd)
 	uint32_t		len;
 	unsigned char	*buf;
 
-	assert(tsh_read_u32(fd, &len) == TSH_IO_OK);
+	assert(sessionio_read_u32(fd, &len) == SESSIONIO_OK);
 	buf = malloc(len);
 	assert(buf != NULL);
-	assert(tsh_read_exact(fd, buf, len) == TSH_IO_OK);
+	assert(sessionio_read_exact(fd, buf, len) == SESSIONIO_OK);
 	free(buf);
 }
 
 static void	*wrong_wrapped_length_peer(void *arg)
 {
 	t_peer_args		*peer;
-	unsigned char	nonce[TSH_NONCE_LEN];
+	unsigned char	nonce[SESSIONIO_NONCE_LEN];
 
 	peer = arg;
 	memset(nonce, 0x5a, sizeof(nonce));
-	assert(tsh_write_exact(peer->fd, nonce, sizeof(nonce)) == 0);
+	assert(sessionio_write_exact(peer->fd, nonce, sizeof(nonce)) == 0);
 	read_discard_blob(peer->fd);
 	read_discard_blob(peer->fd);
 	/* Test fixtures use 1024-bit RSA, whose wrapped block is exactly 128 bytes. */
-	assert(tsh_write_u32(peer->fd, 129u) == 0);
-	assert(tsh_write_exact(peer->fd, "W", 1) == 0);
+	assert(sessionio_write_u32(peer->fd, 129u) == 0);
+	assert(sessionio_write_exact(peer->fd, "W", 1) == 0);
 	assert(shutdown(peer->fd, SHUT_WR) == 0);
 	return (NULL);
 }
@@ -196,7 +198,7 @@ static void	test_wrong_wrapped_length_rejected_before_body(void)
 	assert(session_handshake_server(fds[1], &sess,
 		"tests/tmp/certs/server.crt", "tests/tmp/certs/server.key") == -1);
 	assert(pthread_join(thread, NULL) == 0);
-	assert(recv(fds[1], &leftover, 1, MSG_DONTWAIT) == 1);
+	assert(recv(fds[1], &leftover, 1, 0) == 1);
 	assert(leftover == 'W');
 	assert_session_reset(&sess);
 	close(fds[0]);

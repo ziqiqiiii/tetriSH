@@ -23,7 +23,7 @@ static void	init_session(t_session *sess, int fd, t_tetrissh_role role);
 int	session_handshake_server(int fd, t_session *sess,
 		const char *cert_path, const char *key_path)
 {
-	unsigned char	client_nonce[TSH_NONCE_LEN];
+	unsigned char	client_nonce[SESSIONIO_NONCE_LEN];
 	unsigned char	*cert_bytes;
 	unsigned char	*sig;
 	unsigned char	*wrapped;
@@ -51,7 +51,7 @@ int	session_handshake_server(int fd, t_session *sess,
 	init_session(sess, fd, TETRISSH_ROLE_SERVER);
 	if (fd < 0 || cert_path == NULL || key_path == NULL)
 		goto cleanup;
-	if (tsh_read_exact(fd, client_nonce, sizeof(client_nonce)) != TSH_IO_OK)
+	if (sessionio_read_exact(fd, client_nonce, sizeof(client_nonce)) != SESSIONIO_OK)
 		goto cleanup;
 	if (read_file_bytes(cert_path, &cert_bytes, &cert_len) != 0)
 		goto cleanup;
@@ -65,18 +65,18 @@ int	session_handshake_server(int fd, t_session *sess,
 	if (sig == NULL || sig_len > UINT32_MAX)
 		goto cleanup;
 	sig_len_u32 = (uint32_t)sig_len;
-	if (tsh_write_u32(fd, cert_len) != 0
-		|| tsh_write_exact(fd, cert_bytes, cert_len) != 0
-		|| tsh_write_u32(fd, sig_len_u32) != 0
-		|| tsh_write_exact(fd, sig, sig_len_u32) != 0)
+	if (sessionio_write_u32(fd, cert_len) != 0
+		|| sessionio_write_exact(fd, cert_bytes, cert_len) != 0
+		|| sessionio_write_u32(fd, sig_len_u32) != 0
+		|| sessionio_write_exact(fd, sig, sig_len_u32) != 0)
 		goto cleanup;
-	if (tsh_read_u32(fd, &wrapped_len) != TSH_IO_OK
+	if (sessionio_read_u32(fd, &wrapped_len) != SESSIONIO_OK
 		|| wrapped_len != (uint32_t)key_size)
 		goto cleanup;
 	wrapped = malloc(wrapped_len);
 	if (wrapped == NULL)
 		goto cleanup;
-	if (tsh_read_exact(fd, wrapped, wrapped_len) != TSH_IO_OK)
+	if (sessionio_read_exact(fd, wrapped, wrapped_len) != SESSIONIO_OK)
 		goto cleanup;
 	key_plain = rsa_decrypt_block(priv, wrapped, wrapped_len, &key_len, 1);
 	if (key_plain == NULL || key_len != TETRISSH_KEY_LEN)
@@ -117,7 +117,7 @@ int	session_handshake_server(int fd, t_session *sess,
  */
 int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 {
-	unsigned char	client_nonce[TSH_NONCE_LEN];
+	unsigned char	client_nonce[SESSIONIO_NONCE_LEN];
 	unsigned char	*cert_bytes;
 	unsigned char	*sig;
 	unsigned char	*wrapped;
@@ -144,15 +144,15 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 		goto cleanup;
 	if (RAND_bytes(client_nonce, sizeof(client_nonce)) != 1)
 		goto cleanup;
-	if (tsh_write_exact(fd, client_nonce, sizeof(client_nonce)) != 0)
+	if (sessionio_write_exact(fd, client_nonce, sizeof(client_nonce)) != 0)
 		goto cleanup;
-	if (tsh_read_u32(fd, &cert_len) != TSH_IO_OK || cert_len == 0
-		|| cert_len > TSH_MAX_CERT_LEN)
+	if (sessionio_read_u32(fd, &cert_len) != SESSIONIO_OK || cert_len == 0
+		|| cert_len > SESSIONIO_MAX_CERT_LEN)
 		goto cleanup;
 	cert_bytes = malloc(cert_len);
 	if (cert_bytes == NULL)
 		goto cleanup;
-	if (tsh_read_exact(fd, cert_bytes, cert_len) != TSH_IO_OK)
+	if (sessionio_read_exact(fd, cert_bytes, cert_len) != SESSIONIO_OK)
 		goto cleanup;
 	cert = load_cert_bytes(cert_bytes, (int)cert_len);
 	if (cert == NULL || verify_server_cert(cert, ca_path) != 1)
@@ -163,13 +163,13 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 	key_size = EVP_PKEY_size(pub);
 	if (key_size <= 0)
 		goto cleanup;
-	if (tsh_read_u32(fd, &sig_len) != TSH_IO_OK
+	if (sessionio_read_u32(fd, &sig_len) != SESSIONIO_OK
 		|| sig_len != (uint32_t)key_size)
 		goto cleanup;
 	sig = malloc(sig_len);
 	if (sig == NULL)
 		goto cleanup;
-	if (tsh_read_exact(fd, sig, sig_len) != TSH_IO_OK)
+	if (sessionio_read_exact(fd, sig, sig_len) != SESSIONIO_OK)
 		goto cleanup;
 	if (verify_message_pss(cert, sig, sig_len,
 			client_nonce, sizeof(client_nonce)) != 1)
@@ -180,12 +180,12 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 			&wrapped_len, 1);
 	if (wrapped == NULL || wrapped_len > UINT32_MAX)
 		goto cleanup;
-	if (tsh_write_u32(fd, (uint32_t)wrapped_len) != 0
-		|| tsh_write_exact(fd, wrapped, wrapped_len) != 0)
+	if (sessionio_write_u32(fd, (uint32_t)wrapped_len) != 0
+		|| sessionio_write_exact(fd, wrapped, wrapped_len) != 0)
 		goto cleanup;
 	sess->established = 1;
 	ok = 0;
-	
+
 	cleanup:
 		EVP_PKEY_free(pub);
 		X509_free(cert);
@@ -203,7 +203,7 @@ int	session_handshake_client(int fd, t_session *sess, const char *ca_path)
 /**
  * @brief Reads an entire file into a freshly allocated buffer.
  *
- * Rejects empty files and files larger than TSH_MAX_CERT_LEN before allocating,
+ * Rejects empty files and files larger than SESSIONIO_MAX_CERT_LEN before allocating,
  * so a hostile certificate path cannot force an unbounded allocation. On
  * success *out owns memory the caller must free.
  *
@@ -227,7 +227,7 @@ static int	read_file_bytes(const char *path, unsigned char **out,
 	if (fseek(fp, 0, SEEK_END) != 0)
 		return (fclose(fp), -1);
 	size = ftell(fp);
-	if (size <= 0 || (unsigned long)size > TSH_MAX_CERT_LEN)
+	if (size <= 0 || (unsigned long)size > SESSIONIO_MAX_CERT_LEN)
 		return (fclose(fp), -1);
 	rewind(fp);
 	*out = malloc((size_t)size);

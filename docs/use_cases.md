@@ -75,7 +75,7 @@ Two distinct state systems back these use cases, and their status/result codes m
     - post-game record
     - profile
     - leaderboard.
-  - These use cases call the DB, which returns a `t_db_result` 
+  - These use cases call the DB, which returns a `t_db_result`
     - `DB_OK`
     - `DB_EXISTS`
     - `DB_BAD_CREDS`
@@ -88,7 +88,7 @@ Two distinct state systems back these use cases, and their status/result codes m
 | Group | Use cases | Backing store |
 |---|---|---|
 | **Persisted (DB)** | • UC-01 <br>• UC-02<br>• UC-15 <br>• UC-16 <br>• UC-17<br>• UC-18 <br>• UC-19<br>• UC-20 <br>• UC-21<br>• the `record_game` step of UC-10/11/12<br>• UC-14 reads catalogue/ownership | `libmacminidb` |
-| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (counters live in `tetrislogd`) | tetrisd memory |
+| **Runtime only** | • UC-03 <br>• UC-04 <br>• UC-05 <br>• UC-06<br>• UC-07 <br>• UC-08 <br>• UC-08a<br>• UC-09 <br>• UC-13<br>• the live-play loop of UC-10/11/12<br>• UC-22–UC-26<br>• UC-27 (the Dropped counter lives in `tetrisd`'s ring) | tetrisd memory |
 
 ---
 
@@ -96,15 +96,15 @@ Two distinct state systems back these use cases, and their status/result codes m
 
 Every use case's wire request and the status codes it can return. Two transports are in play; the **Transport** column says which:
 
-- **HTTTP → tetrisd** 
+- **HTTTP → tetrisd**
     - the fixed game protocol (`METHOD PATH HTTTP/1.0`) over the authenticated TCP session. `tetrisd` serves every client-facing method — gameplay, chat, abilities, and the marketplace/profile/leaderboard calls — over this one session.
 - **tetrisctl → HTTTP → tetrisd (control socket)**
     - `tetrisctl`'s admin channel: same wire format, over a local-only Unix control socket instead of the public TCP port.
 
 | UC | Request (wire) | Transport | Success | Error statuses |
 |---|---|---|---|---|
-| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → account svc | `201` | • `409` taken<br>• `400` malformed<br>• `500` |
-| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → account svc | `200` (+`Player-Id`) | • `401` bad creds/unknown<br>• `400`<br>• `500` |
+| UC-01 Register | `SIGNUP /account` body `{username,password}` | HTTTP → tetrisd | `201` | • `409` taken<br>• `400` malformed<br>• `500` |
+| UC-02 Log In | `LOGIN /session` body `{username,password}` | HTTTP → tetrisd | `200` (+`Player-Id`) | • `401` bad creds/unknown<br>• `400`<br>• `500` |
 | UC-02a Connect | crypto handshake (nonce → cert → RSA-OAEP AES key) | `libtetrissh` session | session up | handshake fail → connection dropped |
 | UC-03 Browse Rooms | `LIST /rooms` | HTTTP → tetrisd | `200` (room list) | `500` |
 | UC-03a Refresh | `LIST /rooms` | HTTTP → tetrisd | `200` | `500` |
@@ -119,7 +119,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-11 Double | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
-| — `STATE /room/<id>` | server-originated broadcast (no client status) | HTTTP ← tetrisd | pushed | — |
+| — `STATE /room/<id>/player/<pid>` | server-originated push, one subject per snapshot (no client status) | HTTTP ← tetrisd | pushed | — |
 | UC-15 Buy Character | `BUY /store/character/<cid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-16 Buy Theme | `BUY /store/theme/<tid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-17 Deduct Points | — internal to `db_buy_*` | — | — | — |
@@ -133,7 +133,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
 | UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (control) | `200` (room list) | `500` |
 | UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (control) | `200` (player list) | `500` |
-| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | `500` (logger unreachable) |
+| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | — |
 
 ---
 
@@ -216,25 +216,25 @@ Rooms, slots, and player roles are **runtime-only** state held in `tetrisd` memo
 
 ```
 PLAYER_STATUS
-{ 
+{
   OWNER,
-  PLAYER 
+  PLAYER
 } // role within a room
 
-GAME_ROOM_STATUS  
-{ 
-  WAITING, 
-  READY, 
-  IN_GAME, 
-  FINISHED 
+GAME_ROOM_STATUS
+{
+  WAITING,
+  READY,
+  IN_GAME,
+  FINISHED
 }
 
-SLOT_STATUS 
-{ 
-  WAITING, 
-  JOINING, 
-  LEAVING, 
-  READY 
+SLOT_STATUS
+{
+  WAITING,
+  JOINING,
+  LEAVING,
+  READY
 } // one per slot
 ```
 
@@ -338,11 +338,11 @@ stateDiagram-v2
 **Main Success Scenario**
 1. Player enters the Lobby.
 2. System requests the current room directory from the Game Server.
-3. System renders each room row: 
+3. System renders each room row:
     - ID
-    - Mode (D / BR) 
-    - Players (e.g. 1/2, 8/8) 
-    - State (WAITING / IN-GAME) 
+    - Mode (D / BR)
+    - Players (e.g. 1/2, 8/8)
+    - State (WAITING / IN-GAME)
     - Owner
 4. System renders the header with the Player's username, leaderboard score, and ranking.
 
@@ -496,7 +496,7 @@ stateDiagram-v2
 4. System returns the Player to the Lobby. Server narrates to the room: `PLAYER <name> left the room <id>`.
 
 **Extensions / Alternate Flows**
-- **3a. Leaving Player is the Owner and others remain:** 
+- **3a. Leaving Player is the Owner and others remain:**
     - Ownership is transferred **before** the old Owner's slot is freed → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
 - **3b. Last player leaves:** Server destroys the room (ROOM_DESTROYED); all slots and player data are cleared; chat room is torn down.
 
@@ -656,8 +656,8 @@ stateDiagram-v2
 3. Player controls pieces (`MOVE` left/right, `ROTATE` cw/ccw, `DROP` soft/hard) — `«include»` **UC-13 Control Falling Piece**.
 4. System clears completed lines and updates the score.
 5. Loop steps 2–4 until the board tops out (game over).
-6. System shows the final score, then makes the **one** persisted call of this use case (this specific user): 
-    - `db_record_game(id, score_delta, points_delta, won=true)`, which updates 
+6. System shows the final score, then makes the **one** persisted call of this use case (this specific user):
+    - `db_record_game(id, score_delta, points_delta, won=true)`, which updates
       - `leaderboard_score`
       - credits `wallet_points`
       - increments `games_played`
@@ -688,7 +688,7 @@ stateDiagram-v2
 | **DB Mapping** | Post-game, **each** player is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` for the winner, `false` for the loser. |
 
 **Main Success Scenario**
-1. System renders the split screen: 
+1. System renders the split screen:
     - own **Board** with piece queue and hold column on the left
     - **Opponent Board** on the right
     - both usernames with live point totals below.
@@ -699,7 +699,7 @@ stateDiagram-v2
 
 **Extensions / Alternate Flows**
 - **2a. A Player activates an equipped ability:** → UC-14 Activate Gaiden Ability (`«extend»`).
-- **5a. A Player quits/disconnects mid-game:** 
+- **5a. A Player quits/disconnects mid-game:**
     - Only one Player remains, so the match ends immediately.
     - If the departing Player owns the room, ownership is transferred to the remaining Player → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
     - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default and **is** recorded (`won=true`).
@@ -724,12 +724,12 @@ stateDiagram-v2
 | **Preconditions** | A Battle Royale room with ≥ 4 players has been started (UC-08). |
 | **Postconditions (success)** | • Ranking/last-standing determined <br>• points credited  <br>• leaderboard updated. |
 | **Trigger** | The room's Start Game (UC-08) completes for a Battle Royale room. |
-| **DB Mapping** | Live play (boards, garbage IPC across rooms) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player, `won=false` for the remaining players. |
+| **DB Mapping** | Live play (boards, garbage routed between slots within the room) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player, `won=false` for the remaining players. |
 
 **Main Success Scenario**
 1. System renders own **Board** (center) with piece queue, hold column, and live **Scores**, surrounded by grids showing other players' boards.
 2. Players control pieces concurrently.
-3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage inserted at the bottom of a random other player's board in a different room (server-managed via IPC).
+3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against a Target — a random other player still in the game, in the same room — and inserted at the bottom of that player's board at their next piece lock (server-routed; see [ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)).
 4. Server pushes `STATE` updates for all visible boards.
 5. Players are eliminated as they top out; play continues until a winner/last-standing remains.
 6. At game-over, System records the final ranking and calls `db_record_game(...)` once per **participant who was still in the game at game-over** (last-standing `won=true`, others `won=false`), crediting points (line clears / KOs / win) and updating the leaderboard.
@@ -739,7 +739,7 @@ stateDiagram-v2
     - UC-14 Activate Gaiden Ability (`«extend»`).
 - **5a. Player is KO'd:**
     - Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
-- **5b. Player quits/disconnects mid-game:** 
+- **5b. Player quits/disconnects mid-game:**
     - Server removes them from the match; remaining players play on.
     - If the departing Player owns the room, ownership is transferred and the remaining players are notified → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
     - The quitter is **not recorded** (`db_record_game` is not called for them). Each remaining player is recorded normally at game-over.
@@ -772,7 +772,7 @@ stateDiagram-v2
 3. Server applies the move and pushes updated `STATE`.
 
 **Extensions / Alternate Flows**
-- **2a. Illegal move (collision):** 
+- **2a. Illegal move (collision):**
   - Server responds `409 INVALID_MOVE` with the authoritative position
   - client corrects to it.
 
@@ -811,22 +811,24 @@ The four selected characters retain their complete, four-level ability sets from
 | 3 | 6 | 12 |
 | 4 | 8 | 16 |
 
+A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.md)): Single mode has no Target and offensive abilities are unavailable there, Double implies the one other player, and Battle Royale draws one per resolution from the room's seeded random source among players still in the game. Every cross-player effect is queued against its Target and applied at that player's next piece lock ([ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)). Ability text is kept in step with [`themes.md`](themes.md), which is its source of truth.
+
 | Character | Level | Ability | Server-enforced effect |
 |---|---:|---|---|
-| Halloween | 1 | Fry | Fill the bottom three rows with blocks. When the next piece locks, those rows clear and are sent to the opponent. |
-| Halloween | 2 | Dark | Black out the opponent's field except for a small visible area below the active piece. |
-| Halloween | 3 | Vampire | Transfer the opponent's stored ability charge to the Player. |
-| Halloween | 4 | Bomb | Destroy randomly selected blocks on the opponent's field. |
-| Mirurun | 1 | Mirurun | Remove the bottom four rows from the Player's field without sending them to the opponent. |
-| Mirurun | 2 | Inversion | Reverse the opponent's controls for their next three pieces. |
-| Mirurun | 3 | Pentaris | Send five garbage lines to the opponent. |
-| Mirurun | 4 | Sirtet | Invert every occupied row on the opponent's field: empty cells become blocks and filled cells become empty cells. |
+| Halloween | 1 | Fry | Fill the bottom three rows with blocks. When the next piece locks, those rows clear and are sent to the Target. |
+| Halloween | 2 | Dark | Black out the Target's field except for a small visible area below the active piece. |
+| Halloween | 3 | Vampire | Transfer the Target's stored ability charge to the Player. |
+| Halloween | 4 | Bomb | Destroy randomly selected blocks on the Target's field. |
+| Mirurun | 1 | Mirurun | Remove the bottom four rows from the Player's field without sending them to a Target. |
+| Mirurun | 2 | Inversion | Reverse the Target's controls for their next three pieces. |
+| Mirurun | 3 | Pentaris | Send five garbage lines to the Target. |
+| Mirurun | 4 | Sirtet | Invert every occupied row on the Target's field: empty cells become blocks and filled cells become empty cells. |
 | Princess | 1 | Sol | Clear three adjacent columns from the Player's field with a steerable beam that fires automatically after three seconds. |
-| Princess | 2 | Mirror | Steal the next ability activated by the opponent. |
-| Princess | 3 | Paralysis | Prevent the opponent from rotating their next three pieces. |
-| Princess | 4 | Copy | Replace the Player's field with a copy of the opponent's field. |
+| Princess | 2 | Mirror | Steal the next ability activated against the Player. |
+| Princess | 3 | Paralysis | Prevent the Target from rotating their next three pieces. |
+| Princess | 4 | Copy | Replace the Player's field with a copy of a Target's field. |
 | Wolf-man | 1 | Cut | Clear the top four rows from the Player's field. |
-| Wolf-man | 2 | Nue | Prevent the opponent from fast-dropping their next four pieces. |
+| Wolf-man | 2 | Nue | Prevent the Target from fast-dropping their next four pieces. |
 | Wolf-man | 3 | Pals | For a limited time, incoming ordinary garbage lowers the Player's stack instead of raising it; garbage created by abilities is excluded. |
 | Wolf-man | 4 | Thwack | For the Player's next four pieces, blocks above a cleared line fall, allowing incomplete lower lines to clear in the same sequence. |
 
@@ -861,9 +863,9 @@ The four selected characters retain their complete, four-level ability sets from
 5. On `DB_OK`, System confirms the purchase, flips the **BUY** / **Set as Default** button state (`«include»` **UC-15a Determine Character Button State**).
 
 **Extensions / Alternate Flows**
-- **4a. Already owned (`DB_EXISTS` → 200, no-op):** 
+- **4a. Already owned (`DB_EXISTS` → 200, no-op):**
   - No debit, no change.
-- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):** 
+- **4b. Insufficient points (`DB_INSUFFICIENT` → 403):**
   - Refused, wallet unchanged.
   - Display error message at tetrisu: `Error: Insufficient points`.
 - **4c. Inventory full (`DB_FULL` → 409)** (It won't really trigger this) **:**
@@ -1087,7 +1089,7 @@ The four selected characters retain their complete, four-level ability sets from
 **Main Success Scenario**
 1. Player opens Settings.
 2. Server reads the profile with `db_get_player(id, ...)` and the rank with `db_rank(id, ...)`.
-3. System displays: 
+3. System displays:
     - Username
     - profile picture of current default character, - Default Character (+ Change btn)
     - Character List (with current default marked), - Current Theme (+ Change btn)
@@ -1375,28 +1377,27 @@ Content-Length: 104
 |---|---|
 | **ID** | UC-27  |
 | **Primary Actor** | Administrator |
-| **Secondary Actor** | Logger Daemon (`tetrislogd`) |
-| **Goal** | Read the dropped-records counter — how many log records were lost when the log IPC channel was saturated. |
-| **Preconditions** | `tetrisd` is running; `tetrislogd` is reachable over the log IPC channel. |
-| **Postconditions (success)** | The dropped-records count is returned to the operator; no state changes; the query is logged. |
+| **Secondary Actor** | — (answered by `tetrisd` alone) |
+| **Goal** | Read the Dropped counter — how many log records `tetrisd` never sent because its ring buffer was full. |
+| **Preconditions** | `tetrisd` is running. |
+| **Postconditions (success)** | The Dropped count is returned to the operator; no state changes; the query is logged. |
 | **Trigger** | Operator runs `tetrisctl dropped-logs`. |
 | **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
-| **Return** | • `200 OK` + count<br>• `500` (logger unreachable) |
+| **Return** | • `200 OK` + count |
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl dropped-logs`.
-2. `tetrisd` receives `DROPPED-LOGS /admin` and queries `tetrislogd` over the log IPC channel for its dropped-records counter (optionally adding `tetrisd`'s own local-side drop count if it buffers internally).
-3. `tetrislogd` returns the counter; `tetrisd` replies `200 OK` with the total.
+2. `tetrisd` receives `DROPPED-LOGS /admin` and reads its own ring-buffer counter (`ring_dropped_count`).
+3. `tetrisd` replies `200 OK` with the count, labelled as producer-side Dropped records.
 4. `tetrisctl` prints the count; the query is logged.
 
-**Extensions / Alternate Flows**
-- **2a. `tetrisd` tracks local drops only (logger query optional):** Return the local-side counter and label it as such.
-
-**Exceptions**
-- **E1. `tetrislogd` unreachable (`500`):** `tetrisd` reports the logger is down; `tetrislogd` is designed to survive `tetrisd` restarts, but the reverse (logger down) is surfaced as an error here.
+**Notes**
+- The log IPC channel is a one-way datagram socket, so `tetrisd` cannot query the logger over it. Dropped is a quantity only `tetrisd` can observe anyway: the record never left the ring.
+- `tetrislogd` owns two *different* counters — Rejected (arrived malformed) and Degraded (valid, sink unavailable, written to stderr). They are not Dropped records and must not be added to this total. Until `tetrisctl` gains a control channel to the logger, they surface in the log file itself at boot, on rotation, on `SIGUSR1`, and at shutdown.
+- The state of the logger does not affect this response: `tetrisd` falls back to stderr when the logger is absent, so there is no "logger unreachable" failure to report here.
 
 **Related Use Cases**
-- Targets `tetrislogd`, not tetrisd game state or the DB.
+- Targets `tetrisd`'s log path, not tetrisd game state or the DB.
 
 **Example**
 

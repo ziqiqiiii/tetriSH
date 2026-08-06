@@ -4,13 +4,114 @@
 # The shell prepends $PWD/bin to PATH (see init_root), so the daemon and
 # system-program binaries under ./bin are found by name.
 #
-# `dspawn <program> [args...]` daemonises, registers the daemon in
-# tmp/daemons.reg, then execs <program>. Inspect running daemons with `dcheck`.
+# The game daemons daemonise themselves and are managed with `tetrisctl`
+# (see the daemons section at the bottom). The shell's `dspawn`, `dcheck` and
+# `dkill` remain what they were built to be — generic tools for daemonising
+# arbitrary programs.
 #
 # Daemon launch order: the logger first (so it captures everything), then the
 # game server. tetrisd also serves room chat and the marketplace, so there is
 # no separate social-layer daemon to launch.
+
+################################################################################
+#                              tetrisd settings                                #
+################################################################################
 #
-# These daemons are not built yet — uncomment each line as its binary lands:
-# dspawn tetrislogd
-# dspawn tetrisd
+# Every setting is an `export TETRISD_*=<value>` line, so it is both an
+# ordinary shell command (inherited by anything dspawn launches) and a line
+# tetrisd parses out of this file itself at boot — nothing is hard-coded, and
+# a standalone `./bin/tetrisd` reads the same values. SIGHUP re-reads them.
+# Relative paths resolve against tetrisd's working directory.
+
+# TCP port the game server listens on. 0 lets the kernel pick (tests).
+export TETRISD_PORT=4242
+
+# Where the player store keeps its append-only log, and where the read-only
+# character/theme catalogues are read from.
+export TETRISD_DATA_DIR=tmp/tetrisd
+export TETRISD_CONFIG_DIR=lib/libmacminidb/config
+
+# Secure-session credentials. Generate them with `make certs`; tetrisd refuses
+# to boot when the certificate or key is missing, so it can never silently run
+# unauthenticated. ca_path is what clients verify the server against.
+export TETRISD_CERT_PATH=certs/server.crt
+export TETRISD_KEY_PATH=certs/server.key
+export TETRISD_CA_PATH=certs/ca.crt
+
+# AF_UNIX datagram socket tetrislogd binds and tetrisd ships log records to.
+# Records are dropped, never blocked on, when the logger is slow or absent.
+# One socket, named twice: this key and TETRISLOGD_SOCKET_PATH below must be equal.
+export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock
+export TETRISD_LOG_LEVEL=info
+
+# Pidfile tetrisd claims and holds an exclusive lock on for as long as it runs.
+# One mechanism answers three questions: which pid tetrisctl signals, whether a
+# second instance may start, and whether a pidfile left behind is stale — a
+# lock that can be acquired means its writer is gone.
+export TETRISD_PID_PATH=tmp/tetrisd/tetrisd.pid
+
+# Where tetrisd points its stderr once it has detached and boot has succeeded.
+# Not cosmetic: this is the last-resort copy of log records the logger could
+# not take. A boot that *fails* still prints to the terminal instead.
+export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err
+
+# Concurrency limits and the room ticker period in milliseconds.
+export TETRISD_MAX_CLIENTS=64
+export TETRISD_TICK_MS=12
+
+# Slots in a Battle Royale room (Single and Double are fixed at 1 and 2).
+export TETRISD_BR_SLOTS=4
+
+# Per-connection input budget for MOVE, ROTATE and DROP: a bucket of BURST
+# tokens refilling at RATE per second, one token per input. Sized well above
+# what a person can press - a client that empties it is hammering, and is
+# answered 429 with a Retry-After rather than being served.
+export TETRISD_INPUT_BURST=120
+export TETRISD_INPUT_RATE=60
+
+################################################################################
+#                            tetrislogd settings                               #
+################################################################################
+#
+# The logger reads `export TETRISLOGD_*` lines out of this same file, exactly
+# as tetrisd reads its own prefix. Each daemon parses only its own keys, so
+# the socket both ends share is named twice and the two lines must agree.
+# Configuration is cold: tetrislogd re-reads nothing, and SIGHUP reopens the
+# log file rather than reloading settings.
+
+# Datagram socket tetrislogd binds. Keep identical to TETRISD_LOG_IPC above.
+export TETRISLOGD_SOCKET_PATH=tmp/tetrisd/tetrislogd.sock
+
+# File tetrislogd appends records to. Rotate it from outside - move the file,
+# then `kill -HUP` the daemon and it reopens this path.
+export TETRISLOGD_LOG_PATH=tmp/tetrislogd/tetrislogd.log
+
+# Pidfile tetrislogd claims and holds. This is the single-instance guard — it
+# used to be an flock on the log file itself, which meant deleting tmp/ took
+# away the sink and the guard in one stroke.
+export TETRISLOGD_PID_PATH=tmp/tetrislogd/tetrislogd.pid
+
+# Where tetrislogd points its stderr once it has detached. Degraded records —
+# valid records it could not write because the sink was unavailable — go here.
+export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
+
+################################################################################
+#                                 daemons                                      #
+################################################################################
+#
+# Which daemons tetrisctl manages, and the order it starts them in. This is
+# the only place that order is written down: `tetrisctl stop` reverses it, and
+# reversing it matters — stopping the logger first would push tetrisd's entire
+# shutdown into its error file instead of the log.
+#
+# Each daemon's pidfile is read from its own prefix above (TETRISLOGD_PID_PATH,
+# TETRISD_PID_PATH), so the path is named once by the process that holds it.
+export TETRISCTL_DAEMONS="tetrislogd tetrisd"
+
+# Launch them. Each binary double-forks itself and does not return until it is
+# actually up, so this line fails loudly — non-zero, with the reason on the
+# terminal — rather than leaving a registry entry for a process that died.
+#
+# `tetrisctl start tetrislogd` starts one; `tetrisctl status` shows what is
+# running; `tetrisctl stop` takes the stack down in the reverse order.
+tetrisctl start

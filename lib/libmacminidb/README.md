@@ -6,8 +6,8 @@ A single-node, in-memory NoSQL store for tetriSH — *NoSQLite*. Keeps player, c
 
 ## Table of Contents
 
-- [Features](#features)
 - [Build](#build)
+- [Testing](#testing)
 - [Using the Library](#using-the-library)
 - [Data Model](#data-model)
 - [API Reference](#api-reference)
@@ -16,20 +16,9 @@ A single-node, in-memory NoSQL store for tetriSH — *NoSQLite*. Keeps player, c
 - [Architecture](#architecture)
 - [Boot / Recovery](#boot--recovery)
 - [Project Structure](#project-structure)
-- [Testing](#testing)
 
 ---
 
-## Features
-
-- In-memory player index: hash map (`username → player`) for point lookups, skip list (`(score, id) → player`) for the leaderboard
-- Append-only player log with whole-record Last-Writer-Wins replay for crash recovery
-- Background flusher thread `fdatasync`s the log every second — bounded data loss, no blocking syscall under the store's lock
-- Static character and theme catalogues loaded once from `config/*.cfg` at open
-- Read–write lock guarding the in-memory index; every public call takes exactly one lock
-- Player, character, and theme documents fit comfortably in RAM at the ~300-user target scale
-
----
 
 ## Build
 
@@ -50,6 +39,25 @@ Makefile targets:
 | `make clean`  | Remove object files and test binaries                 |
 | `make fclean` | Remove object files, test binaries, and the archive    |
 | `make re`     | Full rebuild (`fclean` + `all`)                        |
+
+---
+
+## Testing
+
+```bash
+make test
+```
+
+Each module has a matching `tests/test_<module>.c` with its own `main()`, linked against the archive and run through the formatted runner.
+
+### Filtering tests
+
+Use `FILTER` to build and run only suites whose name contains a substring:
+
+```bash
+make test FILTER=skiplist   # only tests/test_skiplist.c
+make test FILTER=recovery   # only tests/test_recovery.c
+```
 
 ---
 
@@ -91,8 +99,6 @@ db_close(db);
 | **Player** | `player_id`, `username`, `password_hashed`, `salt`, `leaderboard_score`, `wallet_points`, `current_equipped_character`, `current_equipped_theme`, `owned_characters`, `owned_themes`, `games_played`, `games_won` |
 | **Character** | `character_id`, `name`, `abilities` (bitfield), `cost_points` |
 | **Theme** | `theme_id`, `name`, `description` |
-
-Characters and themes are read-only catalogues loaded from `config/characters.cfg` and `config/themes.cfg` — `id | name | abilities(hex) | cost_points` and `id | name | description` respectively, `|`-separated, `#` comments and blank lines ignored. Item `1` is the free starter in both catalogues.
 
 ---
 
@@ -136,17 +142,12 @@ Characters and themes are read-only catalogues loaded from `config/characters.cf
 
 Functions that can succeed or be rejected return `t_db_result`:
 
-`DB_OK`, `DB_NOT_FOUND`, `DB_EXISTS`, `DB_BAD_CREDS`, `DB_INSUFFICIENT`, `DB_NOT_OWNED`, `DB_IO_ERROR`, `DB_FULL`, `DB_INVALID`
+• `DB_OK` <br>• `DB_NOT_FOUND` <br>• `DB_EXISTS` <br>• `DB_BAD_CREDS` <br>• `DB_INSUFFICIENT` <br>• `DB_NOT_OWNED` <br>• `DB_IO_ERROR` <br>• `DB_FULL` <br>• `DB_INVALID`
 
 Functions that answer a yes/no question return `t_db_bool` instead:
 
-`DB_TRUE`, `DB_FALSE`, `DB_UNKNOWN`
+• `DB_TRUE` <br>• `DB_FALSE` <br>• `DB_UNKNOWN`
 
-The two vocabularies are kept apart on purpose. A probe returning `DB_FALSE`
-succeeded — "no" is an answer, not a failure — so `DB_OK` is meaningless for
-these calls and `!= DB_TRUE` would lump a real "no" together with `DB_UNKNOWN`.
-Branch on all three. `DB_FALSE` is `0`, so a bare truth test still reads
-correctly, but only `DB_UNKNOWN` signals that the question could not be answered.
 
 ---
 
@@ -256,19 +257,3 @@ libmacminidb/
 
 ---
 
-## Testing
-
-```bash
-make test
-```
-
-Each module has a matching `tests/test_<module>.c` with its own `main()`, linked against the archive and run through the formatted runner.
-
-### Filtering tests
-
-Use `FILTER` to build and run only suites whose name contains a substring:
-
-```bash
-make test FILTER=skiplist   # only tests/test_skiplist.c
-make test FILTER=recovery   # only tests/test_recovery.c
-```

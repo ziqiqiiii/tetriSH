@@ -14,6 +14,11 @@
 # define HTTTP_DATE_BUFSIZE					30u
 # define HTTTP_CONTENT_TYPE_COMMAND			"application/tetris-command"
 # define HTTTP_CONTENT_TYPE_STATE			"application/tetris-state"
+/*
+** What tetrisd's own non-STATE response bodies are. tetris-command names what
+** a client sends; a server answer is neither a command nor a board snapshot.
+*/
+# define HTTTP_CONTENT_TYPE_STATUS			"application/tetris-status"
 # define HTTTP_VALIDATE_AUTHENTICATED_REQUEST	0x01u
 
 typedef enum
