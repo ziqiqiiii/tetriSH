@@ -724,12 +724,12 @@ stateDiagram-v2
 | **Preconditions** | A Battle Royale room with ≥ 4 players has been started (UC-08). |
 | **Postconditions (success)** | • Ranking/last-standing determined <br>• points credited  <br>• leaderboard updated. |
 | **Trigger** | The room's Start Game (UC-08) completes for a Battle Royale room. |
-| **DB Mapping** | Live play (boards, garbage IPC across rooms) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player, `won=false` for the remaining players. |
+| **DB Mapping** | Live play (boards, garbage routed between slots within the room) is runtime only. Post-game, **each** participant is persisted with `db_record_game(id, score_delta, points_delta, won)` — `won=true` only for the last-standing player, `won=false` for the remaining players. |
 
 **Main Success Scenario**
 1. System renders own **Board** (center) with piece queue, hold column, and live **Scores**, surrounded by grids showing other players' boards.
 2. Players control pieces concurrently.
-3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage inserted at the bottom of a random other player's board in a different room (server-managed via IPC).
+3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against a Target — a random other player still in the game, in the same room — and inserted at the bottom of that player's board at their next piece lock (server-routed; see [ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)).
 4. Server pushes `STATE` updates for all visible boards.
 5. Players are eliminated as they top out; play continues until a winner/last-standing remains.
 6. At game-over, System records the final ranking and calls `db_record_game(...)` once per **participant who was still in the game at game-over** (last-standing `won=true`, others `won=false`), crediting points (line clears / KOs / win) and updating the leaderboard.
@@ -811,22 +811,24 @@ The four selected characters retain their complete, four-level ability sets from
 | 3 | 6 | 12 |
 | 4 | 8 | 16 |
 
+A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.md)): Single mode has no Target and offensive abilities are unavailable there, Double implies the one other player, and Battle Royale draws one per resolution from the room's seeded random source among players still in the game. Every cross-player effect is queued against its Target and applied at that player's next piece lock ([ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)). Ability text is kept in step with [`themes.md`](themes.md), which is its source of truth.
+
 | Character | Level | Ability | Server-enforced effect |
 |---|---:|---|---|
-| Halloween | 1 | Fry | Fill the bottom three rows with blocks. When the next piece locks, those rows clear and are sent to the opponent. |
-| Halloween | 2 | Dark | Black out the opponent's field except for a small visible area below the active piece. |
-| Halloween | 3 | Vampire | Transfer the opponent's stored ability charge to the Player. |
-| Halloween | 4 | Bomb | Destroy randomly selected blocks on the opponent's field. |
-| Mirurun | 1 | Mirurun | Remove the bottom four rows from the Player's field without sending them to the opponent. |
-| Mirurun | 2 | Inversion | Reverse the opponent's controls for their next three pieces. |
-| Mirurun | 3 | Pentaris | Send five garbage lines to the opponent. |
-| Mirurun | 4 | Sirtet | Invert every occupied row on the opponent's field: empty cells become blocks and filled cells become empty cells. |
+| Halloween | 1 | Fry | Fill the bottom three rows with blocks. When the next piece locks, those rows clear and are sent to the Target. |
+| Halloween | 2 | Dark | Black out the Target's field except for a small visible area below the active piece. |
+| Halloween | 3 | Vampire | Transfer the Target's stored ability charge to the Player. |
+| Halloween | 4 | Bomb | Destroy randomly selected blocks on the Target's field. |
+| Mirurun | 1 | Mirurun | Remove the bottom four rows from the Player's field without sending them to a Target. |
+| Mirurun | 2 | Inversion | Reverse the Target's controls for their next three pieces. |
+| Mirurun | 3 | Pentaris | Send five garbage lines to the Target. |
+| Mirurun | 4 | Sirtet | Invert every occupied row on the Target's field: empty cells become blocks and filled cells become empty cells. |
 | Princess | 1 | Sol | Clear three adjacent columns from the Player's field with a steerable beam that fires automatically after three seconds. |
-| Princess | 2 | Mirror | Steal the next ability activated by the opponent. |
-| Princess | 3 | Paralysis | Prevent the opponent from rotating their next three pieces. |
-| Princess | 4 | Copy | Replace the Player's field with a copy of the opponent's field. |
+| Princess | 2 | Mirror | Steal the next ability activated against the Player. |
+| Princess | 3 | Paralysis | Prevent the Target from rotating their next three pieces. |
+| Princess | 4 | Copy | Replace the Player's field with a copy of a Target's field. |
 | Wolf-man | 1 | Cut | Clear the top four rows from the Player's field. |
-| Wolf-man | 2 | Nue | Prevent the opponent from fast-dropping their next four pieces. |
+| Wolf-man | 2 | Nue | Prevent the Target from fast-dropping their next four pieces. |
 | Wolf-man | 3 | Pals | For a limited time, incoming ordinary garbage lowers the Player's stack instead of raising it; garbage created by abilities is excluded. |
 | Wolf-man | 4 | Thwack | For the Player's next four pieces, blocks above a cleared line fall, allowing incomplete lower lines to clear in the same sequence. |
 

@@ -41,6 +41,13 @@ _Avoid_: host, admin
 How many players a room's game is played with: Single, Double, or Battle
 Royale.
 
+**Target**:
+The player an offensive ability or garbage lands on. Single mode has no
+Target, so offensive abilities are unavailable there; Double implies the one
+other player; in Battle Royale a Target is drawn per resolution from the
+room's seeded random source, among players still in the game.
+_Avoid_: victim, enemy, opponent (as a role)
+
 ### Gameplay
 
 **Game**:

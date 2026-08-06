@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean). Its threading model is being replaced by an event loop (ADR-0008) and Double/Battle Royale are designed but unbuilt (ADR-0009) |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -216,12 +216,24 @@ Config comes from `.tetrishrc` as `export TETRISD_*=...` lines (`argv[1]` →
 `$TETRISHRC` → `./.tetrishrc`, then environment), re-read on SIGHUP; missing
 certificates are a fatal boot error (`make certs` mints dev ones).
 
-Threads: main loop `poll()`s listener + self-pipe; per client a reader thread
-(blocks in `session_recv`) and a writer thread (sole `session_send` caller);
-per in-game room a ticker thread; one log shipper thread. Lock order is
-`lobby_mutex > room->mutex > registry rwlock > outbox mutex`, and no `db_*`,
-`session_*`, or IPC send happens under any lock (the non-blocking outbox push
-is the sole exception). The registry rwlock is the client-lifetime guard.
+Threads **as built today**: main loop `poll()`s listener + self-pipe; per client
+a reader thread (blocks in `session_recv`) and a writer thread (sole
+`session_send` caller); per in-game room a ticker thread; one log shipper
+thread. Lock order is `lobby_mutex > room->mutex > registry rwlock > outbox
+mutex`, and no `db_*`, `session_*`, or IPC send happens under any lock (the
+non-blocking outbox push is the sole exception). The registry rwlock is the
+client-lifetime guard.
+
+**This model is being replaced** — see
+[ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md), accepted and not yet
+implemented. `tetrisd` becomes a reactor: one thread in `epoll_wait` owns the
+lobby, every room, every game, the registry and every outbox, beside a
+four-worker handshake pool that owns only its own descriptors until handoff.
+Every lock above is deleted, along with `reg_wait_absent` and
+`TD_DISPLACE_WAIT_MS`. The property that replaces the lock order is *one owner
+of all mutable game state*. The migration is seven staged steps, each ending
+green; until step 5 lands, the description above is the truth and the locks are
+load-bearing. Do not remove a lock ahead of its step.
 
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
 `/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`, plus pushed
@@ -240,7 +252,8 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `us_dgram_bind`, which unlinks its socket path unconditionally.
 - A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
 - `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
-- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks.
+- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint is being retired rather than satisfied — ADR-0008 removes the shared state instead of ordering access to it — but it still binds every lock that exists until the step that deletes it.
+- Cross-player effects (garbage, offensive abilities) are queued against a **Target** and applied at that player's next piece lock, never on arrival (ADR-0009). A player's own inputs still apply immediately. Injecting garbage under an active piece can produce a board `piece_is_valid` would reject, so the safe point is a game rule, not an optimisation. Battle Royale is one Room of 4–99 slots; garbage never crosses rooms.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 - All components compile clean under `-Wall -Wextra -Werror`; test binaries are expected to pass `valgrind --leak-check=full --error-exitcode=1`.
 
@@ -253,7 +266,9 @@ Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other
 - `README.md` — project identity and context only; the detail lives in the per-component READMEs below
 - `lib/*/README.md`, `src/*/README.md` — each component's own scope, API, and build; `libhtttp` carries the protocol grammar and method table
 - `.tetrishrc` — the shell start-up file; its keys are documented inline as comments
-- `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs
+- `docs/CONTEXT.md` — the shared glossary; domain terms only, no implementation. Check a term here before inventing one
+- `docs/adr/*.md` — architecture decision records, numbered sequentially. Read the relevant one before changing what it decided
+- `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs. `themes.md` is the source of truth for ability text; `use_cases.md` carries a second table of the same abilities as server-enforced effects, kept in step with it
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
 - `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
