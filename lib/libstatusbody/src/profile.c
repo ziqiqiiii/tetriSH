@@ -4,9 +4,9 @@
 
 // Static Functions
 static int	encode_owned(const char *key, const uint32_t *ids, size_t count, char *out, size_t cap, size_t *off);
-static int	decode_identity(t_sb_cursor *c, t_sb_profile *out);
-static int	decode_equipped(t_sb_cursor *c, t_sb_profile *out);
-static int	decode_owned(t_sb_cursor *c, const char *key, uint32_t *ids, size_t *out_count);
+static int	decode_identity(t_body_cursor *c, t_body_profile *out);
+static int	decode_equipped(t_body_cursor *c, t_body_profile *out);
+static int	decode_owned(t_body_cursor *c, const char *key, uint32_t *ids, size_t *out_count);
 static int	key_value(const char *line, const char *key, const char **value);
 static int	take_number(const char *line, int *used, uint64_t *out);
 
@@ -21,7 +21,7 @@ static int	take_number(const char *line, int *used, uint64_t *out);
  *         empty username, owned counts > BODY_OWNED_MAX) or ERANGE (cap
  *         too small).
  */
-int	body_profile_encode(const t_sb_profile *in, char *out, size_t cap)
+int	body_profile_encode(const t_body_profile *in, char *out, size_t cap)
 {
 	size_t	off;
 
@@ -60,9 +60,9 @@ int	body_profile_encode(const t_sb_profile *in, char *out, size_t cap)
  * @return 0 on success, -1 with errno = EINVAL (NULL args) or EBADMSG
  *         (missing key, malformed value, overlong name, list overflow).
  */
-int	body_profile_decode(const char *buf, size_t len, t_sb_profile *out)
+int	body_profile_decode(const char *buf, size_t len, t_body_profile *out)
 {
-	t_sb_cursor	c;
+	t_body_cursor	c;
 
 	if (!buf || !out)
 		return (body_fail(EINVAL));
@@ -115,7 +115,7 @@ static int	encode_owned(const char *key, const uint32_t *ids, size_t count,
  * @param out The profile being filled.
  * @return 0 on success, -1 on a missing, misordered, or malformed line.
  */
-static int	decode_identity(t_sb_cursor *c, t_sb_profile *out)
+static int	decode_identity(t_body_cursor *c, t_body_profile *out)
 {
 	char		line[BODY_LINE_MAX];
 	const char	*value;
@@ -150,7 +150,7 @@ static int	decode_identity(t_sb_cursor *c, t_sb_profile *out)
  * @param out The profile being filled.
  * @return 0 on success, -1 on a missing, misordered, or malformed line.
  */
-static int	decode_equipped(t_sb_cursor *c, t_sb_profile *out)
+static int	decode_equipped(t_body_cursor *c, t_body_profile *out)
 {
 	char		line[BODY_LINE_MAX];
 	const char	*value;
@@ -181,7 +181,7 @@ static int	decode_equipped(t_sb_cursor *c, t_sb_profile *out)
  * @param out_count Receives how many ids were read.
  * @return 0 on success, -1 on a malformed line or an over-long list.
  */
-static int	decode_owned(t_sb_cursor *c, const char *key, uint32_t *ids,
+static int	decode_owned(t_body_cursor *c, const char *key, uint32_t *ids,
 		size_t *out_count)
 {
 	char		line[BODY_LINE_MAX];

@@ -22,7 +22,7 @@ typedef struct s_harness
 	int			fd;
 	t_player_id	player_id;
 	bool		authed;
-	t_sb_state	last_state;
+	t_body_state	last_state;
 	bool		has_state;
 }	t_harness;
 
@@ -41,7 +41,7 @@ int		hc_connect(t_harness *hc, const t_fixture *fx);
 void	hc_close(t_harness *hc);
 int		hc_request(t_harness *hc, const char *method, const char *path, const char *body, t_htttp_message *out);
 int		hc_recv(t_harness *hc, t_htttp_message *out, int timeout_ms);
-int		hc_wait_state(t_harness *hc, t_sb_state *out, int timeout_ms);
+int		hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms);
 int		hc_signup(t_harness *hc, const char *username, const char *password);
 int		hc_login(t_harness *hc, const char *username, const char *password);
 int		hc_join_new(t_harness *hc, const char *mode, char *room_out, size_t cap);

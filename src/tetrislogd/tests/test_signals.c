@@ -27,7 +27,7 @@ static int	g_wake[2] = {-1, -1};
 int	main(void)
 {
 	assert(selfpipe_open(g_wake) == 0);
-	assert(sig_install(g_wake[1]) == 0);
+	assert(signals_install(g_wake[1]) == 0);
 	test_take_starts_empty_and_clears();
 	test_repeated_signals_coalesce();
 	test_term_and_int_stop_the_loop();
@@ -42,22 +42,22 @@ int	main(void)
 /*
 ** A handler that opened a file or wrote a record would be running
 ** non-async-signal-safe code between two arbitrary instructions. All it may
-** do is set a flag and wake the loop, so sig_take is where the signal
+** do is set a flag and wake the loop, so signals_take is where the signal
 ** becomes visible - and reading it must clear it.
 */
 static void	test_take_starts_empty_and_clears(void)
 {
-	assert(sig_take() == 0);
+	assert(signals_take() == 0);
 	raise(SIGHUP);
-	assert(sig_take() == TL_SIG_HUP);
-	assert(sig_take() == 0);
+	assert(signals_take() == TETRISLOGD_SIGNAL_HUP);
+	assert(signals_take() == 0);
 	raise(SIGUSR1);
-	assert(sig_take() == TL_SIG_DUMP);
+	assert(signals_take() == TETRISLOGD_SIGNAL_DUMP);
 	raise(SIGTERM);
-	assert(sig_take() == TL_SIG_STOP);
+	assert(signals_take() == TETRISLOGD_SIGNAL_STOP);
 	raise(SIGINT);
-	assert(sig_take() == TL_SIG_STOP);
-	assert(sig_take() == 0);
+	assert(signals_take() == TETRISLOGD_SIGNAL_STOP);
+	assert(signals_take() == 0);
 	printf("PASS test_take_starts_empty_and_clears\n");
 }
 
@@ -71,11 +71,11 @@ static void	test_repeated_signals_coalesce(void)
 {
 	raise(SIGHUP);
 	raise(SIGHUP);
-	assert(sig_take() == TL_SIG_HUP);
+	assert(signals_take() == TETRISLOGD_SIGNAL_HUP);
 	raise(SIGHUP);
 	raise(SIGUSR1);
-	assert(sig_take() == (TL_SIG_HUP | TL_SIG_DUMP));
-	assert(sig_take() == 0);
+	assert(signals_take() == (TETRISLOGD_SIGNAL_HUP | TETRISLOGD_SIGNAL_DUMP));
+	assert(signals_take() == 0);
 	printf("PASS test_repeated_signals_coalesce\n");
 }
 
@@ -187,6 +187,6 @@ static int	boot(t_fixture *fx, t_logd *lg)
 	logd_blank(lg);
 	if (logd_start(lg, &fx->cfg) != 0)
 		return (-1);
-	lg->idle_ms = FX_IDLE_MS;
+	lg->idle_ms = FIXTURE_IDLE_MS;
 	return (0);
 }

@@ -1,15 +1,15 @@
 #include "tetrisd.h"
 
 // Static Functions
-static size_t		list_rooms(t_server *srv, t_sb_room_row *rows);
+static size_t		list_rooms(t_server *srv, t_body_room_row *rows);
 static int			read_mode(t_request_context *ctx, t_game_mode *out);
 static int			create_room(t_request_context *ctx, t_game_mode mode);
 static const char	*room_name_from_path(const t_request_context *ctx);
 static int			join_room(t_request_context *ctx, const char *name);
-static void			bind_room(t_client *cli, t_server_room *sroom, int slot);
+static void			bind_room(t_client *cli, t_server_room *server_room, int slot);
 static const char	*seated_room_name(t_request_context *ctx);
-static int			start_games(t_server_room *sroom);
-static void			rollback_start(t_server_room *sroom);
+static int			start_games(t_server_room *server_room);
+static void			rollback_start(t_server_room *server_room);
 static int			start_status(t_request_context *ctx, t_start_verdict verdict);
 
 /**
@@ -53,7 +53,7 @@ bool	request_is_authorised(t_request_context *ctx)
  */
 int	list_handler(const t_htttp_message *msg, void *context)
 {
-	t_sb_room_row	rows[LOBBY_MAX_ROOMS];
+	t_body_room_row	rows[LOBBY_MAX_ROOMS];
 	t_request_context		*ctx;
 	size_t			count;
 	int				len;
@@ -149,7 +149,7 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 int	start_handler(const t_htttp_message *msg, void *context)
 {
 	t_request_context		*ctx;
-	t_server_room		*sroom;
+	t_server_room		*server_room;
 	const char		*name;
 	t_start_verdict	verdict;
 
@@ -160,19 +160,19 @@ int	start_handler(const t_htttp_message *msg, void *context)
 	name = seated_room_name(ctx);
 	if (name == NULL)
 		return (404);
-	sroom = server_room_at(ctx->srv, ctx->cli->room_index);
-	if (sroom == NULL)
+	server_room = server_room_at(ctx->srv, ctx->cli->room_index);
+	if (server_room == NULL)
 		return (409);
-	pthread_mutex_lock(&sroom->mutex);
-	verdict = room_start(sroom->room, ctx->cli->player_id);
+	pthread_mutex_lock(&server_room->mutex);
+	verdict = room_start(server_room->room, ctx->cli->player_id);
 	if (verdict == START_ACCEPTED)
-		start_games(sroom);
-	pthread_mutex_unlock(&sroom->mutex);
+		start_games(server_room);
+	pthread_mutex_unlock(&server_room->mutex);
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
-	if (server_room_begin(sroom, ctx->srv) != 0)
+	if (server_room_begin(server_room, ctx->srv) != 0)
 	{
-		rollback_start(sroom);
+		rollback_start(server_room);
 		return (500);
 	}
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
@@ -189,27 +189,27 @@ int	start_handler(const t_htttp_message *msg, void *context)
  */
 static int	create_room(t_request_context *ctx, t_game_mode mode)
 {
-	t_server_room	*sroom;
+	t_server_room	*server_room;
 	t_room		*room;
 	int			slot;
 
 	slot = -1;
-	sroom = NULL;
+	server_room = NULL;
 	pthread_mutex_lock(&ctx->srv->lobby_mutex);
 	if (lobby_create_room(&ctx->srv->lobby, mode, &room) == 0)
 	{
-		sroom = server_room_at(ctx->srv, (int)(room - ctx->srv->lobby.rooms));
-		pthread_mutex_lock(&sroom->mutex);
+		server_room = server_room_at(ctx->srv, (int)(room - ctx->srv->lobby.rooms));
+		pthread_mutex_lock(&server_room->mutex);
 		slot = room_seat(room, ctx->cli->player_id, ctx->cli->username,
 				server_room_probe, ctx->srv);
-		pthread_mutex_unlock(&sroom->mutex);
+		pthread_mutex_unlock(&server_room->mutex);
 	}
 	pthread_mutex_unlock(&ctx->srv->lobby_mutex);
-	if (sroom == NULL || slot < 0)
+	if (server_room == NULL || slot < 0)
 		return (request_refuse(ctx, "lobby-full"));
-	bind_room(ctx->cli, sroom, slot);
+	bind_room(ctx->cli, server_room, slot);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s created room %s",
-		ctx->cli->username, sroom->room->name);
+		ctx->cli->username, server_room->room->name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->room_name, slot);
 	return (201);
 }
@@ -223,27 +223,27 @@ static int	create_room(t_request_context *ctx, t_game_mode mode)
  */
 static int	join_room(t_request_context *ctx, const char *name)
 {
-	t_server_room		*sroom;
+	t_server_room		*server_room;
 	t_join_verdict	verdict;
 	int				slot;
 
-	sroom = server_room_find(ctx->srv, name);
-	if (sroom == NULL)
+	server_room = server_room_find(ctx->srv, name);
+	if (server_room == NULL)
 		return (404);
 	slot = -1;
-	pthread_mutex_lock(&sroom->mutex);
-	verdict = room_can_accept(sroom->room);
+	pthread_mutex_lock(&server_room->mutex);
+	verdict = room_can_accept(server_room->room);
 	if (verdict == JOIN_ACCEPTED)
-		slot = room_seat(sroom->room, ctx->cli->player_id, ctx->cli->username,
+		slot = room_seat(server_room->room, ctx->cli->player_id, ctx->cli->username,
 				server_room_probe, ctx->srv);
-	pthread_mutex_unlock(&sroom->mutex);
+	pthread_mutex_unlock(&server_room->mutex);
 	if (verdict == JOIN_FULL)
 		return (request_refuse(ctx, "full"));
 	if (verdict == JOIN_IN_GAME)
 		return (request_refuse(ctx, "in-game"));
 	if (slot < 0)
 		return (request_refuse(ctx, "seat-refused"));
-	bind_room(ctx->cli, sroom, slot);
+	bind_room(ctx->cli, server_room, slot);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s joined %s",
 		ctx->cli->username, name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->room_name,
@@ -304,23 +304,23 @@ static int	read_mode(t_request_context *ctx, t_game_mode *out)
  * @brief Records which room and slot a connection now occupies.
  *
  * @param cli Client that was seated.
- * @param sroom Room runtime it was seated in.
+ * @param server_room Room runtime it was seated in.
  * @param slot The 1-based slot index.
  */
-static void	bind_room(t_client *cli, t_server_room *sroom, int slot)
+static void	bind_room(t_client *cli, t_server_room *server_room, int slot)
 {
-	cli->room_index = sroom->index;
+	cli->room_index = server_room->index;
 	cli->slot_index = slot;
-	snprintf(cli->room_name, sizeof(cli->room_name), "%s", sroom->room->name);
+	snprintf(cli->room_name, sizeof(cli->room_name), "%s", server_room->room->name);
 }
 
 /**
  * @brief Deals every seated player a board, under the room's mutex.
  *
- * @param sroom Room runtime whose game is starting.
+ * @param server_room Room runtime whose game is starting.
  * @return The number of games started.
  */
-static int	start_games(t_server_room *sroom)
+static int	start_games(t_server_room *server_room)
 {
 	uint32_t	seed;
 	int			started;
@@ -328,15 +328,15 @@ static int	start_games(t_server_room *sroom)
 
 	started = 0;
 	i = 0;
-	while (i < sroom->room->slot_count && i < TD_MAX_GAMES)
+	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
 	{
-		if (sroom->room->slots[i].occupied)
+		if (server_room->room->slots[i].occupied)
 		{
 			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
-					+ sroom->room->slots[i].membership.player_id);
-			game_start(&sroom->games[i], sroom->room->slots[i].membership.player_id,
+					+ server_room->room->slots[i].membership.player_id);
+			game_start(&server_room->games[i], server_room->room->slots[i].membership.player_id,
 				seed);
-			sroom->dirty[i] = true;
+			server_room->dirty[i] = true;
 			started++;
 		}
 		i++;
@@ -352,22 +352,22 @@ static int	start_games(t_server_room *sroom)
  * room domain will not seat or start anybody while it believes a game is
  * running. The players keep their slots and can simply try again.
  *
- * @param sroom Room runtime whose start is being undone.
+ * @param server_room Room runtime whose start is being undone.
  */
-static void	rollback_start(t_server_room *sroom)
+static void	rollback_start(t_server_room *server_room)
 {
 	int	i;
 
-	pthread_mutex_lock(&sroom->mutex);
+	pthread_mutex_lock(&server_room->mutex);
 	i = 0;
 	while (i < TD_MAX_GAMES)
 	{
-		game_reset(&sroom->games[i]);
-		sroom->dirty[i] = false;
+		game_reset(&server_room->games[i]);
+		server_room->dirty[i] = false;
 		i++;
 	}
-	room_abort_start(sroom->room);
-	pthread_mutex_unlock(&sroom->mutex);
+	room_abort_start(server_room->room);
+	pthread_mutex_unlock(&server_room->mutex);
 }
 
 /**
@@ -423,7 +423,7 @@ static const char	*seated_room_name(t_request_context *ctx)
  * @param rows Receives up to LOBBY_MAX_ROOMS rows.
  * @return Number of rows written.
  */
-static size_t	list_rooms(t_server *srv, t_sb_room_row *rows)
+static size_t	list_rooms(t_server *srv, t_body_room_row *rows)
 {
 	t_room_snapshot	snaps[LOBBY_MAX_ROOMS];
 	size_t			count;
@@ -442,10 +442,10 @@ static size_t	list_rooms(t_server *srv, t_sb_room_row *rows)
 			memset(&rows[written], 0, sizeof(rows[written]));
 			snprintf(rows[written].name, sizeof(rows[written].name), "%s",
 				snaps[i].summary.name);
-			rows[written].mode = (t_sb_mode)snaps[i].summary.mode;
+			rows[written].mode = (t_body_mode)snaps[i].summary.mode;
 			rows[written].players = snaps[i].summary.players;
 			rows[written].slot_count = snaps[i].summary.slot_count;
-			rows[written].status = (t_sb_room_status)snaps[i].summary.status;
+			rows[written].status = (t_body_room_status)snaps[i].summary.status;
 			snprintf(rows[written].owner, sizeof(rows[written].owner), "%s",
 				snaps[i].summary.owner_name);
 			written++;

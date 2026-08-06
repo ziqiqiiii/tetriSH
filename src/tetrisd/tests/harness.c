@@ -199,7 +199,7 @@ int	hc_recv(t_harness *hc, t_htttp_message *out, int timeout_ms)
  * @param timeout_ms How long to wait.
  * @return 0 on success, -1 on timeout or a body that would not decode.
  */
-int	hc_wait_state(t_harness *hc, t_sb_state *out, int timeout_ms)
+int	hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms)
 {
 	t_htttp_message	msg;
 	int				rc;

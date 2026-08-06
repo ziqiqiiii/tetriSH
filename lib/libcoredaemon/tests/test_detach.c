@@ -42,8 +42,8 @@ int	main(void)
 
 static void	test_a_ready_daemon_exits_the_parent_zero(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	marker[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	marker[FIXTURE_PATH_MAX];
 	pid_t	pid;
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
@@ -72,8 +72,8 @@ static void	test_a_dying_daemon_exits_the_parent_nonzero(void)
 
 static void	test_the_daemon_is_not_a_session_leader(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	marker[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	marker[FIXTURE_PATH_MAX];
 	char	text[64];
 	pid_t	pid;
 
@@ -93,8 +93,8 @@ static void	test_the_daemon_is_not_a_session_leader(void)
 
 static void	test_stderr_redirect_moves_the_stream_to_a_file(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
 	char	text[128];
 	pid_t	pid;
 
@@ -119,9 +119,9 @@ static void	test_stderr_redirect_moves_the_stream_to_a_file(void)
 
 static void	test_stderr_redirect_refuses_a_bad_path(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
-	char	blocker[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
+	char	blocker[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(blocker, sizeof(blocker), "%s/wall", dir);

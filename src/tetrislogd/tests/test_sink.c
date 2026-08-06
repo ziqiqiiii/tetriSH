@@ -255,7 +255,7 @@ static void	touch(const char *path)
 {
 	int	fd;
 
-	fd = open(path, O_WRONLY | O_CREAT, TL_FILE_MODE);
+	fd = open(path, O_WRONLY | O_CREAT, TETRISLOGD_FILE_MODE);
 	assert(fd >= 0);
 	close(fd);
 }

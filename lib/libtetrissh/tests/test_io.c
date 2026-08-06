@@ -13,7 +13,7 @@ static void	test_u32_round_trip(void)
 
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	assert(sessionio_write_u32(fds[0], 0x01020304u) == 0);
-	assert(sessionio_read_u32(fds[1], &value) == SESSIONIO_IO_OK);
+	assert(sessionio_read_u32(fds[1], &value) == SESSIONIO_OK);
 	assert(value == 0x01020304u);
 	close(fds[0]);
 	close(fds[1]);
@@ -27,7 +27,7 @@ static void	test_u32_wire_bytes(void)
 
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	assert(sessionio_write_u32(fds[0], 0x01020304u) == 0);
-	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_OK);
 	assert(buf[0] == 0x01 && buf[1] == 0x02);
 	assert(buf[2] == 0x03 && buf[3] == 0x04);
 	close(fds[0]);
@@ -45,7 +45,7 @@ static void	test_exact_buffer_round_trip(void)
 	memset(buf, 0, sizeof(buf));
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	assert(sessionio_write_exact(fds[0], msg, strlen(msg)) == 0);
-	assert(sessionio_read_exact(fds[1], buf, strlen(msg)) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(fds[1], buf, strlen(msg)) == SESSIONIO_OK);
 	assert(strcmp(buf, msg) == 0);
 	close(fds[0]);
 	close(fds[1]);
@@ -60,7 +60,7 @@ static void	test_eof_before_payload_is_error(void)
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	assert(sessionio_write_exact(fds[0], "abc", 3) == 0);
 	close(fds[0]);
-	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_IO_ERR);
+	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_ERR);
 	close(fds[1]);
 	printf("PASS test_eof_before_payload_is_error\n");
 }
@@ -72,7 +72,7 @@ static void	test_clean_eof_before_payload(void)
 
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	close(fds[0]);
-	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_IO_EOF);
+	assert(sessionio_read_exact(fds[1], buf, sizeof(buf)) == SESSIONIO_EOF);
 	close(fds[1]);
 	printf("PASS test_clean_eof_before_payload\n");
 }

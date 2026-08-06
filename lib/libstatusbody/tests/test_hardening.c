@@ -9,10 +9,10 @@ static char	g_out[70000];
 
 void	test_all_decoders_reject_empty_buffer(void)
 {
-	t_sb_state		st;
-	t_sb_profile	pr;
-	t_sb_room_row	rooms[2];
-	t_sb_lb_row		lb[2];
+	t_body_state		st;
+	t_body_profile	pr;
+	t_body_room_row	rooms[2];
+	t_body_leaderboard_row		lb[2];
 	size_t			count;
 
 	assert(body_state_decode("", 0, &st) == -1);
@@ -28,10 +28,10 @@ void	test_all_decoders_reject_empty_buffer(void)
 
 void	test_all_codecs_reject_null_arguments(void)
 {
-	t_sb_state		st;
-	t_sb_profile	pr;
-	t_sb_room_row	rooms[2];
-	t_sb_lb_row		lb[2];
+	t_body_state		st;
+	t_body_profile	pr;
+	t_body_room_row	rooms[2];
+	t_body_leaderboard_row		lb[2];
 	size_t			count;
 	char			out[256];
 
@@ -64,10 +64,10 @@ void	test_all_codecs_reject_null_arguments(void)
 
 void	test_worst_case_encodes_fit_frame_cap(void)
 {
-	static t_sb_state		st;
-	static t_sb_profile		pr;
-	static t_sb_room_row	rooms[99];
-	static t_sb_lb_row		lb[10];
+	static t_body_state		st;
+	static t_body_profile		pr;
+	static t_body_room_row	rooms[99];
+	static t_body_leaderboard_row		lb[10];
 	int						row;
 	int						col;
 	int						i;
@@ -137,10 +137,10 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 
 void	test_decode_is_bounded_on_hostile_input(void)
 {
-	t_sb_state		st;
-	t_sb_profile	pr;
-	t_sb_room_row	rooms[4];
-	t_sb_lb_row		lb[4];
+	t_body_state		st;
+	t_body_profile	pr;
+	t_body_room_row	rooms[4];
+	t_body_leaderboard_row		lb[4];
 	size_t			count;
 
 	memset(g_big, 'A', sizeof(g_big)); // 64 KiB+, no newline, no NUL

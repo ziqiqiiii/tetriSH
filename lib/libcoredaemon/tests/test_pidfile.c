@@ -40,8 +40,8 @@ int	main(void)
 static void	test_claim_writes_the_pid_and_makes_parents(void)
 {
 	t_pidfile	pf;
-	char		dir[FX_DIR_MAX];
-	char		path[FX_PATH_MAX];
+	char		dir[FIXTURE_DIR_MAX];
+	char		path[FIXTURE_PATH_MAX];
 	char		text[64];
 	char		want[64];
 
@@ -62,8 +62,8 @@ static void	test_a_second_claim_loses_the_lock(void)
 {
 	t_holder	h;
 	t_pidfile	pf;
-	char		dir[FX_DIR_MAX];
-	char		path[FX_PATH_MAX];
+	char		dir[FIXTURE_DIR_MAX];
+	char		path[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	pid_path(path, sizeof(path), dir, "x.pid");
@@ -82,8 +82,8 @@ static void	test_release_hands_the_lock_on(void)
 {
 	t_holder	h;
 	t_pidfile	pf;
-	char		dir[FX_DIR_MAX];
-	char		path[FX_PATH_MAX];
+	char		dir[FIXTURE_DIR_MAX];
+	char		path[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	pid_path(path, sizeof(path), dir, "x.pid");
@@ -100,8 +100,8 @@ static void	test_release_hands_the_lock_on(void)
 
 static void	test_probe_reports_nothing_for_a_missing_pidfile(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
 	pid_t	pid;
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
@@ -116,8 +116,8 @@ static void	test_probe_reports_nothing_for_a_missing_pidfile(void)
 static void	test_probe_reports_nothing_for_a_stale_pidfile(void)
 {
 	t_holder	h;
-	char		dir[FX_DIR_MAX];
-	char		path[FX_PATH_MAX];
+	char		dir[FIXTURE_DIR_MAX];
+	char		path[FIXTURE_PATH_MAX];
 	char		text[64];
 	pid_t		pid;
 
@@ -136,8 +136,8 @@ static void	test_probe_reports_nothing_for_a_stale_pidfile(void)
 static void	test_probe_reports_the_pid_of_a_live_holder(void)
 {
 	t_holder	h;
-	char		dir[FX_DIR_MAX];
-	char		path[FX_PATH_MAX];
+	char		dir[FIXTURE_DIR_MAX];
+	char		path[FIXTURE_PATH_MAX];
 	pid_t		pid;
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
@@ -155,8 +155,8 @@ static void	test_probe_reports_the_pid_of_a_live_holder(void)
 
 static void	test_read_parses_an_unheld_pidfile(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
 	pid_t	pid;
 	int		fd;
 

@@ -2,7 +2,7 @@
 
 // Static Functions
 static void		*ticker_main(void *arg);
-static int		tick_once(t_server_room *server_room, t_sb_state *snaps, t_player_id *pids);
+static int		tick_once(t_server_room *server_room, t_body_state *snaps, t_player_id *pids);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
@@ -229,7 +229,7 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
  * @param snap Snapshot to encode and push.
  */
 void	server_room_push_state(t_server_room *server_room, const char *room_name,
-		t_player_id pid, const t_sb_state *snap)
+		t_player_id pid, const t_body_state *snap)
 {
 	t_htttp_message	msg;
 	unsigned char	*bytes;
@@ -270,7 +270,7 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
  */
 static void	*ticker_main(void *arg)
 {
-	t_sb_state		snaps[TD_MAX_GAMES];
+	t_body_state		snaps[TD_MAX_GAMES];
 	t_player_id		pids[TD_MAX_GAMES];
 	struct timespec	period;
 	t_server_room		*server_room;
@@ -317,7 +317,7 @@ static void	*ticker_main(void *arg)
  * @param pids Receives the matching subject player ids.
  * @return Number of snapshots collected.
  */
-static int	tick_once(t_server_room *server_room, t_sb_state *snaps, t_player_id *pids)
+static int	tick_once(t_server_room *server_room, t_body_state *snaps, t_player_id *pids)
 {
 	int	elapsed;
 	int	slot;

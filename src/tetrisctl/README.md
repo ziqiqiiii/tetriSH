@@ -141,13 +141,13 @@ A lock cannot outlive its holder, so a pidfile left by a crash reads as stopped 
 
 ### Start waits, and that is the feature
 
-`d_start` forks, execs the daemon binary, and waits for that child. The child is the daemon's *own* launching process: the binary daemonises itself, so the child lives exactly as long as the boot does and exits with the verdict its readiness pipe carried. Waiting for it is not a delay, it is the answer.
+`managed_start` forks, execs the daemon binary, and waits for that child. The child is the daemon's *own* launching process: the binary daemonises itself, so the child lives exactly as long as the boot does and exits with the verdict its readiness pipe carried. Waiting for it is not a delay, it is the answer.
 
 The shell's `dspawn` could not do this. It wrote its registry entry and *then* called `execvp`, so it never learned whether the program it launched started — a `tetrislogd` that lost a race exited immediately and left an entry `dcheck` rendered as "down", with no cause recorded anywhere.
 
 ### Stop asks the lock, not the process table
 
-`d_stop` sends `SIGTERM`, then blocks on the pidfile lock. The lock comes free as the daemon's last act — after it has drained what it had, reclaimed its sink and written its exit line — so when `stop` returns the daemon is gone, not merely signalled. That is the "blocks until teardown completes" guarantee `docs/use_cases.md` asks for, bought without a protocol on either side.
+`managed_stop` sends `SIGTERM`, then blocks on the pidfile lock. The lock comes free as the daemon's last act — after it has drained what it had, reclaimed its sink and written its exit line — so when `stop` returns the daemon is gone, not merely signalled. That is the "blocks until teardown completes" guarantee `docs/use_cases.md` asks for, bought without a protocol on either side.
 
 The same lock answers `status`. A pidfile is readable long after its writer is gone, so trusting the file would mean signalling a pid some unrelated process now owns.
 
@@ -176,13 +176,13 @@ Resolution is deferred until the whole file has been read, because a file writte
 src/tetrisctl/
 ├── include/tetrisctl.h   Every type and prototype; src/*.c include only this
 ├── src/
-│   ├── main.c            Argument shim over cfg_load and the cmd_* functions
-│   ├── cfg.c             .tetrishrc parsing, the roster, pidfile resolution
-│   ├── daemon.c          One daemon: probe it, launch it, signal it, wait
-│   └── cmd.c             start / status / stop / restart across the roster
+│   ├── main.c            Argument shim over config_load and the *_command functions
+│   ├── config.c             .tetrishrc parsing, the roster, pidfile resolution
+│   ├── managed.c          One daemon: probe it, launch it, signal it, wait
+│   └── commands.c             start / status / stop / restart across the roster
 ├── tests/
 │   ├── fakedaemon.c      A real self-detaching daemon for the suites to drive
-│   ├── test_cfg.c
+│   ├── test_config.c
 │   └── test_lifecycle.c
 ├── scripts/run_tests.sh
 └── Makefile              → src/tetrisctl/tetrisctl
@@ -199,7 +199,7 @@ make -C src/tetrisctl test FILTER=lifecycle
 
 | Suite | Proves |
 |---|---|
-| `test_cfg` | • Roster comes from `.tetrishrc`<br>• Pidfiles read from each daemon's own prefix <br>• Key order does not matter <br>• Unmanaged daemon name fails the load, unknown key is skipped <br>• Environment beats the file <br>• The shipped `.tetrishrc` resolves |
+| `test_config` | • Roster comes from `.tetrishrc`<br>• Pidfiles read from each daemon's own prefix <br>• Key order does not matter <br>• Unmanaged daemon name fails the load, unknown key is skipped <br>• Environment beats the file <br>• The shipped `.tetrishrc` resolves |
 | `test_lifecycle` | • Start reports a daemon that came up *and* one that died booting <br>• A second start is a no-op on the same pid <br>• Stop blocks until the process is gone <br>• Stopping what is not running is success <br>• Teardown reverses launch order <br>• A crash-left pidfile reads as stopped |
 
 `test_lifecycle` execs a real self-detaching daemon (`tests/fakedaemon.c`), not a stub, because the two-process handover is what is under test. The Makefile installs it under `tests/bin/` once per managed daemon name, since `tetrisctl` resolves what to run through `PATH`.
@@ -207,5 +207,5 @@ make -C src/tetrisctl test FILTER=lifecycle
 Valgrind is expected to be clean:
 
 ```bash
-valgrind --leak-check=full --error-exitcode=1 src/tetrisctl/tests/bin/test_cfg
+valgrind --leak-check=full --error-exitcode=1 src/tetrisctl/tests/bin/test_config
 ```

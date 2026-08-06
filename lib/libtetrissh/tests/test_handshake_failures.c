@@ -60,7 +60,7 @@ static void	*oversized_cert_peer(void *arg)
 	unsigned char	nonce[SESSIONIO_NONCE_LEN];
 
 	peer = arg;
-	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_OK);
 	assert(sessionio_write_u32(peer->fd, TETRISSH_MAX_PLAINTEXT + 1u) == 0);
 	assert(sessionio_write_exact(peer->fd, "C", 1) == 0);
 	assert(shutdown(peer->fd, SHUT_WR) == 0);
@@ -118,7 +118,7 @@ static void	*wrong_signature_length_peer(void *arg)
 	uint32_t		cert_len;
 
 	peer = arg;
-	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(peer->fd, nonce, sizeof(nonce)) == SESSIONIO_OK);
 	cert = read_fixture("tests/tmp/certs/server.crt", &cert_len);
 	assert(sessionio_write_u32(peer->fd, cert_len) == 0);
 	assert(sessionio_write_exact(peer->fd, cert, cert_len) == 0);
@@ -159,10 +159,10 @@ static void	read_discard_blob(int fd)
 	uint32_t		len;
 	unsigned char	*buf;
 
-	assert(sessionio_read_u32(fd, &len) == SESSIONIO_IO_OK);
+	assert(sessionio_read_u32(fd, &len) == SESSIONIO_OK);
 	buf = malloc(len);
 	assert(buf != NULL);
-	assert(sessionio_read_exact(fd, buf, len) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(fd, buf, len) == SESSIONIO_OK);
 	free(buf);
 }
 

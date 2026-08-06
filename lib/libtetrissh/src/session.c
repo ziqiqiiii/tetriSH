@@ -64,21 +64,21 @@ ssize_t	session_recv(t_session *sess, void *buf, size_t max_len)
 	unsigned char	*frame;
 	unsigned char	*plain;
 	size_t			plain_len;
-	t_tsh_io_result	res;
+	t_sessionio_result	res;
 
 	if (!valid_session(sess) || buf == NULL)
 		return (-1);
 	res = sessionio_read_u32(sess->fd, &frame_len);
-	if (res == SESSIONIO_IO_EOF)
+	if (res == SESSIONIO_EOF)
 		return (0);
-	if (res != SESSIONIO_IO_OK || frame_len < SESSIONIO_FRAME_OVERHEAD
+	if (res != SESSIONIO_OK || frame_len < SESSIONIO_FRAME_OVERHEAD
 		|| frame_len > SESSIONIO_FRAME_OVERHEAD + TETRISSH_MAX_PLAINTEXT)
 		return (-1);
 	frame = malloc(frame_len);
 	if (frame == NULL)
 		return (-1);
 	plain = NULL;
-	if (sessionio_read_exact(sess->fd, frame, frame_len) != SESSIONIO_IO_OK
+	if (sessionio_read_exact(sess->fd, frame, frame_len) != SESSIONIO_OK
 		|| gcm_decrypt(sess, frame, frame_len, &plain, &plain_len) != 0)
 	{
 		OPENSSL_cleanse(frame, frame_len);

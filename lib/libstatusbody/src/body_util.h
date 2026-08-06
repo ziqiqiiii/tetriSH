@@ -19,16 +19,16 @@
 
 # define BODY_LINE_MAX	1024
 
-typedef struct s_sb_cursor
+typedef struct s_body_cursor
 {
 	const char	*p;
 	const char	*end;
-}	t_sb_cursor;
+}	t_body_cursor;
 
 int		body_fail(int err);
 int		body_append(char *out, size_t cap, size_t *off, const char *fmt, ...);
-int		body_take_line(t_sb_cursor *c, char *line, size_t cap);
-bool	body_at_end(const t_sb_cursor *c);
+int		body_take_line(t_body_cursor *c, char *line, size_t cap);
+bool	body_at_end(const t_body_cursor *c);
 int		body_parse_u64(const char *s, uint64_t *out);
 int		body_parse_int(const char *s, int *out, int min, int max);
 int		body_word_index(const char *word, const char *const *table, size_t n);

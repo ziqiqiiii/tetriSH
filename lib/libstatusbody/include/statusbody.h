@@ -37,15 +37,15 @@
 # define BODY_CHARGE_MAX		10
 # define BODY_COLOR_MAX		15
 
-typedef enum e_sb_phase
+typedef enum e_body_phase
 {
 	BODY_PHASE_ACTIVE,
 	BODY_PHASE_CLEARING,
 	BODY_PHASE_PAUSED,
 	BODY_PHASE_TOP_OUT
-}	t_sb_phase;
+}	t_body_phase;
 
-typedef enum e_sb_clear_label
+typedef enum e_body_clear_label
 {
 	BODY_CLEAR_NONE,
 	BODY_CLEAR_SINGLE,
@@ -55,44 +55,44 @@ typedef enum e_sb_clear_label
 	BODY_CLEAR_TSPIN,
 	BODY_CLEAR_TSPIN_MINI,
 	BODY_CLEAR_PERFECT
-}	t_sb_clear_label;
+}	t_body_clear_label;
 
-typedef enum e_sb_mode
+typedef enum e_body_mode
 {
 	BODY_MODE_SINGLE,
 	BODY_MODE_DOUBLE,
 	BODY_MODE_BATTLE_ROYALE
-}	t_sb_mode;
+}	t_body_mode;
 
-typedef enum e_sb_room_status
+typedef enum e_body_room_status
 {
 	BODY_ROOM_WAITING,
 	BODY_ROOM_READY,
 	BODY_ROOM_IN_GAME,
 	BODY_ROOM_FINISHED
-}	t_sb_room_status;
+}	t_body_room_status;
 
 /* one board cell on the wire: type 0-2, color 0-15 (one hex nibble each) */
-typedef struct s_sb_cell
+typedef struct s_body_cell
 {
 	uint8_t	type;
 	uint8_t	color;
-}	t_sb_cell;
+}	t_body_cell;
 
-typedef struct s_sb_piece
+typedef struct s_body_piece
 {
 	int	type;
 	int	rotation;
 	int	col;
 	int	row;
-}	t_sb_piece;
+}	t_body_piece;
 
 /* last ability activation feedback; level 0 = none */
-typedef struct s_sb_ability
+typedef struct s_body_ability
 {
 	int		level;
 	bool	accepted;
-}	t_sb_ability;
+}	t_body_ability;
 
 /*
 ** application/tetris-state body, in encode order:
@@ -108,12 +108,12 @@ typedef struct s_sb_ability
 **   board            (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
 */
-typedef struct s_sb_state
+typedef struct s_body_state
 {
 	uint64_t			seq;
-	t_sb_phase			phase;
-	t_sb_cell			cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
-	t_sb_piece			piece;
+	t_body_phase			phase;
+	t_body_cell			cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
+	t_body_piece			piece;
 	int					next[BODY_NEXT_COUNT];
 	uint64_t			score;
 	int					lines;
@@ -121,26 +121,26 @@ typedef struct s_sb_state
 	int					combo;
 	bool				back_to_back;
 	int					charge;
-	t_sb_ability		last_ability;
+	t_body_ability		last_ability;
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
-	t_sb_clear_label	last_clear;
-}	t_sb_state;
+	t_body_clear_label	last_clear;
+}	t_body_state;
 
 /* one LIST /rooms line: <name> <mode> <players>/<slots> <status> <owner> */
-typedef struct s_sb_room_row
+typedef struct s_body_room_row
 {
 	char				name[BODY_NAME_MAX];
-	t_sb_mode			mode;
+	t_body_mode			mode;
 	int					players;
 	int					slot_count;
-	t_sb_room_status	status;
+	t_body_room_status	status;
 	char				owner[BODY_USER_MAX];
-}	t_sb_room_row;
+}	t_body_room_row;
 
 /* UC-20 ProfileView body, one key per line; owned lists are count-prefixed */
-typedef struct s_sb_profile
+typedef struct s_body_profile
 {
 	char		username[BODY_USER_MAX];
 	uint64_t	wallet;
@@ -152,30 +152,30 @@ typedef struct s_sb_profile
 	size_t		owned_character_count;
 	uint32_t	owned_themes[BODY_OWNED_MAX];
 	size_t		owned_theme_count;
-}	t_sb_profile;
+}	t_body_profile;
 
 /* one leaderboard line: <rank> <username> <score> (UC-21) */
-typedef struct s_sb_lb_row
+typedef struct s_body_leaderboard_row
 {
 	int			rank;
 	char		username[BODY_USER_MAX];
 	uint64_t	score;
-}	t_sb_lb_row;
+}	t_body_leaderboard_row;
 
 /* STATE.C */
-int	body_state_encode(const t_sb_state *in, char *out, size_t cap);
-int	body_state_decode(const char *buf, size_t len, t_sb_state *out);
+int	body_state_encode(const t_body_state *in, char *out, size_t cap);
+int	body_state_decode(const char *buf, size_t len, t_body_state *out);
 
 /* ROOMS.C */
-int	body_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap);
-int	body_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count);
+int	body_rooms_encode(const t_body_room_row *rows, size_t count, char *out, size_t cap);
+int	body_rooms_decode(const char *buf, size_t len, t_body_room_row *rows, size_t cap, size_t *count);
 
 /* PROFILE.C */
-int	body_profile_encode(const t_sb_profile *in, char *out, size_t cap);
-int	body_profile_decode(const char *buf, size_t len, t_sb_profile *out);
+int	body_profile_encode(const t_body_profile *in, char *out, size_t cap);
+int	body_profile_decode(const char *buf, size_t len, t_body_profile *out);
 
 /* LEADERBOARD.C */
-int	body_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap);
-int	body_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count);
+int	body_leaderboard_encode(const t_body_leaderboard_row *rows, size_t count, char *out, size_t cap);
+int	body_leaderboard_decode(const char *buf, size_t len, t_body_leaderboard_row *rows, size_t cap, size_t *count);
 
 # endif

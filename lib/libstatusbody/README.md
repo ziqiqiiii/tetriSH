@@ -40,15 +40,15 @@ cc ... -I lib/libstatusbody/include lib/libstatusbody/libstatusbody.a
 ```c
 #include "statusbody.h"
 
-t_sb_state	frame;
-t_sb_state	decoded;
+t_body_state	frame;
+t_body_state	decoded;
 char		body[4096];
 int		len;
 
 memset(&frame, 0, sizeof(frame));
 frame.seq = 42;
 frame.phase = BODY_PHASE_ACTIVE;
-frame.piece = (t_sb_piece){ .type = 3, .rotation = 1, .col = 4, .row = 0 };
+frame.piece = (t_body_piece){ .type = 3, .rotation = 1, .col = 4, .row = 0 };
 frame.charge = 7;
 /* ... board cells, next queue, score/lines/level ... */
 

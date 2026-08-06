@@ -4,9 +4,9 @@
 #include <stdio.h>
 
 // Static Functions
-static void	make_profile(t_sb_profile *p);
+static void	make_profile(t_body_profile *p);
 
-static void	make_profile(t_sb_profile *p)
+static void	make_profile(t_body_profile *p)
 {
 	memset(p, 0, sizeof(*p));
 	strcpy(p->username, "alice");
@@ -26,8 +26,8 @@ static void	make_profile(t_sb_profile *p)
 
 void	test_profile_round_trip_full(void)
 {
-	t_sb_profile	in;
-	t_sb_profile	back;
+	t_body_profile	in;
+	t_body_profile	back;
 	char			out[4096];
 	int				n;
 
@@ -42,8 +42,8 @@ void	test_profile_round_trip_full(void)
 
 void	test_profile_round_trip_empty_owned_lists(void)
 {
-	t_sb_profile	in;
-	t_sb_profile	back;
+	t_body_profile	in;
+	t_body_profile	back;
 	char			out[4096];
 	int				n;
 
@@ -64,7 +64,7 @@ void	test_profile_round_trip_empty_owned_lists(void)
 
 void	test_profile_decode_rejects_owned_overflow(void)
 {
-	t_sb_profile	back;
+	t_body_profile	back;
 	char			body[8192];
 	char			num[16];
 	int				i;
@@ -86,7 +86,7 @@ void	test_profile_decode_rejects_owned_overflow(void)
 
 void	test_profile_decode_rejects_missing_or_overlong_username(void)
 {
-	t_sb_profile	back;
+	t_body_profile	back;
 	const char		*no_username;
 	const char		*long_username;
 

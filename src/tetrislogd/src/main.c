@@ -1,7 +1,7 @@
 #include "tetrislogd.h"
 
 // Static Functions
-static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready);
+static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready);
 static int	run(t_logd *lg);
 
 /**
@@ -22,14 +22,14 @@ int	main(int argc, char **argv)
 {
 	t_pidfile	pf;
 	t_logd		lg;
-	t_cfg		cfg;
+	t_config		cfg;
 	int			ready;
 	int			status;
 
-	if (cfg_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
+	if (config_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
 	{
 		fprintf(stderr, "%s: cannot load configuration: %s\n",
-			TL_COMPONENT, strerror(errno));
+			TETRISLOGD_COMPONENT_NAME, strerror(errno));
 		return (EXIT_FAILURE);
 	}
 	if (go_background(&cfg, &pf, &ready) != 0)
@@ -37,14 +37,14 @@ int	main(int argc, char **argv)
 	if (logd_start(&lg, &cfg) != 0)
 	{
 		fprintf(stderr, "%s: cannot start: %s\n",
-			TL_COMPONENT, strerror(errno));
+			TETRISLOGD_COMPONENT_NAME, strerror(errno));
 		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
 	if (daemon_stderr_redirect(cfg.err_path) != 0)
 	{
 		fprintf(stderr, "%s: cannot open %s: %s\n",
-			TL_COMPONENT, cfg.err_path, strerror(errno));
+			TETRISLOGD_COMPONENT_NAME, cfg.err_path, strerror(errno));
 		logd_stop(&lg);
 		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
@@ -70,23 +70,23 @@ int	main(int argc, char **argv)
  * @param ready Receives the readiness descriptor for daemon_ready.
  * @return 0 on success, -1 after reporting why on stderr.
  */
-static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready)
+static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready)
 {
 	daemon_pid_blank(pf);
 	if (daemon_detach(ready) != 0)
 	{
 		fprintf(stderr, "%s: cannot detach: %s\n",
-			TL_COMPONENT, strerror(errno));
+			TETRISLOGD_COMPONENT_NAME, strerror(errno));
 		return (-1);
 	}
 	if (daemon_pid_claim(pf, cfg->pid_path) != 0)
 	{
 		if (errno == EWOULDBLOCK || errno == EAGAIN)
 			fprintf(stderr, "%s: already running (%s)\n",
-				TL_COMPONENT, cfg->pid_path);
+				TETRISLOGD_COMPONENT_NAME, cfg->pid_path);
 		else
 			fprintf(stderr, "%s: cannot claim %s: %s\n",
-				TL_COMPONENT, cfg->pid_path, strerror(errno));
+				TETRISLOGD_COMPONENT_NAME, cfg->pid_path, strerror(errno));
 		return (-1);
 	}
 	return (0);
@@ -105,7 +105,7 @@ static int	run(t_logd *lg)
 		if (logd_run_once(lg) != 0)
 		{
 			fprintf(stderr, "%s: loop failed: %s\n",
-				TL_COMPONENT, strerror(errno));
+				TETRISLOGD_COMPONENT_NAME, strerror(errno));
 			return (EXIT_FAILURE);
 		}
 	}

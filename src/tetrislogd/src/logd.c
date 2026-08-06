@@ -1,7 +1,7 @@
 #include "tetrislogd.h"
 
 // Static Functions
-static int			bring_up(t_logd *lg, const t_cfg *cfg);
+static int			bring_up(t_logd *lg, const t_config *cfg);
 static void			unwind(t_logd *lg);
 static void			apply_signals(t_logd *lg, int flags);
 static void			drain_socket(t_logd *lg);
@@ -26,7 +26,7 @@ void	logd_blank(t_logd *lg)
 	lg->sock_fd = -1;
 	lg->wake[SELFPIPE_READ] = -1;
 	lg->wake[SELFPIPE_WRITE] = -1;
-	lg->idle_ms = TL_IDLE_MS;
+	lg->idle_ms = TETRISLOGD_IDLE_MS;
 	lg->running = false;
 }
 
@@ -42,7 +42,7 @@ void	logd_blank(t_logd *lg)
  * @return 0 on success, -1 when the sink cannot be opened or the socket
  * cannot be bound.
  */
-int	logd_start(t_logd *lg, const t_cfg *cfg)
+int	logd_start(t_logd *lg, const t_config *cfg)
 {
 	if (lg == NULL || cfg == NULL)
 	{
@@ -92,7 +92,7 @@ int	logd_run_once(t_logd *lg)
 		return (-1);
 	if (pfd[1].revents & POLLIN)
 		selfpipe_drain(lg->wake[SELFPIPE_READ]);
-	apply_signals(lg, sig_take());
+	apply_signals(lg, signals_take());
 	if (pfd[0].revents & POLLIN)
 		drain_socket(lg);
 	else if (n == 0)
@@ -122,7 +122,7 @@ void	logd_stop(t_logd *lg)
 		resync_sink(lg);
 		logd_report(lg, "exit");
 	}
-	sig_detach();
+	signals_detach();
 	sink_close(&lg->sink);
 	if (lg->sock_fd >= 0)
 		unixsock_close_unlink(lg->sock_fd, lg->cfg.sock_path);
@@ -153,7 +153,7 @@ void	logd_stop(t_logd *lg)
  */
 int	logd_accept(t_logd *lg, const void *buf, size_t len)
 {
-	char	line[TL_LINE_MAX];
+	char	line[TETRISLOGD_CONFIG_LINE_MAX];
 	int		n;
 
 	if (lg == NULL)
@@ -200,7 +200,7 @@ void	logd_emit(t_logd *lg, t_log_level level, const char *fmt, ...)
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	va_end(ap);
 	if (logrecord_make(&rec, level, now_ms(), (uint32_t)getpid(),
-			TL_COMPONENT, msg) != 0)
+			TETRISLOGD_COMPONENT_NAME, msg) != 0)
 		return ;
 	logd_accept(lg, &rec, sizeof(rec));
 }
@@ -240,17 +240,17 @@ void	logd_report(t_logd *lg, const char *event)
  * @param cfg Configuration supplying both paths.
  * @return 0 on success, -1 with errno set on the first failure.
  */
-static int	bring_up(t_logd *lg, const t_cfg *cfg)
+static int	bring_up(t_logd *lg, const t_config *cfg)
 {
 	if (sink_open(&lg->sink, cfg->file_path) != 0)
 		return (-1);
 	if (selfpipe_open(lg->wake) != 0)
 		return (-1);
-	if (sig_install(lg->wake[SELFPIPE_WRITE]) != 0)
+	if (signals_install(lg->wake[SELFPIPE_WRITE]) != 0)
 		return (-1);
-	if (cfg_mkdir_parent(cfg->sock_path) != 0)
+	if (daemon_mkdir_parent(cfg->sock_path) != 0)
 		return (-1);
-	lg->sock_fd = unixsock_dgram_bind(cfg->sock_path, TL_SOCK_MODE);
+	lg->sock_fd = unixsock_dgram_bind(cfg->sock_path, TETRISLOGD_SOCKET_MODE);
 	if (lg->sock_fd < 0)
 		return (-1);
 	return (0);
@@ -267,7 +267,7 @@ static int	bring_up(t_logd *lg, const t_cfg *cfg)
  */
 static void	unwind(t_logd *lg)
 {
-	sig_detach();
+	signals_detach();
 	sink_close(&lg->sink);
 	if (lg->wake[SELFPIPE_READ] >= 0)
 		close(lg->wake[SELFPIPE_READ]);
@@ -306,20 +306,20 @@ static void	drain_socket(t_logd *lg)
  * @brief Carries out whatever the signals that arrived asked for.
  *
  * @param lg Daemon to act on.
- * @param flags Bitmask from sig_take.
+ * @param flags Bitmask from signals_take.
  */
 static void	apply_signals(t_logd *lg, int flags)
 {
-	if (flags & TL_SIG_HUP)
+	if (flags & TETRISLOGD_SIGNAL_HUP)
 	{
 		if (sink_reopen(&lg->sink) == 0)
 			logd_report(lg, "rotated");
 		else
 			logd_report(lg, "rotation failed, degrading to stderr");
 	}
-	if (flags & TL_SIG_DUMP)
+	if (flags & TETRISLOGD_SIGNAL_DUMP)
 		logd_report(lg, "dump");
-	if (flags & TL_SIG_STOP)
+	if (flags & TETRISLOGD_SIGNAL_STOP)
 		lg->running = false;
 }
 

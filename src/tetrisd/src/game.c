@@ -3,7 +3,7 @@
 // Static Functions
 static void				spawn_next(t_game *g);
 static void				lock_piece(t_game *g);
-static t_sb_clear_label	clear_label(int lines, bool perfect);
+static t_body_clear_label	clear_label(int lines, bool perfect);
 static int				step_interval(const t_game *g);
 
 /**
@@ -161,7 +161,7 @@ bool	game_drop(t_game *g, bool hard)
  * @param g Game to project.
  * @param out Snapshot to fill.
  */
-void	game_snapshot(const t_game *g, t_sb_state *out)
+void	game_snapshot(const t_game *g, t_body_state *out)
 {
 	t_cell	cell;
 	int		row;
@@ -271,7 +271,7 @@ static void	lock_piece(t_game *g)
  * @param perfect true when the clear emptied the board.
  * @return The matching wire label.
  */
-static t_sb_clear_label	clear_label(int lines, bool perfect)
+static t_body_clear_label	clear_label(int lines, bool perfect)
 {
 	if (perfect)
 		return (BODY_CLEAR_PERFECT);

@@ -8,7 +8,7 @@ static int	usage(void);
  * @brief Entry point: read the roster, then run one command against it.
  *
  * A thin shim, for the same reason both daemons' mains are: everything worth
- * testing lives behind cfg_load and the cmd_* functions, which the suites
+ * testing lives behind config_load and the *_command functions, which the suites
  * drive in-process against a fake daemon rather than by running this binary.
  *
  * @param argc Number of command-line arguments.
@@ -31,10 +31,10 @@ int	main(int argc, char **argv)
 	}
 	if (i >= argc)
 		return (usage());
-	if (cfg_load(&ctl, rc) != 0)
+	if (config_load(&ctl, rc) != 0)
 	{
 		fprintf(stderr, "%s: cannot read the roster from %s\n",
-			TC_COMPONENT, ctl.rc_path);
+			TETRISCTL_COMPONENT_NAME, ctl.rc_path);
 		return (EXIT_FAILURE);
 	}
 	if (dispatch(&ctl, argv[i], i + 1 < argc ? argv[i + 1] : NULL) != 0)
@@ -53,14 +53,14 @@ int	main(int argc, char **argv)
 static int	dispatch(const t_ctl *ctl, const char *verb, const char *only)
 {
 	if (strcmp(verb, "start") == 0)
-		return (cmd_start(ctl, only));
+		return (start_command(ctl, only));
 	if (strcmp(verb, "status") == 0)
-		return (cmd_status(ctl, only));
+		return (status_command(ctl, only));
 	if (strcmp(verb, "stop") == 0)
-		return (cmd_stop(ctl, only));
+		return (stop_command(ctl, only));
 	if (strcmp(verb, "restart") == 0)
-		return (cmd_restart(ctl, only));
-	fprintf(stderr, "%s: unknown command '%s'\n", TC_COMPONENT, verb);
+		return (restart_command(ctl, only));
+	fprintf(stderr, "%s: unknown command '%s'\n", TETRISCTL_COMPONENT_NAME, verb);
 	usage();
 	return (-1);
 }
@@ -76,6 +76,6 @@ static int	usage(void)
 		"usage: %s [-f <rc>] start|status|stop|restart [daemon]\n"
 		"       the daemons and their launch order come from %sDAEMONS\n"
 		"       in .tetrishrc; stop and restart reverse that order\n",
-		TC_COMPONENT, TC_KEY_PREFIX);
+		TETRISCTL_COMPONENT_NAME, TETRISCTL_CONFIG_KEY_PREFIX);
 	return (EXIT_FAILURE);
 }

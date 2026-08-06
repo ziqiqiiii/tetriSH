@@ -27,7 +27,7 @@ static void	test_an_input_flood_is_rate_limited(void);
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static int		simple(t_harness *hc, const char *method, const char *path, const char *body);
 static int		start_single(t_fixture *fx, t_harness *hc, char *play_path, size_t cap);
-static int		latest_state(t_harness *hc, t_sb_state *out, int window_ms);
+static int		latest_state(t_harness *hc, t_body_state *out, int window_ms);
 static void		nap(int ms);
 static int64_t	login_score(t_fixture *fx, const char *name);
 
@@ -87,7 +87,7 @@ static void	test_an_input_flood_is_rate_limited(void)
 
 static void	test_starting_a_game_pushes_the_first_state(void)
 {
-	t_sb_state	state;
+	t_body_state	state;
 	t_fixture	fx;
 	t_harness	hc;
 	char		play[96];
@@ -109,8 +109,8 @@ static void	test_starting_a_game_pushes_the_first_state(void)
 
 static void	test_inputs_move_the_piece(void)
 {
-	t_sb_state	before;
-	t_sb_state	after;
+	t_body_state	before;
+	t_body_state	after;
 	t_fixture	fx;
 	t_harness	hc;
 	char		play[96];
@@ -140,7 +140,7 @@ static void	test_inputs_move_the_piece(void)
 
 static void	test_hard_drop_locks_a_piece(void)
 {
-	t_sb_state	state;
+	t_body_state	state;
 	t_fixture	fx;
 	t_harness	hc;
 	char		play[96];
@@ -170,8 +170,8 @@ static void	test_hard_drop_locks_a_piece(void)
 
 static void	test_gravity_falls_without_input(void)
 {
-	t_sb_state	before;
-	t_sb_state	after;
+	t_body_state	before;
+	t_body_state	after;
 	t_fixture	fx;
 	t_harness	hc;
 	char		play[96];
@@ -212,7 +212,7 @@ static void	test_inputs_for_another_player_are_refused(void)
 
 static void	test_topping_out_ends_and_records_the_game(void)
 {
-	t_sb_state	state;
+	t_body_state	state;
 	t_fixture	fx;
 	t_harness	hc;
 	char		play[96];
@@ -241,7 +241,7 @@ static void	test_topping_out_ends_and_records_the_game(void)
 
 static void	test_a_disconnect_forfeits_but_the_room_plays_on(void)
 {
-	t_sb_state	state;
+	t_body_state	state;
 	t_fixture	fx;
 	t_harness	amber;
 	t_harness	blake;
@@ -372,9 +372,9 @@ static int	start_single(t_fixture *fx, t_harness *hc, char *play_path,
  * @param window_ms How long to keep collecting.
  * @return 0 when at least one snapshot arrived, -1 otherwise.
  */
-static int	latest_state(t_harness *hc, t_sb_state *out, int window_ms)
+static int	latest_state(t_harness *hc, t_body_state *out, int window_ms)
 {
-	t_sb_state	snap;
+	t_body_state	snap;
 	int			seen;
 
 	seen = 0;

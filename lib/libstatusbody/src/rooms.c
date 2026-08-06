@@ -14,8 +14,8 @@ static const char *const	g_statuses[] = {
 							};
 
 // Static Functions
-static int	encode_row(const t_sb_room_row *row, char *out, size_t cap, size_t *off);
-static int	decode_row(const char *line, t_sb_room_row *row);
+static int	encode_row(const t_body_room_row *row, char *out, size_t cap, size_t *off);
+static int	decode_row(const char *line, t_body_room_row *row);
 
 /**
  * @brief Serialises the LIST /rooms body: one line per row in the form
@@ -33,7 +33,7 @@ static int	decode_row(const char *line, t_sb_room_row *row);
  *         EINVAL (NULL args with count > 0, bad enum value) or ERANGE
  *         (cap too small).
  */
-int	body_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap)
+int	body_rooms_encode(const t_body_room_row *rows, size_t count, char *out, size_t cap)
 {
 	size_t	off;
 	size_t	i;
@@ -72,9 +72,9 @@ int	body_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t
  *         (malformed line, unknown mode/status token, overlong name/owner),
  *         or ERANGE (more rows than cap).
  */
-int	body_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count)
+int	body_rooms_decode(const char *buf, size_t len, t_body_room_row *rows, size_t cap, size_t *count)
 {
-	t_sb_cursor	c;
+	t_body_cursor	c;
 	char		line[BODY_LINE_MAX];
 
 	if (!buf || !rows || !count)
@@ -103,7 +103,7 @@ int	body_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t c
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_row(const t_sb_room_row *row, char *out, size_t cap,
+static int	encode_row(const t_body_room_row *row, char *out, size_t cap,
 		size_t *off)
 {
 	return (body_append(out, cap, off, "%s %s %d/%d %s %s\n", row->name,
@@ -119,7 +119,7 @@ static int	encode_row(const t_sb_room_row *row, char *out, size_t cap,
  * @return 0 on success, -1 on a malformed field, unknown token, or a name
  *         or owner too long for its field.
  */
-static int	decode_row(const char *line, t_sb_room_row *row)
+static int	decode_row(const char *line, t_body_room_row *row)
 {
 	char	word[4][BODY_LINE_MAX];
 	int		n;
@@ -139,7 +139,7 @@ static int	decode_row(const char *line, t_sb_room_row *row)
 		return (-1);
 	strcpy(row->name, word[0]);
 	strcpy(row->owner, word[3]);
-	row->mode = (t_sb_mode)mode;
-	row->status = (t_sb_room_status)status;
+	row->mode = (t_body_mode)mode;
+	row->status = (t_body_room_status)status;
 	return (0);
 }

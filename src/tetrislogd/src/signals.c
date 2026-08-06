@@ -18,7 +18,7 @@ static volatile sig_atomic_t	g_wake_fd = -1;
  * @param wake_fd Write end of the self-pipe the handler notifies.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	sig_install(int wake_fd)
+int	signals_install(int wake_fd)
 {
 	if (wake_fd < 0)
 	{
@@ -41,9 +41,9 @@ int	sig_install(int wake_fd)
  * The loop asks once per wake-up, so two SIGHUPs between iterations coalesce
  * into one rotation - which is right, the file only needs reopening once.
  *
- * @return Bitmask of TL_SIG_STOP, TL_SIG_HUP and TL_SIG_DUMP.
+ * @return Bitmask of TETRISLOGD_SIGNAL_STOP, TETRISLOGD_SIGNAL_HUP and TETRISLOGD_SIGNAL_DUMP.
  */
-int	sig_take(void)
+int	signals_take(void)
 {
 	int	pending;
 
@@ -60,7 +60,7 @@ int	sig_take(void)
  * have the handler write a byte into whatever now owns that descriptor, so
  * the loop must disown it before the close rather than after.
  */
-void	sig_detach(void)
+void	signals_detach(void)
 {
 	g_wake_fd = -1;
 	g_pending = 0;
@@ -78,11 +78,11 @@ void	sig_detach(void)
 static void	on_signal(int signo)
 {
 	if (signo == SIGTERM || signo == SIGINT)
-		g_pending |= TL_SIG_STOP;
+		g_pending |= TETRISLOGD_SIGNAL_STOP;
 	else if (signo == SIGHUP)
-		g_pending |= TL_SIG_HUP;
+		g_pending |= TETRISLOGD_SIGNAL_HUP;
 	else if (signo == SIGUSR1)
-		g_pending |= TL_SIG_DUMP;
+		g_pending |= TETRISLOGD_SIGNAL_DUMP;
 	if (g_wake_fd >= 0)
 		selfpipe_notify((int)g_wake_fd);
 }

@@ -12,11 +12,11 @@
 #include "tetrisctl.h"
 #include <assert.h>
 
-/* smaller than TC_PATH_MAX: a mkdtemp dir plus a short leaf is all any case
+/* smaller than TETRISCTL_FS_PATH_MAX: a mkdtemp dir plus a short leaf is all any case
 ** builds, and sizing these from the program's own maximum makes every
 ** snprintf here look to the compiler like it might truncate. */
-#define FX_DIR_MAX	96
-#define FX_PATH_MAX	256
+#define FIXTURE_DIR_MAX	96
+#define FIXTURE_PATH_MAX	256
 
 // Static Functions
 static void	test_a_roster_must_be_declared(void);
@@ -56,16 +56,16 @@ int	main(void)
 static void	test_a_roster_must_be_declared(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
-	cfg_defaults(&ctl);
-	assert(cfg_resolve(&ctl) == -1);
+	config_defaults(&ctl);
+	assert(config_resolve(&ctl) == -1);
 	assert(ctl.count == 0);
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc, "export TETRISCTL_DAEMONS=\"tetrislogd\"\n");
-	assert(cfg_load(&ctl, rc) == -1);
+	assert(config_load(&ctl, rc) == -1);
 	rmtree(dir);
 	printf("PASS test_a_roster_must_be_declared\n");
 }
@@ -79,19 +79,19 @@ static void	test_a_roster_must_be_declared(void)
 static void	test_the_roster_comes_from_the_rc_file(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrisd\"\n"
 		"export TETRISD_PID_PATH=/run/tetrisd.pid\n");
-	assert(cfg_load(&ctl, rc) == 0);
+	assert(config_load(&ctl, rc) == 0);
 	assert(ctl.count == 1);
 	assert(strcmp(ctl.daemons[0].name, "tetrisd") == 0);
-	assert(ctl_find(&ctl, "tetrisd") != NULL);
-	assert(ctl_find(&ctl, "tetrislogd") == NULL);
+	assert(ctl_find_daemon(&ctl, "tetrisd") != NULL);
+	assert(ctl_find_daemon(&ctl, "tetrislogd") == NULL);
 	rmtree(dir);
 	printf("PASS test_the_roster_comes_from_the_rc_file\n");
 }
@@ -104,8 +104,8 @@ static void	test_the_roster_comes_from_the_rc_file(void)
 static void	test_pidfile_keys_are_read_from_the_daemons_prefixes(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
@@ -113,7 +113,7 @@ static void	test_pidfile_keys_are_read_from_the_daemons_prefixes(void)
 		"export TETRISCTL_DAEMONS=\"tetrislogd tetrisd\"\n"
 		"export TETRISLOGD_PID=/run/logd.pid\n"
 		"export TETRISD_PID_PATH=/run/tetrisd.pid\n");
-	assert(cfg_load(&ctl, rc) == 0);
+	assert(config_load(&ctl, rc) == 0);
 	assert(ctl.count == 2);
 	assert(strcmp(ctl.daemons[0].pid_path, "/run/logd.pid") == 0);
 	assert(strcmp(ctl.daemons[1].pid_path, "/run/tetrisd.pid") == 0);
@@ -129,8 +129,8 @@ static void	test_pidfile_keys_are_read_from_the_daemons_prefixes(void)
 static void	test_key_order_in_the_file_does_not_matter(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
@@ -138,7 +138,7 @@ static void	test_key_order_in_the_file_does_not_matter(void)
 		"export TETRISCTL_DAEMONS=\"tetrisd tetrislogd\"\n"
 		"export TETRISD_PID_PATH=/run/tetrisd.pid\n"
 		"export TETRISLOGD_PID=/run/logd.pid\n");
-	assert(cfg_load(&ctl, rc) == 0);
+	assert(config_load(&ctl, rc) == 0);
 	assert(strcmp(ctl.daemons[0].name, "tetrisd") == 0);
 	assert(strcmp(ctl.daemons[1].pid_path, "/run/logd.pid") == 0);
 	rmtree(dir);
@@ -154,22 +154,22 @@ static void	test_key_order_in_the_file_does_not_matter(void)
 static void	test_an_unmanaged_name_fails_the_roster(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrislogd tetrisu\"\n"
 		"export TETRISLOGD_PID=/run/logd.pid\n");
-	assert(cfg_load(&ctl, rc) == -1);
+	assert(config_load(&ctl, rc) == -1);
 	write_file(rc,
 		"PATH=/usr/bin\n"
 		"alias ll='ls -l'\n"
 		"# a comment\n"
 		"export TETRISCTL_DAEMONS=\"tetrislogd\"\n"
 		"export TETRISLOGD_PID=/run/logd.pid\n");
-	assert(cfg_load(&ctl, rc) == 0);
+	assert(config_load(&ctl, rc) == 0);
 	assert(ctl.count == 1);
 	rmtree(dir);
 	printf("PASS test_an_unmanaged_name_fails_the_roster\n");
@@ -178,8 +178,8 @@ static void	test_an_unmanaged_name_fails_the_roster(void)
 static void	test_env_overrides_file(void)
 {
 	t_ctl	ctl;
-	char	dir[FX_DIR_MAX];
-	char	rc[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	rc[FIXTURE_PATH_MAX];
 
 	assert(tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
@@ -187,7 +187,7 @@ static void	test_env_overrides_file(void)
 		"export TETRISCTL_DAEMONS=\"tetrislogd\"\n"
 		"export TETRISLOGD_PID=/run/from_file.pid\n");
 	setenv("TETRISLOGD_PID", "/run/from_env.pid", 1);
-	assert(cfg_load(&ctl, rc) == 0);
+	assert(config_load(&ctl, rc) == 0);
 	assert(strcmp(ctl.daemons[0].pid_path, "/run/from_env.pid") == 0);
 	unsetenv("TETRISLOGD_PID");
 	rmtree(dir);
@@ -207,7 +207,7 @@ static void	test_the_shipped_rc_file_resolves(void)
 	t_ctl	shipped;
 	int		i;
 
-	assert(cfg_load(&shipped, "../../.tetrishrc") == 0);
+	assert(config_load(&shipped, "../../.tetrishrc") == 0);
 	assert(shipped.count == 2);
 	assert(strcmp(shipped.daemons[0].name, "tetrislogd") == 0);
 	assert(strcmp(shipped.daemons[1].name, "tetrisd") == 0);

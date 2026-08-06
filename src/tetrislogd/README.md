@@ -94,7 +94,7 @@ The binary daemonises itself, so running it by name returns to the prompt once t
 | `SIGUSR1` | Write the counter line to the log — the stand-in for a control channel |
 | `SIGPIPE` | Ignored — a closed stderr must not kill the degraded path |
 
-Signals set a flag and write one byte down the self-pipe; the loop asks `sig_take` once per wake-up, so repeated signals between iterations coalesce.
+Signals set a flag and write one byte down the self-pipe; the loop asks `signals_take` once per wake-up, so repeated signals between iterations coalesce.
 
 ---
 
@@ -151,7 +151,7 @@ A Degraded record went to stderr rather than to the sink. Once the daemon has de
 ```text
 poll(socket, self-pipe, idle_ms)
      │
-     ├── self-pipe ready   selfpipe_drain, then act on sig_take: STOP, HUP, DUMP
+     ├── self-pipe ready   selfpipe_drain, then act on signals_take: STOP, HUP, DUMP
      │
      ├── socket ready      recv → logd_accept, repeated until EAGAIN
      │                     so a burst is handled in one pass, not one per poll
@@ -190,7 +190,7 @@ src/tetrislogd/
 ├── include/tetrislogd.h  Every type and prototype; src/*.c include only this
 ├── src/
 │   ├── main.c            Detach, claim the pidfile, then loop until stopped
-│   ├── cfg.c             .tetrishrc parsing, rc resolution, mkdir -p
+│   ├── config.c          .tetrishrc parsing, rc resolution
 │   ├── sink.c            The log file: open, write, sync, rotate, reclaim
 │   ├── logd.c            Bring-up, the poll loop, record acceptance, counters
 │   └── signals.c         Handlers: a flag and one byte down the self-pipe
@@ -210,7 +210,7 @@ make -C src/tetrislogd test
 make -C src/tetrislogd test FILTER=sink    # only suites matching "sink"
 ```
 
-Suites lower `idle_ms` from its `TL_IDLE_MS` default so the timeout path — `fdatasync` and the sink-reopen retry — runs without a one-second wait per assertion.
+Suites lower `idle_ms` from its `TETRISLOGD_IDLE_MS` default so the timeout path — `fdatasync` and the sink-reopen retry — runs without a one-second wait per assertion.
 
 Valgrind is expected to be clean:
 

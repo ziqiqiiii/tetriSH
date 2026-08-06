@@ -4,11 +4,11 @@
 #include <stdio.h>
 
 // Static Functions
-static void	make_row(t_sb_room_row *row, const char *name, t_sb_mode mode,
-				t_sb_room_status status, const char *owner);
+static void	make_row(t_body_room_row *row, const char *name, t_body_mode mode,
+				t_body_room_status status, const char *owner);
 
-static void	make_row(t_sb_room_row *row, const char *name, t_sb_mode mode,
-				t_sb_room_status status, const char *owner)
+static void	make_row(t_body_room_row *row, const char *name, t_body_mode mode,
+				t_body_room_status status, const char *owner)
 {
 	memset(row, 0, sizeof(*row));
 	strcpy(row->name, name);
@@ -21,7 +21,7 @@ static void	make_row(t_sb_room_row *row, const char *name, t_sb_mode mode,
 
 void	test_rooms_encode_one_line_per_row(void)
 {
-	t_sb_room_row	rows[3];
+	t_body_room_row	rows[3];
 	char			out[1024];
 	int				n;
 
@@ -43,8 +43,8 @@ void	test_rooms_encode_one_line_per_row(void)
 
 void	test_rooms_round_trip(void)
 {
-	t_sb_room_row	in[4];
-	t_sb_room_row	back[4];
+	t_body_room_row	in[4];
+	t_body_room_row	back[4];
 	char			out[1024];
 	size_t			count;
 	int				n;
@@ -65,7 +65,7 @@ void	test_rooms_round_trip(void)
 
 void	test_rooms_empty_list_round_trips(void)
 {
-	t_sb_room_row	back[4];
+	t_body_room_row	back[4];
 	char			out[64];
 	size_t			count;
 
@@ -79,7 +79,7 @@ void	test_rooms_empty_list_round_trips(void)
 
 void	test_rooms_decode_rejects_bad_mode_or_status_token(void)
 {
-	t_sb_room_row	back[4];
+	t_body_room_row	back[4];
 	size_t			count;
 	const char		*bad_mode;
 	const char		*bad_status;
@@ -97,8 +97,8 @@ void	test_rooms_decode_rejects_bad_mode_or_status_token(void)
 
 void	test_rooms_decode_more_rows_than_cap_fails(void)
 {
-	t_sb_room_row	in[3];
-	t_sb_room_row	back[2];
+	t_body_room_row	in[3];
+	t_body_room_row	back[2];
 	char			out[1024];
 	size_t			count;
 	int				n;
@@ -115,7 +115,7 @@ void	test_rooms_decode_more_rows_than_cap_fails(void)
 
 void	test_rooms_decode_rejects_overlong_name_or_owner(void)
 {
-	t_sb_room_row	back[2];
+	t_body_room_row	back[2];
 	size_t			count;
 	const char		*long_name;
 	const char		*long_owner;

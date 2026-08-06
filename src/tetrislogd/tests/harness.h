@@ -14,7 +14,7 @@
 ** shipper thread does. Nothing reaches the daemon by a test-only back door.
 */
 
-# define FX_IDLE_MS	20
+# define FIXTURE_IDLE_MS	20
 
 typedef struct s_fixture
 {
@@ -22,7 +22,7 @@ typedef struct s_fixture
 	char	sock_path[192];
 	char	file_path[192];
 	char	pid_path[192];
-	t_cfg	cfg;
+	t_config	cfg;
 }	t_fixture;
 
 /* HARNESS.C */

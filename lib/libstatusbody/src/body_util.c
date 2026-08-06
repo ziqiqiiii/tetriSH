@@ -48,7 +48,7 @@ int	body_append(char *out, size_t cap, size_t *off, const char *fmt, ...)
  * @param cap Size of line in bytes.
  * @return 0 on success, -1 when no newline remains or the line overflows.
  */
-int	body_take_line(t_sb_cursor *c, char *line, size_t cap)
+int	body_take_line(t_body_cursor *c, char *line, size_t cap)
 {
 	const char	*nl;
 	size_t		n;
@@ -73,7 +73,7 @@ int	body_take_line(t_sb_cursor *c, char *line, size_t cap)
  * @param c The cursor to test.
  * @return true when nothing is left, false when bytes remain.
  */
-bool	body_at_end(const t_sb_cursor *c)
+bool	body_at_end(const t_body_cursor *c)
 {
 	return (c->p == c->end);
 }

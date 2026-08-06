@@ -29,8 +29,8 @@
 ** the library's own maximum makes every snprintf here look to the compiler
 ** like it might truncate.
 */
-# define FX_DIR_MAX		96
-# define FX_PATH_MAX	256
+# define FIXTURE_DIR_MAX		96
+# define FIXTURE_PATH_MAX	256
 
 typedef struct s_holder
 {

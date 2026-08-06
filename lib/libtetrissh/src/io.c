@@ -10,10 +10,10 @@
  * @param fd The connected socket descriptor.
  * @param buf Destination buffer of at least len bytes.
  * @param len Number of bytes to read.
- * @return SESSIONIO_IO_OK on success, SESSIONIO_IO_EOF on clean EOF before any byte,
- *         SESSIONIO_IO_ERR on error or partial EOF.
+ * @return SESSIONIO_OK on success, SESSIONIO_EOF on clean EOF before any byte,
+ *         SESSIONIO_ERR on error or partial EOF.
  */
-t_tsh_io_result	sessionio_read_exact(int fd, void *buf, size_t len)
+t_sessionio_result	sessionio_read_exact(int fd, void *buf, size_t len)
 {
 	unsigned char	*out;
 	size_t			done;
@@ -25,16 +25,16 @@ t_tsh_io_result	sessionio_read_exact(int fd, void *buf, size_t len)
 	{
 		n = recv(fd, out + done, len - done, 0);
 		if (n == 0)
-			return (done == 0 ? SESSIONIO_IO_EOF : SESSIONIO_IO_ERR);
+			return (done == 0 ? SESSIONIO_EOF : SESSIONIO_ERR);
 		if (n < 0)
 		{
 			if (errno == EINTR)
 				continue;
-			return (SESSIONIO_IO_ERR);
+			return (SESSIONIO_ERR);
 		}
 		done += (size_t)n;
 	}
-	return (SESSIONIO_IO_OK);
+	return (SESSIONIO_OK);
 }
 
 /**
@@ -76,22 +76,22 @@ int	sessionio_write_exact(int fd, const void *buf, size_t len)
  *
  * @param fd The connected socket descriptor.
  * @param value Destination for the decoded value.
- * @return SESSIONIO_IO_OK on success, SESSIONIO_IO_EOF on clean EOF, SESSIONIO_IO_ERR on
+ * @return SESSIONIO_OK on success, SESSIONIO_EOF on clean EOF, SESSIONIO_ERR on
  *         error or a null value pointer.
  */
-t_tsh_io_result	sessionio_read_u32(int fd, uint32_t *value)
+t_sessionio_result	sessionio_read_u32(int fd, uint32_t *value)
 {
 	unsigned char	buf[4];
-	t_tsh_io_result	res;
+	t_sessionio_result	res;
 
 	if (value == NULL)
-		return (SESSIONIO_IO_ERR);
+		return (SESSIONIO_ERR);
 	res = sessionio_read_exact(fd, buf, sizeof(buf));
-	if (res != SESSIONIO_IO_OK)
+	if (res != SESSIONIO_OK)
 		return (res);
 	*value = ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16)
 		| ((uint32_t)buf[2] << 8) | (uint32_t)buf[3];
-	return (SESSIONIO_IO_OK);
+	return (SESSIONIO_OK);
 }
 
 /**

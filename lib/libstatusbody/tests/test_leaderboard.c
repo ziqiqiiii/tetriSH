@@ -4,9 +4,9 @@
 #include <stdio.h>
 
 // Static Functions
-static void	make_rows(t_sb_lb_row *rows, size_t count);
+static void	make_rows(t_body_leaderboard_row *rows, size_t count);
 
-static void	make_rows(t_sb_lb_row *rows, size_t count)
+static void	make_rows(t_body_leaderboard_row *rows, size_t count)
 {
 	size_t	i;
 
@@ -23,7 +23,7 @@ static void	make_rows(t_sb_lb_row *rows, size_t count)
 
 void	test_leaderboard_encode_one_line_per_rank(void)
 {
-	t_sb_lb_row	rows[3];
+	t_body_leaderboard_row	rows[3];
 	char		out[512];
 	int			n;
 
@@ -45,8 +45,8 @@ void	test_leaderboard_encode_one_line_per_rank(void)
 
 void	test_leaderboard_round_trip_and_empty(void)
 {
-	t_sb_lb_row	in[10];
-	t_sb_lb_row	back[10];
+	t_body_leaderboard_row	in[10];
+	t_body_leaderboard_row	back[10];
 	char		out[1024];
 	size_t		count;
 	int			n;
@@ -67,8 +67,8 @@ void	test_leaderboard_round_trip_and_empty(void)
 
 void	test_leaderboard_decode_rejects_bad_row(void)
 {
-	t_sb_lb_row	back[4];
-	t_sb_lb_row	in[3];
+	t_body_leaderboard_row	back[4];
+	t_body_leaderboard_row	in[3];
 	char		out[512];
 	size_t		count;
 	const char	*bad_rank;

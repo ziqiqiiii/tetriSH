@@ -100,7 +100,7 @@ static void	test_stopping_disconnects_every_client(void)
 
 static void	test_stopping_mid_game_is_clean(void)
 {
-	t_sb_state	state;
+	t_body_state	state;
 	t_fixture	fx;
 	t_harness	hc;
 	char		room[ROOM_NAME_MAX];

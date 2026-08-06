@@ -213,7 +213,7 @@ typedef struct s_game
 	bool				topped_out;
 	bool				recorded;
 	t_player_id			player_id;
-	t_sb_clear_label	last_clear;
+	t_body_clear_label	last_clear;
 }	t_game;
 
 /*
@@ -408,7 +408,7 @@ bool			game_gravity(t_game *g, int elapsed_ms);
 bool			game_move(t_game *g, int dcol);
 bool			game_rotate(t_game *g, int dir);
 bool			game_drop(t_game *g, bool hard);
-void			game_snapshot(const t_game *g, t_sb_state *out);
+void			game_snapshot(const t_game *g, t_body_state *out);
 
 /* ROOM.C */
 void			server_room_init_all(t_server *srv);
@@ -419,7 +419,7 @@ bool			server_room_seated(t_server *srv, t_client *cli);
 int				server_room_begin(t_server_room *rt, t_server *srv);
 void			server_room_stop(t_server_room *rt);
 void			server_room_forfeit(t_server *srv, t_client *cli);
-void			server_room_push_state(t_server_room *rt, const char *room_name, t_player_id pid, const t_sb_state *snap);
+void			server_room_push_state(t_server_room *rt, const char *room_name, t_player_id pid, const t_body_state *snap);
 
 /* SERVER.C */
 int				server_start(const t_config *cfg, t_server **out);

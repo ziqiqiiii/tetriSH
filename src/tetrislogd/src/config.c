@@ -5,7 +5,7 @@ static int			set_str(char *dst, size_t cap, const char *value);
 static int			split_assignment(const char *line, char *key, size_t key_cap, char *value, size_t value_cap);
 static const char	*skip_ws(const char *s);
 static void			strip_quotes(char *value);
-static int			apply_env(t_cfg *cfg);
+static int			apply_env(t_config *cfg);
 
 /**
  * @brief Fills a configuration with the values the logger boots with unset.
@@ -16,16 +16,16 @@ static int			apply_env(t_cfg *cfg);
  *
  * @param cfg Configuration to fill (ignored when NULL).
  */
-void	cfg_defaults(t_cfg *cfg)
+void	config_defaults(t_config *cfg)
 {
 	if (cfg == NULL)
 		return ;
 	memset(cfg, 0, sizeof(*cfg));
-	snprintf(cfg->sock_path, TL_PATH_MAX, "%s", TL_DEF_SOCK);
-	snprintf(cfg->file_path, TL_PATH_MAX, "%s", TL_DEF_FILE);
-	snprintf(cfg->pid_path, TL_PATH_MAX, "%s", TL_DEF_PID);
-	snprintf(cfg->err_path, TL_PATH_MAX, "%s", TL_DEF_ERR);
-	snprintf(cfg->rc_path, TL_PATH_MAX, "%s", "./" TL_RC_NAME);
+	snprintf(cfg->sock_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_SOCK);
+	snprintf(cfg->file_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_FILE);
+	snprintf(cfg->pid_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_PID);
+	snprintf(cfg->err_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_ERR);
+	snprintf(cfg->rc_path, TETRISLOGD_FS_PATH_MAX, "%s", "./" TETRISLOGD_RC_FILENAME);
 }
 
 /**
@@ -41,21 +41,21 @@ void	cfg_defaults(t_cfg *cfg)
  * @param value Value text, already unquoted.
  * @return 0 when applied, -1 for an unknown key or an invalid value.
  */
-int	cfg_set(t_cfg *cfg, const char *key, const char *value)
+int	config_set(t_config *cfg, const char *key, const char *value)
 {
 	if (cfg == NULL || key == NULL || value == NULL)
 		return (-1);
-	if (strncmp(key, TL_KEY_PREFIX, strlen(TL_KEY_PREFIX)) != 0)
+	if (strncmp(key, TETRISLOGD_CONFIG_KEY_PREFIX, strlen(TETRISLOGD_CONFIG_KEY_PREFIX)) != 0)
 		return (-1);
-	key += strlen(TL_KEY_PREFIX);
+	key += strlen(TETRISLOGD_CONFIG_KEY_PREFIX);
 	if (strcmp(key, "SOCK") == 0)
-		return (set_str(cfg->sock_path, TL_PATH_MAX, value));
+		return (set_str(cfg->sock_path, TETRISLOGD_FS_PATH_MAX, value));
 	if (strcmp(key, "FILE") == 0)
-		return (set_str(cfg->file_path, TL_PATH_MAX, value));
+		return (set_str(cfg->file_path, TETRISLOGD_FS_PATH_MAX, value));
 	if (strcmp(key, "PID") == 0)
-		return (set_str(cfg->pid_path, TL_PATH_MAX, value));
+		return (set_str(cfg->pid_path, TETRISLOGD_FS_PATH_MAX, value));
 	if (strcmp(key, "ERR") == 0)
-		return (set_str(cfg->err_path, TL_PATH_MAX, value));
+		return (set_str(cfg->err_path, TETRISLOGD_FS_PATH_MAX, value));
 	return (-1);
 }
 
@@ -70,18 +70,18 @@ int	cfg_set(t_cfg *cfg, const char *key, const char *value)
  * @param line One raw line, with or without its newline.
  * @return 0 when applied or deliberately ignored, -1 for a bad value.
  */
-int	cfg_parse_line(t_cfg *cfg, const char *line)
+int	config_parse_line(t_config *cfg, const char *line)
 {
-	char	key[TL_LINE_MAX];
-	char	value[TL_LINE_MAX];
+	char	key[TETRISLOGD_CONFIG_LINE_MAX];
+	char	value[TETRISLOGD_CONFIG_LINE_MAX];
 
 	if (cfg == NULL || line == NULL)
 		return (-1);
 	if (split_assignment(line, key, sizeof(key), value, sizeof(value)) != 0)
 		return (0);
-	if (strncmp(key, TL_KEY_PREFIX, strlen(TL_KEY_PREFIX)) != 0)
+	if (strncmp(key, TETRISLOGD_CONFIG_KEY_PREFIX, strlen(TETRISLOGD_CONFIG_KEY_PREFIX)) != 0)
 		return (0);
-	return (cfg_set(cfg, key, value));
+	return (config_set(cfg, key, value));
 }
 
 /**
@@ -95,16 +95,16 @@ int	cfg_parse_line(t_cfg *cfg, const char *line)
  * @param rc_override Path from argv, or NULL to resolve the usual way.
  * @return 0 on success, -1 when a setting carried an invalid value.
  */
-int	cfg_load(t_cfg *cfg, const char *rc_override)
+int	config_load(t_config *cfg, const char *rc_override)
 {
-	char	line[TL_LINE_MAX];
+	char	line[TETRISLOGD_CONFIG_LINE_MAX];
 	FILE	*f;
 	int		rc;
 
 	if (cfg == NULL)
 		return (-1);
-	cfg_defaults(cfg);
-	if (cfg_resolve_rc(rc_override, cfg->rc_path, TL_PATH_MAX) != 0)
+	config_defaults(cfg);
+	if (config_resolve_rc_path(rc_override, cfg->rc_path, TETRISLOGD_FS_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(cfg->rc_path, "r");
@@ -112,7 +112,7 @@ int	cfg_load(t_cfg *cfg, const char *rc_override)
 	{
 		while (fgets(line, sizeof(line), f) != NULL)
 		{
-			if (cfg_parse_line(cfg, line) != 0)
+			if (config_parse_line(cfg, line) != 0)
 				rc = -1;
 		}
 		fclose(f);
@@ -134,7 +134,7 @@ int	cfg_load(t_cfg *cfg, const char *rc_override)
  * @param cap Size of out.
  * @return 0 on success, -1 on invalid arguments or an overlong path.
  */
-int	cfg_resolve_rc(const char *override, char *out, size_t cap)
+int	config_resolve_rc_path(const char *override, char *out, size_t cap)
 {
 	const char	*env;
 
@@ -145,66 +145,7 @@ int	cfg_resolve_rc(const char *override, char *out, size_t cap)
 	env = getenv("TETRISHRC");
 	if (env != NULL && env[0] != '\0')
 		return (set_str(out, cap, env));
-	return (set_str(out, cap, "./" TL_RC_NAME));
-}
-
-/**
- * @brief Creates a directory and every missing parent above it.
- *
- * The sink and the socket both live under directories a fresh checkout does
- * not have, and `make reset` deletes again.
- *
- * @param path Directory path to create.
- * @return 0 on success, -1 with errno set on failure.
- */
-int	cfg_mkdir_p(const char *path)
-{
-	char	buf[TL_PATH_MAX];
-	size_t	i;
-
-	if (path == NULL || path[0] == '\0' || strlen(path) >= sizeof(buf))
-		return (-1);
-	snprintf(buf, sizeof(buf), "%s", path);
-	i = 1;
-	while (buf[i] != '\0')
-	{
-		if (buf[i] == '/')
-		{
-			buf[i] = '\0';
-			if (mkdir(buf, TL_DIR_MODE) != 0 && errno != EEXIST)
-				return (-1);
-			buf[i] = '/';
-		}
-		i++;
-	}
-	if (mkdir(buf, TL_DIR_MODE) != 0 && errno != EEXIST)
-		return (-1);
-	return (0);
-}
-
-/**
- * @brief Creates the directory a file is about to be opened in.
- *
- * Both things the daemon opens - the sink and the socket - live under a
- * directory a fresh checkout does not have, and they ask the same question of
- * their path, so they ask it in one place.
- *
- * @param path Path to a file, not to a directory.
- * @return 0 on success or when there is no parent to make, -1 on failure.
- */
-int	cfg_mkdir_parent(const char *path)
-{
-	char	dir[TL_PATH_MAX];
-	char	*slash;
-
-	if (path == NULL || strlen(path) >= sizeof(dir))
-		return (-1);
-	snprintf(dir, sizeof(dir), "%s", path);
-	slash = strrchr(dir, '/');
-	if (slash == NULL || slash == dir)
-		return (0);
-	*slash = '\0';
-	return (cfg_mkdir_p(dir));
+	return (set_str(out, cap, "./" TETRISLOGD_RC_FILENAME));
 }
 
 /**
@@ -308,11 +249,11 @@ static void	strip_quotes(char *value)
  * @param cfg Configuration to update.
  * @return 0 on success, -1 when an environment value was invalid.
  */
-static int	apply_env(t_cfg *cfg)
+static int	apply_env(t_config *cfg)
 {
 	static const char	*names[] = {
-		TL_KEY_PREFIX "SOCK", TL_KEY_PREFIX "FILE",
-		TL_KEY_PREFIX "PID", TL_KEY_PREFIX "ERR", NULL
+		TETRISLOGD_CONFIG_KEY_PREFIX "SOCK", TETRISLOGD_CONFIG_KEY_PREFIX "FILE",
+		TETRISLOGD_CONFIG_KEY_PREFIX "PID", TETRISLOGD_CONFIG_KEY_PREFIX "ERR", NULL
 	};
 	const char			*value;
 	int					rc;
@@ -324,7 +265,7 @@ static int	apply_env(t_cfg *cfg)
 	{
 		value = getenv(names[i]);
 		if (value != NULL && value[0] != '\0'
-			&& cfg_set(cfg, names[i], value) != 0)
+			&& config_set(cfg, names[i], value) != 0)
 			rc = -1;
 		i++;
 	}

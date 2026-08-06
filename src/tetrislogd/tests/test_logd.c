@@ -62,7 +62,7 @@ static void	test_start_binds_and_opens_the_sink(void)
 	assert(stat(fx.sock_path, &st) == 0 && S_ISSOCK(st.st_mode));
 	assert(sink_is_open(&lg.sink) == true);
 	assert(lg.running == true);
-	assert(fx_contains(fx.file_path, TL_COMPONENT) == 1);
+	assert(fx_contains(fx.file_path, TETRISLOGD_COMPONENT_NAME) == 1);
 	logd_stop(&lg);
 	assert(stat(fx.sock_path, &st) == -1);
 	fx_destroy(&fx);
@@ -382,7 +382,7 @@ static void	test_stop_is_safe_on_a_blank_daemon(void)
 
 	logd_blank(&lg);
 	assert(lg.sock_fd == -1);
-	assert(lg.idle_ms == TL_IDLE_MS);
+	assert(lg.idle_ms == TETRISLOGD_IDLE_MS);
 	logd_stop(&lg);
 	logd_stop(&lg);
 	printf("PASS test_stop_is_safe_on_a_blank_daemon\n");
@@ -399,6 +399,6 @@ static int	boot(t_fixture *fx, t_logd *lg)
 	logd_blank(lg);
 	if (logd_start(lg, &fx->cfg) != 0)
 		return (-1);
-	lg->idle_ms = FX_IDLE_MS;
+	lg->idle_ms = FIXTURE_IDLE_MS;
 	return (0);
 }

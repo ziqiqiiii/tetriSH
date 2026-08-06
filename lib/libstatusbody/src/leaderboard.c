@@ -3,7 +3,7 @@
 #include <inttypes.h>
 
 // Static Functions
-static int	decode_row(const char *line, t_sb_lb_row *row);
+static int	decode_row(const char *line, t_body_leaderboard_row *row);
 
 /**
  * @brief Serialises leaderboard rows, one `<rank> <username> <score>` line
@@ -19,7 +19,7 @@ static int	decode_row(const char *line, t_sb_lb_row *row);
  *         EINVAL (NULL args with count > 0, unrepresentable field) or
  *         ERANGE (cap too small).
  */
-int	body_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap)
+int	body_leaderboard_encode(const t_body_leaderboard_row *rows, size_t count, char *out, size_t cap)
 {
 	size_t	off;
 	size_t	i;
@@ -57,9 +57,9 @@ int	body_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, si
  *         (malformed line, overlong username), or ERANGE (more rows than
  *         cap).
  */
-int	body_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count)
+int	body_leaderboard_decode(const char *buf, size_t len, t_body_leaderboard_row *rows, size_t cap, size_t *count)
 {
-	t_sb_cursor	c;
+	t_body_cursor	c;
 	char		line[BODY_LINE_MAX];
 
 	if (!buf || !rows || !count)
@@ -86,7 +86,7 @@ int	body_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size
  * @param row The row to fill.
  * @return 0 on success, -1 on a malformed rank, username, or score.
  */
-static int	decode_row(const char *line, t_sb_lb_row *row)
+static int	decode_row(const char *line, t_body_leaderboard_row *row)
 {
 	char	name[BODY_LINE_MAX];
 	char	score[BODY_LINE_MAX];

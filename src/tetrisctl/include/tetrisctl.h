@@ -32,32 +32,32 @@
 ** knowledge about the programs rather than about a deployment of them.
 */
 
-# define TC_COMPONENT		"tetrisctl"
-# define TC_KEY_PREFIX		"TETRISCTL_"
-# define TC_RC_NAME			".tetrishrc"
-# define TC_PATH_MAX		1024
-# define TC_LINE_MAX		2048
-# define TC_NAME_MAX		32
-# define TC_MAX_DAEMONS		8
+# define TETRISCTL_COMPONENT_NAME		"tetrisctl"
+# define TETRISCTL_CONFIG_KEY_PREFIX		"TETRISCTL_"
+# define TETRISCTL_RC_FILENAME			".tetrishrc"
+# define TETRISCTL_FS_PATH_MAX		1024
+# define TETRISCTL_CONFIG_LINE_MAX		2048
+# define TETRISCTL_NAME_MAX		32
+# define TETRISCTL_MAX_DAEMONS		8
 
 /*
 ** How long stop waits for a daemon to finish tearing down. Generous on
 ** purpose: the wait ends the moment the pidfile lock comes free, so the only
 ** thing this number decides is when to give up and say so.
 */
-# define TC_STOP_MS			10000
+# define TETRISCTL_STOP_MS			10000
 
 /*
-** What tetrisctl can tell about a daemon. TC_UNKNOWN is not a third kind of
+** What tetrisctl can tell about a daemon. MANAGED_UNKNOWN is not a third kind of
 ** running - it means the pidfile could not be inspected, which is a different
 ** report to make and a different exit code to return.
 */
-typedef enum e_state
+typedef enum e_managed_state
 {
-	TC_STOPPED,
-	TC_RUNNING,
-	TC_UNKNOWN
-}	t_state;
+	MANAGED_STOPPED,
+	MANAGED_RUNNING,
+	MANAGED_UNKNOWN
+}	t_managed_state;
 
 /*
 ** A daemon this build knows how to manage, and the .tetrishrc key it publishes
@@ -66,27 +66,27 @@ typedef enum e_state
 ** KEY_PATH, tetrislogd already had SOCK and FILE - and a daemon reading its
 ** own settings is the one place that consistency actually matters.
 */
-typedef struct s_known
+typedef struct s_known_daemon
 {
 	const char	*name;
 	const char	*pid_key;
-}	t_known;
+}	t_known_daemon;
 
 /*
 ** One managed daemon: the name .tetrishrc listed and the pidfile that name
 ** resolved to. The pidfile is the whole handle - it is what gets signalled,
 ** what gets waited on, and what says whether a second start may proceed.
 */
-typedef struct s_daemon
+typedef struct s_managed
 {
-	char	name[TC_NAME_MAX];
-	char	pid_path[TC_PATH_MAX];
-}	t_daemon;
+	char	name[TETRISCTL_NAME_MAX];
+	char	pid_path[TETRISCTL_FS_PATH_MAX];
+}	t_managed;
 
 /*
 ** The roster, resolved once from .tetrishrc.
 **
-** `order` and `paths` are kept raw until cfg_resolve runs, because a start-up
+** `order` and `paths` are kept raw until config_resolve runs, because a start-up
 ** file may name the daemons before or after it names their pidfiles and
 ** neither ordering should change the answer. Both start empty: a roster that
 ** was never declared is an error, not a default, or the order this program
@@ -94,32 +94,32 @@ typedef struct s_daemon
 */
 typedef struct s_ctl
 {
-	t_daemon	daemons[TC_MAX_DAEMONS];
+	t_managed	daemons[TETRISCTL_MAX_DAEMONS];
 	int			count;
-	char		order[TC_LINE_MAX];
-	char		paths[TC_MAX_DAEMONS][TC_PATH_MAX];
-	char		rc_path[TC_PATH_MAX];
+	char		order[TETRISCTL_CONFIG_LINE_MAX];
+	char		paths[TETRISCTL_MAX_DAEMONS][TETRISCTL_FS_PATH_MAX];
+	char		rc_path[TETRISCTL_FS_PATH_MAX];
 	int			stop_ms;
 }	t_ctl;
 
 /* CFG.C */
-void			cfg_defaults(t_ctl *ctl);
-int				cfg_set(t_ctl *ctl, const char *key, const char *value);
-int				cfg_parse_line(t_ctl *ctl, const char *line);
-int				cfg_resolve(t_ctl *ctl);
-int				cfg_load(t_ctl *ctl, const char *rc_override);
-int				cfg_resolve_rc(const char *override, char *out, size_t cap);
-const t_daemon	*ctl_find(const t_ctl *ctl, const char *name);
+void			config_defaults(t_ctl *ctl);
+int				config_set(t_ctl *ctl, const char *key, const char *value);
+int				config_parse_line(t_ctl *ctl, const char *line);
+int				config_resolve(t_ctl *ctl);
+int				config_load(t_ctl *ctl, const char *rc_override);
+int				config_resolve_rc_path(const char *override, char *out, size_t cap);
+const t_managed	*ctl_find_daemon(const t_ctl *ctl, const char *name);
 
 /* DAEMON.C */
-t_state			d_state(const t_daemon *d, pid_t *pid);
-int				d_start(const t_daemon *d, const char *rc_path);
-int				d_stop(const t_daemon *d, int timeout_ms);
+t_managed_state			managed_state(const t_managed *d, pid_t *pid);
+int				managed_start(const t_managed *d, const char *rc_path);
+int				managed_stop(const t_managed *d, int timeout_ms);
 
 /* CMD.C */
-int				cmd_start(const t_ctl *ctl, const char *only);
-int				cmd_status(const t_ctl *ctl, const char *only);
-int				cmd_stop(const t_ctl *ctl, const char *only);
-int				cmd_restart(const t_ctl *ctl, const char *only);
+int				start_command(const t_ctl *ctl, const char *only);
+int				status_command(const t_ctl *ctl, const char *only);
+int				stop_command(const t_ctl *ctl, const char *only);
+int				restart_command(const t_ctl *ctl, const char *only);
 
 # endif

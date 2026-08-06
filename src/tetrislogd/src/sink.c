@@ -39,7 +39,7 @@ int	sink_open(t_sink *sk, const char *path)
 {
 	int	fd;
 
-	if (sk == NULL || path == NULL || path[0] == '\0' || strlen(path) >= TL_PATH_MAX)
+	if (sk == NULL || path == NULL || path[0] == '\0' || strlen(path) >= TETRISLOGD_FS_PATH_MAX)
 	{
 		errno = EINVAL;
 		return (-1);
@@ -47,7 +47,7 @@ int	sink_open(t_sink *sk, const char *path)
 	fd = open_sink(path);
 	if (fd < 0)
 		return (-1);
-	snprintf(sk->path, TL_PATH_MAX, "%s", path);
+	snprintf(sk->path, TETRISLOGD_FS_PATH_MAX, "%s", path);
 	adopt(sk, fd);
 	return (0);
 }
@@ -225,9 +225,9 @@ bool	sink_is_stale(const t_sink *sk)
  */
 static int	open_sink(const char *path)
 {
-	if (cfg_mkdir_parent(path) != 0)
+	if (daemon_mkdir_parent(path) != 0)
 		return (-1);
-	return (open(path, O_WRONLY | O_APPEND | O_CREAT, TL_FILE_MODE));
+	return (open(path, O_WRONLY | O_APPEND | O_CREAT, TETRISLOGD_FILE_MODE));
 }
 
 /**

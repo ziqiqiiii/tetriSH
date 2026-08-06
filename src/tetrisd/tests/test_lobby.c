@@ -25,7 +25,7 @@ static void	test_ownership_passes_to_a_successor(void);
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static int		simple(t_harness *hc, const char *method, const char *path,
 					const char *body);
-static size_t	list_rooms(t_harness *hc, t_sb_room_row *rows, size_t cap);
+static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap);
 
 int	main(void)
 {
@@ -41,7 +41,7 @@ int	main(void)
 
 static void	test_join_creates_a_room_and_lists_it(void)
 {
-	t_sb_room_row	rows[LOBBY_MAX_ROOMS];
+	t_body_room_row	rows[LOBBY_MAX_ROOMS];
 	t_fixture		fx;
 	t_harness		hc;
 	char			room[ROOM_NAME_MAX];
@@ -102,7 +102,7 @@ static void	test_unknown_room_is_not_found(void)
 
 static void	test_leaving_removes_an_empty_room(void)
 {
-	t_sb_room_row	rows[LOBBY_MAX_ROOMS];
+	t_body_room_row	rows[LOBBY_MAX_ROOMS];
 	t_fixture		fx;
 	t_harness		hc;
 	char			room[ROOM_NAME_MAX];
@@ -162,7 +162,7 @@ static void	test_start_needs_enough_players(void)
 
 static void	test_ownership_passes_to_a_successor(void)
 {
-	t_sb_room_row	rows[LOBBY_MAX_ROOMS];
+	t_body_room_row	rows[LOBBY_MAX_ROOMS];
 	t_fixture		fx;
 	t_harness		amber;
 	t_harness		blake;
@@ -235,7 +235,7 @@ static int	simple(t_harness *hc, const char *method, const char *path,
  * @param cap Capacity of rows.
  * @return Number of rows listed.
  */
-static size_t	list_rooms(t_harness *hc, t_sb_room_row *rows, size_t cap)
+static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap)
 {
 	t_htttp_message	resp;
 	size_t			count;

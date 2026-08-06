@@ -21,12 +21,12 @@ static const char	*g_head = \
 	"clearing 2 350 18 19\n";
 
 // Static Functions
-static void	make_state(t_sb_state *st);
+static void	make_state(t_body_state *st);
 static void	build_body(char *dst, const char *head, int zero_rows,
 				const char *tail);
 
 // a full, valid frame matching g_head with an all-empty board
-static void	make_state(t_sb_state *st)
+static void	make_state(t_body_state *st)
 {
 	memset(st, 0, sizeof(*st));
 	st->seq = 42;
@@ -73,7 +73,7 @@ static void	build_body(char *dst, const char *head, int zero_rows,
 
 void	test_state_encode_contains_all_required_keys(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		out[4096];
 
 	make_state(&st);
@@ -94,8 +94,8 @@ void	test_state_encode_contains_all_required_keys(void)
 
 void	test_state_round_trip_full_frame(void)
 {
-	t_sb_state	in;
-	t_sb_state	back;
+	t_body_state	in;
+	t_body_state	back;
 	char		out[4096];
 	int			n;
 
@@ -114,8 +114,8 @@ void	test_state_round_trip_full_frame(void)
 
 void	test_state_board_cells_preserve_type_and_color(void)
 {
-	t_sb_state	in;
-	t_sb_state	back;
+	t_body_state	in;
+	t_body_state	back;
 	char		out[4096];
 	char		*row0;
 	int			n;
@@ -143,7 +143,7 @@ void	test_state_board_cells_preserve_type_and_color(void)
 
 void	test_state_encode_rejects_out_of_range_fields(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		out[4096];
 
 	make_state(&st);
@@ -155,7 +155,7 @@ void	test_state_encode_rejects_out_of_range_fields(void)
 	assert(body_state_encode(&st, out, sizeof(out)) == -1);
 	assert(errno == EINVAL);
 	make_state(&st);
-	st.phase = (t_sb_phase)99;
+	st.phase = (t_body_phase)99;
 	assert(body_state_encode(&st, out, sizeof(out)) == -1);
 	assert(errno == EINVAL);
 	printf("PASS test_state_encode_rejects_out_of_range_fields\n");
@@ -163,7 +163,7 @@ void	test_state_encode_rejects_out_of_range_fields(void)
 
 void	test_state_encode_small_cap_returns_erange(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		out[64];
 
 	make_state(&st);
@@ -177,7 +177,7 @@ void	test_state_encode_small_cap_returns_erange(void)
 
 void	test_state_decode_rejects_missing_seq(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		body[4096];
 
 	build_body(body, g_head + 7, BODY_BOARD_ROWS, NULL); // skip "seq 42\n"
@@ -188,7 +188,7 @@ void	test_state_decode_rejects_missing_seq(void)
 
 void	test_state_decode_rejects_malformed_board_row(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		body[4096];
 
 	// last row one cell short (18 hex chars)
@@ -208,7 +208,7 @@ void	test_state_decode_rejects_malformed_board_row(void)
 
 void	test_state_decode_rejects_unknown_key_and_trailing_junk(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		body[4096];
 	char		head[2048];
 
@@ -225,7 +225,7 @@ void	test_state_decode_rejects_unknown_key_and_trailing_junk(void)
 
 void	test_state_decode_rejects_numeric_overflow(void)
 {
-	t_sb_state	st;
+	t_body_state	st;
 	char		body[4096];
 	char		head[2048];
 
@@ -247,8 +247,8 @@ void	test_state_decode_rejects_numeric_overflow(void)
 
 void	test_state_large_seq_round_trips_exactly(void)
 {
-	t_sb_state	in;
-	t_sb_state	back;
+	t_body_state	in;
+	t_body_state	back;
 	char		out[4096];
 	int			n;
 

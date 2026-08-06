@@ -13,7 +13,7 @@
 ** compiled default would put the same path in a third place and let the two
 ** drift apart silently, which is the failure this table exists to avoid.
 */
-static const t_known	g_known[] = {
+static const t_known_daemon	g_known[] = {
 {"tetrislogd", "TETRISLOGD_PID"},
 {"tetrisd", "TETRISD_PID_PATH"},
 {NULL, NULL}
@@ -24,8 +24,7 @@ static int			known_index(const char *key);
 static int			name_index(const char *name);
 static int			add_daemon(t_ctl *ctl, const char *name);
 static int			set_str(char *dst, size_t cap, const char *value);
-static int			split_assignment(const char *line, char *key,
-						size_t key_cap, char *value, size_t value_cap);
+static int			split_assignment(const char *line, char *key, size_t key_cap, char *value, size_t value_cap);
 static const char	*skip_ws(const char *s);
 static void			strip_quotes(char *value);
 static int			apply_env(t_ctl *ctl);
@@ -40,13 +39,13 @@ static int			apply_env(t_ctl *ctl);
  *
  * @param ctl Roster to blank (ignored when NULL).
  */
-void	cfg_defaults(t_ctl *ctl)
+void	config_defaults(t_ctl *ctl)
 {
 	if (ctl == NULL)
 		return ;
 	memset(ctl, 0, sizeof(*ctl));
-	snprintf(ctl->rc_path, TC_PATH_MAX, "%s", "./" TC_RC_NAME);
-	ctl->stop_ms = TC_STOP_MS;
+	snprintf(ctl->rc_path, TETRISCTL_FS_PATH_MAX, "%s", "./" TETRISCTL_RC_FILENAME);
+	ctl->stop_ms = TETRISCTL_STOP_MS;
 }
 
 /**
@@ -63,18 +62,18 @@ void	cfg_defaults(t_ctl *ctl)
  * @param value Value text, already unquoted.
  * @return 0 when applied, -1 for a key that is not ours or a bad value.
  */
-int	cfg_set(t_ctl *ctl, const char *key, const char *value)
+int	config_set(t_ctl *ctl, const char *key, const char *value)
 {
 	int	i;
 
 	if (ctl == NULL || key == NULL || value == NULL)
 		return (-1);
-	if (strcmp(key, TC_KEY_PREFIX "DAEMONS") == 0)
-		return (set_str(ctl->order, TC_LINE_MAX, value));
+	if (strcmp(key, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS") == 0)
+		return (set_str(ctl->order, TETRISCTL_CONFIG_LINE_MAX, value));
 	i = known_index(key);
 	if (i < 0)
 		return (-1);
-	return (set_str(ctl->paths[i], TC_PATH_MAX, value));
+	return (set_str(ctl->paths[i], TETRISCTL_FS_PATH_MAX, value));
 }
 
 /**
@@ -82,7 +81,7 @@ int	cfg_set(t_ctl *ctl, const char *key, const char *value)
  *
  * The file is a shell start-up script, so most lines are commands or another
  * component's settings: anything unrecognised is skipped rather than refused.
- * tetrisctl is stricter than the daemons in only one place, cfg_resolve,
+ * tetrisctl is stricter than the daemons in only one place, config_resolve,
  * where a roster naming a daemon it cannot manage is an error worth stopping
  * for rather than a line worth skipping.
  *
@@ -90,18 +89,18 @@ int	cfg_set(t_ctl *ctl, const char *key, const char *value)
  * @param line One raw line, with or without its newline.
  * @return 0 when applied or deliberately ignored, -1 for a bad value.
  */
-int	cfg_parse_line(t_ctl *ctl, const char *line)
+int	config_parse_line(t_ctl *ctl, const char *line)
 {
-	char	key[TC_LINE_MAX];
-	char	value[TC_LINE_MAX];
+	char	key[TETRISCTL_CONFIG_LINE_MAX];
+	char	value[TETRISCTL_CONFIG_LINE_MAX];
 
 	if (ctl == NULL || line == NULL)
 		return (-1);
 	if (split_assignment(line, key, sizeof(key), value, sizeof(value)) != 0)
 		return (0);
-	if (strcmp(key, TC_KEY_PREFIX "DAEMONS") != 0 && known_index(key) < 0)
+	if (strcmp(key, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS") != 0 && known_index(key) < 0)
 		return (0);
-	return (cfg_set(ctl, key, value));
+	return (config_set(ctl, key, value));
 }
 
 /**
@@ -121,9 +120,9 @@ int	cfg_parse_line(t_ctl *ctl, const char *line)
  * @param ctl Roster holding an order line and any pidfile paths read.
  * @return 0 on success, -1 after reporting which daemon could not be resolved.
  */
-int	cfg_resolve(t_ctl *ctl)
+int	config_resolve(t_ctl *ctl)
 {
-	char	work[TC_LINE_MAX];
+	char	work[TETRISCTL_CONFIG_LINE_MAX];
 	char	*token;
 
 	if (ctl == NULL)
@@ -132,10 +131,10 @@ int	cfg_resolve(t_ctl *ctl)
 	if (ctl->order[0] == '\0')
 	{
 		fprintf(stderr, "%s: %sDAEMONS is not set in %s\n",
-			TC_COMPONENT, TC_KEY_PREFIX, ctl->rc_path);
+			TETRISCTL_COMPONENT_NAME, TETRISCTL_CONFIG_KEY_PREFIX, ctl->rc_path);
 		return (-1);
 	}
-	snprintf(work, TC_LINE_MAX, "%s", ctl->order);
+	snprintf(work, TETRISCTL_CONFIG_LINE_MAX, "%s", ctl->order);
 	token = strtok(work, " \t");
 	while (token != NULL)
 	{
@@ -160,16 +159,16 @@ int	cfg_resolve(t_ctl *ctl)
  * @param rc_override Path from argv, or NULL to resolve the usual way.
  * @return 0 on success, -1 when a setting or the roster was invalid.
  */
-int	cfg_load(t_ctl *ctl, const char *rc_override)
+int	config_load(t_ctl *ctl, const char *rc_override)
 {
-	char	line[TC_LINE_MAX];
+	char	line[TETRISCTL_CONFIG_LINE_MAX];
 	FILE	*f;
 	int		rc;
 
 	if (ctl == NULL)
 		return (-1);
-	cfg_defaults(ctl);
-	if (cfg_resolve_rc(rc_override, ctl->rc_path, TC_PATH_MAX) != 0)
+	config_defaults(ctl);
+	if (config_resolve_rc_path(rc_override, ctl->rc_path, TETRISCTL_FS_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(ctl->rc_path, "r");
@@ -177,14 +176,14 @@ int	cfg_load(t_ctl *ctl, const char *rc_override)
 	{
 		while (fgets(line, sizeof(line), f) != NULL)
 		{
-			if (cfg_parse_line(ctl, line) != 0)
+			if (config_parse_line(ctl, line) != 0)
 				rc = -1;
 		}
 		fclose(f);
 	}
 	if (apply_env(ctl) != 0)
 		rc = -1;
-	if (cfg_resolve(ctl) != 0)
+	if (config_resolve(ctl) != 0)
 		rc = -1;
 	return (rc);
 }
@@ -201,7 +200,7 @@ int	cfg_load(t_ctl *ctl, const char *rc_override)
  * @param cap Size of out.
  * @return 0 on success, -1 on invalid arguments or an overlong path.
  */
-int	cfg_resolve_rc(const char *override, char *out, size_t cap)
+int	config_resolve_rc_path(const char *override, char *out, size_t cap)
 {
 	const char	*env;
 
@@ -212,7 +211,7 @@ int	cfg_resolve_rc(const char *override, char *out, size_t cap)
 	env = getenv("TETRISHRC");
 	if (env != NULL && env[0] != '\0')
 		return (set_str(out, cap, env));
-	return (set_str(out, cap, "./" TC_RC_NAME));
+	return (set_str(out, cap, "./" TETRISCTL_RC_FILENAME));
 }
 
 /**
@@ -222,7 +221,7 @@ int	cfg_resolve_rc(const char *override, char *out, size_t cap)
  * @param name Daemon name to find.
  * @return The daemon, or NULL when the roster does not list it.
  */
-const t_daemon	*ctl_find(const t_ctl *ctl, const char *name)
+const t_managed	*ctl_find_daemon(const t_ctl *ctl, const char *name)
 {
 	int	i;
 
@@ -253,23 +252,23 @@ static int	add_daemon(t_ctl *ctl, const char *name)
 	if (i < 0)
 	{
 		fprintf(stderr, "%s: %s is not a daemon this build manages\n",
-			TC_COMPONENT, name);
+			TETRISCTL_COMPONENT_NAME, name);
 		return (-1);
 	}
-	if (ctl->count >= TC_MAX_DAEMONS)
+	if (ctl->count >= TETRISCTL_MAX_DAEMONS)
 	{
 		fprintf(stderr, "%s: more than %d daemons in %sDAEMONS\n",
-			TC_COMPONENT, TC_MAX_DAEMONS, TC_KEY_PREFIX);
+			TETRISCTL_COMPONENT_NAME, TETRISCTL_MAX_DAEMONS, TETRISCTL_CONFIG_KEY_PREFIX);
 		return (-1);
 	}
 	if (ctl->paths[i][0] == '\0')
 	{
 		fprintf(stderr, "%s: %s is not set in %s, so %s has no pidfile\n",
-			TC_COMPONENT, g_known[i].pid_key, ctl->rc_path, name);
+			TETRISCTL_COMPONENT_NAME, g_known[i].pid_key, ctl->rc_path, name);
 		return (-1);
 	}
-	snprintf(ctl->daemons[ctl->count].name, TC_NAME_MAX, "%s", name);
-	snprintf(ctl->daemons[ctl->count].pid_path, TC_PATH_MAX, "%s",
+	snprintf(ctl->daemons[ctl->count].name, TETRISCTL_NAME_MAX, "%s", name);
+	snprintf(ctl->daemons[ctl->count].pid_path, TETRISCTL_FS_PATH_MAX, "%s",
 		ctl->paths[i]);
 	ctl->count++;
 	return (0);
@@ -422,16 +421,16 @@ static int	apply_env(t_ctl *ctl)
 	int			i;
 
 	rc = 0;
-	value = getenv(TC_KEY_PREFIX "DAEMONS");
+	value = getenv(TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS");
 	if (value != NULL && value[0] != '\0'
-		&& cfg_set(ctl, TC_KEY_PREFIX "DAEMONS", value) != 0)
+		&& config_set(ctl, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS", value) != 0)
 		rc = -1;
 	i = 0;
 	while (g_known[i].name != NULL)
 	{
 		value = getenv(g_known[i].pid_key);
 		if (value != NULL && value[0] != '\0'
-			&& cfg_set(ctl, g_known[i].pid_key, value) != 0)
+			&& config_set(ctl, g_known[i].pid_key, value) != 0)
 			rc = -1;
 		i++;
 	}

@@ -34,10 +34,10 @@ static unsigned char	*capture_frame(int fd, uint32_t *len)
 {
 	unsigned char	*frame;
 
-	assert(sessionio_read_u32(fd, len) == SESSIONIO_IO_OK);
+	assert(sessionio_read_u32(fd, len) == SESSIONIO_OK);
 	frame = malloc(*len);
 	assert(frame != NULL);
-	assert(sessionio_read_exact(fd, frame, *len) == SESSIONIO_IO_OK);
+	assert(sessionio_read_exact(fd, frame, *len) == SESSIONIO_OK);
 	return (frame);
 }
 

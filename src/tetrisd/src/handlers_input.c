@@ -3,7 +3,7 @@
 // Static Functions
 static int	input_target(t_request_context *ctx, t_server_room **out);
 static int	body_token(t_request_context *ctx, char *out, size_t cap);
-static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_action action, int argument);
+static int	apply_input(t_request_context *ctx, t_server_room *server_room, t_input_action action, int argument);
 
 /**
  * @brief MOVE /room/<name>/player/<pid> - translate the falling piece.
@@ -15,21 +15,21 @@ static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_act
 int	move_handler(const t_htttp_message *msg, void *context)
 {
 	t_request_context	*ctx;
-	t_server_room	*sroom;
+	t_server_room	*server_room;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &sroom);
+	status = input_target(ctx, &server_room);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "LEFT") == 0)
-		return (apply_input(ctx, sroom, INPUT_MOVE, -1));
+		return (apply_input(ctx, server_room, INPUT_MOVE, -1));
 	if (strcmp(token, "RIGHT") == 0)
-		return (apply_input(ctx, sroom, INPUT_MOVE, 1));
+		return (apply_input(ctx, server_room, INPUT_MOVE, 1));
 	return (400);
 }
 
@@ -43,21 +43,21 @@ int	move_handler(const t_htttp_message *msg, void *context)
 int	rotate_handler(const t_htttp_message *msg, void *context)
 {
 	t_request_context	*ctx;
-	t_server_room	*sroom;
+	t_server_room	*server_room;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &sroom);
+	status = input_target(ctx, &server_room);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "CW") == 0)
-		return (apply_input(ctx, sroom, INPUT_ROTATE, 1));
+		return (apply_input(ctx, server_room, INPUT_ROTATE, 1));
 	if (strcmp(token, "CCW") == 0)
-		return (apply_input(ctx, sroom, INPUT_ROTATE, -1));
+		return (apply_input(ctx, server_room, INPUT_ROTATE, -1));
 	return (400);
 }
 
@@ -71,21 +71,21 @@ int	rotate_handler(const t_htttp_message *msg, void *context)
 int	drop_handler(const t_htttp_message *msg, void *context)
 {
 	t_request_context	*ctx;
-	t_server_room	*sroom;
+	t_server_room	*server_room;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &sroom);
+	status = input_target(ctx, &server_room);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "SOFT") == 0)
-		return (apply_input(ctx, sroom, INPUT_DROP, 0));
+		return (apply_input(ctx, server_room, INPUT_DROP, 0));
 	if (strcmp(token, "HARD") == 0)
-		return (apply_input(ctx, sroom, INPUT_DROP, 1));
+		return (apply_input(ctx, server_room, INPUT_DROP, 1));
 	return (400);
 }
 
@@ -216,12 +216,12 @@ static int	body_token(t_request_context *ctx, char *out, size_t cap)
  * instead of two racing ones.
  *
  * @param ctx Request context.
- * @param sroom Room runtime holding the game.
+ * @param server_room Room runtime holding the game.
  * @param action Which input to apply.
  * @param argument Direction for a move or rotation, hard flag for a drop.
  * @return 200 when the input was applied, 409 when it was refused.
  */
-static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_action action,
+static int	apply_input(t_request_context *ctx, t_server_room *server_room, t_input_action action,
 			int argument)
 {
 	t_game	*game;
@@ -232,8 +232,8 @@ static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_act
 	if (index < 0 || index >= TD_MAX_GAMES)
 		return (409);
 	ok = false;
-	pthread_mutex_lock(&sroom->mutex);
-	game = &sroom->games[index];
+	pthread_mutex_lock(&server_room->mutex);
+	game = &server_room->games[index];
 	if (game->player_id == ctx->cli->player_id && game->active)
 	{
 		if (action == INPUT_MOVE)
@@ -243,9 +243,9 @@ static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_act
 		else
 			ok = game_drop(game, argument != 0);
 		if (ok)
-			sroom->dirty[index] = true;
+			server_room->dirty[index] = true;
 	}
-	pthread_mutex_unlock(&sroom->mutex);
+	pthread_mutex_unlock(&server_room->mutex);
 	if (!ok)
 		return (request_refuse(ctx, "input-blocked"));
 	return (200);

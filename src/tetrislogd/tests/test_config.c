@@ -20,7 +20,6 @@ static void	test_parse_line_forms(void);
 static void	test_load_reads_rc_file(void);
 static void	test_env_overrides_file(void);
 static void	test_resolve_rc_order(void);
-static void	test_mkdir_p_creates_parents(void);
 static void	test_the_shipped_rc_file_loads(void);
 static void	test_shipped_rc_socket_keys_agree(void);
 
@@ -36,7 +35,6 @@ int	main(void)
 	test_load_reads_rc_file();
 	test_env_overrides_file();
 	test_resolve_rc_order();
-	test_mkdir_p_creates_parents();
 	test_the_shipped_rc_file_loads();
 	test_shipped_rc_socket_keys_agree();
 	return (0);
@@ -44,13 +42,13 @@ int	main(void)
 
 static void	test_defaults_are_complete(void)
 {
-	t_cfg	cfg;
+	t_config	cfg;
 
-	cfg_defaults(&cfg);
-	assert(strcmp(cfg.sock_path, TL_DEF_SOCK) == 0);
-	assert(strcmp(cfg.file_path, TL_DEF_FILE) == 0);
-	assert(strcmp(cfg.pid_path, TL_DEF_PID) == 0);
-	assert(strcmp(cfg.err_path, TL_DEF_ERR) == 0);
+	config_defaults(&cfg);
+	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCK) == 0);
+	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_FILE) == 0);
+	assert(strcmp(cfg.pid_path, TETRISLOGD_DEFAULT_PID) == 0);
+	assert(strcmp(cfg.err_path, TETRISLOGD_DEFAULT_ERR) == 0);
 	printf("PASS test_defaults_are_complete\n");
 }
 
@@ -61,36 +59,36 @@ static void	test_defaults_are_complete(void)
 */
 static void	test_set_known_keys(void)
 {
-	t_cfg	cfg;
+	t_config	cfg;
 
-	cfg_defaults(&cfg);
-	assert(cfg_set(&cfg, "TETRISLOGD_SOCK", "/run/logd.sock") == 0);
+	config_defaults(&cfg);
+	assert(config_set(&cfg, "TETRISLOGD_SOCK", "/run/logd.sock") == 0);
 	assert(strcmp(cfg.sock_path, "/run/logd.sock") == 0);
-	assert(cfg_set(&cfg, "TETRISLOGD_FILE", "/var/log/logd.log") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_FILE", "/var/log/logd.log") == 0);
 	assert(strcmp(cfg.file_path, "/var/log/logd.log") == 0);
-	assert(cfg_set(&cfg, "TETRISLOGD_PID", "/run/logd.pid") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_PID", "/run/logd.pid") == 0);
 	assert(strcmp(cfg.pid_path, "/run/logd.pid") == 0);
-	assert(cfg_set(&cfg, "TETRISLOGD_ERR", "/var/log/logd.err") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_ERR", "/var/log/logd.err") == 0);
 	assert(strcmp(cfg.err_path, "/var/log/logd.err") == 0);
-	assert(cfg_set(&cfg, "TETRISD_LOG_IPC", "/run/other.sock") == -1);
-	assert(cfg_set(&cfg, "PATH", "/usr/bin") == -1);
-	assert(cfg_set(&cfg, "TETRISLOGD_NONSENSE", "x") == -1);
+	assert(config_set(&cfg, "TETRISD_LOG_IPC", "/run/other.sock") == -1);
+	assert(config_set(&cfg, "PATH", "/usr/bin") == -1);
+	assert(config_set(&cfg, "TETRISLOGD_NONSENSE", "x") == -1);
 	printf("PASS test_set_known_keys\n");
 }
 
 static void	test_set_rejects_bad_values(void)
 {
-	char	toolong[TL_PATH_MAX + 32];
-	t_cfg	cfg;
+	char	toolong[TETRISLOGD_FS_PATH_MAX + 32];
+	t_config	cfg;
 
-	cfg_defaults(&cfg);
+	config_defaults(&cfg);
 	memset(toolong, 'a', sizeof(toolong) - 1);
 	toolong[sizeof(toolong) - 1] = '\0';
-	assert(cfg_set(&cfg, "TETRISLOGD_SOCK", "") == -1);
-	assert(cfg_set(&cfg, "TETRISLOGD_FILE", "") == -1);
-	assert(cfg_set(&cfg, "TETRISLOGD_FILE", toolong) == -1);
-	assert(strcmp(cfg.sock_path, TL_DEF_SOCK) == 0);
-	assert(strcmp(cfg.file_path, TL_DEF_FILE) == 0);
+	assert(config_set(&cfg, "TETRISLOGD_SOCK", "") == -1);
+	assert(config_set(&cfg, "TETRISLOGD_FILE", "") == -1);
+	assert(config_set(&cfg, "TETRISLOGD_FILE", toolong) == -1);
+	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCK) == 0);
+	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_FILE) == 0);
 	printf("PASS test_set_rejects_bad_values\n");
 }
 
@@ -101,26 +99,26 @@ static void	test_set_rejects_bad_values(void)
 */
 static void	test_parse_line_forms(void)
 {
-	t_cfg	cfg;
+	t_config	cfg;
 
-	cfg_defaults(&cfg);
-	assert(cfg_parse_line(&cfg, "export TETRISLOGD_SOCK=/a/b.sock") == 0);
+	config_defaults(&cfg);
+	assert(config_parse_line(&cfg, "export TETRISLOGD_SOCK=/a/b.sock") == 0);
 	assert(strcmp(cfg.sock_path, "/a/b.sock") == 0);
-	assert(cfg_parse_line(&cfg, "TETRISLOGD_FILE=\"/c/d.log\"") == 0);
+	assert(config_parse_line(&cfg, "TETRISLOGD_FILE=\"/c/d.log\"") == 0);
 	assert(strcmp(cfg.file_path, "/c/d.log") == 0);
-	assert(cfg_parse_line(&cfg, "# export TETRISLOGD_SOCK=/no.sock") == 0);
-	assert(cfg_parse_line(&cfg, "dspawn tetrisd -- tetrisd") == 0);
-	assert(cfg_parse_line(&cfg, "export TETRISD_PORT=4242") == 0);
-	assert(cfg_parse_line(&cfg, "") == 0);
+	assert(config_parse_line(&cfg, "# export TETRISLOGD_SOCK=/no.sock") == 0);
+	assert(config_parse_line(&cfg, "dspawn tetrisd -- tetrisd") == 0);
+	assert(config_parse_line(&cfg, "export TETRISD_PORT=4242") == 0);
+	assert(config_parse_line(&cfg, "") == 0);
 	assert(strcmp(cfg.sock_path, "/a/b.sock") == 0);
-	assert(cfg_parse_line(&cfg, "export TETRISLOGD_FILE=") == -1);
+	assert(config_parse_line(&cfg, "export TETRISLOGD_FILE=") == -1);
 	printf("PASS test_parse_line_forms\n");
 }
 
 static void	test_load_reads_rc_file(void)
 {
 	t_fixture	fx;
-	t_cfg		cfg;
+	t_config		cfg;
 	char		rc[256];
 
 	assert(fx_make(&fx) == 0);
@@ -130,7 +128,7 @@ static void	test_load_reads_rc_file(void)
 		"export TETRISLOGD_SOCK=/tmp/x.sock\n"
 		"export TETRISLOGD_FILE=/tmp/x.log\n"
 		"export TETRISD_PORT=4242\n");
-	assert(cfg_load(&cfg, rc) == 0);
+	assert(config_load(&cfg, rc) == 0);
 	assert(strcmp(cfg.sock_path, "/tmp/x.sock") == 0);
 	assert(strcmp(cfg.file_path, "/tmp/x.log") == 0);
 	assert(strcmp(cfg.rc_path, rc) == 0);
@@ -145,14 +143,14 @@ static void	test_load_reads_rc_file(void)
 static void	test_env_overrides_file(void)
 {
 	t_fixture	fx;
-	t_cfg		cfg;
+	t_config		cfg;
 	char		rc[256];
 
 	assert(fx_make(&fx) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", fx.dir);
 	write_file(rc, "export TETRISLOGD_FILE=/tmp/from_file.log\n");
 	setenv("TETRISLOGD_FILE", "/tmp/from_env.log", 1);
-	assert(cfg_load(&cfg, rc) == 0);
+	assert(config_load(&cfg, rc) == 0);
 	assert(strcmp(cfg.file_path, "/tmp/from_env.log") == 0);
 	unsetenv("TETRISLOGD_FILE");
 	fx_destroy(&fx);
@@ -161,45 +159,30 @@ static void	test_env_overrides_file(void)
 
 static void	test_resolve_rc_order(void)
 {
-	char	out[TL_PATH_MAX];
+	char	out[TETRISLOGD_FS_PATH_MAX];
 
 	unsetenv("TETRISHRC");
-	assert(cfg_resolve_rc(NULL, out, sizeof(out)) == 0);
-	assert(strcmp(out, "./" TL_RC_NAME) == 0);
+	assert(config_resolve_rc_path(NULL, out, sizeof(out)) == 0);
+	assert(strcmp(out, "./" TETRISLOGD_RC_FILENAME) == 0);
 	setenv("TETRISHRC", "/tmp/env.rc", 1);
-	assert(cfg_resolve_rc(NULL, out, sizeof(out)) == 0);
+	assert(config_resolve_rc_path(NULL, out, sizeof(out)) == 0);
 	assert(strcmp(out, "/tmp/env.rc") == 0);
-	assert(cfg_resolve_rc("/tmp/argv.rc", out, sizeof(out)) == 0);
+	assert(config_resolve_rc_path("/tmp/argv.rc", out, sizeof(out)) == 0);
 	assert(strcmp(out, "/tmp/argv.rc") == 0);
 	unsetenv("TETRISHRC");
 	printf("PASS test_resolve_rc_order\n");
 }
 
-static void	test_mkdir_p_creates_parents(void)
-{
-	t_fixture	fx;
-	struct stat	st;
-	char		deep[256];
-
-	assert(fx_make(&fx) == 0);
-	snprintf(deep, sizeof(deep), "%s/a/b/c", fx.dir);
-	assert(cfg_mkdir_p(deep) == 0);
-	assert(stat(deep, &st) == 0 && S_ISDIR(st.st_mode));
-	assert(cfg_mkdir_p(deep) == 0);
-	fx_destroy(&fx);
-	printf("PASS test_mkdir_p_creates_parents\n");
-}
-
 /*
 ** The .tetrishrc this repository ships is the file the daemon boots from, so
-** a TETRISLOGD_ key documented there but never wired into cfg_set would stop
+** a TETRISLOGD_ key documented there but never wired into config_set would stop
 ** tetrislogd starting at all. Only parsing the real file catches that.
 */
 static void	test_the_shipped_rc_file_loads(void)
 {
-	t_cfg	cfg;
+	t_config	cfg;
 
-	assert(cfg_load(&cfg, "../../.tetrishrc") == 0);
+	assert(config_load(&cfg, "../../.tetrishrc") == 0);
 	assert(cfg.sock_path[0] != '\0');
 	assert(cfg.file_path[0] != '\0');
 	printf("PASS test_the_shipped_rc_file_loads\n");
@@ -214,8 +197,8 @@ static void	test_the_shipped_rc_file_loads(void)
 */
 static void	test_shipped_rc_socket_keys_agree(void)
 {
-	char	dialled[TL_PATH_MAX];
-	char	bound[TL_PATH_MAX];
+	char	dialled[TETRISLOGD_FS_PATH_MAX];
+	char	bound[TETRISLOGD_FS_PATH_MAX];
 
 	assert(rc_value("../../.tetrishrc", "TETRISD_LOG_IPC",
 			dialled, sizeof(dialled)) == 0);
@@ -237,12 +220,12 @@ static void	write_file(const char *path, const char *text)
 
 /*
 ** Reads one assignment straight out of an rc file, without going through
-** cfg_set - the drift check has to see both keys, and cfg_set deliberately
+** config_set - the drift check has to see both keys, and config_set deliberately
 ** refuses the one belonging to the other daemon.
 */
 static int	rc_value(const char *path, const char *key, char *out, size_t cap)
 {
-	char	line[TL_LINE_MAX];
+	char	line[TETRISLOGD_CONFIG_LINE_MAX];
 	char	*at;
 	FILE	*f;
 

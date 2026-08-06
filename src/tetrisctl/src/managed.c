@@ -1,7 +1,7 @@
 #include "tetrisctl.h"
 
 // Static Functions
-static void	spawn(const t_daemon *d, const char *rc_path);
+static void	spawn(const t_managed *d, const char *rc_path);
 
 /**
  * @brief Reports whether a daemon is running, and which pid it is.
@@ -13,21 +13,21 @@ static void	spawn(const t_daemon *d, const char *rc_path);
  *
  * @param d Daemon to inspect.
  * @param pid Receives the running pid, or 0 when nothing is running.
- * @return TC_RUNNING, TC_STOPPED, or TC_UNKNOWN when the pidfile is there but
+ * @return MANAGED_RUNNING, MANAGED_STOPPED, or MANAGED_UNKNOWN when the pidfile is there but
  * cannot be inspected or parsed.
  */
-t_state	d_state(const t_daemon *d, pid_t *pid)
+t_managed_state	managed_state(const t_managed *d, pid_t *pid)
 {
 	int	rc;
 
 	if (d == NULL || pid == NULL)
-		return (TC_UNKNOWN);
+		return (MANAGED_UNKNOWN);
 	rc = daemon_pid_probe(d->pid_path, pid);
 	if (rc < 0)
-		return (TC_UNKNOWN);
+		return (MANAGED_UNKNOWN);
 	if (rc == 1)
-		return (TC_RUNNING);
-	return (TC_STOPPED);
+		return (MANAGED_RUNNING);
+	return (MANAGED_STOPPED);
 }
 
 /**
@@ -47,7 +47,7 @@ t_state	d_state(const t_daemon *d, pid_t *pid)
  * @param rc_path Start-up file to pass on, or NULL to let the daemon resolve.
  * @return 0 when the daemon reported itself up, -1 otherwise.
  */
-int	d_start(const t_daemon *d, const char *rc_path)
+int	managed_start(const t_managed *d, const char *rc_path)
 {
 	pid_t	pid;
 	int		status;
@@ -86,9 +86,9 @@ int	d_start(const t_daemon *d, const char *rc_path)
  * @param timeout_ms How long to wait for teardown before giving up.
  * @return 0 when the daemon is down, -1 with errno set otherwise.
  */
-int	d_stop(const t_daemon *d, int timeout_ms)
+int	managed_stop(const t_managed *d, int timeout_ms)
 {
-	t_state	state;
+	t_managed_state	state;
 	pid_t	pid;
 
 	if (d == NULL)
@@ -96,10 +96,10 @@ int	d_stop(const t_daemon *d, int timeout_ms)
 		errno = EINVAL;
 		return (-1);
 	}
-	state = d_state(d, &pid);
-	if (state == TC_STOPPED)
+	state = managed_state(d, &pid);
+	if (state == MANAGED_STOPPED)
 		return (0);
-	if (state == TC_UNKNOWN)
+	if (state == MANAGED_UNKNOWN)
 		return (-1);
 	if (kill(pid, SIGTERM) != 0 && errno != ESRCH)
 		return (-1);
@@ -107,16 +107,16 @@ int	d_stop(const t_daemon *d, int timeout_ms)
 }
 
 /**
- * @brief Child half of d_start: become the daemon binary; never returns.
+ * @brief Child half of managed_start: become the daemon binary; never returns.
  *
  * @param d Daemon to exec.
  * @param rc_path Start-up file to pass as argv[1], or NULL.
  */
-static void	spawn(const t_daemon *d, const char *rc_path)
+static void	spawn(const t_managed *d, const char *rc_path)
 {
 	char	*argv[3];
-	char	name[TC_NAME_MAX];
-	char	rc[TC_PATH_MAX];
+	char	name[TETRISCTL_NAME_MAX];
+	char	rc[TETRISCTL_FS_PATH_MAX];
 
 	snprintf(name, sizeof(name), "%s", d->name);
 	argv[0] = name;
@@ -129,6 +129,6 @@ static void	spawn(const t_daemon *d, const char *rc_path)
 	}
 	execvp(name, argv);
 	fprintf(stderr, "%s: cannot run %s: %s\n",
-		TC_COMPONENT, name, strerror(errno));
+		TETRISCTL_COMPONENT_NAME, name, strerror(errno));
 	_exit(EXIT_FAILURE);
 }

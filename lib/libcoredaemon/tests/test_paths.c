@@ -32,8 +32,8 @@ int	main(void)
 
 static void	test_mkdir_p_builds_the_whole_chain(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/a/b/c", dir);
@@ -45,8 +45,8 @@ static void	test_mkdir_p_builds_the_whole_chain(void)
 
 static void	test_mkdir_p_accepts_a_directory_that_exists(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/a/b", dir);
@@ -58,9 +58,9 @@ static void	test_mkdir_p_accepts_a_directory_that_exists(void)
 
 static void	test_mkdir_parent_ignores_the_leaf(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
-	char	parent[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
+	char	parent[FIXTURE_PATH_MAX];
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/run/state/x.pid", dir);
@@ -75,9 +75,9 @@ static void	test_mkdir_parent_ignores_the_leaf(void)
 
 static void	test_mkdir_p_fails_through_a_regular_file(void)
 {
-	char	dir[FX_DIR_MAX];
-	char	path[FX_PATH_MAX];
-	char	wall[FX_PATH_MAX];
+	char	dir[FIXTURE_DIR_MAX];
+	char	path[FIXTURE_PATH_MAX];
+	char	wall[FIXTURE_PATH_MAX];
 	int		fd;
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);

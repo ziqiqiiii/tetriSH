@@ -22,22 +22,22 @@ static const char *const	g_clears[] = {
 							};
 
 // Static Functions
-static int	validate_state(const t_sb_state *in);
-static int	validate_cells(const t_sb_state *in);
-static int	encode_head(const t_sb_state *in, char *out, size_t cap,
+static int	validate_state(const t_body_state *in);
+static int	validate_cells(const t_body_state *in);
+static int	encode_head(const t_body_state *in, char *out, size_t cap,
 				size_t *off);
-static int	encode_stats(const t_sb_state *in, char *out, size_t cap,
+static int	encode_stats(const t_body_state *in, char *out, size_t cap,
 				size_t *off);
-static int	encode_clearing(const t_sb_state *in, char *out, size_t cap,
+static int	encode_clearing(const t_body_state *in, char *out, size_t cap,
 				size_t *off);
-static int	encode_board(const t_sb_state *in, char *out, size_t cap,
+static int	encode_board(const t_body_state *in, char *out, size_t cap,
 				size_t *off);
-static int	decode_head(t_sb_cursor *c, t_sb_state *out);
-static int	decode_stats(t_sb_cursor *c, t_sb_state *out);
-static int	decode_flags(t_sb_cursor *c, t_sb_state *out);
-static int	decode_clearing(t_sb_cursor *c, t_sb_state *out);
-static int	decode_board(t_sb_cursor *c, t_sb_state *out);
-static int	decode_row(const char *line, t_sb_cell *cells);
+static int	decode_head(t_body_cursor *c, t_body_state *out);
+static int	decode_stats(t_body_cursor *c, t_body_state *out);
+static int	decode_flags(t_body_cursor *c, t_body_state *out);
+static int	decode_clearing(t_body_cursor *c, t_body_state *out);
+static int	decode_board(t_body_cursor *c, t_body_state *out);
+static int	decode_row(const char *line, t_body_cell *cells);
 static int	hex_nibble(char ch);
 
 /**
@@ -52,7 +52,7 @@ static int	hex_nibble(char ch);
  * @return Body length in bytes, or -1 with errno = EINVAL (NULL args or a
  *         field out of range) or ERANGE (cap too small).
  */
-int	body_state_encode(const t_sb_state *in, char *out, size_t cap)
+int	body_state_encode(const t_body_state *in, char *out, size_t cap)
 {
 	size_t	off;
 
@@ -82,9 +82,9 @@ int	body_state_encode(const t_sb_state *in, char *out, size_t cap)
  *         (missing/misordered key, malformed value, out-of-range number,
  *         bad board row, trailing junk).
  */
-int	body_state_decode(const char *buf, size_t len, t_sb_state *out)
+int	body_state_decode(const char *buf, size_t len, t_body_state *out)
 {
-	t_sb_cursor	c;
+	t_body_cursor	c;
 
 	if (!buf || !out)
 		return (body_fail(EINVAL));
@@ -106,7 +106,7 @@ int	body_state_decode(const char *buf, size_t len, t_sb_state *out)
  * @param in The frame to validate.
  * @return 0 when the frame is encodable, -1 otherwise.
  */
-static int	validate_state(const t_sb_state *in)
+static int	validate_state(const t_body_state *in)
 {
 	if (in->phase > BODY_PHASE_TOP_OUT || in->last_clear > BODY_CLEAR_PERFECT)
 		return (-1);
@@ -129,7 +129,7 @@ static int	validate_state(const t_sb_state *in)
  * @param in The frame to validate.
  * @return 0 when every cell and next entry is representable, -1 otherwise.
  */
-static int	validate_cells(const t_sb_state *in)
+static int	validate_cells(const t_body_state *in)
 {
 	int	row;
 	int	col;
@@ -166,7 +166,7 @@ static int	validate_cells(const t_sb_state *in)
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_head(const t_sb_state *in, char *out, size_t cap,
+static int	encode_head(const t_body_state *in, char *out, size_t cap,
 		size_t *off)
 {
 	if (body_append(out, cap, off, "seq %" PRIu64 "\n", in->seq) != 0)
@@ -191,7 +191,7 @@ static int	encode_head(const t_sb_state *in, char *out, size_t cap,
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_stats(const t_sb_state *in, char *out, size_t cap,
+static int	encode_stats(const t_body_state *in, char *out, size_t cap,
 		size_t *off)
 {
 	if (body_append(out, cap, off, "score %" PRIu64 "\n", in->score) != 0)
@@ -221,7 +221,7 @@ static int	encode_stats(const t_sb_state *in, char *out, size_t cap,
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_clearing(const t_sb_state *in, char *out, size_t cap,
+static int	encode_clearing(const t_body_state *in, char *out, size_t cap,
 		size_t *off)
 {
 	int	i;
@@ -248,7 +248,7 @@ static int	encode_clearing(const t_sb_state *in, char *out, size_t cap,
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_board(const t_sb_state *in, char *out, size_t cap,
+static int	encode_board(const t_body_state *in, char *out, size_t cap,
 		size_t *off)
 {
 	int	row;
@@ -281,7 +281,7 @@ static int	encode_board(const t_sb_state *in, char *out, size_t cap,
  * @param out The frame being filled.
  * @return 0 on success, -1 on a missing, misordered, or malformed line.
  */
-static int	decode_head(t_sb_cursor *c, t_sb_state *out)
+static int	decode_head(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	char	word[BODY_LINE_MAX];
@@ -297,7 +297,7 @@ static int	decode_head(t_sb_cursor *c, t_sb_state *out)
 	n = body_word_index(word, g_phases, 4);
 	if (n < 0)
 		return (-1);
-	out->phase = (t_sb_phase)n;
+	out->phase = (t_body_phase)n;
 	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "piece %d %d %d %d%n", &out->piece.type,
 			&out->piece.rotation, &out->piece.col, &out->piece.row, &n) != 4
@@ -317,7 +317,7 @@ static int	decode_head(t_sb_cursor *c, t_sb_state *out)
  * @param out The frame being filled.
  * @return 0 on success, -1 on a missing, misordered, or malformed line.
  */
-static int	decode_stats(t_sb_cursor *c, t_sb_state *out)
+static int	decode_stats(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	int		n;
@@ -354,7 +354,7 @@ static int	decode_stats(t_sb_cursor *c, t_sb_state *out)
  * @param out The frame being filled.
  * @return 0 on success, -1 on a missing, misordered, or malformed line.
  */
-static int	decode_flags(t_sb_cursor *c, t_sb_state *out)
+static int	decode_flags(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	char	word[BODY_LINE_MAX];
@@ -377,7 +377,7 @@ static int	decode_flags(t_sb_cursor *c, t_sb_state *out)
 	n = body_word_index(word, g_clears, 8);
 	if (n < 0)
 		return (-1);
-	out->last_clear = (t_sb_clear_label)n;
+	out->last_clear = (t_body_clear_label)n;
 	return (0);
 }
 
@@ -388,7 +388,7 @@ static int	decode_flags(t_sb_cursor *c, t_sb_state *out)
  * @param out The frame being filled.
  * @return 0 on success, -1 on a malformed line or a bad row count.
  */
-static int	decode_clearing(t_sb_cursor *c, t_sb_state *out)
+static int	decode_clearing(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	int		used;
@@ -421,7 +421,7 @@ static int	decode_clearing(t_sb_cursor *c, t_sb_state *out)
  * @param out The frame being filled.
  * @return 0 on success, -1 on a missing, short, or non-hex row.
  */
-static int	decode_board(t_sb_cursor *c, t_sb_state *out)
+static int	decode_board(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	int		row;
@@ -447,7 +447,7 @@ static int	decode_board(t_sb_cursor *c, t_sb_state *out)
  * @param cells The row of cells to fill.
  * @return 0 on success, -1 on a wrong length, non-hex, or bad cell type.
  */
-static int	decode_row(const char *line, t_sb_cell *cells)
+static int	decode_row(const char *line, t_body_cell *cells)
 {
 	int	col;
 	int	type;

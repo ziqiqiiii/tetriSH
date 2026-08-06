@@ -46,21 +46,21 @@
 ** every suite with it.
 */
 
-# define TL_COMPONENT		"tetrislogd"
-# define TL_KEY_PREFIX		"TETRISLOGD_"
-# define TL_RC_NAME			".tetrishrc"
-# define TL_PATH_MAX		1024
-# define TL_LINE_MAX		2048
+# define TETRISLOGD_COMPONENT_NAME		"tetrislogd"
+# define TETRISLOGD_CONFIG_KEY_PREFIX		"TETRISLOGD_"
+# define TETRISLOGD_RC_FILENAME			".tetrishrc"
+# define TETRISLOGD_FS_PATH_MAX		1024
+# define TETRISLOGD_CONFIG_LINE_MAX		2048
 
 /* config defaults - all overridable from .tetrishrc */
-# define TL_DEF_SOCK		"tmp/tetrisd/tetrislogd.sock"
-# define TL_DEF_FILE		"tmp/tetrislogd/tetrislogd.log"
-# define TL_DEF_PID			"tmp/tetrislogd/tetrislogd.pid"
-# define TL_DEF_ERR			"tmp/tetrislogd/tetrislogd.err"
+# define TETRISLOGD_DEFAULT_SOCK		"tmp/tetrisd/tetrislogd.sock"
+# define TETRISLOGD_DEFAULT_FILE		"tmp/tetrislogd/tetrislogd.log"
+# define TETRISLOGD_DEFAULT_PID			"tmp/tetrislogd/tetrislogd.pid"
+# define TETRISLOGD_DEFAULT_ERR			"tmp/tetrislogd/tetrislogd.err"
 
-# define TL_SOCK_MODE		0600
-# define TL_FILE_MODE		0644
-# define TL_DIR_MODE		0755
+# define TETRISLOGD_SOCKET_MODE		0600
+# define TETRISLOGD_FILE_MODE		0644
+# define TETRISLOGD_DIR_MODE		0755
 
 /*
 ** Idle tick. The poll timeout doubles as the period of the fdatasync, of the
@@ -69,26 +69,26 @@
 ** handle. logd_start copies it into t_logd.idle_ms, which tests lower to keep
 ** the timeout path fast.
 */
-# define TL_IDLE_MS			1000
+# define TETRISLOGD_IDLE_MS			1000
 
-/* signal flags reported by sig_take */
-# define TL_SIG_STOP		0x1
-# define TL_SIG_HUP			0x2
-# define TL_SIG_DUMP		0x4
+/* signal flags reported by signals_take */
+# define TETRISLOGD_SIGNAL_STOP		0x1
+# define TETRISLOGD_SIGNAL_HUP			0x2
+# define TETRISLOGD_SIGNAL_DUMP		0x4
 
 /*
 ** Every path the daemon touches, resolved once at boot from .tetrishrc.
 ** Config is cold: SIGHUP reopens the sink at the same path, it does not
 ** re-read this. Paths change by restarting the daemon.
 */
-typedef struct s_cfg
+typedef struct s_config
 {
-	char	sock_path[TL_PATH_MAX];
-	char	file_path[TL_PATH_MAX];
-	char	pid_path[TL_PATH_MAX];
-	char	err_path[TL_PATH_MAX];
-	char	rc_path[TL_PATH_MAX];
-}	t_cfg;
+	char	sock_path[TETRISLOGD_FS_PATH_MAX];
+	char	file_path[TETRISLOGD_FS_PATH_MAX];
+	char	pid_path[TETRISLOGD_FS_PATH_MAX];
+	char	err_path[TETRISLOGD_FS_PATH_MAX];
+	char	rc_path[TETRISLOGD_FS_PATH_MAX];
+}	t_config;
 
 /*
 ** What the logger can honestly account for. `written` and `degraded` together
@@ -123,7 +123,7 @@ typedef struct s_sink
 	bool	dirty;
 	dev_t	dev;
 	ino_t	ino;
-	char	path[TL_PATH_MAX];
+	char	path[TETRISLOGD_FS_PATH_MAX];
 }	t_sink;
 
 /*
@@ -134,7 +134,7 @@ typedef struct s_sink
 */
 typedef struct s_logd
 {
-	t_cfg		cfg;
+	t_config		cfg;
 	t_sink		sink;
 	t_counters	count;
 	int			sock_fd;
@@ -144,13 +144,11 @@ typedef struct s_logd
 }	t_logd;
 
 /* CFG.C */
-void	cfg_defaults(t_cfg *cfg);
-int		cfg_set(t_cfg *cfg, const char *key, const char *value);
-int		cfg_parse_line(t_cfg *cfg, const char *line);
-int		cfg_load(t_cfg *cfg, const char *rc_override);
-int		cfg_resolve_rc(const char *override, char *out, size_t cap);
-int		cfg_mkdir_p(const char *path);
-int		cfg_mkdir_parent(const char *path);
+void	config_defaults(t_config *cfg);
+int		config_set(t_config *cfg, const char *key, const char *value);
+int		config_parse_line(t_config *cfg, const char *line);
+int		config_load(t_config *cfg, const char *rc_override);
+int		config_resolve_rc_path(const char *override, char *out, size_t cap);
 
 /* SINK.C */
 void	sink_blank(t_sink *sk);
@@ -165,7 +163,7 @@ bool	sink_is_stale(const t_sink *sk);
 
 /* LOGD.C */
 void	logd_blank(t_logd *lg);
-int		logd_start(t_logd *lg, const t_cfg *cfg);
+int		logd_start(t_logd *lg, const t_config *cfg);
 int		logd_run_once(t_logd *lg);
 void	logd_stop(t_logd *lg);
 int		logd_accept(t_logd *lg, const void *buf, size_t len);
@@ -173,8 +171,8 @@ void	logd_emit(t_logd *lg, t_log_level level, const char *fmt, ...);
 void	logd_report(t_logd *lg, const char *event);
 
 /* SIGNALS.C */
-int		sig_install(int wake_fd);
-int		sig_take(void);
-void	sig_detach(void);
+int		signals_install(int wake_fd);
+int		signals_take(void);
+void	signals_detach(void);
 
 # endif
