@@ -1,16 +1,16 @@
 #include "tetrisu.h"
 
 // Static Functions
-static bool	key_action(uint32_t key, solo_action_t *action);
-static void	press_horizontal(solo_handling_state_t *state,
-				const solo_handling_config_t *config, int direction);
-static bool	release_horizontal(solo_handling_state_t *state,
-				const solo_handling_config_t *config, int direction,
-				solo_action_t *action);
-static int	soft_drop_interval(const solo_handling_config_t *config,
+static bool	key_action(uint32_t key, t_solo_action *action);
+static void	press_horizontal(t_solo_handling_state *state,
+				const t_solo_handling_config *config, int direction);
+static bool	release_horizontal(t_solo_handling_state *state,
+				const t_solo_handling_config *config, int direction,
+				t_solo_action *action);
+static int	soft_drop_interval(const t_solo_handling_config *config,
 				int gravity_ms);
 static void	emit_repeats(int *wait_ms, int interval_ms, int elapsed_ms,
-				solo_action_t action, solo_action_t *actions, int capacity,
+				t_solo_action action, t_solo_action *actions, int capacity,
 				int *count);
 
 /**
@@ -18,9 +18,9 @@ static void	emit_repeats(int *wait_ms, int interval_ms, int elapsed_ms,
  *
  * @return Default DAS, ARR, and soft-drop factor.
  */
-solo_handling_config_t	solo_handling_default_config(void)
+t_solo_handling_config	solo_handling_default_config(void)
 {
-	solo_handling_config_t	config;
+	t_solo_handling_config	config;
 
 	config.das_ms = SOLO_DEFAULT_DAS_MS;
 	config.arr_ms = SOLO_DEFAULT_ARR_MS;
@@ -33,7 +33,7 @@ solo_handling_config_t	solo_handling_default_config(void)
  *
  * @param state Handling state to reset.
  */
-void	solo_handling_reset(solo_handling_state_t *state)
+void	solo_handling_reset(t_solo_handling_state *state)
 {
 	memset(state, 0, sizeof(*state));
 }
@@ -52,9 +52,9 @@ void	solo_handling_reset(solo_handling_state_t *state)
  * @param action Output immediate action when the return value is true.
  * @return true when an immediate gameplay action should be applied.
  */
-bool	solo_handling_event(solo_handling_state_t *state,
-	const solo_handling_config_t *config, uint32_t key,
-	ncintype_e event_type, solo_action_t *action)
+bool	solo_handling_event(t_solo_handling_state *state,
+	const t_solo_handling_config *config, uint32_t key,
+	ncintype_e event_type, t_solo_action *action)
 {
 	int	direction;
 
@@ -105,11 +105,11 @@ bool	solo_handling_event(solo_handling_state_t *state,
  * @param capacity Number of output entries available.
  * @return Number of actions written.
  */
-int	solo_handling_update(solo_handling_state_t *state,
-	const solo_handling_config_t *config, int gravity_ms, int elapsed_ms,
-	solo_action_t *actions, int capacity)
+int	solo_handling_update(t_solo_handling_state *state,
+	const t_solo_handling_config *config, int gravity_ms, int elapsed_ms,
+	t_solo_action *actions, int capacity)
 {
-	solo_action_t	action;
+	t_solo_action	action;
 	int				count;
 	int				interval_ms;
 
@@ -143,8 +143,8 @@ int	solo_handling_update(solo_handling_state_t *state,
  * @param gravity_ms Current level gravity interval.
  * @return Milliseconds until next repeat, or -1 when no key is held.
  */
-int	solo_handling_next_wake_ms(const solo_handling_state_t *state,
-	const solo_handling_config_t *config, int gravity_ms)
+int	solo_handling_next_wake_ms(const t_solo_handling_state *state,
+	const t_solo_handling_config *config, int gravity_ms)
 {
 	int	wake_ms;
 	int	soft_ms;
@@ -168,7 +168,7 @@ int	solo_handling_next_wake_ms(const solo_handling_state_t *state,
 /**
  * @brief Maps handling-owned keys to Solo actions.
  */
-static bool	key_action(uint32_t key, solo_action_t *action)
+static bool	key_action(uint32_t key, t_solo_action *action)
 {
 	if (key == NCKEY_LEFT)
 		*action = SOLO_MOVE_LEFT;
@@ -184,8 +184,8 @@ static bool	key_action(uint32_t key, solo_action_t *action)
 /**
  * @brief Makes the latest horizontal press authoritative.
  */
-static void	press_horizontal(solo_handling_state_t *state,
-	const solo_handling_config_t *config, int direction)
+static void	press_horizontal(t_solo_handling_state *state,
+	const t_solo_handling_config *config, int direction)
 {
 	state->sequence++;
 	if (direction < 0)
@@ -205,9 +205,9 @@ static void	press_horizontal(solo_handling_state_t *state,
 /**
  * @brief Releases one direction and restores the still-held opposing key.
  */
-static bool	release_horizontal(solo_handling_state_t *state,
-	const solo_handling_config_t *config, int direction,
-	solo_action_t *action)
+static bool	release_horizontal(t_solo_handling_state *state,
+	const t_solo_handling_config *config, int direction,
+	t_solo_action *action)
 {
 	bool	was_active;
 
@@ -242,7 +242,7 @@ static bool	release_horizontal(solo_handling_state_t *state,
 /**
  * @brief Converts current gravity into a 20x soft-drop repeat interval.
  */
-static int	soft_drop_interval(const solo_handling_config_t *config,
+static int	soft_drop_interval(const t_solo_handling_config *config,
 	int gravity_ms)
 {
 	int	factor;
@@ -263,7 +263,7 @@ static int	soft_drop_interval(const solo_handling_config_t *config,
  * @brief Advances one repeat clock and appends every due action.
  */
 static void	emit_repeats(int *wait_ms, int interval_ms, int elapsed_ms,
-	solo_action_t action, solo_action_t *actions, int capacity, int *count)
+	t_solo_action action, t_solo_action *actions, int capacity, int *count)
 {
 	if (interval_ms < 1)
 		interval_ms = 1;

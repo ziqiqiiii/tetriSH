@@ -1,12 +1,12 @@
 #include "tetrisu.h"
 
 // Static Functions
-static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx);
-static void	refresh_cell_geometry(render_ctx_t *ctx);
-static void	fit_background_to_terminal(render_ctx_t *ctx,
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx);
+static void	refresh_cell_geometry(t_render_ctx *ctx);
+static void	fit_background_to_terminal(t_render_ctx *ctx,
 	int std_rows, int std_cols);
 static int	max_int(int a, int b);
-static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	int rows, int cols);
 static void	set_opaque_backdrop(struct ncplane *plane);
 
@@ -19,9 +19,9 @@ static void	set_opaque_backdrop(struct ncplane *plane);
  * @param image_path Image rendered behind the home screen.
  * @return Fully initialised render context; exits when setup cannot recover.
  */
-render_ctx_t	render_init(const char *image_path)
+t_render_ctx	render_init(const char *image_path)
 {
-	render_ctx_t		ctx;
+	t_render_ctx		ctx;
 	notcurses_options	opts;
 	const char			*term;
 
@@ -63,7 +63,7 @@ render_ctx_t	render_init(const char *image_path)
  * @param ctx Active render context.
  * @return true when bitmap planes may move, overlap, and restack.
  */
-bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
+bool	render_pixel_planes_reliable(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_MOVABLE);
 }
@@ -74,7 +74,7 @@ bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
  * @param ctx Active render context.
  * @return true for every tier above the terminal-cell renderer.
  */
-bool	render_pixels_available(const render_ctx_t *ctx)
+bool	render_pixels_available(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels != TETRISU_PIXELS_NONE);
 }
@@ -89,7 +89,7 @@ bool	render_pixels_available(const render_ctx_t *ctx)
  * @param ctx Active render context.
  * @return true when all changing UI surfaces must remain terminal cells.
  */
-bool	render_compatibility_mode(const render_ctx_t *ctx)
+bool	render_compatibility_mode(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_NONE);
 }
@@ -102,7 +102,7 @@ bool	render_compatibility_mode(const render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_compatibility_badge_refresh(render_ctx_t *ctx)
+void	render_compatibility_badge_refresh(t_render_ctx *ctx)
 {
 	ncplane_options	opts;
 	const char		*text;
@@ -149,7 +149,7 @@ void	render_compatibility_badge_refresh(render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_compatibility_badge_hide(render_ctx_t *ctx)
+void	render_compatibility_badge_hide(t_render_ctx *ctx)
 {
 	if (ctx != NULL && ctx->compatibility_plane != NULL)
 	{
@@ -165,7 +165,7 @@ void	render_compatibility_badge_hide(render_ctx_t *ctx)
  * @param repaint Whether notcurses must query and repaint the terminal first.
  * @return 0 on success, -1 when notcurses refresh fails.
  */
-int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
+int	render_geometry_refresh(t_render_ctx *ctx, bool repaint)
 {
 	unsigned	rows;
 	unsigned	cols;
@@ -192,7 +192,7 @@ int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
  * @param ctx Pointer to the render context.
  * @return true when the tty and standard-plane dimensions differ.
  */
-bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
+bool	render_terminal_geometry_changed(const t_render_ctx *ctx)
 {
 	struct winsize	terminal;
 	unsigned		plane_rows;
@@ -213,7 +213,7 @@ bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
  *
  * @param ctx Context whose background pointer is cleared.
  */
-void	render_background_destroy(render_ctx_t *ctx)
+void	render_background_destroy(t_render_ctx *ctx)
 {
 	if (ctx->bg_plane != NULL)
 	{
@@ -233,7 +233,7 @@ void	render_background_destroy(render_ctx_t *ctx)
  * @param stretch Whether to fill the entire terminal instead of letterboxing.
  * @return 0 on success, -1 when loading, allocation, or rendering fails.
  */
-int	render_background_replace(render_ctx_t *ctx, const char *image_path,
+int	render_background_replace(t_render_ctx *ctx, const char *image_path,
 	bool stretch)
 {
 	struct ncvisual			*ncv;
@@ -307,7 +307,7 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
  * @return The Unicode codepoint or NCKEY_* constant for the event, or
  * (uint32_t)-1 on input error.
  */
-uint32_t	render_wait_key(render_ctx_t *ctx)
+uint32_t	render_wait_key(t_render_ctx *ctx)
 {
 	return (render_wait_input(ctx, NULL));
 }
@@ -324,7 +324,7 @@ uint32_t	render_wait_key(render_ctx_t *ctx)
  * @return The Unicode codepoint or NCKEY_* constant for the event, or
  * (uint32_t)-1 on input error.
  */
-uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
+uint32_t	render_wait_input(t_render_ctx *ctx, ncinput *input)
 {
 	ncinput		local;
 	ncinput		*event;
@@ -387,7 +387,7 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
  *
  * @param ctx Pointer to the render context to tear down.
  */
-void	render_teardown(render_ctx_t *ctx)
+void	render_teardown(t_render_ctx *ctx)
 {
 	if (ctx->nc != NULL)
 	{
@@ -413,9 +413,9 @@ void	render_teardown(render_ctx_t *ctx)
  * @param ctx Render context holding a started notcurses instance.
  * @return The tier every later render decision is derived from.
  */
-static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx)
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx)
 {
-	tetrisu_pixel_policy_t	policy;
+	t_tetrisu_pixel_policy	policy;
 	char					*term;
 
 	term = notcurses_detected_terminal(ctx->nc);
@@ -431,7 +431,7 @@ static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx)
  * @param ctx Render context updated with a portable 2:1 fallback when the
  * terminal exposes no bitmap geometry.
  */
-static void	refresh_cell_geometry(render_ctx_t *ctx)
+static void	refresh_cell_geometry(t_render_ctx *ctx)
 {
 	unsigned	cell_px_y;
 	unsigned	cell_px_x;
@@ -457,7 +457,7 @@ static void	refresh_cell_geometry(render_ctx_t *ctx)
  * @param std_rows Available terminal rows.
  * @param std_cols Available terminal columns.
  */
-static void	fit_background_to_terminal(render_ctx_t *ctx,
+static void	fit_background_to_terminal(t_render_ctx *ctx,
 	int std_rows, int std_cols)
 {
 	double	image_ratio;
@@ -503,7 +503,7 @@ static int	max_int(int a, int b)
  * @param cols Destination column count (unused).
  * @return The 4x2 cell blitter.
  */
-static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	int rows, int cols)
 {
 	(void)ctx;

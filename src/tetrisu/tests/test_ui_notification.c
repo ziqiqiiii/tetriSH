@@ -18,7 +18,7 @@ int	main(void)
 
 static void	test_show_clamps_and_replaces(void)
 {
-	ui_notification_stack_t	stack;
+	t_ui_notification_stack	stack;
 
 	ui_notification_stack_init(&stack);
 	ui_notification_show(&stack, "MUSIC", 140, 100);
@@ -34,7 +34,7 @@ static void	test_show_clamps_and_replaces(void)
 
 static void	test_stack_drops_oldest(void)
 {
-	ui_notification_stack_t	stack;
+	t_ui_notification_stack	stack;
 
 	ui_notification_stack_init(&stack);
 	ui_notification_show(&stack, "ONE", 10, 1);
@@ -50,7 +50,7 @@ static void	test_stack_drops_oldest(void)
 
 static void	test_hold_fade_and_expiry(void)
 {
-	ui_notification_stack_t	stack;
+	t_ui_notification_stack	stack;
 	uint64_t				start;
 
 	start = 5000;
@@ -73,7 +73,7 @@ static void	test_hold_fade_and_expiry(void)
 
 static void	test_next_wake_deadlines(void)
 {
-	ui_notification_stack_t	stack;
+	t_ui_notification_stack	stack;
 	uint64_t				start;
 
 	start = 1000;

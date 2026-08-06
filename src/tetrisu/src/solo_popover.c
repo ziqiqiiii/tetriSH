@@ -1,7 +1,7 @@
 #include "tetrisu.h"
 
-static void	start_fade(solo_render_t *solo, solo_popover_phase_t phase);
-static int	fade_opacity(const solo_render_t *solo, int duration_ms);
+static void	start_fade(t_solo_render *solo, t_solo_popover_phase phase);
+static int	fade_opacity(const t_solo_render *solo, int duration_ms);
 
 /**
  * @brief Changes the pointer-selected ability and starts the matching fade.
@@ -14,7 +14,7 @@ static int	fade_opacity(const solo_render_t *solo, int duration_ms);
  * @param ability Newly hovered ability, or SOLO_ABILITY_NONE on pointer exit.
  * @return true when visible or pending presentation state changed.
  */
-bool	solo_popover_set_hover(solo_render_t *solo, solo_ability_t ability)
+bool	solo_popover_set_hover(t_solo_render *solo, t_solo_ability ability)
 {
 	if (solo == NULL)
 		return (false);
@@ -51,7 +51,7 @@ bool	solo_popover_set_hover(solo_render_t *solo, solo_ability_t ability)
  * @param elapsed_ms Elapsed monotonic milliseconds.
  * @return true when a redraw is required.
  */
-bool	solo_popover_update(solo_render_t *solo, const solo_game_t *game,
+bool	solo_popover_update(t_solo_render *solo, const t_solo_game *game,
 	int elapsed_ms)
 {
 	int		before;
@@ -125,7 +125,7 @@ bool	solo_popover_update(solo_render_t *solo, const solo_game_t *game,
 /**
  * @brief Returns the next animation-frame deadline for an active fade.
  */
-int	solo_popover_next_wake_ms(const solo_render_t *solo)
+int	solo_popover_next_wake_ms(const t_solo_render *solo)
 {
 	int	duration_ms;
 	int	remaining_ms;
@@ -147,8 +147,8 @@ int	solo_popover_next_wake_ms(const solo_render_t *solo)
 /**
  * @brief Resolves the content owner, giving game feedback absolute priority.
  */
-solo_ability_t	solo_popover_displayed_ability(const solo_render_t *solo,
-	const solo_game_t *game)
+t_solo_ability	solo_popover_displayed_ability(const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	if (game != NULL
 		&& game->ability_result != SOLO_ABILITY_RESULT_NONE)
@@ -161,8 +161,8 @@ solo_ability_t	solo_popover_displayed_ability(const solo_render_t *solo,
 /**
  * @brief Resolves the visual opacity, keeping feedback fully legible.
  */
-int	solo_popover_displayed_opacity(const solo_render_t *solo,
-	const solo_game_t *game)
+int	solo_popover_displayed_opacity(const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	if (game != NULL
 		&& game->ability_result != SOLO_ABILITY_RESULT_NONE)
@@ -175,7 +175,7 @@ int	solo_popover_displayed_opacity(const solo_render_t *solo,
 /**
  * @brief Starts one linear fade from the current opacity.
  */
-static void	start_fade(solo_render_t *solo, solo_popover_phase_t phase)
+static void	start_fade(t_solo_render *solo, t_solo_popover_phase phase)
 {
 	solo->popover_phase = phase;
 	solo->popover_fade_start_opacity = solo->popover_opacity;
@@ -185,7 +185,7 @@ static void	start_fade(solo_render_t *solo, solo_popover_phase_t phase)
 /**
  * @brief Calculates linear opacity for the current fade direction.
  */
-static int	fade_opacity(const solo_render_t *solo, int duration_ms)
+static int	fade_opacity(const t_solo_render *solo, int duration_ms)
 {
 	int	elapsed_ms;
 

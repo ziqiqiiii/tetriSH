@@ -11,7 +11,7 @@
  * @param value Value of TETRISU_RENDERER, or NULL when unset.
  * @return The matching forced tier, or automatic selection.
  */
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value)
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_from_value(const char *value)
 {
 	if (value == NULL)
 		return (TETRISU_RENDERER_AUTO);
@@ -29,7 +29,7 @@ tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value)
  *
  * @return Forced tier from TETRISU_RENDERER, or automatic selection.
  */
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_requested(void)
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_requested(void)
 {
 	return (tetrisu_renderer_mode_from_value(getenv("TETRISU_RENDERER")));
 }

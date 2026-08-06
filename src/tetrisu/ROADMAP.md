@@ -301,12 +301,12 @@ and offline entry screens in item 16.
 ## Shared interfaces
 
 - `render_wait_input(..., ncinput *)` for input where event state matters.
-- `solo_handling_config_t` and `solo_handling_state_t` for DAS/ARR/SDF
+- `t_solo_handling_config` and `t_solo_handling_state` for DAS/ARR/SDF
   independent of gameplay authority.
 - `solo_clear_duration_ms(level)` as the single source for clear timing.
-- `ui_notification_t`, `ui_event_t`, and `audio_sfx_t` to connect gameplay
+- `t_ui_notification`, `t_ui_event`, and `t_audio_sfx` to connect gameplay
   events with overlays and audio without coupling rules to rendering.
-- `app_screen_t` and `app_data_provider_t` to separate screens from the future
+- `t_app_screen` and `t_app_data_provider` to separate screens from the future
   network adapter.
 - HOLD remains in the local Solo snapshot and later maps directly into the
   server-provided gameplay view model.

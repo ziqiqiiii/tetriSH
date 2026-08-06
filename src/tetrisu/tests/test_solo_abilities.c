@@ -37,13 +37,13 @@ static void	test_ability_metadata_and_meter_spacing(void)
 	ability = SOLO_ABILITY_MIRURUN;
 	while (ability <= SOLO_ABILITY_SIRTET)
 	{
-		assert(solo_ability_cost((solo_ability_t)ability) == ability * 2);
-		assert(solo_ability_name((solo_ability_t)ability)[0] != '\0');
-		assert(solo_ability_description((solo_ability_t)ability)[0] != '\0');
+		assert(solo_ability_cost((t_solo_ability)ability) == ability * 2);
+		assert(solo_ability_name((t_solo_ability)ability)[0] != '\0');
+		assert(solo_ability_description((t_solo_ability)ability)[0] != '\0');
 		if (previous_y >= 0)
 			assert(previous_y
-				- solo_ability_center_y((solo_ability_t)ability) == 64);
-		previous_y = solo_ability_center_y((solo_ability_t)ability);
+				- solo_ability_center_y((t_solo_ability)ability) == 64);
+		previous_y = solo_ability_center_y((t_solo_ability)ability);
 		ability++;
 	}
 	assert(solo_ability_cost(SOLO_ABILITY_NONE) == -1);
@@ -55,7 +55,7 @@ static void	test_ability_metadata_and_meter_spacing(void)
  */
 static void	test_mirurun_removes_bottom_four_rows(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int			row;
 	int			col;
 
@@ -99,7 +99,7 @@ static void	test_mirurun_removes_bottom_four_rows(void)
  */
 static void	test_activation_rejections_preserve_charge(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_board		before;
 	int			cols[4];
 	int			rows[4];
@@ -139,7 +139,7 @@ static void	test_activation_rejections_preserve_charge(void)
  */
 static void	test_opponent_abilities_are_visual_solo_tests(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_board		before;
 	int			ability;
 
@@ -152,7 +152,7 @@ static void	test_opponent_abilities_are_visual_solo_tests(void)
 		before = game.board;
 		game.crystal_charge = SOLO_CRYSTAL_CAPACITY;
 		assert(solo_game_activate_ability(&game,
-				(solo_ability_t)ability) == SOLO_ABILITY_RESULT_ACTIVATED);
+				(t_solo_ability)ability) == SOLO_ABILITY_RESULT_ACTIVATED);
 		assert(game.crystal_charge == SOLO_CRYSTAL_CAPACITY - ability * 2);
 		assert(memcmp(&game.board, &before, sizeof(before)) == 0);
 		ability++;
@@ -165,7 +165,7 @@ static void	test_opponent_abilities_are_visual_solo_tests(void)
  */
 static void	test_feedback_expires_on_shared_wake_deadline(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 903u);
 	game.crystal_charge = 2;
@@ -201,8 +201,8 @@ static void	test_feedback_expires_on_shared_wake_deadline(void)
  */
 static void	test_popover_fades_and_feedback_priority(void)
 {
-	solo_render_t	solo;
-	solo_game_t		game;
+	t_solo_render	solo;
+	t_solo_game		game;
 
 	memset(&solo, 0, sizeof(solo));
 	solo_game_init(&game, 904u);
@@ -257,8 +257,8 @@ static void	test_popover_fades_and_feedback_priority(void)
  */
 static void	test_canvas_hitboxes_and_terminal_mapping(void)
 {
-	render_ctx_t	ctx;
-	solo_render_t	solo;
+	t_render_ctx	ctx;
+	t_solo_render	solo;
 	ncinput			input;
 	int				ability;
 	int				center_x;
@@ -272,12 +272,12 @@ static void	test_canvas_hitboxes_and_terminal_mapping(void)
 	ability = SOLO_ABILITY_MIRURUN;
 	while (ability <= SOLO_ABILITY_SIRTET)
 	{
-		center_y = solo_ability_center_y((solo_ability_t)ability);
+		center_y = solo_ability_center_y((t_solo_ability)ability);
 		assert(solo_ability_at_canvas(center_x, center_y)
-			== (solo_ability_t)ability);
+			== (t_solo_ability)ability);
 		assert(solo_ability_at_canvas(center_x
 				+ SOLO_ABILITY_HITBOX_HALF_WIDTH, center_y)
-			== (solo_ability_t)ability);
+			== (t_solo_ability)ability);
 		ability++;
 	}
 	assert(solo_ability_at_canvas(center_x, 266) == SOLO_ABILITY_NONE);

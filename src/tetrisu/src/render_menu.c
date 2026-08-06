@@ -2,19 +2,19 @@
 
 // Static Functions
 static int	clamp_int(int value, int min, int max);
-static int	bunny_cols_for_rows(const render_ctx_t *ctx);
+static int	bunny_cols_for_rows(const t_render_ctx *ctx);
 static int	scale_from_bg(int origin, int size, double ratio);
-static int	bunny_x(const render_ctx_t *ctx);
-static int	bunny_y_for_selection(const render_ctx_t *ctx,
-	const menu_selection_t *m);
-static int	menu_step_y(const render_ctx_t *ctx);
-static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x);
-static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x);
-static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
+static int	bunny_x(const t_render_ctx *ctx);
+static int	bunny_y_for_selection(const t_render_ctx *ctx,
+	const t_menu_selection *m);
+static int	menu_step_y(const t_render_ctx *ctx);
+static struct ncplane	*create_bunny_sprite(t_render_ctx *ctx, int y, int x);
+static struct ncplane	*create_bunny_pixel(t_render_ctx *ctx, int y, int x);
+static struct ncplane	*create_bunny_fallback(t_render_ctx *ctx,
 	int y, int x);
-static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
+static struct ncplane	*create_compatibility_selector(t_render_ctx *ctx,
 	int y, int x);
-static void	destroy_bunny_visual(render_ctx_t *ctx);
+static void	destroy_bunny_visual(t_render_ctx *ctx);
 static void	set_transparent_base(struct ncplane *plane);
 
 /**
@@ -26,9 +26,9 @@ static void	set_transparent_base(struct ncplane *plane);
  *
  * @param ctx Pointer to the initialized render context.
  */
-void	render_menu_create(render_ctx_t *ctx)
+void	render_menu_create(t_render_ctx *ctx)
 {
-	menu_selection_t	initial;
+	t_menu_selection	initial;
 	int					y;
 	int					x;
 
@@ -73,7 +73,7 @@ void	render_menu_create(render_ctx_t *ctx)
  * @param ctx Pointer to the render context.
  * @param m Pointer to the current selection state.
  */
-void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
+void	render_menu_move_bunny(t_render_ctx *ctx, const t_menu_selection *m)
 {
 	int	y;
 	int	x;
@@ -124,7 +124,7 @@ void	render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m)
  * @param selected Destination for the zero-based item index.
  * @return true when the pointer is over one of the five menu rows.
  */
-bool	render_menu_hit_test(const render_ctx_t *ctx, const ncinput *input,
+bool	render_menu_hit_test(const t_render_ctx *ctx, const ncinput *input,
 	int *selected)
 {
 	int	first_y;
@@ -165,7 +165,7 @@ bool	render_menu_hit_test(const render_ctx_t *ctx, const ncinput *input,
  * @param ctx Pointer to the render context.
  * @param msg Message text to display.
  */
-void	render_menu_show_message(render_ctx_t *ctx, const char *msg)
+void	render_menu_show_message(t_render_ctx *ctx, const char *msg)
 {
 	ncplane_options	opts;
 	unsigned	rows;
@@ -204,7 +204,7 @@ void	render_menu_show_message(render_ctx_t *ctx, const char *msg)
  *
  * @param ctx Pointer to the render context.
  */
-void	render_menu_destroy(render_ctx_t *ctx)
+void	render_menu_destroy(t_render_ctx *ctx)
 {
 	if (ctx->bunny_plane != NULL)
 	{
@@ -249,7 +249,7 @@ static int	clamp_int(int value, int min, int max)
  * @param ctx Pointer to the render context.
  * @return Selector width in terminal columns.
  */
-static int	bunny_cols_for_rows(const render_ctx_t *ctx)
+static int	bunny_cols_for_rows(const t_render_ctx *ctx)
 {
 	double	source_ratio;
 	double	cell_ratio;
@@ -281,7 +281,7 @@ static int	scale_from_bg(int origin, int size, double ratio)
  * @param ctx Pointer to the render context.
  * @return Clamped terminal column for the selector plane.
  */
-static int	bunny_x(const render_ctx_t *ctx)
+static int	bunny_x(const t_render_ctx *ctx)
 {
 	int	label_x;
 	int	x;
@@ -303,8 +303,8 @@ static int	bunny_x(const render_ctx_t *ctx)
  * @param m Pointer to the current selection.
  * @return Clamped terminal row for the selector plane.
  */
-static int	bunny_y_for_selection(const render_ctx_t *ctx,
-	const menu_selection_t *m)
+static int	bunny_y_for_selection(const t_render_ctx *ctx,
+	const t_menu_selection *m)
 {
 	int	center_y;
 	int	y;
@@ -335,7 +335,7 @@ static int	bunny_y_for_selection(const render_ctx_t *ctx,
  * @param ctx Pointer to the render context.
  * @return Menu spacing in terminal rows, always at least one.
  */
-static int	menu_step_y(const render_ctx_t *ctx)
+static int	menu_step_y(const t_render_ctx *ctx)
 {
 	int	step_y;
 
@@ -359,7 +359,7 @@ static int	menu_step_y(const render_ctx_t *ctx)
  * @param x Target terminal column.
  * @return Owned selector plane, or NULL when the pixel blit is unavailable.
  */
-static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
+static struct ncplane	*create_bunny_pixel(t_render_ctx *ctx, int y, int x)
 {
 	struct ncvisual_options	vopts;
 
@@ -401,7 +401,7 @@ static struct ncplane	*create_bunny_pixel(render_ctx_t *ctx, int y, int x)
  * @param x Target terminal column.
  * @return Owned selector plane, or NULL when every renderer fails.
  */
-static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
+static struct ncplane	*create_bunny_sprite(t_render_ctx *ctx, int y, int x)
 {
 	struct ncvisual			*ncv;
 	struct ncvisual_options	vopts;
@@ -457,7 +457,7 @@ static struct ncplane	*create_bunny_sprite(render_ctx_t *ctx, int y, int x)
  * @param x Target terminal column.
  * @return Owned selector plane, or NULL when allocation fails.
  */
-static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
+static struct ncplane	*create_bunny_fallback(t_render_ctx *ctx,
 	int y, int x)
 {
 	ncplane_options	opts;
@@ -490,7 +490,7 @@ static struct ncplane	*create_bunny_fallback(render_ctx_t *ctx,
  * @param x Target terminal column.
  * @return Owned selector plane, or NULL when allocation fails.
  */
-static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
+static struct ncplane	*create_compatibility_selector(t_render_ctx *ctx,
 	int y, int x)
 {
 	ncplane_options	opts;
@@ -522,7 +522,7 @@ static struct ncplane	*create_compatibility_selector(render_ctx_t *ctx,
  *
  * @param ctx Pointer to the render context, which may hold no cached sprite.
  */
-static void	destroy_bunny_visual(render_ctx_t *ctx)
+static void	destroy_bunny_visual(t_render_ctx *ctx)
 {
 	if (ctx->bunny_visual != NULL)
 	{

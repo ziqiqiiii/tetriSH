@@ -1,30 +1,30 @@
 #include "tetrisu.h"
 
 // Static Functions
-static app_provider_result_t	fixture_login(void *userdata,
+static t_app_provider_result	fixture_login(void *userdata,
 				const char *username, const char *password,
-				app_auth_view_model_t *view);
-static app_provider_result_t	fixture_sign_up(void *userdata,
+				t_app_auth_view_model *view);
+static t_app_provider_result	fixture_sign_up(void *userdata,
 				const char *username, const char *password,
-				app_auth_view_model_t *view);
-static app_provider_result_t	fixture_load_profile(void *userdata,
-				app_profile_view_model_t *view);
-static app_provider_result_t	fixture_load_catalogue(void *userdata,
-				app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
-static app_provider_result_t	fixture_load_leaderboard(void *userdata,
-				app_leaderboard_view_model_t *view);
-static app_provider_result_t	fixture_load_lobby(void *userdata,
-				app_lobby_view_model_t *view);
-static app_provider_result_t	fixture_load_room(void *userdata,
-				const char *room_id, app_room_view_model_t *view);
-static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
+				t_app_auth_view_model *view);
+static t_app_provider_result	fixture_load_profile(void *userdata,
+				t_app_profile_view_model *view);
+static t_app_provider_result	fixture_load_catalogue(void *userdata,
+				t_app_catalogue_kind kind, t_app_catalogue_view_model *view);
+static t_app_provider_result	fixture_load_leaderboard(void *userdata,
+				t_app_leaderboard_view_model *view);
+static t_app_provider_result	fixture_load_lobby(void *userdata,
+				t_app_lobby_view_model *view);
+static t_app_provider_result	fixture_load_room(void *userdata,
+				const char *room_id, t_app_room_view_model *view);
+static void	set_catalogue_item(t_app_catalogue_item_view_model *item,
 				const char *id, const char *name, int price, bool owned,
 				bool equipped);
-static app_data_status_t	status_from_result(app_provider_result_t result);
-static app_provider_result_t	load_provider_screen(
-				const app_data_provider_t *provider, app_screen_t screen,
-				app_screen_view_model_t *view);
-static void	set_screen_copy(app_screen_view_model_t *view,
+static t_app_data_status	status_from_result(t_app_provider_result result);
+static t_app_provider_result	load_provider_screen(
+				const t_app_data_provider *provider, t_app_screen screen,
+				t_app_screen_view_model *view);
+static void	set_screen_copy(t_app_screen_view_model *view,
 				const char *subtitle);
 
 /**
@@ -33,7 +33,7 @@ static void	set_screen_copy(app_screen_view_model_t *view,
  * These fixtures are deliberately isolated behind the same provider contract
  * a future network adapter will implement.
  */
-void	app_fixture_provider_init(app_data_provider_t *provider)
+void	app_fixture_provider_init(t_app_data_provider *provider)
 {
 	if (provider == NULL)
 		return ;
@@ -52,11 +52,11 @@ void	app_fixture_provider_init(app_data_provider_t *provider)
 /**
  * @brief Loads the typed model required by one application screen.
  */
-app_provider_result_t	app_screen_view_load(
-	const app_data_provider_t *provider, app_screen_t screen,
-	app_screen_view_model_t *view)
+t_app_provider_result	app_screen_view_load(
+	const t_app_data_provider *provider, t_app_screen screen,
+	t_app_screen_view_model *view)
 {
-	app_provider_result_t	result;
+	t_app_provider_result	result;
 
 	if (view == NULL || screen < APP_SCREEN_ENTRY
 		|| screen >= APP_SCREEN_COUNT)
@@ -74,7 +74,7 @@ app_provider_result_t	app_screen_view_load(
 /**
  * @brief Returns a compact label for loading, empty, and failure UI.
  */
-const char	*app_data_status_name(app_data_status_t status)
+const char	*app_data_status_name(t_app_data_status status)
 {
 	static const char	*names[] = {
 		"IDLE", "LOADING", "READY", "EMPTY", "UNAVAILABLE", "ERROR"
@@ -88,7 +88,7 @@ const char	*app_data_status_name(app_data_status_t status)
 /**
  * @brief Returns the reader-facing game-mode label.
  */
-const char	*app_game_mode_name(app_game_mode_t mode)
+const char	*app_game_mode_name(t_app_game_mode mode)
 {
 	if (mode == APP_GAME_MODE_DOUBLE)
 		return ("Double");
@@ -100,8 +100,8 @@ const char	*app_game_mode_name(app_game_mode_t mode)
 /**
  * @brief Fixture authentication accepts non-empty preview credentials.
  */
-static app_provider_result_t	fixture_login(void *userdata,
-	const char *username, const char *password, app_auth_view_model_t *view)
+static t_app_provider_result	fixture_login(void *userdata,
+	const char *username, const char *password, t_app_auth_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL || username == NULL || password == NULL
@@ -118,8 +118,8 @@ static app_provider_result_t	fixture_login(void *userdata,
 /**
  * @brief Fixture sign-up shares the local preview authentication contract.
  */
-static app_provider_result_t	fixture_sign_up(void *userdata,
-	const char *username, const char *password, app_auth_view_model_t *view)
+static t_app_provider_result	fixture_sign_up(void *userdata,
+	const char *username, const char *password, t_app_auth_view_model *view)
 {
 	return (fixture_login(userdata, username, password, view));
 }
@@ -127,8 +127,8 @@ static app_provider_result_t	fixture_sign_up(void *userdata,
 /**
  * @brief Supplies a deterministic preview profile.
  */
-static app_provider_result_t	fixture_load_profile(void *userdata,
-	app_profile_view_model_t *view)
+static t_app_provider_result	fixture_load_profile(void *userdata,
+	t_app_profile_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL)
@@ -147,8 +147,8 @@ static app_provider_result_t	fixture_load_profile(void *userdata,
 /**
  * @brief Supplies compact character or theme fixture catalogues.
  */
-static app_provider_result_t	fixture_load_catalogue(void *userdata,
-	app_catalogue_kind_t kind, app_catalogue_view_model_t *view)
+static t_app_provider_result	fixture_load_catalogue(void *userdata,
+	t_app_catalogue_kind kind, t_app_catalogue_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL || (kind != APP_CATALOGUE_CHARACTERS
@@ -181,8 +181,8 @@ static app_provider_result_t	fixture_load_catalogue(void *userdata,
 /**
  * @brief Supplies a ranked local preview list.
  */
-static app_provider_result_t	fixture_load_leaderboard(void *userdata,
-	app_leaderboard_view_model_t *view)
+static t_app_provider_result	fixture_load_leaderboard(void *userdata,
+	t_app_leaderboard_view_model *view)
 {
 	static const char	*names[] = {
 		"BlockBunny", "Tetromancer", "MoonStack", "PreviewPlayer",
@@ -213,8 +213,8 @@ static app_provider_result_t	fixture_load_leaderboard(void *userdata,
 /**
  * @brief Supplies two rooms for lobby layout work.
  */
-static app_provider_result_t	fixture_load_lobby(void *userdata,
-	app_lobby_view_model_t *view)
+static t_app_provider_result	fixture_load_lobby(void *userdata,
+	t_app_lobby_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL)
@@ -237,8 +237,8 @@ static app_provider_result_t	fixture_load_lobby(void *userdata,
 /**
  * @brief Supplies a waiting-room snapshot with explicit ready states.
  */
-static app_provider_result_t	fixture_load_room(void *userdata,
-	const char *room_id, app_room_view_model_t *view)
+static t_app_provider_result	fixture_load_room(void *userdata,
+	const char *room_id, t_app_room_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL)
@@ -263,7 +263,7 @@ static app_provider_result_t	fixture_load_room(void *userdata,
 /**
  * @brief Writes one bounded fixture catalogue item.
  */
-static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
+static void	set_catalogue_item(t_app_catalogue_item_view_model *item,
 	const char *id, const char *name, int price, bool owned, bool equipped)
 {
 	snprintf(item->id, sizeof(item->id), "%s", id);
@@ -276,7 +276,7 @@ static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
 /**
  * @brief Maps provider outcomes to screen presentation states.
  */
-static app_data_status_t	status_from_result(app_provider_result_t result)
+static t_app_data_status	status_from_result(t_app_provider_result result)
 {
 	if (result == APP_PROVIDER_OK)
 		return (APP_DATA_READY);
@@ -292,11 +292,11 @@ static app_data_status_t	status_from_result(app_provider_result_t result)
 /**
  * @brief Dispatches one screen to the provider method for its typed model.
  */
-static app_provider_result_t	load_provider_screen(
-	const app_data_provider_t *provider, app_screen_t screen,
-	app_screen_view_model_t *view)
+static t_app_provider_result	load_provider_screen(
+	const t_app_data_provider *provider, t_app_screen screen,
+	t_app_screen_view_model *view)
 {
-	app_provider_result_t	result;
+	t_app_provider_result	result;
 
 	result = APP_PROVIDER_OK;
 	if (screen == APP_SCREEN_ENTRY)
@@ -373,7 +373,7 @@ static app_provider_result_t	load_provider_screen(
 /**
  * @brief Sets one bounded screen subtitle.
  */
-static void	set_screen_copy(app_screen_view_model_t *view,
+static void	set_screen_copy(t_app_screen_view_model *view,
 	const char *subtitle)
 {
 	snprintf(view->subtitle, sizeof(view->subtitle), "%s", subtitle);

@@ -1,7 +1,7 @@
 #include "tetrisu.h"
 
 // Static Functions
-static struct ncplane	*create_intro_plane(render_ctx_t *ctx);
+static struct ncplane	*create_intro_plane(t_render_ctx *ctx);
 static int	intro_streamer(struct ncvisual *ncv,
 	struct ncvisual_options *vopts, const struct timespec *tspec, void *curry);
 
@@ -17,13 +17,13 @@ static int	intro_streamer(struct ncvisual *ncv,
  * @param audio_path MP3 path to play once alongside the video.
  * @return 1 if skipped by input, 0 if finished or skipped by missing assets.
  */
-int	render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
+int	render_intro_play(t_render_ctx *ctx, t_audio_ctx *audio,
 	const char *video_path, const char *audio_path)
 {
 	struct ncvisual			*ncv;
 	struct ncplane			*plane;
 	struct ncvisual_options	vopts;
-	intro_stream_t			intro;
+	t_intro_stream			intro;
 	int						ret;
 
 	if (ctx == NULL || video_path == NULL)
@@ -66,7 +66,7 @@ int	render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
  * @param ctx Render context containing fitted background geometry.
  * @return New child plane, or NULL when allocation fails.
  */
-static struct ncplane	*create_intro_plane(render_ctx_t *ctx)
+static struct ncplane	*create_intro_plane(t_render_ctx *ctx)
 {
 	ncplane_options	opts;
 
@@ -90,12 +90,12 @@ static struct ncplane	*create_intro_plane(render_ctx_t *ctx)
 static int	intro_streamer(struct ncvisual *ncv,
 	struct ncvisual_options *vopts, const struct timespec *tspec, void *curry)
 {
-	intro_stream_t	*intro;
+	t_intro_stream	*intro;
 	ncinput			ni;
 	uint32_t		key;
 	int				ret;
 
-	intro = (intro_stream_t *)curry;
+	intro = (t_intro_stream *)curry;
 	ret = ncvisual_simple_streamer(ncv, vopts, tspec, NULL);
 	if (ret != 0)
 		return (ret);

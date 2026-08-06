@@ -4,9 +4,9 @@
 static bool	put_centered(struct ncplane *plane, int row, const char *text,
 				bool bold);
 static void	draw_border(struct ncplane *plane, int rows, int cols);
-static void	screen_summary(const app_screen_view_model_t *view,
+static void	screen_summary(const t_app_screen_view_model *view,
 				char *summary, size_t size);
-static const char	*screen_controls(app_screen_t screen);
+static const char	*screen_controls(t_app_screen screen);
 
 /**
  * @brief Draws the shared native-terminal shell for scaffolded screens.
@@ -15,8 +15,8 @@ static const char	*screen_controls(app_screen_t screen);
  * screen artwork. Every fixture-backed screen is visibly labelled so preview
  * data cannot be mistaken for a live server response.
  */
-bool	render_screen_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view)
+bool	render_screen_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -82,7 +82,7 @@ bool	render_screen_show(render_ctx_t *ctx,
 /**
  * @brief Destroys the shared scaffold plane.
  */
-void	render_screen_destroy(render_ctx_t *ctx)
+void	render_screen_destroy(t_render_ctx *ctx)
 {
 	if (ctx != NULL && ctx->screen_plane != NULL)
 	{
@@ -148,7 +148,7 @@ static void	draw_border(struct ncplane *plane, int rows, int cols)
 /**
  * @brief Formats one useful line from the screen-specific typed model.
  */
-static void	screen_summary(const app_screen_view_model_t *view,
+static void	screen_summary(const t_app_screen_view_model *view,
 	char *summary, size_t size)
 {
 	if (view->screen == APP_SCREEN_HOME
@@ -191,7 +191,7 @@ static void	screen_summary(const app_screen_view_model_t *view,
 /**
  * @brief Returns the temporary navigation hints for each scaffold.
  */
-static const char	*screen_controls(app_screen_t screen)
+static const char	*screen_controls(t_app_screen screen)
 {
 	if (screen == APP_SCREEN_ENTRY)
 		return ("L LOGIN  S SIGN UP  O PLAY OFFLINE");

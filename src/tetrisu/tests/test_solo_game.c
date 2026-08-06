@@ -29,7 +29,7 @@ static void	test_countdown_blocks_play_and_emits_cues(void);
 static void	test_score_and_ready_animations_expire(void);
 static void	test_rotation_stress_preserves_valid_state(void);
 static int	filled_cells(const t_board *board);
-static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed);
+static void	prepare_single_line_clear(t_solo_game *game, uint32_t seed);
 
 /**
  * @brief Runs the complete local Solo state regression suite.
@@ -75,7 +75,7 @@ int	main(void)
  */
 static void	test_level_seven_clear_splits_at_midpoint(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	prepare_single_line_clear(&game, 323u);
 	game.level = 7;
@@ -94,7 +94,7 @@ static void	test_level_seven_clear_splits_at_midpoint(void)
  */
 static void	test_soft_drop_overrides_gravity_timer(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				row;
 
 	solo_game_init(&game, 125u);
@@ -115,7 +115,7 @@ static void	test_soft_drop_overrides_gravity_timer(void)
  */
 static void	test_init_has_active_and_three_previews(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	bool			seen[BRAIN_BAG_SIZE] = {false};
 	int				index;
 
@@ -142,7 +142,7 @@ static void	test_init_has_active_and_three_previews(void)
  */
 static void	test_ghost_and_hard_drop(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_piece		before;
 	t_piece		ghost;
 	int			distance;
@@ -167,7 +167,7 @@ static void	test_ghost_and_hard_drop(void)
  */
 static void	test_ghost_stops_above_stack(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_piece		ghost;
 
 	solo_game_init(&game, 457u);
@@ -187,7 +187,7 @@ static void	test_ghost_stops_above_stack(void)
  */
 static void	test_first_hold_consumes_queue_once(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_piece_type	initial;
 	t_piece_type	first_next;
 	t_piece_type	second_next;
@@ -218,7 +218,7 @@ static void	test_first_hold_consumes_queue_once(void)
  */
 static void	test_hold_rearms_after_lock(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	t_piece_type	first_held;
 	t_piece_type	outgoing;
 	t_piece		expected;
@@ -246,7 +246,7 @@ static void	test_hold_rearms_after_lock(void)
  */
 static void	test_locking_piece_in_top_row_reveals_before_game_over(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 458u);
 	game.active = piece_spawn(PIECE_O);
@@ -282,7 +282,7 @@ static void	test_locking_piece_in_top_row_reveals_before_game_over(void)
  */
 static void	test_locking_piece_below_top_row_continues(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 459u);
 	game.active = piece_spawn(PIECE_O);
@@ -305,7 +305,7 @@ static void	test_locking_piece_below_top_row_continues(void)
 static void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(
 	void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				col;
 
 	solo_game_init(&game, 460u);
@@ -343,7 +343,7 @@ static void	test_blocked_spawn_with_empty_top_row_reveals_before_game_over(
  */
 static void	test_catchup_cannot_skip_new_top_out_reveal(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 461u);
 	game.active = piece_spawn(PIECE_O);
@@ -379,7 +379,7 @@ static void	test_catchup_cannot_skip_new_top_out_reveal(void)
  */
 static void	test_lock_delay_waits_half_second(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 789u);
 	piece_hard_drop(&game.board, &game.active);
@@ -398,7 +398,7 @@ static void	test_lock_delay_waits_half_second(void)
  */
 static void	test_landing_starts_a_fresh_lock_delay(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				gravity_ms;
 
 	solo_game_init(&game, 790u);
@@ -428,7 +428,7 @@ static void	test_landing_starts_a_fresh_lock_delay(void)
  */
 static void	test_next_wake_tracks_gravity_and_lock_deadlines(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				gravity_ms;
 
 	solo_game_init(&game, 791u);
@@ -451,7 +451,7 @@ static void	test_next_wake_tracks_gravity_and_lock_deadlines(void)
  */
 static void	test_zero_elapsed_consumes_due_deadlines(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				gravity_ms;
 	int				row_before;
 
@@ -509,7 +509,7 @@ static void	test_clear_duration_progresses_by_level(void)
  */
 static void	test_grounded_piece_sleeps_until_lock_deadline(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 796u);
 	game.level = 18;
@@ -532,7 +532,7 @@ static void	test_grounded_piece_sleeps_until_lock_deadline(void)
  */
 static void	test_clear_animation_wakes_at_visual_boundaries(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				duration_ms;
 	int				halfway;
 
@@ -564,8 +564,8 @@ static void	test_clear_animation_wakes_at_visual_boundaries(void)
  */
 static void	test_pause_freezes_active_and_clear_timers(void)
 {
-	solo_game_t	active;
-	solo_game_t	clearing;
+	t_solo_game	active;
+	t_solo_game	clearing;
 	int				active_row;
 
 	solo_game_init(&active, 792u);
@@ -603,7 +603,7 @@ static void	test_pause_freezes_active_and_clear_timers(void)
  */
 static void	test_clear_animation_then_level_and_meter_update(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				col;
 
 	solo_game_init(&game, 321u);
@@ -648,7 +648,7 @@ static void	test_clear_animation_then_level_and_meter_update(void)
  */
 static void	test_rotation_stress_preserves_valid_state(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	int				index;
 
 	solo_game_init(&game, 798u);
@@ -672,7 +672,7 @@ static void	test_rotation_stress_preserves_valid_state(void)
  */
 static void	test_danger_state_has_stable_exit_hysteresis(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 799u);
 	board_set(&game.board, 0, SOLO_DANGER_ENTER_ROW,
@@ -717,7 +717,7 @@ static void	test_danger_state_has_stable_exit_hysteresis(void)
  */
 static void	test_gameplay_events_are_one_shot(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	uint32_t	events;
 
 	solo_game_init(&game, 800u);
@@ -757,7 +757,7 @@ static void	test_gameplay_events_are_one_shot(void)
  */
 static void	test_personal_best_only_finishes_once_at_game_over(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 	unsigned	opacity;
 
 	solo_game_init(&game, 802u);
@@ -792,7 +792,7 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
  */
 static void	test_countdown_blocks_play_and_emits_cues(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	solo_game_init(&game, 804u);
 	solo_game_start_countdown(&game);
@@ -829,7 +829,7 @@ static void	test_countdown_blocks_play_and_emits_cues(void)
  */
 static void	test_score_and_ready_animations_expire(void)
 {
-	solo_game_t	game;
+	t_solo_game	game;
 
 	prepare_single_line_clear(&game, 805u);
 	game.crystal_charge = 1;
@@ -895,7 +895,7 @@ static int	filled_cells(const t_board *board)
  * @param game Pointer to the Solo state to prepare.
  * @param seed Deterministic seven-bag seed.
  */
-static void	prepare_single_line_clear(solo_game_t *game, uint32_t seed)
+static void	prepare_single_line_clear(t_solo_game *game, uint32_t seed)
 {
 	int	col;
 

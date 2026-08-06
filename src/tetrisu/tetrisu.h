@@ -266,7 +266,7 @@ typedef enum e_app_screen
 	APP_SCREEN_BATTLE_ROYALE,
 	APP_SCREEN_QUIT,
 	APP_SCREEN_COUNT
-}	app_screen_t;
+}	t_app_screen;
 
 typedef enum e_app_nav_action
 {
@@ -286,7 +286,7 @@ typedef enum e_app_nav_action
 	APP_NAV_START_BATTLE_ROYALE,
 	APP_NAV_BACK,
 	APP_NAV_QUIT
-}	app_nav_action_t;
+}	t_app_nav_action;
 
 typedef enum e_app_data_status
 {
@@ -296,7 +296,7 @@ typedef enum e_app_data_status
 	APP_DATA_EMPTY,
 	APP_DATA_UNAVAILABLE,
 	APP_DATA_ERROR
-}	app_data_status_t;
+}	t_app_data_status;
 
 typedef enum e_app_provider_result
 {
@@ -305,34 +305,34 @@ typedef enum e_app_provider_result
 	APP_PROVIDER_UNAVAILABLE,
 	APP_PROVIDER_INVALID,
 	APP_PROVIDER_ERROR
-}	app_provider_result_t;
+}	t_app_provider_result;
 
 typedef enum e_app_catalogue_kind
 {
 	APP_CATALOGUE_CHARACTERS,
 	APP_CATALOGUE_THEMES
-}	app_catalogue_kind_t;
+}	t_app_catalogue_kind;
 
 typedef enum e_app_game_mode
 {
 	APP_GAME_MODE_NONE,
 	APP_GAME_MODE_DOUBLE,
 	APP_GAME_MODE_BATTLE_ROYALE
-}	app_game_mode_t;
+}	t_app_game_mode;
 
 typedef struct s_app_navigation
 {
-	app_screen_t	current;
-	app_screen_t	previous;
+	t_app_screen	current;
+	t_app_screen	previous;
 	bool			offline;
-}	app_navigation_t;
+}	t_app_navigation;
 
 typedef struct s_app_auth_view_model
 {
 	bool	signed_in;
 	char	username[APP_TEXT_MAX];
 	char	message[APP_TEXT_MAX];
-}	app_auth_view_model_t;
+}	t_app_auth_view_model;
 
 typedef struct s_app_profile_view_model
 {
@@ -343,7 +343,7 @@ typedef struct s_app_profile_view_model
 	uint64_t	score;
 	int			wallet_points;
 	int			rank;
-}	app_profile_view_model_t;
+}	t_app_profile_view_model;
 
 typedef struct s_app_catalogue_item_view_model
 {
@@ -352,109 +352,109 @@ typedef struct s_app_catalogue_item_view_model
 	int		price;
 	bool	owned;
 	bool	equipped;
-}	app_catalogue_item_view_model_t;
+}	t_app_catalogue_item_view_model;
 
 typedef struct s_app_catalogue_view_model
 {
-	app_catalogue_kind_t			kind;
+	t_app_catalogue_kind			kind;
 	int							count;
-	app_catalogue_item_view_model_t	items[APP_CATALOGUE_MAX_ITEMS];
-}	app_catalogue_view_model_t;
+	t_app_catalogue_item_view_model	items[APP_CATALOGUE_MAX_ITEMS];
+}	t_app_catalogue_view_model;
 
 typedef struct s_app_leaderboard_entry_view_model
 {
 	int			position;
 	char		username[APP_TEXT_MAX];
 	uint64_t	score;
-}	app_leaderboard_entry_view_model_t;
+}	t_app_leaderboard_entry_view_model;
 
 typedef struct s_app_leaderboard_view_model
 {
 	int								count;
-	app_leaderboard_entry_view_model_t	entries[
+	t_app_leaderboard_entry_view_model	entries[
 		APP_LEADERBOARD_MAX_ENTRIES];
-}	app_leaderboard_view_model_t;
+}	t_app_leaderboard_view_model;
 
 typedef struct s_app_room_summary_view_model
 {
 	char			id[APP_TEXT_MAX];
 	char			owner[APP_TEXT_MAX];
-	app_game_mode_t	mode;
+	t_app_game_mode	mode;
 	int				players;
 	int				capacity;
-}	app_room_summary_view_model_t;
+}	t_app_room_summary_view_model;
 
 typedef struct s_app_lobby_view_model
 {
 	int							count;
-	app_room_summary_view_model_t	rooms[APP_LOBBY_MAX_ROOMS];
-}	app_lobby_view_model_t;
+	t_app_room_summary_view_model	rooms[APP_LOBBY_MAX_ROOMS];
+}	t_app_lobby_view_model;
 
 typedef struct s_app_room_player_view_model
 {
 	char	username[APP_TEXT_MAX];
 	bool	owner;
 	bool	ready;
-}	app_room_player_view_model_t;
+}	t_app_room_player_view_model;
 
 typedef struct s_app_room_view_model
 {
 	char						id[APP_TEXT_MAX];
-	app_game_mode_t				mode;
+	t_app_game_mode				mode;
 	int							required_players;
 	int							player_count;
-	app_room_player_view_model_t	players[APP_ROOM_MAX_PLAYERS];
-}	app_room_view_model_t;
+	t_app_room_player_view_model	players[APP_ROOM_MAX_PLAYERS];
+}	t_app_room_view_model;
 
 typedef struct s_app_match_view_model
 {
 	char			room_id[APP_TEXT_MAX];
-	app_game_mode_t	mode;
+	t_app_game_mode	mode;
 	int				player_count;
 	char			status[APP_TEXT_MAX];
-}	app_match_view_model_t;
+}	t_app_match_view_model;
 
 typedef union u_app_screen_data
 {
-	app_auth_view_model_t			auth;
-	app_profile_view_model_t		profile;
-	app_catalogue_view_model_t		catalogue;
-	app_leaderboard_view_model_t	leaderboard;
-	app_lobby_view_model_t			lobby;
-	app_room_view_model_t			room;
-	app_match_view_model_t			match;
-}	app_screen_data_t;
+	t_app_auth_view_model			auth;
+	t_app_profile_view_model		profile;
+	t_app_catalogue_view_model		catalogue;
+	t_app_leaderboard_view_model	leaderboard;
+	t_app_lobby_view_model			lobby;
+	t_app_room_view_model			room;
+	t_app_match_view_model			match;
+}	t_app_screen_data;
 
 typedef struct s_app_screen_view_model
 {
-	app_screen_t		screen;
-	app_data_status_t	status;
+	t_app_screen		screen;
+	t_app_data_status	status;
 	bool				local_preview;
 	char				title[APP_TEXT_MAX];
 	char				subtitle[APP_TEXT_MAX];
-	app_screen_data_t	data;
-}	app_screen_view_model_t;
+	t_app_screen_data	data;
+}	t_app_screen_view_model;
 
 typedef struct s_app_data_provider
 {
 	const char	*name;
 	bool		local_fixtures;
 	void		*userdata;
-	app_provider_result_t	(*login)(void *userdata, const char *username,
-			const char *password, app_auth_view_model_t *view);
-	app_provider_result_t	(*sign_up)(void *userdata, const char *username,
-			const char *password, app_auth_view_model_t *view);
-	app_provider_result_t	(*load_profile)(void *userdata,
-			app_profile_view_model_t *view);
-	app_provider_result_t	(*load_catalogue)(void *userdata,
-			app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
-	app_provider_result_t	(*load_leaderboard)(void *userdata,
-			app_leaderboard_view_model_t *view);
-	app_provider_result_t	(*load_lobby)(void *userdata,
-			app_lobby_view_model_t *view);
-	app_provider_result_t	(*load_room)(void *userdata, const char *room_id,
-			app_room_view_model_t *view);
-}	app_data_provider_t;
+	t_app_provider_result	(*login)(void *userdata, const char *username,
+			const char *password, t_app_auth_view_model *view);
+	t_app_provider_result	(*sign_up)(void *userdata, const char *username,
+			const char *password, t_app_auth_view_model *view);
+	t_app_provider_result	(*load_profile)(void *userdata,
+			t_app_profile_view_model *view);
+	t_app_provider_result	(*load_catalogue)(void *userdata,
+			t_app_catalogue_kind kind, t_app_catalogue_view_model *view);
+	t_app_provider_result	(*load_leaderboard)(void *userdata,
+			t_app_leaderboard_view_model *view);
+	t_app_provider_result	(*load_lobby)(void *userdata,
+			t_app_lobby_view_model *view);
+	t_app_provider_result	(*load_room)(void *userdata, const char *room_id,
+			t_app_room_view_model *view);
+}	t_app_data_provider;
 
 typedef enum e_tetrisu_renderer_mode
 {
@@ -462,7 +462,7 @@ typedef enum e_tetrisu_renderer_mode
 	TETRISU_RENDERER_CELL,
 	TETRISU_RENDERER_STATIONARY,
 	TETRISU_RENDERER_PIXEL
-}	tetrisu_renderer_mode_t;
+}	t_tetrisu_renderer_mode;
 
 // How far the terminal can be trusted with bitmap graphics. NONE is the
 // terminal-cell compatibility renderer; STATIONARY draws bitmaps but never
@@ -472,12 +472,12 @@ typedef enum e_tetrisu_pixel_policy
 	TETRISU_PIXELS_NONE,
 	TETRISU_PIXELS_STATIONARY,
 	TETRISU_PIXELS_MOVABLE
-}	tetrisu_pixel_policy_t;
+}	t_tetrisu_pixel_policy;
 
 typedef struct
 {
 	int	selected;
-}	menu_selection_t;
+}	t_menu_selection;
 
 typedef enum e_audio_sfx
 {
@@ -501,7 +501,7 @@ typedef enum e_audio_sfx
 	AUDIO_SFX_LEVEL_UP,
 	AUDIO_SFX_PERSONAL_BEST,
 	AUDIO_SFX_COUNT
-}	audio_sfx_t;
+}	t_audio_sfx;
 
 typedef struct
 {
@@ -516,20 +516,20 @@ typedef struct
 	void	*game_sfx[AUDIO_SFX_COUNT];
 	char	music_path[AUDIO_PATH_MAX];
 	char	pending_music_path[AUDIO_PATH_MAX];
-}	audio_ctx_t;
+}	t_audio_ctx;
 
 typedef struct s_ui_notification
 {
 	char		title[UI_NOTIFICATION_TITLE_MAX + 1];
 	int			percent;
 	uint64_t	shown_at_ms;
-}	ui_notification_t;
+}	t_ui_notification;
 
 typedef struct s_ui_notification_stack
 {
-	ui_notification_t	items[UI_NOTIFICATION_STACK_MAX];
+	t_ui_notification	items[UI_NOTIFICATION_STACK_MAX];
 	int					count;
-}	ui_notification_stack_t;
+}	t_ui_notification_stack;
 
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
@@ -547,7 +547,7 @@ typedef struct
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
-	ui_notification_stack_t	notifications;
+	t_ui_notification_stack	notifications;
 	int					bg_row;
 	int					bg_col;
 	int					bg_rows;
@@ -558,28 +558,28 @@ typedef struct
 	int					menu_col;
 	int					bunny_rows;
 	int					bunny_cols;
-	tetrisu_pixel_policy_t	pixels;
-}	render_ctx_t;
+	t_tetrisu_pixel_policy	pixels;
+}	t_render_ctx;
 
 typedef struct s_intro_stream
 {
-	render_ctx_t	*ctx;
+	t_render_ctx	*ctx;
 	int				skipped;
-}	intro_stream_t;
+}	t_intro_stream;
 
 typedef struct s_pixel_asset
 {
 	uint32_t	*pixels;
 	int			width;
 	int			height;
-}	pixel_asset_t;
+}	t_pixel_asset;
 
 typedef struct s_color
 {
 	unsigned	r;
 	unsigned	g;
 	unsigned	b;
-}	color_t;
+}	t_color;
 
 typedef struct s_piece_geometry
 {
@@ -589,7 +589,7 @@ typedef struct s_piece_geometry
 	int	max_col;
 	int	min_row;
 	int	max_row;
-}	piece_geometry_t;
+}	t_piece_geometry;
 
 typedef struct s_piece_bounds
 {
@@ -597,7 +597,7 @@ typedef struct s_piece_bounds
 	int	max_col;
 	int	min_row;
 	int	max_row;
-}	piece_bounds_t;
+}	t_piece_bounds;
 
 typedef enum e_solo_phase
 {
@@ -605,7 +605,7 @@ typedef enum e_solo_phase
 	SOLO_CLEARING,
 	SOLO_TOP_OUT_REVEAL,
 	SOLO_GAME_OVER
-}	solo_phase_t;
+}	t_solo_phase;
 
 typedef enum e_solo_action
 {
@@ -616,7 +616,7 @@ typedef enum e_solo_action
 	SOLO_SOFT_DROP,
 	SOLO_HARD_DROP,
 	SOLO_HOLD
-}	solo_action_t;
+}	t_solo_action;
 
 typedef enum e_solo_event
 {
@@ -639,14 +639,14 @@ typedef enum e_solo_event
 	SOLO_EVENT_PERSONAL_BEST = 1u << 16,
 	SOLO_EVENT_COUNTDOWN_TICK = 1u << 17,
 	SOLO_EVENT_COUNTDOWN_GO = 1u << 18
-}	solo_event_t;
+}	t_solo_event;
 
 typedef struct s_solo_handling_config
 {
 	int	das_ms;
 	int	arr_ms;
 	int	soft_drop_factor;
-}	solo_handling_config_t;
+}	t_solo_handling_config;
 
 typedef struct s_solo_handling_state
 {
@@ -659,7 +659,7 @@ typedef struct s_solo_handling_state
 	bool		left_held;
 	bool		right_held;
 	bool		down_held;
-}	solo_handling_state_t;
+}	t_solo_handling_state;
 
 typedef enum e_solo_ability
 {
@@ -668,7 +668,7 @@ typedef enum e_solo_ability
 	SOLO_ABILITY_INVERSION,
 	SOLO_ABILITY_PENTARIS,
 	SOLO_ABILITY_SIRTET
-}	solo_ability_t;
+}	t_solo_ability;
 
 typedef enum e_solo_ability_result
 {
@@ -678,7 +678,7 @@ typedef enum e_solo_ability_result
 	SOLO_ABILITY_RESULT_UNAVAILABLE,
 	SOLO_ABILITY_RESULT_BLOCKED,
 	SOLO_ABILITY_RESULT_INVALID
-}	solo_ability_result_t;
+}	t_solo_ability_result;
 
 typedef enum e_solo_popover_phase
 {
@@ -686,7 +686,7 @@ typedef enum e_solo_popover_phase
 	SOLO_POPOVER_FADING_IN,
 	SOLO_POPOVER_VISIBLE,
 	SOLO_POPOVER_FADING_OUT
-}	solo_popover_phase_t;
+}	t_solo_popover_phase;
 
 typedef struct s_solo_game
 {
@@ -698,7 +698,7 @@ typedef struct s_solo_game
 	t_score_state	scoring;
 	t_score_result	last_score;
 	uint64_t		personal_best;
-	solo_phase_t	phase;
+	t_solo_phase	phase;
 	t_spin_type	pending_spin;
 	t_spin_type	last_spin;
 	int				clear_rows[BRAIN_MAX_CLEAR_LINES];
@@ -708,8 +708,8 @@ typedef struct s_solo_game
 	int				level;
 	int				crystal_charge;
 	int				crystal_line_progress;
-	solo_ability_t	last_ability;
-	solo_ability_result_t	ability_result;
+	t_solo_ability	last_ability;
+	t_solo_ability_result	ability_result;
 	int				ability_feedback_elapsed_ms;
 	int				gravity_elapsed_ms;
 	int				lock_elapsed_ms;
@@ -735,8 +735,8 @@ typedef struct s_solo_game
 	bool			score_event_active;
 	bool			ability_ready_active;
 	bool			countdown_active;
-	solo_ability_t	ready_ability;
-}	solo_game_t;
+	t_solo_ability	ready_ability;
+}	t_solo_game;
 
 typedef struct s_solo_render
 {
@@ -786,9 +786,9 @@ typedef struct s_solo_render
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
-	solo_ability_t	hovered_ability;
-	solo_ability_t	popover_ability;
-	solo_popover_phase_t	popover_phase;
+	t_solo_ability	hovered_ability;
+	t_solo_ability	popover_ability;
+	t_solo_popover_phase	popover_phase;
 	int				popover_opacity;
 	int				popover_fade_start_opacity;
 	int				popover_fade_elapsed_ms;
@@ -801,70 +801,70 @@ typedef struct s_solo_render
 	bool			cell_board;
 	bool			board_plane_cells;
 	char			asset_error[160];
-}	solo_render_t;
+}	t_solo_render;
 
 /* APP_STATE.C */
-void			app_navigation_init(app_navigation_t *navigation,
-					app_screen_t initial);
-bool			app_navigation_dispatch(app_navigation_t *navigation,
-					app_nav_action_t action);
-app_screen_t	app_screen_parent(app_screen_t screen);
-const char		*app_screen_name(app_screen_t screen);
-app_screen_t	app_handle_key(app_screen_t current, uint32_t key);
-void			menu_move_selection(menu_selection_t *m, uint32_t key);
+void			app_navigation_init(t_app_navigation *navigation,
+					t_app_screen initial);
+bool			app_navigation_dispatch(t_app_navigation *navigation,
+					t_app_nav_action action);
+t_app_screen	app_screen_parent(t_app_screen screen);
+const char		*app_screen_name(t_app_screen screen);
+t_app_screen	app_handle_key(t_app_screen current, uint32_t key);
+void			menu_move_selection(t_menu_selection *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
 
 /* APP_PROVIDER.C */
-void			app_fixture_provider_init(app_data_provider_t *provider);
-app_provider_result_t	app_screen_view_load(
-					const app_data_provider_t *provider,
-					app_screen_t screen, app_screen_view_model_t *view);
-const char		*app_data_status_name(app_data_status_t status);
-const char		*app_game_mode_name(app_game_mode_t mode);
+void			app_fixture_provider_init(t_app_data_provider *provider);
+t_app_provider_result	app_screen_view_load(
+					const t_app_data_provider *provider,
+					t_app_screen screen, t_app_screen_view_model *view);
+const char		*app_data_status_name(t_app_data_status status);
+const char		*app_game_mode_name(t_app_game_mode mode);
 
 /* UI_NOTIFICATION.C */
-void			ui_notification_stack_init(ui_notification_stack_t *stack);
-void			ui_notification_show(ui_notification_stack_t *stack,
+void			ui_notification_stack_init(t_ui_notification_stack *stack);
+void			ui_notification_show(t_ui_notification_stack *stack,
 					const char *title, int percent, uint64_t now_ms);
-bool			ui_notification_update(ui_notification_stack_t *stack,
+bool			ui_notification_update(t_ui_notification_stack *stack,
 					uint64_t now_ms);
-int				ui_notification_opacity(const ui_notification_t *notification,
+int				ui_notification_opacity(const t_ui_notification *notification,
 					uint64_t now_ms);
 int				ui_notification_next_wake_ms(
-					const ui_notification_stack_t *stack, uint64_t now_ms);
+					const t_ui_notification_stack *stack, uint64_t now_ms);
 int				ui_notification_volume_percent(int volume);
 uint64_t		ui_notification_now_ms(void);
 
 /* RENDER_BACKGROUND.C */
-render_ctx_t	render_init(const char *image_path);
-uint32_t		render_wait_key(render_ctx_t *ctx);
-uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
-void			render_teardown(render_ctx_t *ctx);
-int				render_background_replace(render_ctx_t *ctx,
+t_render_ctx	render_init(const char *image_path);
+uint32_t		render_wait_key(t_render_ctx *ctx);
+uint32_t		render_wait_input(t_render_ctx *ctx, ncinput *input);
+void			render_teardown(t_render_ctx *ctx);
+int				render_background_replace(t_render_ctx *ctx,
 					const char *image_path, bool stretch);
-void				render_background_destroy(render_ctx_t *ctx);
-int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
-bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
-bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
-bool				render_pixels_available(const render_ctx_t *ctx);
-bool				render_compatibility_mode(const render_ctx_t *ctx);
-void				render_compatibility_badge_refresh(render_ctx_t *ctx);
-void				render_compatibility_badge_hide(render_ctx_t *ctx);
-void				render_notification_show_volume(render_ctx_t *ctx,
+void				render_background_destroy(t_render_ctx *ctx);
+int				render_geometry_refresh(t_render_ctx *ctx, bool repaint);
+bool				render_terminal_geometry_changed(const t_render_ctx *ctx);
+bool				render_pixel_planes_reliable(const t_render_ctx *ctx);
+bool				render_pixels_available(const t_render_ctx *ctx);
+bool				render_compatibility_mode(const t_render_ctx *ctx);
+void				render_compatibility_badge_refresh(t_render_ctx *ctx);
+void				render_compatibility_badge_hide(t_render_ctx *ctx);
+void				render_notification_show_volume(t_render_ctx *ctx,
 					int volume);
-void				render_notification_tick(render_ctx_t *ctx);
+void				render_notification_tick(t_render_ctx *ctx);
 int					render_notification_next_wake_ms(
-					const render_ctx_t *ctx);
-void				render_notification_reflow(render_ctx_t *ctx);
-void				render_notification_raise(render_ctx_t *ctx);
-void				render_notification_destroy(render_ctx_t *ctx);
-tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
-					const char *term, tetrisu_renderer_mode_t forced);
+					const t_render_ctx *ctx);
+void				render_notification_reflow(t_render_ctx *ctx);
+void				render_notification_raise(t_render_ctx *ctx);
+void				render_notification_destroy(t_render_ctx *ctx);
+t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
+					const char *term, t_tetrisu_renderer_mode forced);
 
 /* RENDERER_POLICY.C */
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value);
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_requested(void);
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_from_value(const char *value);
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_requested(void);
 
 /* SOLO_LAYOUT.C */
 int				solo_layout_content_rows(int tile_rows);
@@ -873,129 +873,129 @@ bool				solo_layout_terminal_fits(int terminal_rows,
 					int terminal_cols, int tile_rows, int tile_cols);
 
 /* RENDER_MENU.C */
-void			render_menu_create(render_ctx_t *ctx);
-void			render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m);
-bool			render_menu_hit_test(const render_ctx_t *ctx,
+void			render_menu_create(t_render_ctx *ctx);
+void			render_menu_move_bunny(t_render_ctx *ctx, const t_menu_selection *m);
+bool			render_menu_hit_test(const t_render_ctx *ctx,
 					const ncinput *input, int *selected);
-void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
-void			render_menu_destroy(render_ctx_t *ctx);
-struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
-int				render_menu_label_y(const render_ctx_t *ctx, int index);
+void			render_menu_show_message(t_render_ctx *ctx, const char *msg);
+void			render_menu_destroy(t_render_ctx *ctx);
+struct ncplane	*render_menu_labels_create(t_render_ctx *ctx);
+int				render_menu_label_y(const t_render_ctx *ctx, int index);
 
 /* RENDER_SCREEN.C */
-bool			render_screen_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view);
-void			render_screen_destroy(render_ctx_t *ctx);
+bool			render_screen_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view);
+void			render_screen_destroy(t_render_ctx *ctx);
 
 /* RENDER_INTRO.C */
-int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
+int				render_intro_play(t_render_ctx *ctx, t_audio_ctx *audio,
 					const char *video_path, const char *audio_path);
 
 /* AUDIO.C */
-int				audio_init(audio_ctx_t *audio);
-void			audio_play_music(audio_ctx_t *audio, const char *path);
-void			audio_transition_music(audio_ctx_t *audio, const char *path,
+int				audio_init(t_audio_ctx *audio);
+void			audio_play_music(t_audio_ctx *audio, const char *path);
+void			audio_transition_music(t_audio_ctx *audio, const char *path,
 					int duration_ms);
-bool			audio_update(audio_ctx_t *audio, int elapsed_ms);
-int				audio_next_wake_ms(const audio_ctx_t *audio);
-void			audio_play_once(audio_ctx_t *audio, const char *path);
-void			audio_stop_music(audio_ctx_t *audio);
-void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
+bool			audio_update(t_audio_ctx *audio, int elapsed_ms);
+int				audio_next_wake_ms(const t_audio_ctx *audio);
+void			audio_play_once(t_audio_ctx *audio, const char *path);
+void			audio_stop_music(t_audio_ctx *audio);
+void			audio_load_menu_sfx(t_audio_ctx *audio, const char *move_path,
 					const char *select_path);
-void			audio_load_game_sfx(audio_ctx_t *audio);
-void			audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx);
-void			audio_play_menu_move(audio_ctx_t *audio);
-void			audio_play_menu_select(audio_ctx_t *audio);
-void			audio_set_music_volume(audio_ctx_t *audio, int volume);
-void			audio_volume_up(audio_ctx_t *audio);
-void			audio_volume_down(audio_ctx_t *audio);
-void			audio_teardown(audio_ctx_t *audio);
+void			audio_load_game_sfx(t_audio_ctx *audio);
+void			audio_play_sfx(t_audio_ctx *audio, t_audio_sfx sfx);
+void			audio_play_menu_move(t_audio_ctx *audio);
+void			audio_play_menu_select(t_audio_ctx *audio);
+void			audio_set_music_volume(t_audio_ctx *audio, int volume);
+void			audio_volume_up(t_audio_ctx *audio);
+void			audio_volume_down(t_audio_ctx *audio);
+void			audio_teardown(t_audio_ctx *audio);
 
 /* SOLO_GAME.C — pure local authority, replaced by tetrisd STATE later */
-void			solo_game_init(solo_game_t *game, uint32_t seed);
-bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
-bool			solo_game_update(solo_game_t *game, int elapsed_ms);
-bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
-unsigned		solo_game_danger_dim(const solo_game_t *game);
-uint32_t		solo_game_take_events(solo_game_t *game);
-void			solo_game_set_personal_best(solo_game_t *game,
+void			solo_game_init(t_solo_game *game, uint32_t seed);
+bool			solo_game_apply_action(t_solo_game *game, t_solo_action action);
+bool			solo_game_update(t_solo_game *game, int elapsed_ms);
+bool			solo_game_update_danger(t_solo_game *game, int elapsed_ms);
+unsigned		solo_game_danger_dim(const t_solo_game *game);
+uint32_t		solo_game_take_events(t_solo_game *game);
+void			solo_game_set_personal_best(t_solo_game *game,
 					uint64_t score);
-bool			solo_game_finish_personal_best(solo_game_t *game);
-unsigned		solo_game_personal_best_opacity(const solo_game_t *game);
-void			solo_game_start_countdown(solo_game_t *game);
-int				solo_game_countdown_value(const solo_game_t *game);
-unsigned		solo_game_countdown_opacity(const solo_game_t *game);
-unsigned		solo_game_score_event_opacity(const solo_game_t *game);
-unsigned		solo_game_ability_ready_opacity(const solo_game_t *game);
-unsigned		solo_game_ability_result_opacity(const solo_game_t *game);
-int				solo_game_next_wake_ms(const solo_game_t *game);
+bool			solo_game_finish_personal_best(t_solo_game *game);
+unsigned		solo_game_personal_best_opacity(const t_solo_game *game);
+void			solo_game_start_countdown(t_solo_game *game);
+int				solo_game_countdown_value(const t_solo_game *game);
+unsigned		solo_game_countdown_opacity(const t_solo_game *game);
+unsigned		solo_game_score_event_opacity(const t_solo_game *game);
+unsigned		solo_game_ability_ready_opacity(const t_solo_game *game);
+unsigned		solo_game_ability_result_opacity(const t_solo_game *game);
+int				solo_game_next_wake_ms(const t_solo_game *game);
 int				solo_clear_duration_ms(int level);
-t_piece			solo_game_ghost(const solo_game_t *game);
-bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
-void			solo_game_toggle_pause(solo_game_t *game);
+t_piece			solo_game_ghost(const t_solo_game *game);
+bool			solo_game_row_is_clearing(const t_solo_game *game, int row);
+void			solo_game_toggle_pause(t_solo_game *game);
 
 /* SOLO_PERSISTENCE.C */
 uint64_t		solo_best_load(void);
 bool			solo_best_store(uint64_t score);
 
 /* SOLO_HANDLING.C — terminal-aware DAS, ARR, and soft-drop timing */
-solo_handling_config_t	solo_handling_default_config(void);
-void			solo_handling_reset(solo_handling_state_t *state);
-bool			solo_handling_event(solo_handling_state_t *state,
-					const solo_handling_config_t *config, uint32_t key,
-					ncintype_e event_type, solo_action_t *action);
-int				solo_handling_update(solo_handling_state_t *state,
-					const solo_handling_config_t *config, int gravity_ms,
-					int elapsed_ms, solo_action_t *actions, int capacity);
+t_solo_handling_config	solo_handling_default_config(void);
+void			solo_handling_reset(t_solo_handling_state *state);
+bool			solo_handling_event(t_solo_handling_state *state,
+					const t_solo_handling_config *config, uint32_t key,
+					ncintype_e event_type, t_solo_action *action);
+int				solo_handling_update(t_solo_handling_state *state,
+					const t_solo_handling_config *config, int gravity_ms,
+					int elapsed_ms, t_solo_action *actions, int capacity);
 int				solo_handling_next_wake_ms(
-					const solo_handling_state_t *state,
-					const solo_handling_config_t *config, int gravity_ms);
+					const t_solo_handling_state *state,
+					const t_solo_handling_config *config, int gravity_ms);
 
 /* SOLO_ABILITIES.C — temporary local ability authority for Solo testing */
-int				solo_ability_cost(solo_ability_t ability);
-const char		*solo_ability_name(solo_ability_t ability);
-const char		*solo_ability_description(solo_ability_t ability);
-int				solo_ability_center_y(solo_ability_t ability);
-solo_ability_t	solo_ability_at_canvas(int x, int y);
-bool				solo_mouse_canvas_position(const render_ctx_t *ctx,
-					const solo_render_t *solo, const ncinput *input,
+int				solo_ability_cost(t_solo_ability ability);
+const char		*solo_ability_name(t_solo_ability ability);
+const char		*solo_ability_description(t_solo_ability ability);
+int				solo_ability_center_y(t_solo_ability ability);
+t_solo_ability	solo_ability_at_canvas(int x, int y);
+bool				solo_mouse_canvas_position(const t_render_ctx *ctx,
+					const t_solo_render *solo, const ncinput *input,
 					int *canvas_x, int *canvas_y);
-solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
-					solo_ability_t ability);
+t_solo_ability_result	solo_game_activate_ability(t_solo_game *game,
+					t_solo_ability ability);
 
 /* SOLO_POPOVER.C — timed hover presentation shared by every renderer */
-bool			solo_popover_set_hover(solo_render_t *solo,
-					solo_ability_t ability);
-bool			solo_popover_update(solo_render_t *solo,
-					const solo_game_t *game, int elapsed_ms);
-int				solo_popover_next_wake_ms(const solo_render_t *solo);
-solo_ability_t	solo_popover_displayed_ability(const solo_render_t *solo,
-					const solo_game_t *game);
-int				solo_popover_displayed_opacity(const solo_render_t *solo,
-					const solo_game_t *game);
+bool			solo_popover_set_hover(t_solo_render *solo,
+					t_solo_ability ability);
+bool			solo_popover_update(t_solo_render *solo,
+					const t_solo_game *game, int elapsed_ms);
+int				solo_popover_next_wake_ms(const t_solo_render *solo);
+t_solo_ability	solo_popover_displayed_ability(const t_solo_render *solo,
+					const t_solo_game *game);
+int				solo_popover_displayed_opacity(const t_solo_render *solo,
+					const t_solo_game *game);
 
 /* RENDER_SOLO_CANVAS.C */
-bool			solo_canvas_load(solo_render_t *solo);
+bool			solo_canvas_load(t_solo_render *solo);
 int				solo_canvas_piece_tile(t_piece_type type);
 uint32_t		solo_canvas_ghost_tile_pixel(uint32_t pixel, int x, int y);
 bool			solo_canvas_buffer_bytes(int width, int height, size_t *bytes);
-void			solo_canvas_set_error(solo_render_t *solo, const char *message,
+void			solo_canvas_set_error(t_solo_render *solo, const char *message,
 					const char *path);
-void			solo_canvas_compose_hud(solo_render_t *solo,
-					const solo_game_t *game);
-void			solo_canvas_compose_board(solo_render_t *solo,
-					const solo_game_t *game);
-void			solo_canvas_compose_danger_background(solo_render_t *solo,
-					const solo_game_t *game);
+void			solo_canvas_compose_hud(t_solo_render *solo,
+					const t_solo_game *game);
+void			solo_canvas_compose_board(t_solo_render *solo,
+					const t_solo_game *game);
+void			solo_canvas_compose_danger_background(t_solo_render *solo,
+					const t_solo_game *game);
 
 /* RENDER_SOLO.C */
-void			render_solo_create(render_ctx_t *ctx, solo_render_t *solo);
-void			render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
-					const solo_game_t *game);
-void			render_solo_resize(render_ctx_t *ctx, solo_render_t *solo);
-void			render_solo_destroy(solo_render_t *solo);
+void			render_solo_create(t_render_ctx *ctx, t_solo_render *solo);
+void			render_solo_draw(t_render_ctx *ctx, t_solo_render *solo,
+					const t_solo_game *game);
+void			render_solo_resize(t_render_ctx *ctx, t_solo_render *solo);
+void			render_solo_destroy(t_solo_render *solo);
 
 /* SOLO_MODE.C */
-int				solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio);
+int				solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio);
 
 # endif

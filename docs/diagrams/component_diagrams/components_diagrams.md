@@ -545,17 +545,17 @@ classDiagram
         APP_QUIT
     }
 
-    class menu_selection_t {
+    class t_menu_selection {
         +int selected
     }
-    class audio_ctx_t {
+    class t_audio_ctx {
         +int enabled
         +int music_volume
         +void* music
         +void* menu_move_sfx
         +void* menu_select_sfx
     }
-    class render_ctx_t {
+    class t_render_ctx {
         +notcurses* nc
         +ncplane* std
         +ncplane* bg_plane
@@ -577,7 +577,7 @@ classDiagram
     }
     class render_background {
         <<module>> render_background.c
-        +render_init(image_path) render_ctx_t
+        +render_init(image_path) t_render_ctx
         +render_wait_key(ctx) uint32
         +render_teardown(ctx)
     }
@@ -605,9 +605,9 @@ classDiagram
         +main() : drives state machine
     }
 
-    main o--> render_ctx_t : owns
-    main o--> audio_ctx_t : owns
-    main o--> menu_selection_t : owns
+    main o--> t_render_ctx : owns
+    main o--> t_audio_ctx : owns
+    main o--> t_menu_selection : owns
     main ..> app_state_t : loop state
 
     main ..> app_state
@@ -617,13 +617,13 @@ classDiagram
     main ..> audio
 
     app_state ..> app_state_t
-    app_state ..> menu_selection_t
-    render_background ..> render_ctx_t
-    render_menu ..> render_ctx_t
-    render_menu ..> menu_selection_t
-    render_intro ..> render_ctx_t
-    render_intro ..> audio_ctx_t
-    audio ..> audio_ctx_t
+    app_state ..> t_menu_selection
+    render_background ..> t_render_ctx
+    render_menu ..> t_render_ctx
+    render_menu ..> t_menu_selection
+    render_intro ..> t_render_ctx
+    render_intro ..> t_audio_ctx
+    audio ..> t_audio_ctx
 ```
 
 ---

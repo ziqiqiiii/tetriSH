@@ -1,28 +1,28 @@
 #include "tetrisu.h"
 
 // Static Functions
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
-static bool	activate_menu_selection(audio_ctx_t *audio,
-				app_navigation_t *navigation,
-				const menu_selection_t *menu);
-static app_nav_action_t	menu_navigation_action(int selected);
-static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, const menu_selection_t *menu);
-static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
+static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu);
+static bool	activate_menu_selection(t_audio_ctx *audio,
+				t_app_navigation *navigation,
+				const t_menu_selection *menu);
+static t_app_nav_action	menu_navigation_action(int selected);
+static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, const t_menu_selection *menu);
+static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 				uint32_t key);
-static void	enable_home_mouse(render_ctx_t *ctx);
+static void	enable_home_mouse(t_render_ctx *ctx);
 
 /**
  * @brief Entry point for the screen-navigation and rendering loop.
  */
 int	main(void)
 {
-	app_navigation_t	navigation;
-	app_data_provider_t	provider;
-	menu_selection_t	menu;
-	render_ctx_t		ctx;
-	audio_ctx_t			audio;
+	t_app_navigation	navigation;
+	t_app_data_provider	provider;
+	t_menu_selection	menu;
+	t_render_ctx		ctx;
+	t_audio_ctx			audio;
 	ncinput				input;
 	uint32_t			key;
 	int					hovered;
@@ -118,10 +118,10 @@ int	main(void)
 /**
  * @brief Routes one home selection into the screen graph.
  */
-static bool	activate_menu_selection(audio_ctx_t *audio,
-	app_navigation_t *navigation, const menu_selection_t *menu)
+static bool	activate_menu_selection(t_audio_ctx *audio,
+	t_app_navigation *navigation, const t_menu_selection *menu)
 {
-	app_nav_action_t	action;
+	t_app_nav_action	action;
 
 	if (navigation == NULL || menu == NULL)
 		return (false);
@@ -135,7 +135,7 @@ static bool	activate_menu_selection(audio_ctx_t *audio,
 /**
  * @brief Maps the fixed five-item home order to typed navigation actions.
  */
-static app_nav_action_t	menu_navigation_action(int selected)
+static t_app_nav_action	menu_navigation_action(int selected)
 {
 	if (selected == 0)
 		return (APP_NAV_OPEN_SOLO);
@@ -153,12 +153,12 @@ static app_nav_action_t	menu_navigation_action(int selected)
 /**
  * @brief Presents and advances one scaffolded item-15 screen.
  */
-static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
-	app_screen_view_model_t	view;
-	app_nav_action_t		action;
+	t_app_screen_view_model	view;
+	t_app_nav_action		action;
 	ncinput					input;
 	uint32_t				key;
 
@@ -206,7 +206,7 @@ static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Maps temporary scaffold controls to the validated state graph.
  */
-static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
+static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 	uint32_t key)
 {
 	if (key == 'q' || key == 'Q')
@@ -238,7 +238,7 @@ static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
 /**
  * @brief Enables pointer movement and click reporting for the home menu.
  */
-static void	enable_home_mouse(render_ctx_t *ctx)
+static void	enable_home_mouse(t_render_ctx *ctx)
 {
 	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
 }
@@ -246,7 +246,7 @@ static void	enable_home_mouse(render_ctx_t *ctx)
 /**
  * @brief Rebuilds the home screen after resize or scaffold navigation.
  */
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
+static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu)
 {
 	render_screen_destroy(ctx);
 	render_menu_destroy(ctx);

@@ -7,17 +7,17 @@
 # define NOTIFICATION_GAP		1
 # define NOTIFICATION_TEXT_LEFT	13
 
-static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms);
-static bool	notification_position(render_ctx_t *ctx, int index,
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms);
+static bool	notification_position(t_render_ctx *ctx, int index,
 					int *y, int *x);
-static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
-					const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_art_plane(t_render_ctx *ctx, int y, int x,
+					const t_ui_notification *notification, int opacity,
 					bool *content_embedded);
-static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
-					const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_text_plane(t_render_ctx *ctx, int y, int x,
+					const t_ui_notification *notification, int opacity,
 					bool has_art);
 static void	draw_visual_content(struct ncvisual *visual,
-					const ui_notification_t *notification,
+					const t_ui_notification *notification,
 					int pixel_rows, int pixel_cols);
 static void	draw_pixel_text(struct ncvisual *visual, int y, int x,
 					const char *text, int scale, uint32_t color);
@@ -30,7 +30,7 @@ static void	draw_pixel_rect(struct ncvisual *visual, int y, int x,
 					int height, int width, uint32_t color);
 static void	fade_visual(struct ncvisual *visual, int opacity);
 static void	draw_notification(struct ncplane *plane,
-					const ui_notification_t *notification, int opacity,
+					const t_ui_notification *notification, int opacity,
 					int row_offset);
 static void	draw_bar(struct ncplane *plane, int percent, int opacity,
 					int row);
@@ -39,7 +39,7 @@ static void	set_transparent_base(struct ncplane *plane);
 static void	set_color(struct ncplane *plane, unsigned r, unsigned g,
 					unsigned b, int opacity);
 static unsigned	fade_component(unsigned component, int opacity);
-static void	destroy_notification_planes(render_ctx_t *ctx);
+static void	destroy_notification_planes(t_render_ctx *ctx);
 
 /**
  * @brief Shows or refreshes the global music-volume notification.
@@ -51,7 +51,7 @@ static void	destroy_notification_planes(render_ctx_t *ctx);
  * @param ctx Active render context.
  * @param volume Mixer volume in the application range.
  */
-void	render_notification_show_volume(render_ctx_t *ctx, int volume)
+void	render_notification_show_volume(t_render_ctx *ctx, int volume)
 {
 	uint64_t	now_ms;
 
@@ -69,7 +69,7 @@ void	render_notification_show_volume(render_ctx_t *ctx, int volume)
  *
  * @param ctx Active render context.
  */
-void	render_notification_tick(render_ctx_t *ctx)
+void	render_notification_tick(t_render_ctx *ctx)
 {
 	uint64_t	now_ms;
 
@@ -87,7 +87,7 @@ void	render_notification_tick(render_ctx_t *ctx)
  * @param ctx Active render context.
  * @return Delay in milliseconds, or -1 with no visible notifications.
  */
-int	render_notification_next_wake_ms(const render_ctx_t *ctx)
+int	render_notification_next_wake_ms(const t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return (-1);
@@ -100,7 +100,7 @@ int	render_notification_next_wake_ms(const render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_notification_reflow(render_ctx_t *ctx)
+void	render_notification_reflow(t_render_ctx *ctx)
 {
 	if (ctx == NULL || ctx->nc == NULL || ctx->notifications.count == 0)
 		return ;
@@ -113,7 +113,7 @@ void	render_notification_reflow(render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_notification_raise(render_ctx_t *ctx)
+void	render_notification_raise(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -135,7 +135,7 @@ void	render_notification_raise(render_ctx_t *ctx)
  *
  * @param ctx Render context being torn down.
  */
-void	render_notification_destroy(render_ctx_t *ctx)
+void	render_notification_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -143,7 +143,7 @@ void	render_notification_destroy(render_ctx_t *ctx)
 	ui_notification_stack_init(&ctx->notifications);
 }
 
-static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms)
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 {
 	int		index;
 	int		opacity;
@@ -174,7 +174,7 @@ static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms)
 	render_notification_raise(ctx);
 }
 
-static bool	notification_position(render_ctx_t *ctx, int index,
+static bool	notification_position(t_render_ctx *ctx, int index,
 	int *y, int *x)
 {
 	unsigned	rows;
@@ -190,8 +190,8 @@ static bool	notification_position(render_ctx_t *ctx, int index,
 	return (*y + NOTIFICATION_ROWS <= (int)rows);
 }
 
-static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
-	const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_art_plane(t_render_ctx *ctx, int y, int x,
+	const t_ui_notification *notification, int opacity,
 	bool *content_embedded)
 {
 	struct ncvisual			*visual;
@@ -241,7 +241,7 @@ static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
 }
 
 static void	draw_visual_content(struct ncvisual *visual,
-	const ui_notification_t *notification, int pixel_rows, int pixel_cols)
+	const t_ui_notification *notification, int pixel_rows, int pixel_cols)
 {
 	char		percent[8];
 	int			scale;
@@ -395,8 +395,8 @@ static void	draw_pixel_rect(struct ncvisual *visual, int y, int x,
 	}
 }
 
-static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
-	const ui_notification_t *notification, int opacity, bool has_art)
+static struct ncplane	*create_text_plane(t_render_ctx *ctx, int y, int x,
+	const t_ui_notification *notification, int opacity, bool has_art)
 {
 	ncplane_options	opts;
 	struct ncplane	*plane;
@@ -447,7 +447,7 @@ static void	fade_visual(struct ncvisual *visual, int opacity)
 }
 
 static void	draw_notification(struct ncplane *plane,
-	const ui_notification_t *notification, int opacity, int row_offset)
+	const t_ui_notification *notification, int opacity, int row_offset)
 {
 	char	percent[8];
 	int		percent_x;
@@ -560,7 +560,7 @@ static unsigned	fade_component(unsigned component, int opacity)
 	return ((component * (unsigned)opacity) / 255u);
 }
 
-static void	destroy_notification_planes(render_ctx_t *ctx)
+static void	destroy_notification_planes(t_render_ctx *ctx)
 {
 	int	index;
 

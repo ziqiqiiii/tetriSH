@@ -16,7 +16,7 @@ action and `STATE` wire fields before either endpoint is implemented.
 | Current code | Final owner | Migration treatment |
 |---|---|---|
 | `libtetrisbrain` board, SRS, 7-bag, scoring, gravity helpers | `tetrisd` | Link the same pure archive into the server |
-| `render_solo.c` 512 x 384 board, previews, ghost, score, meter, and Mirurun composition | `tetrisu` | Keep; change its input from `solo_game_t` to a decoded snapshot/view model |
+| `render_solo.c` 512 x 384 board, previews, ghost, score, meter, and Mirurun composition | `tetrisu` | Keep; change its input from `t_solo_game` to a decoded snapshot/view model |
 | Key bindings in `render_solo.c` | `tetrisu` | Keep; serialise actions instead of mutating local state |
 | Two-frame clear animation | `tetrisu` | Keep as presentation driven by a server clear sequence/row mask |
 | `solo_game.c` tests | server game-session tests | Move the cases to `tetrisd`'s room/ticker test harness |
@@ -49,7 +49,7 @@ enum values onto the wire.
 ## Server-owned state
 
 Create one server-side session value per Solo player containing the fields now
-held by `solo_game_t`:
+held by `t_solo_game`:
 
 - board and active piece;
 - next-three queue and caller-owned 7-bag/RNG state;
