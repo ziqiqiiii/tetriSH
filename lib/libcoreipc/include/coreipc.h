@@ -57,9 +57,7 @@ typedef struct s_ring_buffer
 }	t_ring_buffer;
 
 /* LOG_RECORD.C */
-int			lr_make(t_log_record *out, t_log_level level,
-				uint64_t timestamp_ms, uint32_t pid,
-				const char *component, const char *msg);
+int			lr_make(t_log_record *out, t_log_level level, uint64_t timestamp_ms, uint32_t pid, const char *component, const char *msg);
 int			lr_validate(const void *buf, size_t len);
 const char	*lr_level_name(t_log_level level);
 int			lr_level_parse(const char *name);
