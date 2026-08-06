@@ -318,15 +318,15 @@ static void	test_a_second_instance_refuses_to_start(void)
 	t_logd		first;
 
 	assert(boot(&fx, &first) == 0);
-	cd_pid_blank(&held);
-	cd_pid_blank(&loser);
-	assert(cd_pid_claim(&held, fx.cfg.pid_path) == 0);
+	daemon_pid_blank(&held);
+	daemon_pid_blank(&loser);
+	assert(daemon_pid_claim(&held, fx.cfg.pid_path) == 0);
 	errno = 0;
-	assert(cd_pid_claim(&loser, fx.cfg.pid_path) == -1);
+	assert(daemon_pid_claim(&loser, fx.cfg.pid_path) == -1);
 	assert(errno == EWOULDBLOCK || errno == EAGAIN);
 	assert(stat(fx.sock_path, &st) == 0 && S_ISSOCK(st.st_mode));
 	assert(sink_is_open(&first.sink) == true);
-	cd_pid_release(&held);
+	daemon_pid_release(&held);
 	logd_stop(&first);
 	fx_destroy(&fx);
 	printf("PASS test_a_second_instance_refuses_to_start\n");

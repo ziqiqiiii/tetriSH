@@ -53,10 +53,10 @@ static void	test_join_creates_a_room_and_lists_it(void)
 	assert(strcmp(room, "S-01") == 0);
 	assert(list_rooms(&hc, rows, LOBBY_MAX_ROOMS) == 1);
 	assert(strcmp(rows[0].name, "S-01") == 0);
-	assert(rows[0].mode == SB_MODE_SINGLE);
+	assert(rows[0].mode == BODY_MODE_SINGLE);
 	assert(rows[0].players == 1);
 	assert(rows[0].slot_count == 1);
-	assert(rows[0].status == SB_ROOM_READY);
+	assert(rows[0].status == BODY_ROOM_READY);
 	assert(strcmp(rows[0].owner, "amber") == 0);
 	hc_close(&hc);
 	fx_stop(&fx);
@@ -245,7 +245,7 @@ static size_t	list_rooms(t_harness *hc, t_sb_room_row *rows, size_t cap)
 		return (0);
 	assert(resp.status_code == 200);
 	if (resp.body != NULL && resp.body_len > 0)
-		assert(sb_rooms_decode((const char *)resp.body, resp.body_len, rows,
+		assert(body_rooms_decode((const char *)resp.body, resp.body_len, rows,
 				cap, &count) == 0);
 	htttp_message_free(&resp);
 	return (count);

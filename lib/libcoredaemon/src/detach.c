@@ -9,20 +9,20 @@ static void	shed_descriptors(int keep_fd);
  * @brief Detaches into the background and hands back the readiness pipe.
  *
  * Returns in the daemon only. The originating process blocks inside this call
- * until the daemon either reports itself ready (cd_ready) or dies, and exits
+ * until the daemon either reports itself ready (daemon_ready) or dies, and exits
  * with the corresponding status, so `tetrisctl start` learns whether the boot
  * it asked for actually happened.
  *
  * stderr is deliberately left pointing at whatever the caller had - usually a
- * terminal. Everything between here and cd_ready is boot, and a boot that
- * fails has to say why somewhere a person is looking; cd_stderr_redirect
+ * terminal. Everything between here and daemon_ready is boot, and a boot that
+ * fails has to say why somewhere a person is looking; daemon_stderr_redirect
  * moves the stream to its configured file once there is nothing left to fail.
  *
  * @param ready_fd Receives the write end of the readiness pipe, to be passed
- * to cd_ready once the daemon is up.
+ * to daemon_ready once the daemon is up.
  * @return 0 in the detached daemon, -1 with errno set when it could not fork.
  */
-int	cd_detach(int *ready_fd)
+int	daemon_detach(int *ready_fd)
 {
 	pid_t	pid;
 	int		ready[2];
@@ -66,16 +66,16 @@ int	cd_detach(int *ready_fd)
  * exits EXIT_SUCCESS; here the parent reads one byte for success and
  * end-of-file for a daemon that died before it got this far.
  *
- * @param ready_fd Descriptor from cd_detach, or -1 to do nothing.
+ * @param ready_fd Descriptor from daemon_detach, or -1 to do nothing.
  */
-void	cd_ready(int ready_fd)
+void	daemon_ready(int ready_fd)
 {
 	char	byte;
 	ssize_t	n;
 
 	if (ready_fd < 0)
 		return ;
-	byte = CD_READY_BYTE;
+	byte = DAEMON_READY_BYTE;
 	n = write(ready_fd, &byte, 1);
 	while (n < 0 && errno == EINTR)
 		n = write(ready_fd, &byte, 1);
@@ -93,19 +93,19 @@ void	cd_ready(int ready_fd)
  * @param path File to append stderr to; its parents are created.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	cd_stderr_redirect(const char *path)
+int	daemon_stderr_redirect(const char *path)
 {
 	int	fd;
 	int	saved;
 
-	if (path == NULL || path[0] == '\0' || strlen(path) >= CD_PATH_MAX)
+	if (path == NULL || path[0] == '\0' || strlen(path) >= DAEMON_PATH_MAX)
 	{
 		errno = EINVAL;
 		return (-1);
 	}
-	if (cd_mkdir_parent(path) != 0)
+	if (daemon_mkdir_parent(path) != 0)
 		return (-1);
-	fd = open(path, O_WRONLY | O_APPEND | O_CREAT, CD_FILE_MODE);
+	fd = open(path, O_WRONLY | O_APPEND | O_CREAT, DAEMON_FILE_MODE);
 	if (fd < 0)
 		return (-1);
 	if (dup2(fd, STDERR_FILENO) < 0)
@@ -171,7 +171,7 @@ static void	second_fork(void)
 /**
  * @brief Closes inherited descriptors and takes stdin and stdout to /dev/null.
  *
- * stderr is left alone; see cd_detach. The working directory is left alone
+ * stderr is left alone; see daemon_detach. The working directory is left alone
  * too, deliberately: every path in .tetrishrc is relative to where the daemon
  * was launched, so the customary chdir("/") would resolve all of them
  * somewhere else.

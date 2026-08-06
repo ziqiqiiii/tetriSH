@@ -238,7 +238,7 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
 	size_t			len;
 	int				body_len;
 
-	body_len = sb_state_encode(snap, body, sizeof(body));
+	body_len = body_state_encode(snap, body, sizeof(body));
 	if (server_room == NULL || body_len <= 0)
 		return ;
 	snprintf(path, sizeof(path), "/room/%s/player/%llu", room_name,

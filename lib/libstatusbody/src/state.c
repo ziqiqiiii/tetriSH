@@ -1,4 +1,4 @@
-#include "sb_util.h"
+#include "body_util.h"
 
 #include <inttypes.h>
 
@@ -52,20 +52,20 @@ static int	hex_nibble(char ch);
  * @return Body length in bytes, or -1 with errno = EINVAL (NULL args or a
  *         field out of range) or ERANGE (cap too small).
  */
-int	sb_state_encode(const t_sb_state *in, char *out, size_t cap)
+int	body_state_encode(const t_sb_state *in, char *out, size_t cap)
 {
 	size_t	off;
 
 	if (!in || !out)
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	if (validate_state(in) != 0)
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	off = 0;
 	if (encode_head(in, out, cap, &off) != 0
 		|| encode_stats(in, out, cap, &off) != 0
 		|| encode_clearing(in, out, cap, &off) != 0
 		|| encode_board(in, out, cap, &off) != 0)
-		return (sb_fail(ERANGE));
+		return (body_fail(ERANGE));
 	return ((int)off);
 }
 
@@ -82,12 +82,12 @@ int	sb_state_encode(const t_sb_state *in, char *out, size_t cap)
  *         (missing/misordered key, malformed value, out-of-range number,
  *         bad board row, trailing junk).
  */
-int	sb_state_decode(const char *buf, size_t len, t_sb_state *out)
+int	body_state_decode(const char *buf, size_t len, t_sb_state *out)
 {
 	t_sb_cursor	c;
 
 	if (!buf || !out)
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	memset(out, 0, sizeof(*out));
 	c.p = buf;
 	c.end = buf + len;
@@ -95,8 +95,8 @@ int	sb_state_decode(const char *buf, size_t len, t_sb_state *out)
 		|| decode_stats(&c, out) != 0
 		|| decode_clearing(&c, out) != 0
 		|| decode_board(&c, out) != 0
-		|| !sb_at_end(&c))
-		return (sb_fail(EBADMSG));
+		|| !body_at_end(&c))
+		return (body_fail(EBADMSG));
 	return (0);
 }
 
@@ -108,11 +108,11 @@ int	sb_state_decode(const char *buf, size_t len, t_sb_state *out)
  */
 static int	validate_state(const t_sb_state *in)
 {
-	if (in->phase > SB_PHASE_TOP_OUT || in->last_clear > SB_CLEAR_PERFECT)
+	if (in->phase > BODY_PHASE_TOP_OUT || in->last_clear > BODY_CLEAR_PERFECT)
 		return (-1);
-	if (in->charge < 0 || in->charge > SB_CHARGE_MAX)
+	if (in->charge < 0 || in->charge > BODY_CHARGE_MAX)
 		return (-1);
-	if (in->clearing_count < 0 || in->clearing_count > SB_CLEARING_MAX)
+	if (in->clearing_count < 0 || in->clearing_count > BODY_CLEARING_MAX)
 		return (-1);
 	if (in->lines < 0 || in->level < 0 || in->combo < 0)
 		return (-1);
@@ -135,20 +135,20 @@ static int	validate_cells(const t_sb_state *in)
 	int	col;
 
 	row = 0;
-	while (row < SB_NEXT_COUNT)
+	while (row < BODY_NEXT_COUNT)
 	{
-		if (in->next[row] < 0 || in->next[row] > SB_COLOR_MAX)
+		if (in->next[row] < 0 || in->next[row] > BODY_COLOR_MAX)
 			return (-1);
 		row++;
 	}
 	row = 0;
-	while (row < SB_BOARD_ROWS)
+	while (row < BODY_BOARD_ROWS)
 	{
 		col = 0;
-		while (col < SB_BOARD_COLS)
+		while (col < BODY_BOARD_COLS)
 		{
 			if (in->cells[row][col].type > 2
-				|| in->cells[row][col].color > SB_COLOR_MAX)
+				|| in->cells[row][col].color > BODY_COLOR_MAX)
 				return (-1);
 			col++;
 		}
@@ -169,14 +169,14 @@ static int	validate_cells(const t_sb_state *in)
 static int	encode_head(const t_sb_state *in, char *out, size_t cap,
 		size_t *off)
 {
-	if (sb_append(out, cap, off, "seq %" PRIu64 "\n", in->seq) != 0)
+	if (body_append(out, cap, off, "seq %" PRIu64 "\n", in->seq) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "phase %s\n", g_phases[in->phase]) != 0)
+	if (body_append(out, cap, off, "phase %s\n", g_phases[in->phase]) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "piece %d %d %d %d\n", in->piece.type,
+	if (body_append(out, cap, off, "piece %d %d %d %d\n", in->piece.type,
 			in->piece.rotation, in->piece.col, in->piece.row) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "next %d %d %d\n", in->next[0], in->next[1],
+	if (body_append(out, cap, off, "next %d %d %d\n", in->next[0], in->next[1],
 			in->next[2]) != 0)
 		return (-1);
 	return (0);
@@ -194,22 +194,22 @@ static int	encode_head(const t_sb_state *in, char *out, size_t cap,
 static int	encode_stats(const t_sb_state *in, char *out, size_t cap,
 		size_t *off)
 {
-	if (sb_append(out, cap, off, "score %" PRIu64 "\n", in->score) != 0)
+	if (body_append(out, cap, off, "score %" PRIu64 "\n", in->score) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "lines %d\n", in->lines) != 0)
+	if (body_append(out, cap, off, "lines %d\n", in->lines) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "level %d\n", in->level) != 0)
+	if (body_append(out, cap, off, "level %d\n", in->level) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "combo %d\n", in->combo) != 0)
+	if (body_append(out, cap, off, "combo %d\n", in->combo) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "b2b %d\n", in->back_to_back) != 0)
+	if (body_append(out, cap, off, "b2b %d\n", in->back_to_back) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "charge %d\n", in->charge) != 0)
+	if (body_append(out, cap, off, "charge %d\n", in->charge) != 0)
 		return (-1);
-	if (sb_append(out, cap, off, "ability %d %d\n", in->last_ability.level,
+	if (body_append(out, cap, off, "ability %d %d\n", in->last_ability.level,
 			in->last_ability.accepted) != 0)
 		return (-1);
-	return (sb_append(out, cap, off, "clear %s\n", g_clears[in->last_clear]));
+	return (body_append(out, cap, off, "clear %s\n", g_clears[in->last_clear]));
 }
 
 /**
@@ -226,17 +226,17 @@ static int	encode_clearing(const t_sb_state *in, char *out, size_t cap,
 {
 	int	i;
 
-	if (sb_append(out, cap, off, "clearing %d %d", in->clearing_count,
+	if (body_append(out, cap, off, "clearing %d %d", in->clearing_count,
 			in->clearing_ms) != 0)
 		return (-1);
 	i = 0;
 	while (i < in->clearing_count)
 	{
-		if (sb_append(out, cap, off, " %d", in->clearing_rows[i]) != 0)
+		if (body_append(out, cap, off, " %d", in->clearing_rows[i]) != 0)
 			return (-1);
 		i++;
 	}
-	return (sb_append(out, cap, off, "\n"));
+	return (body_append(out, cap, off, "\n"));
 }
 
 /**
@@ -254,20 +254,20 @@ static int	encode_board(const t_sb_state *in, char *out, size_t cap,
 	int	row;
 	int	col;
 
-	if (sb_append(out, cap, off, "board\n") != 0)
+	if (body_append(out, cap, off, "board\n") != 0)
 		return (-1);
 	row = 0;
-	while (row < SB_BOARD_ROWS)
+	while (row < BODY_BOARD_ROWS)
 	{
 		col = 0;
-		while (col < SB_BOARD_COLS)
+		while (col < BODY_BOARD_COLS)
 		{
-			if (sb_append(out, cap, off, "%x%x", in->cells[row][col].type,
+			if (body_append(out, cap, off, "%x%x", in->cells[row][col].type,
 					in->cells[row][col].color) != 0)
 				return (-1);
 			col++;
 		}
-		if (sb_append(out, cap, off, "\n") != 0)
+		if (body_append(out, cap, off, "\n") != 0)
 			return (-1);
 		row++;
 	}
@@ -283,27 +283,27 @@ static int	encode_board(const t_sb_state *in, char *out, size_t cap,
  */
 static int	decode_head(t_sb_cursor *c, t_sb_state *out)
 {
-	char	line[SB_LINE_MAX];
-	char	word[SB_LINE_MAX];
+	char	line[BODY_LINE_MAX];
+	char	word[BODY_LINE_MAX];
 	int		n;
 
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| strncmp(line, "seq ", 4) != 0
-		|| sb_parse_u64(line + 4, &out->seq) != 0)
+		|| body_parse_u64(line + 4, &out->seq) != 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "phase %1023s%n", word, &n) != 1 || line[n] != '\0')
 		return (-1);
-	n = sb_word_index(word, g_phases, 4);
+	n = body_word_index(word, g_phases, 4);
 	if (n < 0)
 		return (-1);
 	out->phase = (t_sb_phase)n;
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "piece %d %d %d %d%n", &out->piece.type,
 			&out->piece.rotation, &out->piece.col, &out->piece.row, &n) != 4
 		|| line[n] != '\0' || out->piece.type < 0 || out->piece.rotation < 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "next %d %d %d%n", &out->next[0], &out->next[1],
 			&out->next[2], &n) != 3 || line[n] != '\0')
 		return (-1);
@@ -319,27 +319,27 @@ static int	decode_head(t_sb_cursor *c, t_sb_state *out)
  */
 static int	decode_stats(t_sb_cursor *c, t_sb_state *out)
 {
-	char	line[SB_LINE_MAX];
+	char	line[BODY_LINE_MAX];
 	int		n;
 	int		b2b;
 
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| strncmp(line, "score ", 6) != 0
-		|| sb_parse_u64(line + 6, &out->score) != 0)
+		|| body_parse_u64(line + 6, &out->score) != 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "lines %d%n", &out->lines, &n) != 1 || line[n] != '\0'
 		|| out->lines < 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "level %d%n", &out->level, &n) != 1 || line[n] != '\0'
 		|| out->level < 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "combo %d%n", &out->combo, &n) != 1 || line[n] != '\0'
 		|| out->combo < 0)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "b2b %d%n", &b2b, &n) != 1 || line[n] != '\0'
 		|| (b2b != 0 && b2b != 1))
 		return (-1);
@@ -356,25 +356,25 @@ static int	decode_stats(t_sb_cursor *c, t_sb_state *out)
  */
 static int	decode_flags(t_sb_cursor *c, t_sb_state *out)
 {
-	char	line[SB_LINE_MAX];
-	char	word[SB_LINE_MAX];
+	char	line[BODY_LINE_MAX];
+	char	word[BODY_LINE_MAX];
 	int		accepted;
 	int		n;
 
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "charge %d%n", &out->charge, &n) != 1
-		|| line[n] != '\0' || out->charge < 0 || out->charge > SB_CHARGE_MAX)
+		|| line[n] != '\0' || out->charge < 0 || out->charge > BODY_CHARGE_MAX)
 		return (-1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "ability %d %d%n", &out->last_ability.level,
 			&accepted, &n) != 2 || line[n] != '\0'
 		|| out->last_ability.level < 0 || (accepted != 0 && accepted != 1))
 		return (-1);
 	out->last_ability.accepted = (accepted == 1);
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "clear %1023s%n", word, &n) != 1 || line[n] != '\0')
 		return (-1);
-	n = sb_word_index(word, g_clears, 8);
+	n = body_word_index(word, g_clears, 8);
 	if (n < 0)
 		return (-1);
 	out->last_clear = (t_sb_clear_label)n;
@@ -390,15 +390,15 @@ static int	decode_flags(t_sb_cursor *c, t_sb_state *out)
  */
 static int	decode_clearing(t_sb_cursor *c, t_sb_state *out)
 {
-	char	line[SB_LINE_MAX];
+	char	line[BODY_LINE_MAX];
 	int		used;
 	int		n;
 	int		i;
 
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "clearing %d %d%n", &out->clearing_count,
 			&out->clearing_ms, &used) != 2
-		|| out->clearing_count < 0 || out->clearing_count > SB_CLEARING_MAX
+		|| out->clearing_count < 0 || out->clearing_count > BODY_CLEARING_MAX
 		|| out->clearing_ms < 0)
 		return (-1);
 	i = 0;
@@ -423,16 +423,16 @@ static int	decode_clearing(t_sb_cursor *c, t_sb_state *out)
  */
 static int	decode_board(t_sb_cursor *c, t_sb_state *out)
 {
-	char	line[SB_LINE_MAX];
+	char	line[BODY_LINE_MAX];
 	int		row;
 
-	if (sb_take_line(c, line, sizeof(line)) != 0
+	if (body_take_line(c, line, sizeof(line)) != 0
 		|| strcmp(line, "board") != 0)
 		return (-1);
 	row = 0;
-	while (row < SB_BOARD_ROWS)
+	while (row < BODY_BOARD_ROWS)
 	{
-		if (sb_take_line(c, line, sizeof(line)) != 0
+		if (body_take_line(c, line, sizeof(line)) != 0
 			|| decode_row(line, out->cells[row]) != 0)
 			return (-1);
 		row++;
@@ -453,10 +453,10 @@ static int	decode_row(const char *line, t_sb_cell *cells)
 	int	type;
 	int	color;
 
-	if (strlen(line) != (size_t)(SB_BOARD_COLS * 2))
+	if (strlen(line) != (size_t)(BODY_BOARD_COLS * 2))
 		return (-1);
 	col = 0;
-	while (col < SB_BOARD_COLS)
+	while (col < BODY_BOARD_COLS)
 	{
 		type = hex_nibble(line[col * 2]);
 		color = hex_nibble(line[col * 2 + 1]);

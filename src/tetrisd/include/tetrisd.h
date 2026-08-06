@@ -204,7 +204,7 @@ typedef struct s_game
 	t_score_state		score;
 	t_charge_state		charge;
 	t_effect_state		effects;
-	int					next[SB_NEXT_COUNT];
+	int					next[BODY_NEXT_COUNT];
 	int					lines;
 	int					level;
 	uint64_t			seq;

@@ -8,7 +8,7 @@ static void	nap_ms(int ms);
  * @brief Reads the pid out of a pidfile, whether or not anyone holds it.
  *
  * This answers only "what does the file say". Whether that pid is still alive
- * is cd_pid_probe's question, and the two are kept apart because a pidfile
+ * is daemon_pid_probe's question, and the two are kept apart because a pidfile
  * left behind by a crash reads perfectly well and means nothing.
  *
  * @param path Pidfile to read.
@@ -16,7 +16,7 @@ static void	nap_ms(int ms);
  * @return 0 on success, -1 with errno set when the file is absent or its
  * contents are not a single positive pid.
  */
-int	cd_pid_read(const char *path, pid_t *out)
+int	daemon_pid_read(const char *path, pid_t *out)
 {
 	char	text[32];
 	char	*end;
@@ -64,7 +64,7 @@ int	cd_pid_read(const char *path, pid_t *out)
  * @return 1 when a daemon holds the pidfile, 0 when none does, -1 with errno
  * set when the file exists but cannot be inspected or parsed.
  */
-int	cd_pid_probe(const char *path, pid_t *out)
+int	daemon_pid_probe(const char *path, pid_t *out)
 {
 	int	held;
 
@@ -77,7 +77,7 @@ int	cd_pid_probe(const char *path, pid_t *out)
 	held = lock_state(path);
 	if (held <= 0)
 		return (held);
-	if (cd_pid_read(path, out) != 0)
+	if (daemon_pid_read(path, out) != 0)
 		return (-1);
 	return (1);
 }
@@ -94,7 +94,7 @@ int	cd_pid_probe(const char *path, pid_t *out)
  * @param timeout_ms How long to wait; negative waits indefinitely.
  * @return 0 once the lock is free, -1 with errno set to ETIMEDOUT on timeout.
  */
-int	cd_pid_wait(const char *path, int timeout_ms)
+int	daemon_pid_wait(const char *path, int timeout_ms)
 {
 	int	waited;
 	int	held;
@@ -115,8 +115,8 @@ int	cd_pid_wait(const char *path, int timeout_ms)
 			errno = ETIMEDOUT;
 			return (-1);
 		}
-		nap_ms(CD_WAIT_STEP_MS);
-		waited += CD_WAIT_STEP_MS;
+		nap_ms(DAEMON_WAIT_STEP_MS);
+		waited += DAEMON_WAIT_STEP_MS;
 	}
 }
 

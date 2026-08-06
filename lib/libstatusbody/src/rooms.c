@@ -1,4 +1,4 @@
-#include "sb_util.h"
+#include "body_util.h"
 
 // Static Variables
 static const char *const	g_modes[] = {
@@ -33,26 +33,26 @@ static int	decode_row(const char *line, t_sb_room_row *row);
  *         EINVAL (NULL args with count > 0, bad enum value) or ERANGE
  *         (cap too small).
  */
-int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap)
+int	body_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap)
 {
 	size_t	off;
 	size_t	i;
 
 	if (!out || (!rows && count > 0))
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	if (cap == 0)
-		return (sb_fail(ERANGE));
+		return (body_fail(ERANGE));
 	out[0] = '\0';
 	off = 0;
 	i = 0;
 	while (i < count)
 	{
-		if (rows[i].mode > SB_MODE_BATTLE_ROYALE
-			|| rows[i].status > SB_ROOM_FINISHED
+		if (rows[i].mode > BODY_MODE_BATTLE_ROYALE
+			|| rows[i].status > BODY_ROOM_FINISHED
 			|| rows[i].name[0] == '\0' || rows[i].owner[0] == '\0')
-			return (sb_fail(EINVAL));
+			return (body_fail(EINVAL));
 		if (encode_row(&rows[i], out, cap, &off) != 0)
-			return (sb_fail(ERANGE));
+			return (body_fail(ERANGE));
 		i++;
 	}
 	return ((int)off);
@@ -72,23 +72,23 @@ int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t c
  *         (malformed line, unknown mode/status token, overlong name/owner),
  *         or ERANGE (more rows than cap).
  */
-int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count)
+int	body_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count)
 {
 	t_sb_cursor	c;
-	char		line[SB_LINE_MAX];
+	char		line[BODY_LINE_MAX];
 
 	if (!buf || !rows || !count)
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	*count = 0;
 	c.p = buf;
 	c.end = buf + len;
-	while (!sb_at_end(&c))
+	while (!body_at_end(&c))
 	{
 		if (*count == cap)
-			return (sb_fail(ERANGE));
-		if (sb_take_line(&c, line, sizeof(line)) != 0
+			return (body_fail(ERANGE));
+		if (body_take_line(&c, line, sizeof(line)) != 0
 			|| decode_row(line, &rows[*count]) != 0)
-			return (sb_fail(EBADMSG));
+			return (body_fail(EBADMSG));
 		(*count)++;
 	}
 	return (0);
@@ -106,7 +106,7 @@ int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap
 static int	encode_row(const t_sb_room_row *row, char *out, size_t cap,
 		size_t *off)
 {
-	return (sb_append(out, cap, off, "%s %s %d/%d %s %s\n", row->name,
+	return (body_append(out, cap, off, "%s %s %d/%d %s %s\n", row->name,
 			g_modes[row->mode], row->players, row->slot_count,
 			g_statuses[row->status], row->owner));
 }
@@ -121,7 +121,7 @@ static int	encode_row(const t_sb_room_row *row, char *out, size_t cap,
  */
 static int	decode_row(const char *line, t_sb_room_row *row)
 {
-	char	word[4][SB_LINE_MAX];
+	char	word[4][BODY_LINE_MAX];
 	int		n;
 	int		mode;
 	int		status;
@@ -131,10 +131,10 @@ static int	decode_row(const char *line, t_sb_room_row *row)
 			&row->players, &row->slot_count, word[2], word[3], &n) != 6
 		|| line[n] != '\0' || row->players < 0 || row->slot_count < 0)
 		return (-1);
-	if (strlen(word[0]) >= SB_NAME_MAX || strlen(word[3]) >= SB_USER_MAX)
+	if (strlen(word[0]) >= BODY_NAME_MAX || strlen(word[3]) >= BODY_USER_MAX)
 		return (-1);
-	mode = sb_word_index(word[1], g_modes, 3);
-	status = sb_word_index(word[2], g_statuses, 4);
+	mode = body_word_index(word[1], g_modes, 3);
+	status = body_word_index(word[2], g_statuses, 4);
 	if (mode < 0 || status < 0)
 		return (-1);
 	strcpy(row->name, word[0]);

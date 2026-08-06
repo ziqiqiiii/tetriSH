@@ -13,17 +13,17 @@ static int	make_one(const char *path);
  * @param path Directory to create.
  * @return 0 when the directory exists afterwards, -1 with errno set otherwise.
  */
-int	cd_mkdir_p(const char *path)
+int	daemon_mkdir_p(const char *path)
 {
-	char	work[CD_PATH_MAX];
+	char	work[DAEMON_PATH_MAX];
 	size_t	i;
 
-	if (path == NULL || path[0] == '\0' || strlen(path) >= CD_PATH_MAX)
+	if (path == NULL || path[0] == '\0' || strlen(path) >= DAEMON_PATH_MAX)
 	{
 		errno = EINVAL;
 		return (-1);
 	}
-	snprintf(work, CD_PATH_MAX, "%s", path);
+	snprintf(work, DAEMON_PATH_MAX, "%s", path);
 	i = 1;
 	while (work[i] != '\0')
 	{
@@ -48,22 +48,22 @@ int	cd_mkdir_p(const char *path)
  * @param path File path whose parents are wanted.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	cd_mkdir_parent(const char *path)
+int	daemon_mkdir_parent(const char *path)
 {
-	char	work[CD_PATH_MAX];
+	char	work[DAEMON_PATH_MAX];
 	char	*slash;
 
-	if (path == NULL || path[0] == '\0' || strlen(path) >= CD_PATH_MAX)
+	if (path == NULL || path[0] == '\0' || strlen(path) >= DAEMON_PATH_MAX)
 	{
 		errno = EINVAL;
 		return (-1);
 	}
-	snprintf(work, CD_PATH_MAX, "%s", path);
+	snprintf(work, DAEMON_PATH_MAX, "%s", path);
 	slash = strrchr(work, '/');
 	if (slash == NULL || slash == work)
 		return (0);
 	*slash = '\0';
-	return (cd_mkdir_p(work));
+	return (daemon_mkdir_p(work));
 }
 
 /**
@@ -81,7 +81,7 @@ static int	make_one(const char *path)
 {
 	struct stat	st;
 
-	if (mkdir(path, CD_DIR_MODE) == 0)
+	if (mkdir(path, DAEMON_DIR_MODE) == 0)
 		return (0);
 	if (errno != EEXIST)
 		return (-1);

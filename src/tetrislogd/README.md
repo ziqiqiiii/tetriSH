@@ -179,7 +179,7 @@ Reclaim is now only about the sink. It used to have to restore the `flock` as we
 
 `main.c` claims the pidfile *before* calling `logd_start`, and that ordering is the guard. `unixsock_dgram_bind` unlinks its path unconditionally, so binding the socket is the point at which a second instance would damage the first; losing the pidfile race happens before the bind is ever reached, while the running logger's socket is still intact. Reversing those two lines is silent: both instances start, and the older one goes deaf.
 
-The claim also comes *after* `cd_detach`, because the pid written has to be the detached process's and the lock has to be held by the process that will still be there to hold it. Both the fork and the claim live in `main.c` alone — behind `logd_start` they would make every in-process test suite fork.
+The claim also comes *after* `daemon_detach`, because the pid written has to be the detached process's and the lock has to be held by the process that will still be there to hold it. Both the fork and the claim live in `main.c` alone — behind `logd_start` they would make every in-process test suite fork.
 
 ---
 

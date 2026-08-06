@@ -10,7 +10,7 @@ static int	run(t_logd *lg);
  * The fork lives here, never behind logd_start(), so the test suites can
  * boot the daemon in-process without forking (docs/adr/0007).
  *
- * Boot owns the terminal: everything up to cd_ready reports failure on
+ * Boot owns the terminal: everything up to daemon_ready reports failure on
  * stderr and exits non-zero, so the operator who typed the command sees it.
  * stderr only moves to the error file once the daemon is listening.
  *
@@ -38,21 +38,21 @@ int	main(int argc, char **argv)
 	{
 		fprintf(stderr, "%s: cannot start: %s\n",
 			TL_COMPONENT, strerror(errno));
-		cd_pid_release(&pf);
+		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
-	if (cd_stderr_redirect(cfg.err_path) != 0)
+	if (daemon_stderr_redirect(cfg.err_path) != 0)
 	{
 		fprintf(stderr, "%s: cannot open %s: %s\n",
 			TL_COMPONENT, cfg.err_path, strerror(errno));
 		logd_stop(&lg);
-		cd_pid_release(&pf);
+		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
-	cd_ready(ready);
+	daemon_ready(ready);
 	status = run(&lg);
 	logd_stop(&lg);
-	cd_pid_release(&pf);
+	daemon_pid_release(&pf);
 	return (status);
 }
 
@@ -67,19 +67,19 @@ int	main(int argc, char **argv)
  *
  * @param cfg Configuration supplying the pidfile path.
  * @param pf Pidfile to claim.
- * @param ready Receives the readiness descriptor for cd_ready.
+ * @param ready Receives the readiness descriptor for daemon_ready.
  * @return 0 on success, -1 after reporting why on stderr.
  */
 static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready)
 {
-	cd_pid_blank(pf);
-	if (cd_detach(ready) != 0)
+	daemon_pid_blank(pf);
+	if (daemon_detach(ready) != 0)
 	{
 		fprintf(stderr, "%s: cannot detach: %s\n",
 			TL_COMPONENT, strerror(errno));
 		return (-1);
 	}
-	if (cd_pid_claim(pf, cfg->pid_path) != 0)
+	if (daemon_pid_claim(pf, cfg->pid_path) != 0)
 	{
 		if (errno == EWOULDBLOCK || errno == EAGAIN)
 			fprintf(stderr, "%s: already running (%s)\n",

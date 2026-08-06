@@ -63,7 +63,7 @@ int	list_handler(const t_htttp_message *msg, void *context)
 	if (!request_is_authorised(ctx))
 		return (401);
 	count = list_rooms(ctx->srv, rows);
-	len = sb_rooms_encode(rows, count, ctx->body, sizeof(ctx->body));
+	len = body_rooms_encode(rows, count, ctx->body, sizeof(ctx->body));
 	if (len < 0)
 		return (500);
 	ctx->body_len = (size_t)len;

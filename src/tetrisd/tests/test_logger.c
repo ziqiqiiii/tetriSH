@@ -118,7 +118,7 @@ static void	test_absent_logger_falls_back_to_stderr(void)
 static void	make_tmp_dir(char *out, size_t cap)
 {
 	snprintf(out, cap, "tests/tmp/logXXXXXX");
-	assert(cd_mkdir_p("tests/tmp") == 0);
+	assert(daemon_mkdir_p("tests/tmp") == 0);
 	assert(mkdtemp(out) != NULL);
 }
 

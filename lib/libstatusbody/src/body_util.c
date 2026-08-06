@@ -1,6 +1,4 @@
-#include "sb_util.h"
-
-#include <stdarg.h>
+#include "body_util.h"
 
 /**
  * @brief Sets errno and returns the codec failure value in one step.
@@ -8,7 +6,7 @@
  * @param err The errno value to report.
  * @return Always -1.
  */
-int	sb_fail(int err)
+int	body_fail(int err)
 {
 	errno = err;
 	return (-1);
@@ -23,7 +21,7 @@ int	sb_fail(int err)
  * @param fmt printf-style format for the fragment.
  * @return 0 on success, -1 when the fragment does not fit.
  */
-int	sb_append(char *out, size_t cap, size_t *off, const char *fmt, ...)
+int	body_append(char *out, size_t cap, size_t *off, const char *fmt, ...)
 {
 	va_list	ap;
 	int		n;
@@ -50,7 +48,7 @@ int	sb_append(char *out, size_t cap, size_t *off, const char *fmt, ...)
  * @param cap Size of line in bytes.
  * @return 0 on success, -1 when no newline remains or the line overflows.
  */
-int	sb_take_line(t_sb_cursor *c, char *line, size_t cap)
+int	body_take_line(t_sb_cursor *c, char *line, size_t cap)
 {
 	const char	*nl;
 	size_t		n;
@@ -75,7 +73,7 @@ int	sb_take_line(t_sb_cursor *c, char *line, size_t cap)
  * @param c The cursor to test.
  * @return true when nothing is left, false when bytes remain.
  */
-bool	sb_at_end(const t_sb_cursor *c)
+bool	body_at_end(const t_sb_cursor *c)
 {
 	return (c->p == c->end);
 }
@@ -91,7 +89,7 @@ bool	sb_at_end(const t_sb_cursor *c)
  * @return 0 on success, -1 on empty, non-numeric, signed, or overflowing
  *         input.
  */
-int	sb_parse_u64(const char *s, uint64_t *out)
+int	body_parse_u64(const char *s, uint64_t *out)
 {
 	char				*end;
 	unsigned long long	v;
@@ -116,7 +114,7 @@ int	sb_parse_u64(const char *s, uint64_t *out)
  * @return 0 on success, -1 on non-numeric, trailing, or out-of-range
  *         input.
  */
-int	sb_parse_int(const char *s, int *out, int min, int max)
+int	body_parse_int(const char *s, int *out, int min, int max)
 {
 	char	*end;
 	long	v;
@@ -141,7 +139,7 @@ int	sb_parse_int(const char *s, int *out, int min, int max)
  * @param n Number of entries in table.
  * @return The matching index, or -1 when the keyword is unknown.
  */
-int	sb_word_index(const char *word, const char *const *table, size_t n)
+int	body_word_index(const char *word, const char *const *table, size_t n)
 {
 	size_t	i;
 

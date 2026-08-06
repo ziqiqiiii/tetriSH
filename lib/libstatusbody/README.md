@@ -47,15 +47,15 @@ int		len;
 
 memset(&frame, 0, sizeof(frame));
 frame.seq = 42;
-frame.phase = SB_PHASE_ACTIVE;
+frame.phase = BODY_PHASE_ACTIVE;
 frame.piece = (t_sb_piece){ .type = 3, .rotation = 1, .col = 4, .row = 0 };
 frame.charge = 7;
 /* ... board cells, next queue, score/lines/level ... */
 
-len = sb_state_encode(&frame, body, sizeof(body));   /* -1: EINVAL or ERANGE */
+len = body_state_encode(&frame, body, sizeof(body));   /* -1: EINVAL or ERANGE */
 
 /* tetrisu, on receipt of the HTTTP body: */
-if (len > 0 && sb_state_decode(body, (size_t)len, &decoded) == 0) {
+if (len > 0 && body_state_decode(body, (size_t)len, &decoded) == 0) {
     /* decoded mirrors frame field-for-field */
 }
 ```
@@ -64,13 +64,13 @@ if (len > 0 && sb_state_decode(body, (size_t)len, &decoded) == 0) {
 
 ## Codec Contract
 
-A *codec* (coder/decoder) is one `sb_*_encode`/`sb_*_decode` pair — the two
+A *codec* (coder/decoder) is one `body_*_encode`/`body_*_decode` pair — the two
 halves of a single body type. Every pair shares one contract:
 
 | Call | Success | Failure |
 |---|---|---|
-| `sb_*_encode(in, out, cap)` | bytes written | `-1`, `errno` set — see below; never writes past `cap` |
-| `sb_*_decode(buf, len, out)` | `0` | `-1`, `errno` set — see below; never reads past `len` |
+| `body_*_encode(in, out, cap)` | bytes written | `-1`, `errno` set — see below; never writes past `cap` |
+| `body_*_decode(buf, len, out)` | `0` | `-1`, `errno` set — see below; never reads past `len` |
 
 On failure both return `-1` and set `errno`:
 
@@ -91,8 +91,8 @@ All bodies are plaintext `key value` lines. Single public header,
 
 | Function | Description |
 |---|---|
-| `sb_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4 and cell type/color nibbles before writing |
-| `sb_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
+| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4 and cell type/color nibbles before writing |
+| `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
 
 Fixed key order, exactly as encoded:
 
@@ -118,18 +118,18 @@ board
 | Key | Form |
 |---|---|
 | `piece` | `<type> <rotation> <col> <row>` |
-| `next` | `<t0> <t1> <t2>` (`SB_NEXT_COUNT` = 3) |
+| `next` | `<t0> <t1> <t2>` (`BODY_NEXT_COUNT` = 3) |
 | `ability` | `<level> <0\|1>` — last activation; level `0` = none |
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
-| `board` | `SB_BOARD_ROWS` (20) lines × `SB_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
+| `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 
 ### Rooms — `LIST /rooms` rows (`rooms.c`)
 
 | Function | Description |
 |---|---|
-| `sb_rooms_encode(rows, count, out, cap)` | Serialise `LIST /rooms`; `count == 0` yields a valid empty body |
-| `sb_rooms_decode(buf, len, rows, cap, count)` | Parse room rows; an empty buffer decodes to `count == 0`, not an error; more rows than `cap` fails `ERANGE` |
+| `body_rooms_encode(rows, count, out, cap)` | Serialise `LIST /rooms`; `count == 0` yields a valid empty body |
+| `body_rooms_decode(buf, len, rows, cap, count)` | Parse room rows; an empty buffer decodes to `count == 0`, not an error; more rows than `cap` fails `ERANGE` |
 
 One line per room:
 
@@ -145,10 +145,10 @@ One line per room:
 
 | Function | Description |
 |---|---|
-| `sb_profile_encode(in, out, cap)` | Serialise the ProfileView body; owned lists written as `<count> <id>...` |
-| `sb_profile_decode(buf, len, out)` | Parse a profile body; enforces `SB_USER_MAX` on `username` and `SB_OWNED_MAX` on both owned lists |
+| `body_profile_encode(in, out, cap)` | Serialise the ProfileView body; owned lists written as `<count> <id>...` |
+| `body_profile_decode(buf, len, out)` | Parse a profile body; enforces `BODY_USER_MAX` on `username` and `BODY_OWNED_MAX` on both owned lists |
 
-Fixed key order, one key per line; owned lists are count-prefixed and capped at `SB_OWNED_MAX` (64) in both directions:
+Fixed key order, one key per line; owned lists are count-prefixed and capped at `BODY_OWNED_MAX` (64) in both directions:
 
 ```
 username alice
@@ -165,8 +165,8 @@ owned_themes <count> <id>...
 
 | Function | Description |
 |---|---|
-| `sb_leaderboard_encode(rows, count, out, cap)` | Serialise leaderboard rows, rank ascending; `count == 0` yields a valid empty body |
-| `sb_leaderboard_decode(buf, len, rows, cap, count)` | Parse leaderboard rows; an empty buffer decodes to `count == 0`, not an error |
+| `body_leaderboard_encode(rows, count, out, cap)` | Serialise leaderboard rows, rank ascending; `count == 0` yields a valid empty body |
+| `body_leaderboard_decode(buf, len, rows, cap, count)` | Parse leaderboard rows; an empty buffer decodes to `count == 0`, not an error |
 
 One line per rank, ascending:
 
@@ -193,8 +193,8 @@ libstatusbody/
 │   ├── rooms.c             LIST /rooms row encode/decode
 │   ├── profile.c           ProfileView encode/decode
 │   ├── leaderboard.c       leaderboard row encode/decode
-│   ├── sb_util.h           Private — shared append/scan primitives
-│   └── sb_util.c           Private — not part of the public API
+│   ├── body_util.h           Private — shared append/scan primitives
+│   └── body_util.c           Private — not part of the public API
 ├── tests/test_*.c          Unit tests, one per module (each with its own main)
 ├── scripts/run_tests.sh    Formatted test runner
 ├── obj/                    Generated objects

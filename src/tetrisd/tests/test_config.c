@@ -235,6 +235,6 @@ static void	write_file(const char *path, const char *text)
 static void	make_tmp_dir(char *out, size_t cap)
 {
 	snprintf(out, cap, "tests/tmp/cfgXXXXXX");
-	assert(cd_mkdir_p("tests/tmp") == 0);
+	assert(daemon_mkdir_p("tests/tmp") == 0);
 	assert(mkdtemp(out) != NULL);
 }

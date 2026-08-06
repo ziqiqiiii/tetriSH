@@ -7,13 +7,13 @@ static int	publish(int fd, pid_t pid);
  * @brief Puts a zeroed pidfile into the "nothing is held" state.
  *
  * A zeroed fd is stdin, so a pidfile that was never claimed would have
- * cd_pid_release close the daemon's standard input. Boot can fail before the
+ * daemon_pid_release close the daemon's standard input. Boot can fail before the
  * claim, and teardown is shared between that path and an ordinary stop, so
  * the safe state has to exist before anything can fail.
  *
  * @param pf Pidfile to blank.
  */
-void	cd_pid_blank(t_pidfile *pf)
+void	daemon_pid_blank(t_pidfile *pf)
 {
 	if (pf == NULL)
 		return ;
@@ -24,7 +24,7 @@ void	cd_pid_blank(t_pidfile *pf)
 /**
  * @brief Claims the pidfile, which is what makes this the only instance.
  *
- * Call it after cd_detach and never before: the pid written has to be the
+ * Call it after daemon_detach and never before: the pid written has to be the
  * detached process's, and the lock has to be held by the process that will
  * still be here to hold it.
  *
@@ -37,20 +37,20 @@ void	cd_pid_blank(t_pidfile *pf)
  * @param path Path to claim.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	cd_pid_claim(t_pidfile *pf, const char *path)
+int	daemon_pid_claim(t_pidfile *pf, const char *path)
 {
 	int	fd;
 	int	saved;
 
 	if (pf == NULL || path == NULL || path[0] == '\0'
-		|| strlen(path) >= CD_PATH_MAX)
+		|| strlen(path) >= DAEMON_PATH_MAX)
 	{
 		errno = EINVAL;
 		return (-1);
 	}
-	if (cd_mkdir_parent(path) != 0)
+	if (daemon_mkdir_parent(path) != 0)
 		return (-1);
-	fd = open(path, O_RDWR | O_CREAT, CD_FILE_MODE);
+	fd = open(path, O_RDWR | O_CREAT, DAEMON_FILE_MODE);
 	if (fd < 0)
 		return (-1);
 	if (flock(fd, LOCK_EX | LOCK_NB) != 0 || publish(fd, getpid()) != 0)
@@ -62,7 +62,7 @@ int	cd_pid_claim(t_pidfile *pf, const char *path)
 	}
 	pf->fd = fd;
 	pf->pid = getpid();
-	snprintf(pf->path, CD_PATH_MAX, "%s", path);
+	snprintf(pf->path, DAEMON_PATH_MAX, "%s", path);
 	return (0);
 }
 
@@ -76,7 +76,7 @@ int	cd_pid_claim(t_pidfile *pf, const char *path)
  *
  * @param pf Pidfile to release; safe on one that was never claimed.
  */
-void	cd_pid_release(t_pidfile *pf)
+void	daemon_pid_release(t_pidfile *pf)
 {
 	if (pf == NULL || pf->fd < 0)
 		return ;

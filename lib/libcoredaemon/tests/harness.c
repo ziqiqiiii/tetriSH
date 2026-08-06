@@ -1,9 +1,5 @@
 #include "harness.h"
 
-#include <dirent.h>
-#include <sys/wait.h>
-#include <time.h>
-
 // Static Functions
 static void	holder_body(t_holder *h, const char *path);
 static void	nap_ms(int ms);
@@ -34,7 +30,7 @@ void	fx_rmtree(const char *path)
 {
 	DIR				*d;
 	struct dirent	*e;
-	char			child[CD_PATH_MAX];
+	char			child[DAEMON_PATH_MAX];
 
 	d = opendir(path);
 	if (d == NULL)
@@ -187,15 +183,15 @@ static void	holder_body(t_holder *h, const char *path)
 
 	close(h->up[0]);
 	close(h->go[1]);
-	cd_pid_blank(&pf);
-	if (cd_pid_claim(&pf, path) != 0)
+	daemon_pid_blank(&pf);
+	if (daemon_pid_claim(&pf, path) != 0)
 		_exit(1);
 	byte = 'u';
 	if (write(h->up[1], &byte, 1) != 1)
 		_exit(1);
 	while (read(h->go[0], &byte, 1) < 0 && errno == EINTR)
 		;
-	cd_pid_release(&pf);
+	daemon_pid_release(&pf);
 	_exit(0);
 }
 

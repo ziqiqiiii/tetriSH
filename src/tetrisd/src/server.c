@@ -238,7 +238,7 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	pthread_mutex_init(&srv->lobby_mutex, NULL);
 	lobby_init(&srv->lobby, LOBBY_MAX_ROOMS, cfg->br_slots);
 	server_room_init_all(srv);
-	if (cd_mkdir_p(cfg->data_dir) != 0)
+	if (daemon_mkdir_p(cfg->data_dir) != 0)
 		return (-1);
 	if (logger_init(&srv->log, &srv->cfg) != 0)
 		return (-1);

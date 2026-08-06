@@ -28,7 +28,7 @@ int	fx_start(t_fixture *fx)
 
 	memset(fx, 0, sizeof(*fx));
 	snprintf(fx->dir, sizeof(fx->dir), "tests/tmp/srvXXXXXX");
-	if (cd_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
+	if (daemon_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
 		return (-1);
 	if (generate_certs(fx) != 0)
 		return (-1);
@@ -152,7 +152,7 @@ int	hc_request(t_harness *hc, const char *method, const char *path,
 			return (-1);
 		if (out->type == HTTTP_MESSAGE_RESPONSE)
 			return (0);
-		if (sb_state_decode((const char *)out->body, out->body_len,
+		if (body_state_decode((const char *)out->body, out->body_len,
 				&hc->last_state) == 0)
 			hc->has_state = true;
 		htttp_message_free(out);
@@ -209,7 +209,7 @@ int	hc_wait_state(t_harness *hc, t_sb_state *out, int timeout_ms)
 		if (msg.type == HTTTP_MESSAGE_REQUEST && msg.method != NULL
 			&& strcmp(msg.method, "STATE") == 0)
 		{
-			rc = sb_state_decode((const char *)msg.body, msg.body_len, out);
+			rc = body_state_decode((const char *)msg.body, msg.body_len, out);
 			htttp_message_free(&msg);
 			return (rc);
 		}

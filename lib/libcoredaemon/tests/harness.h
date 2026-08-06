@@ -3,6 +3,11 @@
 
 # include "coredaemon.h"
 
+
+# include <dirent.h>
+# include <sys/wait.h>
+# include <time.h>
+
 /*
 ** The shared fixture for the libcoredaemon suites.
 **
@@ -19,7 +24,7 @@
 */
 
 /*
-** Test-side buffer sizes. Deliberately smaller than CD_PATH_MAX: a mkdtemp
+** Test-side buffer sizes. Deliberately smaller than DAEMON_PATH_MAX: a mkdtemp
 ** directory plus a short leaf is all any case builds, and sizing these from
 ** the library's own maximum makes every snprintf here look to the compiler
 ** like it might truncate.

@@ -22,7 +22,7 @@ t_state	d_state(const t_daemon *d, pid_t *pid)
 
 	if (d == NULL || pid == NULL)
 		return (TC_UNKNOWN);
-	rc = cd_pid_probe(d->pid_path, pid);
+	rc = daemon_pid_probe(d->pid_path, pid);
 	if (rc < 0)
 		return (TC_UNKNOWN);
 	if (rc == 1)
@@ -103,7 +103,7 @@ int	d_stop(const t_daemon *d, int timeout_ms)
 		return (-1);
 	if (kill(pid, SIGTERM) != 0 && errno != ESRCH)
 		return (-1);
-	return (cd_pid_wait(d->pid_path, timeout_ms));
+	return (daemon_pid_wait(d->pid_path, timeout_ms));
 }
 
 /**

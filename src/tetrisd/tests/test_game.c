@@ -96,7 +96,7 @@ static void	test_starting_a_game_pushes_the_first_state(void)
 	assert(player(&fx, &hc, "amber") == 0);
 	assert(start_single(&fx, &hc, play, sizeof(play)) == 0);
 	assert(hc_wait_state(&hc, &state, HC_TIMEOUT_MS) == 0);
-	assert(state.phase == SB_PHASE_ACTIVE);
+	assert(state.phase == BODY_PHASE_ACTIVE);
 	assert(state.score == 0);
 	assert(state.lines == 0);
 	assert(state.level == 1);
@@ -155,9 +155,9 @@ static void	test_hard_drop_locks_a_piece(void)
 	assert(latest_state(&hc, &state, 200) == 0);
 	filled = 0;
 	col = 0;
-	while (col < SB_BOARD_COLS)
+	while (col < BODY_BOARD_COLS)
 	{
-		if (state.cells[SB_BOARD_ROWS - 1][col].type != 0)
+		if (state.cells[BODY_BOARD_ROWS - 1][col].type != 0)
 			filled++;
 		col++;
 	}
@@ -231,7 +231,7 @@ static void	test_topping_out_ends_and_records_the_game(void)
 	}
 	assert(status == 409);
 	assert(latest_state(&hc, &state, 300) == 0);
-	assert(state.phase == SB_PHASE_TOP_OUT);
+	assert(state.phase == BODY_PHASE_TOP_OUT);
 	nap(200);
 	hc_close(&hc);
 	assert(login_score(&fx, "amber") > 0);
@@ -259,7 +259,7 @@ static void	test_a_disconnect_forfeits_but_the_room_plays_on(void)
 	hc_close(&amber);
 	nap(200);
 	assert(hc_wait_state(&blake, &state, HC_TIMEOUT_MS) == 0);
-	assert(state.phase == SB_PHASE_ACTIVE);
+	assert(state.phase == BODY_PHASE_ACTIVE);
 	hc_close(&blake);
 	fx_stop(&fx);
 	printf("PASS test_a_disconnect_forfeits_but_the_room_plays_on\n");

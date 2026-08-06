@@ -9,7 +9,7 @@ static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready);
  * The fork lives here, never behind server_start(), so the test suites can
  * boot a real server in-process without forking (docs/adr/0007).
  *
- * Boot owns the terminal: everything up to cd_ready reports failure on
+ * Boot owns the terminal: everything up to daemon_ready reports failure on
  * stderr and exits non-zero, so the operator who typed the command sees it.
  * stderr only moves to the error file once nothing is left to fail - which
  * costs one window, where a record from the already-running log shipper
@@ -42,23 +42,23 @@ int	main(int argc, char **argv)
 	if (server_start(&cfg, &srv) != 0)
 	{
 		fprintf(stderr, "tetrisd: failed to start on port %d\n", cfg.port);
-		cd_pid_release(&pf);
+		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
-	if (cd_stderr_redirect(cfg.err_path) != 0)
+	if (daemon_stderr_redirect(cfg.err_path) != 0)
 	{
 		fprintf(stderr, "tetrisd: cannot open %s: %s\n",
 			cfg.err_path, strerror(errno));
 		server_stop(srv);
-		cd_pid_release(&pf);
+		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
 	signals_install(srv);
-	cd_ready(ready);
+	daemon_ready(ready);
 	server_wait(srv);
 	signals_restore();
 	server_stop(srv);
-	cd_pid_release(&pf);
+	daemon_pid_release(&pf);
 	return (EXIT_SUCCESS);
 }
 
@@ -70,19 +70,19 @@ int	main(int argc, char **argv)
  *
  * @param cfg Configuration supplying the pidfile path.
  * @param pf Pidfile to claim.
- * @param ready Receives the readiness descriptor for cd_ready.
+ * @param ready Receives the readiness descriptor for daemon_ready.
  * @return 0 on success, -1 after reporting why on stderr.
  */
 static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready)
 {
-	cd_pid_blank(pf);
-	if (cd_detach(ready) != 0)
+	daemon_pid_blank(pf);
+	if (daemon_detach(ready) != 0)
 	{
 		fprintf(stderr, "%s: cannot detach: %s\n",
 			TETRISD_COMPONENT_NAME, strerror(errno));
 		return (-1);
 	}
-	if (cd_pid_claim(pf, cfg->pid_path) != 0)
+	if (daemon_pid_claim(pf, cfg->pid_path) != 0)
 	{
 		if (errno == EWOULDBLOCK || errno == EAGAIN)
 			fprintf(stderr, "%s: already running (%s)\n",

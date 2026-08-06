@@ -26,13 +26,13 @@
 ** Two things this library deliberately does not do. It never logs - a daemon
 ** that cannot start has to say so on the stderr it still shares with the
 ** terminal, and a library printing over that would bury it. And it never
-** forks behind a start function: cd_detach belongs in main() alone, or an
+** forks behind a start function: daemon_detach belongs in main() alone, or an
 ** in-process test suite would begin forking the moment it booted a daemon.
 */
 
-# define CD_PATH_MAX		1024
-# define CD_FILE_MODE		0644
-# define CD_DIR_MODE		0755
+# define DAEMON_PATH_MAX		1024
+# define DAEMON_FILE_MODE		0644
+# define DAEMON_DIR_MODE		0755
 
 /*
 ** The byte a daemon writes to say it booted. Its value is irrelevant and its
@@ -40,15 +40,15 @@
 ** file for a child that died, which is the whole difference between this and
 ** the shell's quiet-pipe (it closes on both paths and cannot tell them apart).
 */
-# define CD_READY_BYTE		'1'
+# define DAEMON_READY_BYTE		'1'
 
-/* how often cd_pid_wait retries the lock while waiting for an exit */
-# define CD_WAIT_STEP_MS	20
+/* how often daemon_pid_wait retries the lock while waiting for an exit */
+# define DAEMON_WAIT_STEP_MS	20
 
 /*
 ** A held pidfile: the descriptor whose flock is the single-instance guard,
 ** the pid written into it, and the path both are named by. fd is -1 when
-** nothing is held, which is the state cd_pid_release is safe on.
+** nothing is held, which is the state daemon_pid_release is safe on.
 **
 ** The lock rather than the file is the guard, because a file can be read
 ** after its writer is gone and a lock cannot be held after it. One mechanism
@@ -59,26 +59,26 @@ typedef struct s_pidfile
 {
 	int		fd;
 	pid_t	pid;
-	char	path[CD_PATH_MAX];
+	char	path[DAEMON_PATH_MAX];
 }	t_pidfile;
 
 /* DETACH.C - daemon side */
-int		cd_detach(int *ready_fd);
-void	cd_ready(int ready_fd);
-int		cd_stderr_redirect(const char *path);
+int		daemon_detach(int *ready_fd);
+void	daemon_ready(int ready_fd);
+int		daemon_stderr_redirect(const char *path);
 
 /* PIDFILE.C - daemon side */
-void	cd_pid_blank(t_pidfile *pf);
-int		cd_pid_claim(t_pidfile *pf, const char *path);
-void	cd_pid_release(t_pidfile *pf);
+void	daemon_pid_blank(t_pidfile *pf);
+int		daemon_pid_claim(t_pidfile *pf, const char *path);
+void	daemon_pid_release(t_pidfile *pf);
 
 /* PROBE.C - tetrisctl side */
-int		cd_pid_read(const char *path, pid_t *out);
-int		cd_pid_probe(const char *path, pid_t *out);
-int		cd_pid_wait(const char *path, int timeout_ms);
+int		daemon_pid_read(const char *path, pid_t *out);
+int		daemon_pid_probe(const char *path, pid_t *out);
+int		daemon_pid_wait(const char *path, int timeout_ms);
 
 /* PATHS.C */
-int		cd_mkdir_p(const char *path);
-int		cd_mkdir_parent(const char *path);
+int		daemon_mkdir_p(const char *path);
+int		daemon_mkdir_parent(const char *path);
 
 # endif

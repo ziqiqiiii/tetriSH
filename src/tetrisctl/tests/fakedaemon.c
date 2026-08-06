@@ -48,24 +48,24 @@ int	main(int argc, char **argv)
 		fprintf(stderr, "%s: %s is not set\n", name, pid_key_for(name));
 		return (EXIT_FAILURE);
 	}
-	if (cd_detach(&ready) != 0)
+	if (daemon_detach(&ready) != 0)
 		return (EXIT_FAILURE);
 	if (getenv("FAKE_FAIL") != NULL)
 	{
 		fprintf(stderr, "%s: refusing to boot\n", name);
 		return (EXIT_FAILURE);
 	}
-	cd_pid_blank(&pf);
-	if (cd_pid_claim(&pf, pid_path) != 0)
+	daemon_pid_blank(&pf);
+	if (daemon_pid_claim(&pf, pid_path) != 0)
 	{
 		fprintf(stderr, "%s: already running\n", name);
 		return (EXIT_FAILURE);
 	}
 	signal(SIGTERM, on_term);
-	cd_ready(ready);
+	daemon_ready(ready);
 	wait_for_term();
 	trace(name);
-	cd_pid_release(&pf);
+	daemon_pid_release(&pf);
 	return (EXIT_SUCCESS);
 }
 

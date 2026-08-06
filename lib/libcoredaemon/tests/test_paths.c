@@ -37,7 +37,7 @@ static void	test_mkdir_p_builds_the_whole_chain(void)
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/a/b/c", dir);
-	assert(cd_mkdir_p(path) == 0);
+	assert(daemon_mkdir_p(path) == 0);
 	assert(is_dir(path) == true);
 	fx_rmtree(dir);
 	printf("PASS test_mkdir_p_builds_the_whole_chain\n");
@@ -50,8 +50,8 @@ static void	test_mkdir_p_accepts_a_directory_that_exists(void)
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/a/b", dir);
-	assert(cd_mkdir_p(path) == 0);
-	assert(cd_mkdir_p(path) == 0);
+	assert(daemon_mkdir_p(path) == 0);
+	assert(daemon_mkdir_p(path) == 0);
 	fx_rmtree(dir);
 	printf("PASS test_mkdir_p_accepts_a_directory_that_exists\n");
 }
@@ -65,10 +65,10 @@ static void	test_mkdir_parent_ignores_the_leaf(void)
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(path, sizeof(path), "%s/run/state/x.pid", dir);
 	snprintf(parent, sizeof(parent), "%s/run/state", dir);
-	assert(cd_mkdir_parent(path) == 0);
+	assert(daemon_mkdir_parent(path) == 0);
 	assert(is_dir(parent) == true);
 	assert(is_dir(path) == false);
-	assert(cd_mkdir_parent("bare.pid") == 0);
+	assert(daemon_mkdir_parent("bare.pid") == 0);
 	fx_rmtree(dir);
 	printf("PASS test_mkdir_parent_ignores_the_leaf\n");
 }
@@ -82,20 +82,20 @@ static void	test_mkdir_p_fails_through_a_regular_file(void)
 
 	assert(fx_tmpdir(dir, sizeof(dir)) == 0);
 	snprintf(wall, sizeof(wall), "%s/wall", dir);
-	fd = open(wall, O_WRONLY | O_CREAT | O_TRUNC, CD_FILE_MODE);
+	fd = open(wall, O_WRONLY | O_CREAT | O_TRUNC, DAEMON_FILE_MODE);
 	assert(fd >= 0);
 	close(fd);
 	snprintf(path, sizeof(path), "%s/wall/below", dir);
-	assert(cd_mkdir_p(path) == -1);
+	assert(daemon_mkdir_p(path) == -1);
 	fx_rmtree(dir);
 	printf("PASS test_mkdir_p_fails_through_a_regular_file\n");
 }
 
 static void	test_mkdir_rejects_bad_arguments(void)
 {
-	assert(cd_mkdir_p(NULL) == -1);
-	assert(cd_mkdir_p("") == -1);
-	assert(cd_mkdir_parent(NULL) == -1);
+	assert(daemon_mkdir_p(NULL) == -1);
+	assert(daemon_mkdir_p("") == -1);
+	assert(daemon_mkdir_parent(NULL) == -1);
 	printf("PASS test_mkdir_rejects_bad_arguments\n");
 }
 

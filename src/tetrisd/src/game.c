@@ -45,7 +45,7 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 	g->level = level_from_lines(0);
 	g->seq = 1;
 	i = 0;
-	while (i < SB_NEXT_COUNT)
+	while (i < BODY_NEXT_COUNT)
 	{
 		g->next[i] = (int)piece_bag_next(&g->bag);
 		i++;
@@ -171,16 +171,16 @@ void	game_snapshot(const t_game *g, t_sb_state *out)
 		return ;
 	memset(out, 0, sizeof(*out));
 	out->seq = g->seq;
-	out->phase = SB_PHASE_ACTIVE;
+	out->phase = BODY_PHASE_ACTIVE;
 	if (g->topped_out)
-		out->phase = SB_PHASE_TOP_OUT;
+		out->phase = BODY_PHASE_TOP_OUT;
 	else if (!g->active)
-		out->phase = SB_PHASE_PAUSED;
+		out->phase = BODY_PHASE_PAUSED;
 	row = 0;
-	while (row < SB_BOARD_ROWS)
+	while (row < BODY_BOARD_ROWS)
 	{
 		col = 0;
-		while (col < SB_BOARD_COLS)
+		while (col < BODY_BOARD_COLS)
 		{
 			cell = board_get(&g->board, col, row);
 			out->cells[row][col].type = (uint8_t)cell.type;
@@ -204,8 +204,8 @@ void	game_snapshot(const t_game *g, t_sb_state *out)
 		out->combo = 0;
 	out->back_to_back = g->score.back_to_back;
 	out->charge = g->charge.charges;
-	if (out->charge > SB_CHARGE_MAX)
-		out->charge = SB_CHARGE_MAX;
+	if (out->charge > BODY_CHARGE_MAX)
+		out->charge = BODY_CHARGE_MAX;
 	out->last_clear = g->last_clear;
 }
 
@@ -224,12 +224,12 @@ static void	spawn_next(t_game *g)
 
 	g->piece = piece_spawn((t_piece_type)g->next[0]);
 	i = 0;
-	while (i < SB_NEXT_COUNT - 1)
+	while (i < BODY_NEXT_COUNT - 1)
 	{
 		g->next[i] = g->next[i + 1];
 		i++;
 	}
-	g->next[SB_NEXT_COUNT - 1] = (int)piece_bag_next(&g->bag);
+	g->next[BODY_NEXT_COUNT - 1] = (int)piece_bag_next(&g->bag);
 	if (!piece_is_valid(&g->board, &g->piece))
 	{
 		g->topped_out = true;
@@ -274,16 +274,16 @@ static void	lock_piece(t_game *g)
 static t_sb_clear_label	clear_label(int lines, bool perfect)
 {
 	if (perfect)
-		return (SB_CLEAR_PERFECT);
+		return (BODY_CLEAR_PERFECT);
 	if (lines == 1)
-		return (SB_CLEAR_SINGLE);
+		return (BODY_CLEAR_SINGLE);
 	if (lines == 2)
-		return (SB_CLEAR_DOUBLE);
+		return (BODY_CLEAR_DOUBLE);
 	if (lines == 3)
-		return (SB_CLEAR_TRIPLE);
+		return (BODY_CLEAR_TRIPLE);
 	if (lines >= 4)
-		return (SB_CLEAR_TETRIS);
-	return (SB_CLEAR_NONE);
+		return (BODY_CLEAR_TETRIS);
+	return (BODY_CLEAR_NONE);
 }
 
 /**

@@ -131,8 +131,8 @@ Every question this program asks is asked of one thing — the lock on the pidfi
 
 ```text
  start ──▶ waitpid on the launching child   ┌──────────────────┐
- status ─▶ cd_pid_probe   LOCK_SH|LOCK_NB ─▶│ flock(pidfile)   │ held ⇢ running
- stop ───▶ SIGTERM, then cd_pid_wait ──────▶│ the daemon holds │ free ⇢ stopped
+ status ─▶ daemon_pid_probe   LOCK_SH|LOCK_NB ─▶│ flock(pidfile)   │ held ⇢ running
+ stop ───▶ SIGTERM, then daemon_pid_wait ──────▶│ the daemon holds │ free ⇢ stopped
                           polls until free  │ it exclusively   │
                                             └──────────────────┘
 ```

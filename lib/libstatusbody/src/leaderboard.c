@@ -1,4 +1,4 @@
-#include "sb_util.h"
+#include "body_util.h"
 
 #include <inttypes.h>
 
@@ -19,25 +19,25 @@ static int	decode_row(const char *line, t_sb_lb_row *row);
  *         EINVAL (NULL args with count > 0, unrepresentable field) or
  *         ERANGE (cap too small).
  */
-int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap)
+int	body_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap)
 {
 	size_t	off;
 	size_t	i;
 
 	if (!out || (!rows && count > 0))
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	if (cap == 0)
-		return (sb_fail(ERANGE));
+		return (body_fail(ERANGE));
 	out[0] = '\0';
 	off = 0;
 	i = 0;
 	while (i < count)
 	{
 		if (rows[i].rank < 0 || rows[i].username[0] == '\0')
-			return (sb_fail(EINVAL));
-		if (sb_append(out, cap, &off, "%d %s %" PRIu64 "\n", rows[i].rank,
+			return (body_fail(EINVAL));
+		if (body_append(out, cap, &off, "%d %s %" PRIu64 "\n", rows[i].rank,
 				rows[i].username, rows[i].score) != 0)
-			return (sb_fail(ERANGE));
+			return (body_fail(ERANGE));
 		i++;
 	}
 	return ((int)off);
@@ -57,23 +57,23 @@ int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size
  *         (malformed line, overlong username), or ERANGE (more rows than
  *         cap).
  */
-int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count)
+int	body_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count)
 {
 	t_sb_cursor	c;
-	char		line[SB_LINE_MAX];
+	char		line[BODY_LINE_MAX];
 
 	if (!buf || !rows || !count)
-		return (sb_fail(EINVAL));
+		return (body_fail(EINVAL));
 	*count = 0;
 	c.p = buf;
 	c.end = buf + len;
-	while (!sb_at_end(&c))
+	while (!body_at_end(&c))
 	{
 		if (*count == cap)
-			return (sb_fail(ERANGE));
-		if (sb_take_line(&c, line, sizeof(line)) != 0
+			return (body_fail(ERANGE));
+		if (body_take_line(&c, line, sizeof(line)) != 0
 			|| decode_row(line, &rows[*count]) != 0)
-			return (sb_fail(EBADMSG));
+			return (body_fail(EBADMSG));
 		(*count)++;
 	}
 	return (0);
@@ -88,17 +88,17 @@ int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t
  */
 static int	decode_row(const char *line, t_sb_lb_row *row)
 {
-	char	name[SB_LINE_MAX];
-	char	score[SB_LINE_MAX];
+	char	name[BODY_LINE_MAX];
+	char	score[BODY_LINE_MAX];
 	int		n;
 
 	memset(row, 0, sizeof(*row));
 	if (sscanf(line, "%d %1023s %1023s%n", &row->rank, name, score, &n) != 3
 		|| line[n] != '\0' || row->rank < 0)
 		return (-1);
-	if (strlen(name) >= SB_USER_MAX)
+	if (strlen(name) >= BODY_USER_MAX)
 		return (-1);
-	if (sb_parse_u64(score, &row->score) != 0)
+	if (body_parse_u64(score, &row->score) != 0)
 		return (-1);
 	strcpy(row->username, name);
 	return (0);

@@ -27,7 +27,7 @@ static void	touch(const char *path);
 
 int	main(void)
 {
-	/* This suite forks, and cd_detach flushes stdio before it does - so a
+	/* This suite forks, and daemon_detach flushes stdio before it does - so a
 	 * PASS line still sitting in a block-buffered pipe would be written once
 	 * by this process and again by every child. Line buffering retires each
 	 * line before the next fork can inherit it. */
@@ -104,7 +104,7 @@ static void	test_stderr_redirect_moves_the_stream_to_a_file(void)
 	assert(pid >= 0);
 	if (pid == 0)
 	{
-		if (cd_stderr_redirect(path) != 0)
+		if (daemon_stderr_redirect(path) != 0)
 			_exit(1);
 		fprintf(stderr, "moved\n");
 		fflush(stderr);
@@ -127,9 +127,9 @@ static void	test_stderr_redirect_refuses_a_bad_path(void)
 	snprintf(blocker, sizeof(blocker), "%s/wall", dir);
 	touch(blocker);
 	snprintf(path, sizeof(path), "%s/wall/err.log", dir);
-	assert(cd_stderr_redirect(path) == -1);
-	assert(cd_stderr_redirect(NULL) == -1);
-	assert(cd_stderr_redirect("") == -1);
+	assert(daemon_stderr_redirect(path) == -1);
+	assert(daemon_stderr_redirect(NULL) == -1);
+	assert(daemon_stderr_redirect("") == -1);
 	fx_rmtree(dir);
 	printf("PASS test_stderr_redirect_refuses_a_bad_path\n");
 }
@@ -137,7 +137,7 @@ static void	test_stderr_redirect_refuses_a_bad_path(void)
 /**
  * @brief Body of a daemon that boots cleanly: detach, prove it, report ready.
  *
- * The marker is written before cd_ready and the session check with it, so the
+ * The marker is written before daemon_ready and the session check with it, so the
  * assertions in the parent cannot pass on a process that merely forked.
  *
  * @param marker Path this daemon creates once it is detached.
@@ -147,17 +147,17 @@ static void	ready_daemon(const char *marker)
 	int		ready;
 	int		fd;
 
-	if (cd_detach(&ready) != 0)
+	if (daemon_detach(&ready) != 0)
 		_exit(1);
 	if (getpid() == getsid(0))
 		_exit(1);
-	fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, CD_FILE_MODE);
+	fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, DAEMON_FILE_MODE);
 	if (fd < 0)
 		_exit(1);
 	if (write(fd, "detached\n", 9) != 9)
 		_exit(1);
 	close(fd);
-	cd_ready(ready);
+	daemon_ready(ready);
 	_exit(0);
 }
 
@@ -168,7 +168,7 @@ static void	dying_daemon(void)
 {
 	int	ready;
 
-	if (cd_detach(&ready) != 0)
+	if (daemon_detach(&ready) != 0)
 		_exit(1);
 	_exit(3);
 }
@@ -182,7 +182,7 @@ static void	touch(const char *path)
 {
 	int	fd;
 
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, CD_FILE_MODE);
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, DAEMON_FILE_MODE);
 	assert(fd >= 0);
 	close(fd);
 }

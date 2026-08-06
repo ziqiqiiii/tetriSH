@@ -15,9 +15,9 @@
 ** leaderboard rows). Self-contained: no brain/room/db headers; the daemons
 ** map their structs into these wire-facing ones. All bodies are plaintext
 ** `key value` lines. Contract:
-**   sb_*_encode -> bytes written, or -1 with errno = EINVAL (bad field /
+**   body_*_encode -> bytes written, or -1 with errno = EINVAL (bad field /
 **                  NULL) or ERANGE (cap too small); never writes past cap.
-**   sb_*_decode -> 0, or -1 with errno = EBADMSG (missing key, malformed
+**   body_*_decode -> 0, or -1 with errno = EBADMSG (missing key, malformed
 **                  or out-of-range value, trailing junk) or EINVAL (NULL).
 ** Round-trip law: decode(encode(x)) == x; encode is deterministic.
 **
@@ -27,49 +27,49 @@
 ** own field so clients never parse the prefix.
 */
 
-# define SB_NAME_MAX		16
-# define SB_USER_MAX		32
-# define SB_OWNED_MAX		64
-# define SB_BOARD_ROWS		20
-# define SB_BOARD_COLS		10
-# define SB_NEXT_COUNT		3
-# define SB_CLEARING_MAX	4
-# define SB_CHARGE_MAX		10
-# define SB_COLOR_MAX		15
+# define BODY_NAME_MAX		16
+# define BODY_USER_MAX		32
+# define BODY_OWNED_MAX		64
+# define BODY_BOARD_ROWS		20
+# define BODY_BOARD_COLS		10
+# define BODY_NEXT_COUNT		3
+# define BODY_CLEARING_MAX	4
+# define BODY_CHARGE_MAX		10
+# define BODY_COLOR_MAX		15
 
 typedef enum e_sb_phase
 {
-	SB_PHASE_ACTIVE,
-	SB_PHASE_CLEARING,
-	SB_PHASE_PAUSED,
-	SB_PHASE_TOP_OUT
+	BODY_PHASE_ACTIVE,
+	BODY_PHASE_CLEARING,
+	BODY_PHASE_PAUSED,
+	BODY_PHASE_TOP_OUT
 }	t_sb_phase;
 
 typedef enum e_sb_clear_label
 {
-	SB_CLEAR_NONE,
-	SB_CLEAR_SINGLE,
-	SB_CLEAR_DOUBLE,
-	SB_CLEAR_TRIPLE,
-	SB_CLEAR_TETRIS,
-	SB_CLEAR_TSPIN,
-	SB_CLEAR_TSPIN_MINI,
-	SB_CLEAR_PERFECT
+	BODY_CLEAR_NONE,
+	BODY_CLEAR_SINGLE,
+	BODY_CLEAR_DOUBLE,
+	BODY_CLEAR_TRIPLE,
+	BODY_CLEAR_TETRIS,
+	BODY_CLEAR_TSPIN,
+	BODY_CLEAR_TSPIN_MINI,
+	BODY_CLEAR_PERFECT
 }	t_sb_clear_label;
 
 typedef enum e_sb_mode
 {
-	SB_MODE_SINGLE,
-	SB_MODE_DOUBLE,
-	SB_MODE_BATTLE_ROYALE
+	BODY_MODE_SINGLE,
+	BODY_MODE_DOUBLE,
+	BODY_MODE_BATTLE_ROYALE
 }	t_sb_mode;
 
 typedef enum e_sb_room_status
 {
-	SB_ROOM_WAITING,
-	SB_ROOM_READY,
-	SB_ROOM_IN_GAME,
-	SB_ROOM_FINISHED
+	BODY_ROOM_WAITING,
+	BODY_ROOM_READY,
+	BODY_ROOM_IN_GAME,
+	BODY_ROOM_FINISHED
 }	t_sb_room_status;
 
 /* one board cell on the wire: type 0-2, color 0-15 (one hex nibble each) */
@@ -112,9 +112,9 @@ typedef struct s_sb_state
 {
 	uint64_t			seq;
 	t_sb_phase			phase;
-	t_sb_cell			cells[SB_BOARD_ROWS][SB_BOARD_COLS];
+	t_sb_cell			cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
 	t_sb_piece			piece;
-	int					next[SB_NEXT_COUNT];
+	int					next[BODY_NEXT_COUNT];
 	uint64_t			score;
 	int					lines;
 	int					level;
@@ -122,7 +122,7 @@ typedef struct s_sb_state
 	bool				back_to_back;
 	int					charge;
 	t_sb_ability		last_ability;
-	int					clearing_rows[SB_CLEARING_MAX];
+	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
 	t_sb_clear_label	last_clear;
@@ -131,26 +131,26 @@ typedef struct s_sb_state
 /* one LIST /rooms line: <name> <mode> <players>/<slots> <status> <owner> */
 typedef struct s_sb_room_row
 {
-	char				name[SB_NAME_MAX];
+	char				name[BODY_NAME_MAX];
 	t_sb_mode			mode;
 	int					players;
 	int					slot_count;
 	t_sb_room_status	status;
-	char				owner[SB_USER_MAX];
+	char				owner[BODY_USER_MAX];
 }	t_sb_room_row;
 
 /* UC-20 ProfileView body, one key per line; owned lists are count-prefixed */
 typedef struct s_sb_profile
 {
-	char		username[SB_USER_MAX];
+	char		username[BODY_USER_MAX];
 	uint64_t	wallet;
 	uint64_t	score;
 	int			rank;
 	uint32_t	equipped_character;
 	uint32_t	equipped_theme;
-	uint32_t	owned_characters[SB_OWNED_MAX];
+	uint32_t	owned_characters[BODY_OWNED_MAX];
 	size_t		owned_character_count;
-	uint32_t	owned_themes[SB_OWNED_MAX];
+	uint32_t	owned_themes[BODY_OWNED_MAX];
 	size_t		owned_theme_count;
 }	t_sb_profile;
 
@@ -158,24 +158,24 @@ typedef struct s_sb_profile
 typedef struct s_sb_lb_row
 {
 	int			rank;
-	char		username[SB_USER_MAX];
+	char		username[BODY_USER_MAX];
 	uint64_t	score;
 }	t_sb_lb_row;
 
 /* STATE.C */
-int	sb_state_encode(const t_sb_state *in, char *out, size_t cap);
-int	sb_state_decode(const char *buf, size_t len, t_sb_state *out);
+int	body_state_encode(const t_sb_state *in, char *out, size_t cap);
+int	body_state_decode(const char *buf, size_t len, t_sb_state *out);
 
 /* ROOMS.C */
-int	sb_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap);
-int	sb_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count);
+int	body_rooms_encode(const t_sb_room_row *rows, size_t count, char *out, size_t cap);
+int	body_rooms_decode(const char *buf, size_t len, t_sb_room_row *rows, size_t cap, size_t *count);
 
 /* PROFILE.C */
-int	sb_profile_encode(const t_sb_profile *in, char *out, size_t cap);
-int	sb_profile_decode(const char *buf, size_t len, t_sb_profile *out);
+int	body_profile_encode(const t_sb_profile *in, char *out, size_t cap);
+int	body_profile_decode(const char *buf, size_t len, t_sb_profile *out);
 
 /* LEADERBOARD.C */
-int	sb_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap);
-int	sb_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count);
+int	body_leaderboard_encode(const t_sb_lb_row *rows, size_t count, char *out, size_t cap);
+int	body_leaderboard_decode(const char *buf, size_t len, t_sb_lb_row *rows, size_t cap, size_t *count);
 
 # endif
