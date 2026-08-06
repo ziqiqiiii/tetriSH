@@ -351,7 +351,7 @@ MacMini_tetriSH/
 │   ├── test_plan.md               Cross-component test plan
 │   ├── diagrams/                  Class, sequence, component, and solution diagrams
 │   └── bugs/                      Post-mortem notes on design defects
-├── skills/                        Code, Makefile, and README style guides
+├── .claude/skills/                Code, Makefile, and README style guides
 ├── scripts/                       Dependency check/install helpers
 ├── .tetrishrc                     Shell start-up file — launches the daemons
 ├── Makefile                       Umbrella; recurses into every component
@@ -402,7 +402,7 @@ Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macO
 | [`docs/test_plan.md`](docs/test_plan.md) | Cross-component test plan |
 | [`docs/diagrams/`](docs/diagrams/) | Class, sequence, domain, component, and use-case diagrams |
 | [`docs/bugs/`](docs/bugs/) | Post-mortems: what broke, the fix, the lesson |
-| [`skills/`](skills/) | Style guides for code, Makefiles, and READMEs |
+| [`.claude/skills/`](.claude/skills/) | Style guides for code, Makefiles, and READMEs |
 
 ---
 

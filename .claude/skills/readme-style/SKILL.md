@@ -1,46 +1,27 @@
-# README_STYLE.md
+---
+name: readme-style
+description: README conventions for this repository. Use when writing or editing any README.md here, or deciding what belongs in a README versus docs/ or a header.
+---
 
-The conventions for writing a `README.md` in this repository, written so they can
-be replicated in other repos.
+# README style
 
 Three rules govern everything below:
 
-1. **Keep it clean and concise**
+1. **Keep it clean and concise.**
 2. **Overview first, then progressive drill-down** — a reader never meets a
    detail before its context.
 3. **Carry material in the densest form that still reads** — a table over a
    paragraph, an inline literal over a sentence, nothing over a restatement.
 
-The canonical examples are the top-level [`README.md`](../README.md) (a large
-multi-component system) and [`src/tetrish/README.md`](../src/tetrish/README.md) (a
-single self-contained tool).
+The canonical examples are the top-level `README.md` (a large multi-component
+system) and `src/tetrish/README.md` (a single self-contained tool).
 
 ---
 
-## Table of contents
+## Length budget
 
-1. [Length budget](#1-length-budget)
-2. [What does not belong](#2-what-does-not-belong)
-3. [Section order](#3-section-order)
-4. [The opener](#4-the-opener)
-5. [Table of contents block](#5-table-of-contents-block)
-6. [Density: table → code → list → prose](#6-density-table--code--list--prose)
-7. [Reference tables](#7-reference-tables)
-8. [Code blocks & runbooks](#8-code-blocks--runbooks)
-9. [Diagrams](#9-diagrams)
-10. [Summary table, then per-item deep-dive](#10-summary-table-then-per-item-deep-dive)
-11. [Grammar & enumerable-value blocks](#11-grammar--enumerable-value-blocks)
-12. [Inline code for every literal](#12-inline-code-for-every-literal)
-13. [Tone & grammar](#13-tone--grammar)
-14. [Visual rhythm](#14-visual-rhythm)
-15. [Placeholders & closing matter](#15-placeholders--closing-matter)
-
----
-
-## 1. Length budget
-
-Concision is a constraint, not an aspiration. A README that exceeds its budget
-is a README with detail that belongs somewhere else.
+Concision is a constraint, not an aspiration. A README that exceeds its budget is
+a README carrying detail that belongs somewhere else.
 
 | README for | Target | Hard ceiling |
 |---|---|---|
@@ -48,19 +29,19 @@ is a README with detail that belongs somewhere else.
 | A binary (`src/XXX/`) | ~200 lines | 250 |
 | The repository root | ~400 lines | 600 |
 
-When a section outgrows the budget, move it — don't shrink the font:
+When a section outgrows the budget, move it:
 
 - Full API semantics → the header file's Doxygen comments
 - Design rationale, trade-offs, post-mortems → `docs/`
 - Per-use-case detail → `docs/diagrams/`
-- Style rules → `skills/`
+- Style rules → `.claude/skills/`
 
 The README links to those; it does not duplicate them. **One fact lives in
 exactly one place.**
 
 ---
 
-## 2. What does not belong
+## What does not belong
 
 Cut on sight:
 
@@ -69,8 +50,8 @@ Cut on sight:
   sentence for its *outcome*.
 - **Exhaustive API listings** — a function table with every parameter and return
   code. Name the surface; the header documents it.
-- **Changelogs, roadmaps, TODOs** — these belong in git history, `ROADMAP.md`,
-  or an issue tracker.
+- **Changelogs, roadmaps, TODOs** — these belong in git history, `ROADMAP.md`, or
+  an issue tracker.
 - **Marketing** — "powerful", "blazing-fast", "welcome to", "simply", "just".
 - **Motivational preamble** — background on why the problem is interesting.
 
@@ -79,11 +60,11 @@ deleted.
 
 ---
 
-## 3. Section order
+## Section order
 
-Reuse this sequence; drop sections that don't apply, but keep the order.
-Usage precedes internals — nobody reads how the parser works before learning
-how to compile.
+Reuse this sequence; drop sections that don't apply, but keep the order. Usage
+precedes internals — nobody reads how the parser works before learning how to
+compile.
 
 | # | Section | Answers |
 |---|---------|---------|
@@ -98,20 +79,15 @@ how to compile.
 | 9 | Project Structure | *Where does everything live?* |
 | 10 | Testing | *How do I verify / contribute?* |
 
-Prerequisites → Build → Run appear **in the order the user performs them.**
-Every section could be cut from the bottom and the document above it still
-stands.
+Prerequisites → Build → Run appear **in the order the user performs them.** Every
+section could be cut from the bottom and the document above it still stands.
 
 ---
 
-## 4. The opener
-
-
-
+## The opener
 
 Sentence 1 = *what it is*; sentence 2 = *what it does*, as a comma list. Follow
 it with a `---` rule.
-
 
 ```markdown
 # MacMini_tetriSH
@@ -129,7 +105,7 @@ second pitch. Bold only the one proper noun that matters.
 
 ---
 
-## 5. Table of contents block
+## Table of contents block
 
 Immediately after the opener, list **every `##` section** as anchor links, in
 document order, so the document's shape is visible before any section is read.
@@ -147,7 +123,7 @@ a README under ~80 lines — a table of contents for five sections is noise.
 
 ---
 
-## 6. Density: table → code → list → prose
+## Density: table → code → list → prose
 
 Reach for the densest form that still reads, in that order.
 
@@ -162,7 +138,7 @@ Reach for the densest form that still reads, in that order.
 
 ---
 
-## 7. Reference tables
+## Reference tables
 
 All "what can I use" material — built-ins, operators, exit codes — goes in a
 table. **One row = one thing; one cell = one verb-first clause.**
@@ -179,12 +155,12 @@ table. **One row = one thing; one cell = one verb-first clause.**
   `echo [-n] [args...]`, `cd [path\|'-']`.
 - Description: a single clause, verb first. No trailing period, no
   multi-sentence cells.
-- Caveats go **in the cell they qualify** — "(Linux only; excluded from the
-  build on macOS)" — never in a separate "Notes" dump.
+- Caveats go **in the cell they qualify** — "(Linux only; excluded from the build
+  on macOS)" — never in a separate "Notes" dump.
 
 ---
 
-## 8. Code blocks & runbooks
+## Code blocks & runbooks
 
 Every action a user performs is a copy-pasteable fenced block, language-tagged,
 with one imperative lead-in sentence:
@@ -193,8 +169,8 @@ with one imperative lead-in sentence:
 Clone the repository and build with `make`:
 
 ```bash
-git clone https://github.com/ziqiqiiii/MacMini_Shell.git
-cd MacMini_Shell
+git clone https://github.com/ziqiqiiii/MacMini_tetriSH.git
+cd MacMini_tetriSH
 make
 ```
 ````
@@ -216,7 +192,7 @@ cp sample.tetrishrc .tetrishrc
 
 ---
 
-## 9. Diagrams
+## Diagrams
 
 Where a picture beats a paragraph, draw one in a plain code fence. Annotations
 explain *purpose*; they never restate the name.
@@ -233,7 +209,9 @@ readline input
    Lexer            tokenise into COMMAND / PIPE / RDIN / RDOUT / ...
 ```
 
-**Layers** — ASCII boxes, topmost first, one gloss per layer:
+**Layers** — ASCII boxes, topmost first, one gloss per layer, followed by one
+sentence drawing the boundary between what the project implements and what it
+relies on:
 
 ```
 +---------------------------------------------+
@@ -245,26 +223,22 @@ readline input
 +---------------------------------------------+
 ```
 
-Follow a layer diagram with one sentence drawing the boundary — what the project
-implements versus what it relies on.
-
 **Tree** — an annotated `tree`, each entry with a one-line note, `→ target` to
-show what a directory builds into:
+show what a directory builds into. Prune it to the entries a newcomer needs —
+not `ls -R`:
 
 ```
-MacMini_Shell/
+MacMini_tetriSH/
 ├── src/
-│   ├── shell/         Shell pipeline sources (numbered by stage) → macmini_shell
-│   └── system/        Standalone system programs → bin/
-├── includes/          Header files
+│   ├── tetrish/       Interactive shell → macmini_shell
+│   └── tetrisd/       Concurrent game server → tetrisd
+├── lib/               Statically linked libraries (libXXX/libXXX.a)
 └── Makefile
 ```
 
-Prune the tree to the entries a newcomer needs — not `ls -R`.
-
 ---
 
-## 10. Summary table, then per-item deep-dive
+## Summary table, then per-item deep-dive
 
 When a set of things (binaries, libraries) each needs more than a one-line cell,
 lead with the summary table, then give **one `###` subsection per row**:
@@ -292,7 +266,7 @@ subsections to fill.
 
 ---
 
-## 11. Grammar & enumerable-value blocks
+## Grammar & enumerable-value blocks
 
 Formal specs get their own precise form:
 
@@ -311,48 +285,39 @@ Formal specs get their own precise form:
   `200`, `201`, `400`, `401`, `403`, `404`, `409`, `429`, `500`
   ```
 
-- **Config directives** — a plain fence with an aligned trailing `#` comment:
+- **Config keys** — a plain fence with an aligned trailing `#` comment. Use the
+  key's real `.tetrishrc` spelling, `<COMPONENT>_<THING>_PATH`:
 
   ```
-  listen_port  <port>           # TCP port for tetrisd
-  cert_path    <path>           # Server certificate
+  TETRISD_PORT=<port>           # TCP port for tetrisd
+  TETRISD_CERT_PATH=<path>      # Server certificate
+  TETRISLOGD_SOCKET_PATH=<path> # Datagram socket tetrisd ships records to
   ```
 
 ---
 
-## 12. Inline code for every literal
+## Inline code, tone, rhythm
 
 Any command, flag, filename, path, env var, operator, or code symbol is wrapped
-in `inline code` in prose — never spelled out bare.
-
-- Yes: "expand `$VAR` and `$?`", "programs under `./bin/`".
-- No: "expand $VAR", "the PATH variable", "the bin folder".
-
----
-
-## 13. Tone & grammar
+in `inline code` in prose — never spelled out bare. Yes: "expand `$VAR` and
+`$?`", "programs under `./bin/`". No: "expand $VAR", "the PATH variable", "the
+bin folder".
 
 - **Instructions:** second person, imperative — "Clone the repository and build
   with `make`."
 - **Facts:** present tense, declarative — "The shell prepends `$PWD/bin`."
 - No first person, no filler ("simply", "just", "as you can see"), no future
   tense for present behaviour.
-
----
-
-## 14. Visual rhythm
-
 - A `---` rule separates **every** top-level `##` section.
-- Sections use `##`; sub-sections use `###`. Stop at `###` — a fourth level
-  means the content belongs in `docs/`.
+- Sections use `##`; sub-sections use `###`. Stop at `###` — a fourth level means
+  the content belongs in `docs/`.
 - One blank line around fences, tables, and rules.
 
 ---
 
-## 15. Placeholders & closing matter
+## Placeholders
 
 When the README ships ahead of a decision, leave an explicit **bracketed
 placeholder** — `[document: Unix domain socket / POSIX message queue]`, `[Name]`
 — rather than an empty section or an invented answer. The bracket makes an
 unfinished spot greppable and unmistakably not-yet-done.
-

@@ -271,4 +271,4 @@ Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
 - `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
 - `docs/naming.md` — naming conventions and the one-time rename that reached them. All three stages are applied, so the prefix map in §2 is the live namespace: check it before inventing a prefix. §4.3 and §5.4 record the two decisions `daemon_` forced, and §5.6 the one rename deliberately left undone
-- `skills/{code_style,makefile_style,readme_style}.md` — style guides these files are expected to follow; see `skills/README.md`
+- `.claude/skills/{c-style,makefile-style,readme-style}/` — the style guides these files are expected to follow, as auto-invoked skills. `c-style` discloses component layout to `LAYOUT.md` and test conventions to `TESTING.md`; `makefile-style` discloses dependency-script rules to `DEPS_SCRIPTS.md`
