@@ -46,21 +46,21 @@
 ** every suite with it.
 */
 
-# define TETRISLOGD_COMPONENT_NAME		"tetrislogd"
+# define TETRISLOGD_COMPONENT_NAME			"tetrislogd"
 # define TETRISLOGD_CONFIG_KEY_PREFIX		"TETRISLOGD_"
-# define TETRISLOGD_RC_FILENAME			".tetrishrc"
+# define TETRISLOGD_RC_FILENAME				".tetrishrc"
 # define TETRISLOGD_FILESYSTEM_PATH_MAX		1024
-# define TETRISLOGD_CONFIG_LINE_MAX		2048
+# define TETRISLOGD_CONFIG_LINE_MAX			2048
 
 /* config defaults - all overridable from .tetrishrc */
-# define TETRISLOGD_DEFAULT_SOCK		"tmp/tetrisd/tetrislogd.sock"
-# define TETRISLOGD_DEFAULT_FILE		"tmp/tetrislogd/tetrislogd.log"
-# define TETRISLOGD_DEFAULT_PID			"tmp/tetrislogd/tetrislogd.pid"
-# define TETRISLOGD_DEFAULT_ERR			"tmp/tetrislogd/tetrislogd.err"
+# define TETRISLOGD_DEFAULT_SOCKET_PATH		"tmp/tetrisd/tetrislogd.sock"
+# define TETRISLOGD_DEFAULT_LOG_PATH		"tmp/tetrislogd/tetrislogd.log"
+# define TETRISLOGD_DEFAULT_PID_PATH		"tmp/tetrislogd/tetrislogd.pid"
+# define TETRISLOGD_DEFAULT_ERR_PATH		"tmp/tetrislogd/tetrislogd.err"
 
-# define TETRISLOGD_SOCKET_MODE		0600
-# define TETRISLOGD_FILE_MODE		0644
-# define TETRISLOGD_DIR_MODE		0755
+# define TETRISLOGD_SOCKET_MODE				0600
+# define TETRISLOGD_FILE_MODE				0644
+# define TETRISLOGD_DIR_MODE				0755
 
 /*
 ** Idle tick. The poll timeout doubles as the period of the fdatasync, of the
@@ -69,12 +69,12 @@
 ** handle. logd_start copies it into t_logd.idle_ms, which tests lower to keep
 ** the timeout path fast.
 */
-# define TETRISLOGD_IDLE_MS			1000
+# define TETRISLOGD_IDLE_MS					1000
 
 /* signal flags reported by signals_take */
-# define TETRISLOGD_SIGNAL_STOP		0x1
-# define TETRISLOGD_SIGNAL_HUP			0x2
-# define TETRISLOGD_SIGNAL_DUMP		0x4
+# define TETRISLOGD_SIGNAL_STOP				0x1
+# define TETRISLOGD_SIGNAL_HUP				0x2
+# define TETRISLOGD_SIGNAL_DUMP				0x4
 
 /*
 ** Every path the daemon touches, resolved once at boot from .tetrishrc.

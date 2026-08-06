@@ -111,7 +111,7 @@ static void	test_pidfile_keys_are_read_from_the_daemons_prefixes(void)
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrislogd tetrisd\"\n"
-		"export TETRISLOGD_PID=/run/logd.pid\n"
+		"export TETRISLOGD_PID_PATH=/run/logd.pid\n"
 		"export TETRISD_PID_PATH=/run/tetrisd.pid\n");
 	assert(config_load(&ctl, rc) == 0);
 	assert(ctl.count == 2);
@@ -137,7 +137,7 @@ static void	test_key_order_in_the_file_does_not_matter(void)
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrisd tetrislogd\"\n"
 		"export TETRISD_PID_PATH=/run/tetrisd.pid\n"
-		"export TETRISLOGD_PID=/run/logd.pid\n");
+		"export TETRISLOGD_PID_PATH=/run/logd.pid\n");
 	assert(config_load(&ctl, rc) == 0);
 	assert(strcmp(ctl.daemons[0].name, "tetrisd") == 0);
 	assert(strcmp(ctl.daemons[1].pid_path, "/run/logd.pid") == 0);
@@ -161,14 +161,14 @@ static void	test_an_unmanaged_name_fails_the_roster(void)
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrislogd tetrisu\"\n"
-		"export TETRISLOGD_PID=/run/logd.pid\n");
+		"export TETRISLOGD_PID_PATH=/run/logd.pid\n");
 	assert(config_load(&ctl, rc) == -1);
 	write_file(rc,
 		"PATH=/usr/bin\n"
 		"alias ll='ls -l'\n"
 		"# a comment\n"
 		"export TETRISCTL_DAEMONS=\"tetrislogd\"\n"
-		"export TETRISLOGD_PID=/run/logd.pid\n");
+		"export TETRISLOGD_PID_PATH=/run/logd.pid\n");
 	assert(config_load(&ctl, rc) == 0);
 	assert(ctl.count == 1);
 	rmtree(dir);
@@ -185,11 +185,11 @@ static void	test_env_overrides_file(void)
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
 	write_file(rc,
 		"export TETRISCTL_DAEMONS=\"tetrislogd\"\n"
-		"export TETRISLOGD_PID=/run/from_file.pid\n");
-	setenv("TETRISLOGD_PID", "/run/from_env.pid", 1);
+		"export TETRISLOGD_PID_PATH=/run/from_file.pid\n");
+	setenv("TETRISLOGD_PID_PATH", "/run/from_env.pid", 1);
 	assert(config_load(&ctl, rc) == 0);
 	assert(strcmp(ctl.daemons[0].pid_path, "/run/from_env.pid") == 0);
-	unsetenv("TETRISLOGD_PID");
+	unsetenv("TETRISLOGD_PID_PATH");
 	rmtree(dir);
 	printf("PASS test_env_overrides_file\n");
 }

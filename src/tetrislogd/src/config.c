@@ -21,10 +21,10 @@ void	config_defaults(t_config *cfg)
 	if (cfg == NULL)
 		return ;
 	memset(cfg, 0, sizeof(*cfg));
-	snprintf(cfg->sock_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_SOCK);
-	snprintf(cfg->file_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_FILE);
-	snprintf(cfg->pid_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_PID);
-	snprintf(cfg->err_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_ERR);
+	snprintf(cfg->sock_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_SOCKET_PATH);
+	snprintf(cfg->file_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_LOG_PATH);
+	snprintf(cfg->pid_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_PID_PATH);
+	snprintf(cfg->err_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_ERR_PATH);
 	snprintf(cfg->rc_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", "./" TETRISLOGD_RC_FILENAME);
 }
 
@@ -48,13 +48,13 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 	if (strncmp(key, TETRISLOGD_CONFIG_KEY_PREFIX, strlen(TETRISLOGD_CONFIG_KEY_PREFIX)) != 0)
 		return (-1);
 	key += strlen(TETRISLOGD_CONFIG_KEY_PREFIX);
-	if (strcmp(key, "SOCK") == 0)
+	if (strcmp(key, "SOCKET_PATH") == 0)
 		return (set_str(cfg->sock_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
-	if (strcmp(key, "FILE") == 0)
+	if (strcmp(key, "LOG_PATH") == 0)
 		return (set_str(cfg->file_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
-	if (strcmp(key, "PID") == 0)
+	if (strcmp(key, "PID_PATH") == 0)
 		return (set_str(cfg->pid_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
-	if (strcmp(key, "ERR") == 0)
+	if (strcmp(key, "ERR_PATH") == 0)
 		return (set_str(cfg->err_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
 	return (-1);
 }
@@ -252,8 +252,8 @@ static void	strip_quotes(char *value)
 static int	apply_env(t_config *cfg)
 {
 	static const char	*names[] = {
-		TETRISLOGD_CONFIG_KEY_PREFIX "SOCK", TETRISLOGD_CONFIG_KEY_PREFIX "FILE",
-		TETRISLOGD_CONFIG_KEY_PREFIX "PID", TETRISLOGD_CONFIG_KEY_PREFIX "ERR", NULL
+		TETRISLOGD_CONFIG_KEY_PREFIX "SOCKET_PATH", TETRISLOGD_CONFIG_KEY_PREFIX "LOG_PATH",
+		TETRISLOGD_CONFIG_KEY_PREFIX "PID_PATH", TETRISLOGD_CONFIG_KEY_PREFIX "ERR_PATH", NULL
 	};
 	const char			*value;
 	int					rc;

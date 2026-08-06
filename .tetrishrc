@@ -40,7 +40,7 @@ export TETRISD_CA_PATH=certs/ca.crt
 
 # AF_UNIX datagram socket tetrislogd binds and tetrisd ships log records to.
 # Records are dropped, never blocked on, when the logger is slow or absent.
-# One socket, named twice: this key and TETRISLOGD_SOCK below must be equal.
+# One socket, named twice: this key and TETRISLOGD_SOCKET_PATH below must be equal.
 export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock
 export TETRISD_LOG_LEVEL=info
 
@@ -80,20 +80,20 @@ export TETRISD_INPUT_RATE=60
 # log file rather than reloading settings.
 
 # Datagram socket tetrislogd binds. Keep identical to TETRISD_LOG_IPC above.
-export TETRISLOGD_SOCK=tmp/tetrisd/tetrislogd.sock
+export TETRISLOGD_SOCKET_PATH=tmp/tetrisd/tetrislogd.sock
 
 # File tetrislogd appends records to. Rotate it from outside - move the file,
 # then `kill -HUP` the daemon and it reopens this path.
-export TETRISLOGD_FILE=tmp/tetrislogd/tetrislogd.log
+export TETRISLOGD_LOG_PATH=tmp/tetrislogd/tetrislogd.log
 
 # Pidfile tetrislogd claims and holds. This is the single-instance guard — it
 # used to be an flock on the log file itself, which meant deleting tmp/ took
 # away the sink and the guard in one stroke.
-export TETRISLOGD_PID=tmp/tetrislogd/tetrislogd.pid
+export TETRISLOGD_PID_PATH=tmp/tetrislogd/tetrislogd.pid
 
 # Where tetrislogd points its stderr once it has detached. Degraded records —
 # valid records it could not write because the sink was unavailable — go here.
-export TETRISLOGD_ERR=tmp/tetrislogd/tetrislogd.err
+export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
 
 ################################################################################
 #                                 daemons                                      #
@@ -104,7 +104,7 @@ export TETRISLOGD_ERR=tmp/tetrislogd/tetrislogd.err
 # reversing it matters — stopping the logger first would push tetrisd's entire
 # shutdown into its error file instead of the log.
 #
-# Each daemon's pidfile is read from its own prefix above (TETRISLOGD_PID,
+# Each daemon's pidfile is read from its own prefix above (TETRISLOGD_PID_PATH,
 # TETRISD_PID_PATH), so the path is named once by the process that holds it.
 export TETRISCTL_DAEMONS="tetrislogd tetrisd"
 

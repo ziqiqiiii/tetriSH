@@ -353,11 +353,20 @@ static void	strip_quotes(char *value)
 static int	apply_env(t_config *cfg)
 {
 	static const char	*names[] = {
-		"TETRISD_PORT", "TETRISD_DATA_DIR",
-		"TETRISD_CONFIG_DIR", "TETRISD_CERT_PATH", "TETRISD_KEY_PATH",
-		"TETRISD_CA_PATH", "TETRISD_LOG_IPC", "TETRISD_LOG_LEVEL",
-		"TETRISD_PID_PATH", "TETRISD_ERR_PATH",
-		"TETRISD_MAX_CLIENTS", "TETRISD_TICK_MS", "TETRISD_BR_SLOTS", NULL
+		"TETRISD_PORT", 
+		"TETRISD_DATA_DIR",
+		"TETRISD_CONFIG_DIR", 
+		"TETRISD_CERT_PATH", 
+		"TETRISD_KEY_PATH",
+		"TETRISD_CA_PATH", 
+		"TETRISD_LOG_IPC", 
+		"TETRISD_LOG_LEVEL",
+		"TETRISD_PID_PATH", 
+		"TETRISD_ERR_PATH",
+		"TETRISD_MAX_CLIENTS", 
+		"TETRISD_TICK_MS", 
+		"TETRISD_BR_SLOTS", 
+		NULL
 	};
 	const char			*value;
 	int					rc;

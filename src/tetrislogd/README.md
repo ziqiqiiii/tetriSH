@@ -104,10 +104,10 @@ Every setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` �
 
 | Key | Default | Meaning |
 |---|---|---|
-| `TETRISLOGD_SOCK` | `tmp/tetrisd/tetrislogd.sock` | Datagram socket to bind; must equal `TETRISD_LOG_IPC` |
-| `TETRISLOGD_FILE` | `tmp/tetrislogd/tetrislogd.log` | Log file to write; parent directories are created |
-| `TETRISLOGD_PID` | `tmp/tetrislogd/tetrislogd.pid` | Pidfile to claim and hold; the single-instance guard, and what `tetrisctl` signals |
-| `TETRISLOGD_ERR` | `tmp/tetrislogd/tetrislogd.err` | Where stderr goes after boot — Degraded records land here |
+| `TETRISLOGD_SOCKET_PATH` | `tmp/tetrisd/tetrislogd.sock` | Datagram socket to bind; must equal `TETRISD_LOG_IPC` |
+| `TETRISLOGD_LOG_PATH` | `tmp/tetrislogd/tetrislogd.log` | Log file to write; parent directories are created |
+| `TETRISLOGD_PID_PATH` | `tmp/tetrislogd/tetrislogd.pid` | Pidfile to claim and hold; the single-instance guard, and what `tetrisctl` signals |
+| `TETRISLOGD_ERR_PATH` | `tmp/tetrislogd/tetrislogd.err` | Where stderr goes after boot — Degraded records land here |
 
 Config is cold: paths are resolved once at boot and change only by restarting the daemon. An unknown `TETRISLOGD_*` key fails the boot rather than being ignored, so a setting documented but never wired up cannot silently do nothing.
 
@@ -144,7 +144,7 @@ The words are not interchangeable, and only two of them are counted here:
 | **Rejected** | Arrived here but failed `logrecord_validate`; discarded | `tetrislogd` |
 | **Degraded** | Valid, but the sink was unavailable; written to stderr | `tetrislogd` |
 
-A Degraded record went to stderr rather than to the sink. Once the daemon has detached, stderr is the file named by `TETRISLOGD_ERR`; the daemon reopens it onto that path itself, after boot succeeds, which is why a boot *failure* still reaches the terminal instead. That makes a degraded record recoverable, not retained: the error file lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
+A Degraded record went to stderr rather than to the sink. Once the daemon has detached, stderr is the file named by `TETRISLOGD_ERR_PATH`; the daemon reopens it onto that path itself, after boot succeeds, which is why a boot *failure* still reaches the terminal instead. That makes a degraded record recoverable, not retained: the error file lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
 
 ### The loop
 

@@ -99,7 +99,7 @@ static const char	*pid_key_for(const char *name)
 {
 	if (strcmp(name, "tetrisd") == 0)
 		return ("TETRISD_PID_PATH");
-	return ("TETRISLOGD_PID");
+	return ("TETRISLOGD_PID_PATH");
 }
 
 /**

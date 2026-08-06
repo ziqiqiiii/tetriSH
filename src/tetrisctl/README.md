@@ -102,7 +102,7 @@ both ends read their settings out of the same file.
 | Key | Required | Meaning |
 |---|---|---|
 | `TETRISCTL_DAEMONS` | yes | Daemons to manage, in launch order; teardown is this reversed |
-| `TETRISLOGD_PID` | if `tetrislogd` is listed | Where `tetrislogd` publishes its pidfile |
+| `TETRISLOGD_PID_PATH` | if `tetrislogd` is listed | Where `tetrislogd` publishes its pidfile |
 | `TETRISD_PID_PATH` | if `tetrisd` is listed | Where `tetrisd` publishes its pidfile |
 
 The file is read first, then any matching environment variable overlays it.

@@ -219,7 +219,7 @@ static void	arrange(t_ctl *ctl, char *dir, size_t cap)
 	snprintf(path, sizeof(path), "%s/tests/bin:%s", cwd, g_path);
 	setenv("PATH", path, 1);
 	snprintf(path, sizeof(path), "%s/logd.pid", dir);
-	setenv("TETRISLOGD_PID", path, 1);
+	setenv("TETRISLOGD_PID_PATH", path, 1);
 	snprintf(path, sizeof(path), "%s/tetrisd.pid", dir);
 	setenv("TETRISD_PID_PATH", path, 1);
 	setenv("TETRISCTL_DAEMONS", "tetrislogd tetrisd", 1);

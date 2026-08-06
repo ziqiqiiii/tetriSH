@@ -61,10 +61,7 @@ typedef enum e_managed_state
 
 /*
 ** A daemon this build knows how to manage, and the .tetrishrc key it publishes
-** its pidfile under. The key names differ between the two because each daemon
-** keeps its own prefix's existing habit - tetrisd already had CERT_PATH and
-** KEY_PATH, tetrislogd already had SOCK and FILE - and a daemon reading its
-** own settings is the one place that consistency actually matters.
+** its pidfile under.
 */
 typedef struct s_known_daemon
 {

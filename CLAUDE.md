@@ -199,9 +199,7 @@ the owner leaves.
 ## libstatusbody API (statusbody.h)
 
 The HTTTP message-body codec shared by both ends: `tetrisd` encodes, `tetrisu`
-decodes. Four body types, each an encode/decode pair in its own `.c` —
-`sb_state_*` (`state.c`), `sb_rooms_*` (`rooms.c`), `sb_profile_*`
-(`profile.c`), `sb_leaderboard_*` (`leaderboard.c`).
+decodes. Four body types, each an encode/decode pair in its own `.c` — `body_state_*` (`state.c`), `body_rooms_*` (`rooms.c`), `body_profile_*` (`profile.c`), `body_leaderboard_*` (`leaderboard.c`).
 
 Encoders return the body length in bytes, decoders return `0`; both return `-1`
 with `errno` set — `EINVAL` for NULL args or a too-small buffer, `EBADMSG` for
@@ -229,7 +227,7 @@ client-lifetime guard.
 implemented. `tetrisd` becomes a reactor: one thread in `epoll_wait` owns the
 lobby, every room, every game, the registry and every outbox, beside a
 four-worker handshake pool that owns only its own descriptors until handoff.
-Every lock above is deleted, along with `reg_wait_absent` and
+Every lock above is deleted, along with `registry_wait_absent` and
 `TD_DISPLACE_WAIT_MS`. The property that replaces the lock order is *one owner
 of all mutable game state*. The migration is seven staged steps, each ending
 green; until step 5 lands, the description above is the truth and the locks are
@@ -249,7 +247,7 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - `libtetrisbrain` and `libtetrisroom` have **no I/O, no side effects** — pure logic only. Where a room decision needs external facts (is a player still connected?), the caller supplies a probe callback.
 - `libcoreipc` must not log, `printf`, or `exit()` — it *is* the log path and must never recurse into itself. Errno-style returns only.
 - No hard-coded paths anywhere; all paths come from `.tetrishrc` or are passed in by the caller.
-- The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `us_dgram_bind`, which unlinks its socket path unconditionally.
+- The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `unixsock_dgram_bind`, which unlinks its socket path unconditionally.
 - A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
 - `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
 - No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint is being retired rather than satisfied — ADR-0008 removes the shared state instead of ordering access to it — but it still binds every lock that exists until the step that deletes it.
@@ -272,4 +270,5 @@ Custom HTTP-like protocol. Only `STATE` is server-originated (pushed); all other
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
 - `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
+- `docs/naming.md` — naming conventions and the one-time rename that reached them. All three stages are applied, so the prefix map in §2 is the live namespace: check it before inventing a prefix. §4.3 and §5.4 record the two decisions `daemon_` forced, and §5.6 the one rename deliberately left undone
 - `skills/{code_style,makefile_style,readme_style}.md` — style guides these files are expected to follow; see `skills/README.md`

@@ -14,9 +14,9 @@
 ** drift apart silently, which is the failure this table exists to avoid.
 */
 static const t_known_daemon	g_known[] = {
-{"tetrislogd", "TETRISLOGD_PID"},
-{"tetrisd", "TETRISD_PID_PATH"},
-{NULL, NULL}
+	{"tetrislogd", "TETRISLOGD_PID_PATH"},
+	{"tetrisd", "TETRISD_PID_PATH"},
+	{NULL, NULL}
 };
 
 // Static Functions

@@ -45,10 +45,10 @@ static void	test_defaults_are_complete(void)
 	t_config	cfg;
 
 	config_defaults(&cfg);
-	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCK) == 0);
-	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_FILE) == 0);
-	assert(strcmp(cfg.pid_path, TETRISLOGD_DEFAULT_PID) == 0);
-	assert(strcmp(cfg.err_path, TETRISLOGD_DEFAULT_ERR) == 0);
+	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCKET_PATH) == 0);
+	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_LOG_PATH) == 0);
+	assert(strcmp(cfg.pid_path, TETRISLOGD_DEFAULT_PID_PATH) == 0);
+	assert(strcmp(cfg.err_path, TETRISLOGD_DEFAULT_ERR_PATH) == 0);
 	printf("PASS test_defaults_are_complete\n");
 }
 
@@ -62,13 +62,13 @@ static void	test_set_known_keys(void)
 	t_config	cfg;
 
 	config_defaults(&cfg);
-	assert(config_set(&cfg, "TETRISLOGD_SOCK", "/run/logd.sock") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_SOCKET_PATH", "/run/logd.sock") == 0);
 	assert(strcmp(cfg.sock_path, "/run/logd.sock") == 0);
-	assert(config_set(&cfg, "TETRISLOGD_FILE", "/var/log/logd.log") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_LOG_PATH", "/var/log/logd.log") == 0);
 	assert(strcmp(cfg.file_path, "/var/log/logd.log") == 0);
-	assert(config_set(&cfg, "TETRISLOGD_PID", "/run/logd.pid") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_PID_PATH", "/run/logd.pid") == 0);
 	assert(strcmp(cfg.pid_path, "/run/logd.pid") == 0);
-	assert(config_set(&cfg, "TETRISLOGD_ERR", "/var/log/logd.err") == 0);
+	assert(config_set(&cfg, "TETRISLOGD_ERR_PATH", "/var/log/logd.err") == 0);
 	assert(strcmp(cfg.err_path, "/var/log/logd.err") == 0);
 	assert(config_set(&cfg, "TETRISD_LOG_IPC", "/run/other.sock") == -1);
 	assert(config_set(&cfg, "PATH", "/usr/bin") == -1);
@@ -84,11 +84,11 @@ static void	test_set_rejects_bad_values(void)
 	config_defaults(&cfg);
 	memset(toolong, 'a', sizeof(toolong) - 1);
 	toolong[sizeof(toolong) - 1] = '\0';
-	assert(config_set(&cfg, "TETRISLOGD_SOCK", "") == -1);
-	assert(config_set(&cfg, "TETRISLOGD_FILE", "") == -1);
-	assert(config_set(&cfg, "TETRISLOGD_FILE", toolong) == -1);
-	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCK) == 0);
-	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_FILE) == 0);
+	assert(config_set(&cfg, "TETRISLOGD_SOCKET_PATH", "") == -1);
+	assert(config_set(&cfg, "TETRISLOGD_LOG_PATH", "") == -1);
+	assert(config_set(&cfg, "TETRISLOGD_LOG_PATH", toolong) == -1);
+	assert(strcmp(cfg.sock_path, TETRISLOGD_DEFAULT_SOCKET_PATH) == 0);
+	assert(strcmp(cfg.file_path, TETRISLOGD_DEFAULT_LOG_PATH) == 0);
 	printf("PASS test_set_rejects_bad_values\n");
 }
 
@@ -102,16 +102,16 @@ static void	test_parse_line_forms(void)
 	t_config	cfg;
 
 	config_defaults(&cfg);
-	assert(config_parse_line(&cfg, "export TETRISLOGD_SOCK=/a/b.sock") == 0);
+	assert(config_parse_line(&cfg, "export TETRISLOGD_SOCKET_PATH=/a/b.sock") == 0);
 	assert(strcmp(cfg.sock_path, "/a/b.sock") == 0);
-	assert(config_parse_line(&cfg, "TETRISLOGD_FILE=\"/c/d.log\"") == 0);
+	assert(config_parse_line(&cfg, "TETRISLOGD_LOG_PATH=\"/c/d.log\"") == 0);
 	assert(strcmp(cfg.file_path, "/c/d.log") == 0);
-	assert(config_parse_line(&cfg, "# export TETRISLOGD_SOCK=/no.sock") == 0);
+	assert(config_parse_line(&cfg, "# export TETRISLOGD_SOCKET_PATH=/no.sock") == 0);
 	assert(config_parse_line(&cfg, "dspawn tetrisd -- tetrisd") == 0);
 	assert(config_parse_line(&cfg, "export TETRISD_PORT=4242") == 0);
 	assert(config_parse_line(&cfg, "") == 0);
 	assert(strcmp(cfg.sock_path, "/a/b.sock") == 0);
-	assert(config_parse_line(&cfg, "export TETRISLOGD_FILE=") == -1);
+	assert(config_parse_line(&cfg, "export TETRISLOGD_LOG_PATH=") == -1);
 	printf("PASS test_parse_line_forms\n");
 }
 
@@ -125,8 +125,8 @@ static void	test_load_reads_rc_file(void)
 	snprintf(rc, sizeof(rc), "%s/rc", fx.dir);
 	write_file(rc,
 		"# a comment\n"
-		"export TETRISLOGD_SOCK=/tmp/x.sock\n"
-		"export TETRISLOGD_FILE=/tmp/x.log\n"
+		"export TETRISLOGD_SOCKET_PATH=/tmp/x.sock\n"
+		"export TETRISLOGD_LOG_PATH=/tmp/x.log\n"
 		"export TETRISD_PORT=4242\n");
 	assert(config_load(&cfg, rc) == 0);
 	assert(strcmp(cfg.sock_path, "/tmp/x.sock") == 0);
@@ -148,11 +148,11 @@ static void	test_env_overrides_file(void)
 
 	assert(fx_make(&fx) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", fx.dir);
-	write_file(rc, "export TETRISLOGD_FILE=/tmp/from_file.log\n");
-	setenv("TETRISLOGD_FILE", "/tmp/from_env.log", 1);
+	write_file(rc, "export TETRISLOGD_LOG_PATH=/tmp/from_file.log\n");
+	setenv("TETRISLOGD_LOG_PATH", "/tmp/from_env.log", 1);
 	assert(config_load(&cfg, rc) == 0);
 	assert(strcmp(cfg.file_path, "/tmp/from_env.log") == 0);
-	unsetenv("TETRISLOGD_FILE");
+	unsetenv("TETRISLOGD_LOG_PATH");
 	fx_destroy(&fx);
 	printf("PASS test_env_overrides_file\n");
 }
@@ -190,7 +190,7 @@ static void	test_the_shipped_rc_file_loads(void)
 
 /*
 ** Two keys name one socket: tetrisd dials TETRISD_LOG_IPC, tetrislogd binds
-** TETRISLOGD_SOCK. Nothing at runtime can notice them drifting apart - the
+** TETRISLOGD_SOCKET_PATH. Nothing at runtime can notice them drifting apart - the
 ** logger simply sits on a socket nobody sends to, and every record ends up
 ** in tetrisd's stderr fallback. This assertion is the only thing keeping the
 ** two lines equal, so it fails the build rather than the deployment.
@@ -202,7 +202,7 @@ static void	test_shipped_rc_socket_keys_agree(void)
 
 	assert(rc_value("../../.tetrishrc", "TETRISD_LOG_IPC",
 			dialled, sizeof(dialled)) == 0);
-	assert(rc_value("../../.tetrishrc", "TETRISLOGD_SOCK",
+	assert(rc_value("../../.tetrishrc", "TETRISLOGD_SOCKET_PATH",
 			bound, sizeof(bound)) == 0);
 	assert(strcmp(dialled, bound) == 0);
 	printf("PASS test_shipped_rc_socket_keys_agree\n");
