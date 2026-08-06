@@ -21,11 +21,11 @@ void	config_defaults(t_config *cfg)
 	if (cfg == NULL)
 		return ;
 	memset(cfg, 0, sizeof(*cfg));
-	snprintf(cfg->sock_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_SOCK);
-	snprintf(cfg->file_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_FILE);
-	snprintf(cfg->pid_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_PID);
-	snprintf(cfg->err_path, TETRISLOGD_FS_PATH_MAX, "%s", TETRISLOGD_DEFAULT_ERR);
-	snprintf(cfg->rc_path, TETRISLOGD_FS_PATH_MAX, "%s", "./" TETRISLOGD_RC_FILENAME);
+	snprintf(cfg->sock_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_SOCK);
+	snprintf(cfg->file_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_FILE);
+	snprintf(cfg->pid_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_PID);
+	snprintf(cfg->err_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", TETRISLOGD_DEFAULT_ERR);
+	snprintf(cfg->rc_path, TETRISLOGD_FILESYSTEM_PATH_MAX, "%s", "./" TETRISLOGD_RC_FILENAME);
 }
 
 /**
@@ -49,13 +49,13 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 		return (-1);
 	key += strlen(TETRISLOGD_CONFIG_KEY_PREFIX);
 	if (strcmp(key, "SOCK") == 0)
-		return (set_str(cfg->sock_path, TETRISLOGD_FS_PATH_MAX, value));
+		return (set_str(cfg->sock_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "FILE") == 0)
-		return (set_str(cfg->file_path, TETRISLOGD_FS_PATH_MAX, value));
+		return (set_str(cfg->file_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "PID") == 0)
-		return (set_str(cfg->pid_path, TETRISLOGD_FS_PATH_MAX, value));
+		return (set_str(cfg->pid_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "ERR") == 0)
-		return (set_str(cfg->err_path, TETRISLOGD_FS_PATH_MAX, value));
+		return (set_str(cfg->err_path, TETRISLOGD_FILESYSTEM_PATH_MAX, value));
 	return (-1);
 }
 
@@ -104,7 +104,7 @@ int	config_load(t_config *cfg, const char *rc_override)
 	if (cfg == NULL)
 		return (-1);
 	config_defaults(cfg);
-	if (config_resolve_rc_path(rc_override, cfg->rc_path, TETRISLOGD_FS_PATH_MAX) != 0)
+	if (config_resolve_rc_path(rc_override, cfg->rc_path, TETRISLOGD_FILESYSTEM_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(cfg->rc_path, "r");

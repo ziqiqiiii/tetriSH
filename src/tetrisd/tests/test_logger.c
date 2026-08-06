@@ -125,7 +125,7 @@ static void	make_tmp_dir(char *out, size_t cap)
 static void	logger_cfg(t_config *cfg, const char *sock_path, int level)
 {
 	config_defaults(cfg);
-	snprintf(cfg->log_ipc, TETRISD_FS_PATH_MAX, "%s", sock_path);
+	snprintf(cfg->log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", sock_path);
 	cfg->log_level = level;
 }
 

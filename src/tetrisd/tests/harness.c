@@ -36,16 +36,16 @@ int	fx_start(t_fixture *fx)
 	fx->cfg.port = 0;
 	fx->cfg.log_level = COREIPC_LOG_ERROR;
 	snprintf(path, sizeof(path), "%s/data", fx->dir);
-	snprintf(fx->cfg.data_dir, TETRISD_FS_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.config_dir, TETRISD_FS_PATH_MAX, "%s",
+	snprintf(fx->cfg.data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s",
 		"../../lib/libmacminidb/config");
 	snprintf(path, sizeof(path), "%s/certs/server.crt", fx->dir);
-	snprintf(fx->cfg.cert_path, TETRISD_FS_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.cert_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
 	snprintf(path, sizeof(path), "%s/certs/server.key", fx->dir);
-	snprintf(fx->cfg.key_path, TETRISD_FS_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.ca_path, TETRISD_FS_PATH_MAX, "%s", fx->ca_path);
+	snprintf(fx->cfg.key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.ca_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", fx->ca_path);
 	snprintf(path, sizeof(path), "%s/log.sock", fx->dir);
-	snprintf(fx->cfg.log_ipc, TETRISD_FS_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
 	return (server_start(&fx->cfg, &fx->srv));
 }
 

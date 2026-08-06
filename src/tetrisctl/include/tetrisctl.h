@@ -35,7 +35,7 @@
 # define TETRISCTL_COMPONENT_NAME		"tetrisctl"
 # define TETRISCTL_CONFIG_KEY_PREFIX		"TETRISCTL_"
 # define TETRISCTL_RC_FILENAME			".tetrishrc"
-# define TETRISCTL_FS_PATH_MAX		1024
+# define TETRISCTL_FILESYSTEM_PATH_MAX		1024
 # define TETRISCTL_CONFIG_LINE_MAX		2048
 # define TETRISCTL_NAME_MAX		32
 # define TETRISCTL_MAX_DAEMONS		8
@@ -80,7 +80,7 @@ typedef struct s_known_daemon
 typedef struct s_managed
 {
 	char	name[TETRISCTL_NAME_MAX];
-	char	pid_path[TETRISCTL_FS_PATH_MAX];
+	char	pid_path[TETRISCTL_FILESYSTEM_PATH_MAX];
 }	t_managed;
 
 /*
@@ -97,12 +97,12 @@ typedef struct s_ctl
 	t_managed	daemons[TETRISCTL_MAX_DAEMONS];
 	int			count;
 	char		order[TETRISCTL_CONFIG_LINE_MAX];
-	char		paths[TETRISCTL_MAX_DAEMONS][TETRISCTL_FS_PATH_MAX];
-	char		rc_path[TETRISCTL_FS_PATH_MAX];
+	char		paths[TETRISCTL_MAX_DAEMONS][TETRISCTL_FILESYSTEM_PATH_MAX];
+	char		rc_path[TETRISCTL_FILESYSTEM_PATH_MAX];
 	int			stop_ms;
 }	t_ctl;
 
-/* CFG.C */
+/* CONFIG.C */
 void			config_defaults(t_ctl *ctl);
 int				config_set(t_ctl *ctl, const char *key, const char *value);
 int				config_parse_line(t_ctl *ctl, const char *line);
@@ -111,12 +111,12 @@ int				config_load(t_ctl *ctl, const char *rc_override);
 int				config_resolve_rc_path(const char *override, char *out, size_t cap);
 const t_managed	*ctl_find_daemon(const t_ctl *ctl, const char *name);
 
-/* DAEMON.C */
+/* MANAGED.C */
 t_managed_state			managed_state(const t_managed *d, pid_t *pid);
 int				managed_start(const t_managed *d, const char *rc_path);
 int				managed_stop(const t_managed *d, int timeout_ms);
 
-/* CMD.C */
+/* COMMANDS.C */
 int				start_command(const t_ctl *ctl, const char *only);
 int				status_command(const t_ctl *ctl, const char *only);
 int				stop_command(const t_ctl *ctl, const char *only);

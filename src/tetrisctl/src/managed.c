@@ -116,7 +116,7 @@ static void	spawn(const t_managed *d, const char *rc_path)
 {
 	char	*argv[3];
 	char	name[TETRISCTL_NAME_MAX];
-	char	rc[TETRISCTL_FS_PATH_MAX];
+	char	rc[TETRISCTL_FILESYSTEM_PATH_MAX];
 
 	snprintf(name, sizeof(name), "%s", d->name);
 	argv[0] = name;

@@ -44,7 +44,7 @@ void	config_defaults(t_ctl *ctl)
 	if (ctl == NULL)
 		return ;
 	memset(ctl, 0, sizeof(*ctl));
-	snprintf(ctl->rc_path, TETRISCTL_FS_PATH_MAX, "%s", "./" TETRISCTL_RC_FILENAME);
+	snprintf(ctl->rc_path, TETRISCTL_FILESYSTEM_PATH_MAX, "%s", "./" TETRISCTL_RC_FILENAME);
 	ctl->stop_ms = TETRISCTL_STOP_MS;
 }
 
@@ -73,7 +73,7 @@ int	config_set(t_ctl *ctl, const char *key, const char *value)
 	i = known_index(key);
 	if (i < 0)
 		return (-1);
-	return (set_str(ctl->paths[i], TETRISCTL_FS_PATH_MAX, value));
+	return (set_str(ctl->paths[i], TETRISCTL_FILESYSTEM_PATH_MAX, value));
 }
 
 /**
@@ -168,7 +168,7 @@ int	config_load(t_ctl *ctl, const char *rc_override)
 	if (ctl == NULL)
 		return (-1);
 	config_defaults(ctl);
-	if (config_resolve_rc_path(rc_override, ctl->rc_path, TETRISCTL_FS_PATH_MAX) != 0)
+	if (config_resolve_rc_path(rc_override, ctl->rc_path, TETRISCTL_FILESYSTEM_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(ctl->rc_path, "r");
@@ -268,7 +268,7 @@ static int	add_daemon(t_ctl *ctl, const char *name)
 		return (-1);
 	}
 	snprintf(ctl->daemons[ctl->count].name, TETRISCTL_NAME_MAX, "%s", name);
-	snprintf(ctl->daemons[ctl->count].pid_path, TETRISCTL_FS_PATH_MAX, "%s",
+	snprintf(ctl->daemons[ctl->count].pid_path, TETRISCTL_FILESYSTEM_PATH_MAX, "%s",
 		ctl->paths[i]);
 	ctl->count++;
 	return (0);

@@ -144,7 +144,7 @@ static void	test_sighup_rereads_the_configuration(void)
 	assert(fx_start(&fx) == 0);
 	snprintf(rc, sizeof(rc), "%s/rc", fx.dir);
 	write_rc(rc, "export TETRISD_LOG_LEVEL=error\nexport TETRISD_TICK_MS=25\n");
-	snprintf(fx.srv->cfg.rc_path, TETRISD_FS_PATH_MAX, "%s", rc);
+	snprintf(fx.srv->cfg.rc_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", rc);
 	signals_install(fx.srv);
 	assert(raise(SIGHUP) == 0);
 	assert(player(&fx, &hc, "amber") == 0);
@@ -194,7 +194,7 @@ static void	test_a_failed_boot_leaves_stdin_open(void)
 	fd = open(blocker, O_CREAT | O_WRONLY, 0600);
 	assert(fd >= 0);
 	close(fd);
-	snprintf(fx.cfg.data_dir, TETRISD_FS_PATH_MAX, "%s/sub", blocker);
+	snprintf(fx.cfg.data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s/sub", blocker);
 	srv = NULL;
 	assert(server_start(&fx.cfg, &srv) == -1);
 	assert(fcntl(STDIN_FILENO, F_GETFD) != -1);

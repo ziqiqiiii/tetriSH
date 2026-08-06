@@ -184,7 +184,7 @@ static void	test_env_overrides_file(void)
 
 static void	test_resolve_rc_order(void)
 {
-	char	out[TETRISD_FS_PATH_MAX];
+	char	out[TETRISD_FILESYSTEM_PATH_MAX];
 
 	setenv("TETRISHRC", "/tmp/from-env", 1);
 	assert(config_resolve_rc_path(NULL, out, sizeof(out)) == 0);

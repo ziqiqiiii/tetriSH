@@ -44,7 +44,7 @@ int	logger_init(t_logger *lg, const t_config *cfg)
 		return (-1);
 	logger_blank(lg);
 	atomic_store(&lg->level, cfg->log_level);
-	snprintf(lg->ipc_path, TETRISD_FS_PATH_MAX, "%s", cfg->log_ipc);
+	snprintf(lg->ipc_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", cfg->log_ipc);
 	if (ring_init(&lg->ring, sizeof(t_log_record), TETRISD_LOG_RING_CAPACITY) != 0)
 		return (-1);
 	if (selfpipe_open(lg->wake) != 0)

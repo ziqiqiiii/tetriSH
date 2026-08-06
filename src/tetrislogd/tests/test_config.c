@@ -78,7 +78,7 @@ static void	test_set_known_keys(void)
 
 static void	test_set_rejects_bad_values(void)
 {
-	char	toolong[TETRISLOGD_FS_PATH_MAX + 32];
+	char	toolong[TETRISLOGD_FILESYSTEM_PATH_MAX + 32];
 	t_config	cfg;
 
 	config_defaults(&cfg);
@@ -159,7 +159,7 @@ static void	test_env_overrides_file(void)
 
 static void	test_resolve_rc_order(void)
 {
-	char	out[TETRISLOGD_FS_PATH_MAX];
+	char	out[TETRISLOGD_FILESYSTEM_PATH_MAX];
 
 	unsetenv("TETRISHRC");
 	assert(config_resolve_rc_path(NULL, out, sizeof(out)) == 0);
@@ -197,8 +197,8 @@ static void	test_the_shipped_rc_file_loads(void)
 */
 static void	test_shipped_rc_socket_keys_agree(void)
 {
-	char	dialled[TETRISLOGD_FS_PATH_MAX];
-	char	bound[TETRISLOGD_FS_PATH_MAX];
+	char	dialled[TETRISLOGD_FILESYSTEM_PATH_MAX];
+	char	bound[TETRISLOGD_FILESYSTEM_PATH_MAX];
 
 	assert(rc_value("../../.tetrishrc", "TETRISD_LOG_IPC",
 			dialled, sizeof(dialled)) == 0);

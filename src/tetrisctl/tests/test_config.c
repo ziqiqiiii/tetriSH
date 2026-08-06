@@ -12,10 +12,10 @@
 #include "tetrisctl.h"
 #include <assert.h>
 
-/* smaller than TETRISCTL_FS_PATH_MAX: a mkdtemp dir plus a short leaf is all any case
+/* smaller than TETRISCTL_FILESYSTEM_PATH_MAX: a mkdtemp dir plus a short leaf is all any case
 ** builds, and sizing these from the program's own maximum makes every
 ** snprintf here look to the compiler like it might truncate. */
-#define FIXTURE_DIR_MAX	96
+#define FIXTURE_DIR_MAX		96
 #define FIXTURE_PATH_MAX	256
 
 // Static Functions

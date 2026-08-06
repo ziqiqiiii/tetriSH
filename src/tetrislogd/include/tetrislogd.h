@@ -49,7 +49,7 @@
 # define TETRISLOGD_COMPONENT_NAME		"tetrislogd"
 # define TETRISLOGD_CONFIG_KEY_PREFIX		"TETRISLOGD_"
 # define TETRISLOGD_RC_FILENAME			".tetrishrc"
-# define TETRISLOGD_FS_PATH_MAX		1024
+# define TETRISLOGD_FILESYSTEM_PATH_MAX		1024
 # define TETRISLOGD_CONFIG_LINE_MAX		2048
 
 /* config defaults - all overridable from .tetrishrc */
@@ -83,11 +83,11 @@
 */
 typedef struct s_config
 {
-	char	sock_path[TETRISLOGD_FS_PATH_MAX];
-	char	file_path[TETRISLOGD_FS_PATH_MAX];
-	char	pid_path[TETRISLOGD_FS_PATH_MAX];
-	char	err_path[TETRISLOGD_FS_PATH_MAX];
-	char	rc_path[TETRISLOGD_FS_PATH_MAX];
+	char	sock_path[TETRISLOGD_FILESYSTEM_PATH_MAX];
+	char	file_path[TETRISLOGD_FILESYSTEM_PATH_MAX];
+	char	pid_path[TETRISLOGD_FILESYSTEM_PATH_MAX];
+	char	err_path[TETRISLOGD_FILESYSTEM_PATH_MAX];
+	char	rc_path[TETRISLOGD_FILESYSTEM_PATH_MAX];
 }	t_config;
 
 /*
@@ -123,7 +123,7 @@ typedef struct s_sink
 	bool	dirty;
 	dev_t	dev;
 	ino_t	ino;
-	char	path[TETRISLOGD_FS_PATH_MAX];
+	char	path[TETRISLOGD_FILESYSTEM_PATH_MAX];
 }	t_sink;
 
 /*
@@ -143,7 +143,7 @@ typedef struct s_logd
 	bool		running;
 }	t_logd;
 
-/* CFG.C */
+/* CONFIG.C */
 void	config_defaults(t_config *cfg);
 int		config_set(t_config *cfg, const char *key, const char *value);
 int		config_parse_line(t_config *cfg, const char *line);

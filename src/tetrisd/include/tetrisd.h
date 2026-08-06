@@ -54,7 +54,7 @@
 ** with it.
 */
 
-# define TETRISD_FS_PATH_MAX					1024
+# define TETRISD_FILESYSTEM_PATH_MAX					1024
 # define TETRISD_COMPONENT_NAME					"tetrisd"
 
 /* config defaults - every one of them overridable from .tetrishrc */
@@ -131,15 +131,15 @@ typedef struct s_client	t_client;
 typedef struct s_config
 {
 	int		port;
-	char	data_dir[TETRISD_FS_PATH_MAX];
-	char	config_dir[TETRISD_FS_PATH_MAX];
-	char	cert_path[TETRISD_FS_PATH_MAX];
-	char	key_path[TETRISD_FS_PATH_MAX];
-	char	ca_path[TETRISD_FS_PATH_MAX];
-	char	log_ipc[TETRISD_FS_PATH_MAX];
-	char	pid_path[TETRISD_FS_PATH_MAX];
-	char	err_path[TETRISD_FS_PATH_MAX];
-	char	rc_path[TETRISD_FS_PATH_MAX];
+	char	data_dir[TETRISD_FILESYSTEM_PATH_MAX];
+	char	config_dir[TETRISD_FILESYSTEM_PATH_MAX];
+	char	cert_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char	key_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char	ca_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char	log_ipc[TETRISD_FILESYSTEM_PATH_MAX];
+	char	pid_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char	err_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char	rc_path[TETRISD_FILESYSTEM_PATH_MAX];
 	int		log_level;
 	int		max_clients;
 	int		tick_ms;
@@ -159,7 +159,7 @@ typedef struct s_logger
 	int				sock_fd;
 	int				wake[2];
 	atomic_int		level;
-	char			ipc_path[TETRISD_FS_PATH_MAX];
+	char			ipc_path[TETRISD_FILESYSTEM_PATH_MAX];
 	pthread_t		shipper;
 	bool			shipper_started;
 	atomic_bool		running;

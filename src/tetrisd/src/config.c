@@ -24,14 +24,14 @@ void	config_defaults(t_config *cfg)
 		return ;
 	memset(cfg, 0, sizeof(*cfg));
 	cfg->port = TETRISD_DEFAULT_PORT;
-	snprintf(cfg->data_dir, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_DATA_DIR);
-	snprintf(cfg->config_dir, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CONFIG_DIR);
-	snprintf(cfg->cert_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CERT_PATH);
-	snprintf(cfg->key_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_KEY_PATH);
-	snprintf(cfg->ca_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CA_PATH);
-	snprintf(cfg->log_ipc, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_LOG_IPC_PATH);
-	snprintf(cfg->pid_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_PID_PATH);
-	snprintf(cfg->err_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_ERR_PATH);
+	snprintf(cfg->data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_DATA_DIR);
+	snprintf(cfg->config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_CONFIG_DIR);
+	snprintf(cfg->cert_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_CERT_PATH);
+	snprintf(cfg->key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_KEY_PATH);
+	snprintf(cfg->ca_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_CA_PATH);
+	snprintf(cfg->log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_LOG_IPC_PATH);
+	snprintf(cfg->pid_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_PID_PATH);
+	snprintf(cfg->err_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_ERR_PATH);
 	cfg->log_level = COREIPC_LOG_INFO;
 	cfg->max_clients = TETRISD_DEFAULT_MAX_CLIENTS;
 	cfg->tick_ms = TETRISD_DEFAULT_TICK_MS;
@@ -88,21 +88,21 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 	if (strcmp(key, "PORT") == 0)
 		return (set_int(&cfg->port, value, TETRISD_PORT_MIN, TETRISD_PORT_MAX));
 	if (strcmp(key, "DATA_DIR") == 0)
-		return (set_str(cfg->data_dir, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->data_dir, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "CONFIG_DIR") == 0)
-		return (set_str(cfg->config_dir, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->config_dir, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "CERT_PATH") == 0)
-		return (set_str(cfg->cert_path, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->cert_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "KEY_PATH") == 0)
-		return (set_str(cfg->key_path, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->key_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "CA_PATH") == 0)
-		return (set_str(cfg->ca_path, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->ca_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "LOG_IPC") == 0)
-		return (set_str(cfg->log_ipc, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->log_ipc, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "PID_PATH") == 0)
-		return (set_str(cfg->pid_path, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->pid_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "ERR_PATH") == 0)
-		return (set_str(cfg->err_path, TETRISD_FS_PATH_MAX, value));
+		return (set_str(cfg->err_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "LOG_LEVEL") == 0)
 		return (set_level(&cfg->log_level, value));
 	if (strcmp(key, "MAX_CLIENTS") == 0)
@@ -165,7 +165,7 @@ int	config_load(t_config *cfg, const char *override)
 	if (cfg == NULL)
 		return (-1);
 	config_defaults(cfg);
-	if (config_resolve_rc_path(override, cfg->rc_path, TETRISD_FS_PATH_MAX) != 0)
+	if (config_resolve_rc_path(override, cfg->rc_path, TETRISD_FILESYSTEM_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(cfg->rc_path, "r");
