@@ -79,7 +79,7 @@ static void	test_an_input_flood_is_rate_limited(void)
 	assert(resp.status_code == 429);
 	assert(htttp_message_get_header(&resp, "Retry-After") != NULL);
 	htttp_message_free(&resp);
-	assert(simple(&hc, "LIST", TD_PATH_ROOMS, NULL) == 200);
+	assert(simple(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL) == 200);
 	hc_close(&hc);
 	fx_stop(&fx);
 	printf("PASS test_an_input_flood_is_rate_limited\n");
@@ -420,7 +420,7 @@ static int64_t	login_score(t_fixture *fx, const char *name)
 	t_htttp_message	resp;
 	t_harness		hc;
 	char			body[128];
-	char			text[TD_BODY_MAX];
+	char			text[TETRISD_BODY_MAX_BYTES];
 	const char		*score;
 	int64_t			value;
 
@@ -428,7 +428,7 @@ static int64_t	login_score(t_fixture *fx, const char *name)
 		return (-1);
 	snprintf(body, sizeof(body), "username %s\npassword hunter2\n", name);
 	value = -1;
-	if (hc_request(&hc, "LOGIN", TD_PATH_SESSION, body, &resp) == 0)
+	if (hc_request(&hc, "LOGIN", TETRISD_ROUTE_SESSION, body, &resp) == 0)
 	{
 		if (resp.status_code == 200 && resp.body_len < sizeof(text))
 		{

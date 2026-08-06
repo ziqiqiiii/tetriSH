@@ -2,11 +2,11 @@
 
 // Static Functions
 static void		*ticker_main(void *arg);
-static int		tick_once(t_room_rt *rt, t_sb_state *snaps, t_player_id *pids);
-static bool		room_is_over(t_room_rt *rt);
-static void		record_and_reset(t_room_rt *rt);
-static void		forfeit_slot(t_room_rt *rt, int slot, t_game *out);
-static void		destroy_if_empty(t_room_rt *rt);
+static int		tick_once(t_server_room *server_room, t_sb_state *snaps, t_player_id *pids);
+static bool		room_is_over(t_server_room *server_room);
+static void		record_and_reset(t_server_room *server_room);
+static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
+static void		destroy_if_empty(t_server_room *server_room);
 static int64_t	coins_earned(const t_game *game);
 
 /**
@@ -17,7 +17,7 @@ static int64_t	coins_earned(const t_game *game);
  *
  * @param srv Server whose room runtimes are being prepared.
  */
-void	room_rt_init_all(t_server *srv)
+void	server_room_init_all(t_server *srv)
 {
 	int	i;
 
@@ -41,7 +41,7 @@ void	room_rt_init_all(t_server *srv)
  * @param index Room index, as assigned by the lobby.
  * @return The runtime, or NULL when the index is out of range.
  */
-t_room_rt	*room_rt_at(t_server *srv, int index)
+t_server_room	*server_room_at(t_server *srv, int index)
 {
 	if (srv == NULL || index < 0 || index >= LOBBY_MAX_ROOMS)
 		return (NULL);
@@ -58,7 +58,7 @@ t_room_rt	*room_rt_at(t_server *srv, int index)
  * @param name Room display name.
  * @return The runtime, or NULL when no room carries that name.
  */
-t_room_rt	*room_rt_find(t_server *srv, const char *name)
+t_server_room	*server_room_find(t_server *srv, const char *name)
 {
 	t_room	*room;
 
@@ -69,7 +69,7 @@ t_room_rt	*room_rt_find(t_server *srv, const char *name)
 	pthread_mutex_unlock(&srv->lobby_mutex);
 	if (room == NULL)
 		return (NULL);
-	return (room_rt_at(srv, (int)(room - srv->lobby.rooms)));
+	return (server_room_at(srv, (int)(room - srv->lobby.rooms)));
 }
 
 /**
@@ -82,14 +82,14 @@ t_room_rt	*room_rt_find(t_server *srv, const char *name)
  * @param pid Player being asked about.
  * @return true when that player still has a live connection.
  */
-bool	room_rt_probe(void *ctx, t_player_id pid)
+bool	server_room_probe(void *ctx, t_player_id pid)
 {
 	t_server	*srv;
 
 	srv = ctx;
 	if (srv == NULL)
 		return (false);
-	return (reg_player_online(&srv->reg, pid));
+	return (registry_player_online(&srv->reg, pid));
 }
 
 /**
@@ -104,21 +104,21 @@ bool	room_rt_probe(void *ctx, t_player_id pid)
  * @param cli Client whose binding is checked; cleared when stale.
  * @return true when the client is still seated where it thinks it is.
  */
-bool	room_rt_seated(t_server *srv, t_client *cli)
+bool	server_room_seated(t_server *srv, t_client *cli)
 {
-	t_room_rt	*rt;
+	t_server_room	*server_room;
 	bool		seated;
 
 	if (srv == NULL || cli == NULL || cli->room_index < 0)
 		return (false);
-	rt = room_rt_at(srv, cli->room_index);
+	server_room = server_room_at(srv, cli->room_index);
 	seated = false;
-	if (rt != NULL)
+	if (server_room != NULL)
 	{
-		pthread_mutex_lock(&rt->mutex);
-		seated = strcmp(rt->room->name, cli->room_name) == 0
-			&& room_find_member(rt->room, cli->player_id) != NULL;
-		pthread_mutex_unlock(&rt->mutex);
+		pthread_mutex_lock(&server_room->mutex);
+		seated = strcmp(server_room->room->name, cli->room_name) == 0
+			&& room_find_member(server_room->room, cli->player_id) != NULL;
+		pthread_mutex_unlock(&server_room->mutex);
 	}
 	if (!seated)
 	{
@@ -135,44 +135,44 @@ bool	room_rt_seated(t_server *srv, t_client *cli)
  * A previous game's ticker is joined first, so a room can host game after
  * game without leaking a thread each time.
  *
- * @param rt Room runtime to start; its room must already be IN_GAME.
+ * @param server_room Room runtime to start; its room must already be IN_GAME.
  * @param srv Server the room belongs to.
  * @return 0 on success, -1 when the thread could not be created.
  */
-int	room_rt_begin(t_room_rt *rt, t_server *srv)
+int	server_room_begin(t_server_room *server_room, t_server *srv)
 {
-	if (rt == NULL || srv == NULL)
+	if (server_room == NULL || srv == NULL)
 		return (-1);
-	if (rt->ticker_started)
+	if (server_room->ticker_started)
 	{
-		pthread_join(rt->ticker, NULL);
-		rt->ticker_started = false;
+		pthread_join(server_room->ticker, NULL);
+		server_room->ticker_started = false;
 	}
-	rt->srv = srv;
-	clock_gettime(CLOCK_MONOTONIC, &rt->last_tick);
-	atomic_store(&rt->running, true);
-	if (pthread_create(&rt->ticker, NULL, ticker_main, rt) != 0)
+	server_room->srv = srv;
+	clock_gettime(CLOCK_MONOTONIC, &server_room->last_tick);
+	atomic_store(&server_room->running, true);
+	if (pthread_create(&server_room->ticker, NULL, ticker_main, server_room) != 0)
 	{
-		atomic_store(&rt->running, false);
+		atomic_store(&server_room->running, false);
 		return (-1);
 	}
-	rt->ticker_started = true;
+	server_room->ticker_started = true;
 	return (0);
 }
 
 /**
  * @brief Stops a room's ticker and waits for it to finish.
  *
- * @param rt Room runtime to stop; safe when no ticker ever ran.
+ * @param server_room Room runtime to stop; safe when no ticker ever ran.
  */
-void	room_rt_stop(t_room_rt *rt)
+void	server_room_stop(t_server_room *server_room)
 {
-	if (rt == NULL)
+	if (server_room == NULL)
 		return ;
-	atomic_store(&rt->running, false);
-	if (rt->ticker_started)
-		pthread_join(rt->ticker, NULL);
-	rt->ticker_started = false;
+	atomic_store(&server_room->running, false);
+	if (server_room->ticker_started)
+		pthread_join(server_room->ticker, NULL);
+	server_room->ticker_started = false;
 }
 
 /**
@@ -185,33 +185,33 @@ void	room_rt_stop(t_room_rt *rt)
  * @param srv Server the client belongs to.
  * @param cli Client leaving; its room binding is cleared.
  */
-void	room_rt_forfeit(t_server *srv, t_client *cli)
+void	server_room_forfeit(t_server *srv, t_client *cli)
 {
 	t_release_result	res;
-	t_room_rt			*rt;
+	t_server_room			*server_room;
 	t_game				finished;
 
 	if (srv == NULL || cli == NULL || cli->room_index < 0)
 		return ;
-	rt = room_rt_at(srv, cli->room_index);
+	server_room = server_room_at(srv, cli->room_index);
 	game_reset(&finished);
-	if (rt != NULL)
+	if (server_room != NULL)
 	{
-		pthread_mutex_lock(&rt->mutex);
-		if (strcmp(rt->room->name, cli->room_name) == 0
-			&& room_find_member(rt->room, cli->player_id) != NULL)
+		pthread_mutex_lock(&server_room->mutex);
+		if (strcmp(server_room->room->name, cli->room_name) == 0
+			&& room_find_member(server_room->room, cli->player_id) != NULL)
 		{
-			forfeit_slot(rt, cli->slot_index, &finished);
+			forfeit_slot(server_room, cli->slot_index, &finished);
 			memset(&res, 0, sizeof(res));
-			room_release(rt->room, cli->player_id, room_rt_probe, srv, &res);
+			room_release(server_room->room, cli->player_id, server_room_probe, srv, &res);
 		}
-		pthread_mutex_unlock(&rt->mutex);
+		pthread_mutex_unlock(&server_room->mutex);
 	}
 	if (finished.player_id != 0)
 		db_record_game(srv->db, finished.player_id,
 			(int64_t)finished.score.total, coins_earned(&finished), false);
-	if (rt != NULL)
-		destroy_if_empty(rt);
+	if (server_room != NULL)
+		destroy_if_empty(server_room);
 	cli->room_index = -1;
 	cli->slot_index = -1;
 	cli->room_name[0] = '\0';
@@ -223,23 +223,23 @@ void	room_rt_forfeit(t_server *srv, t_client *cli)
  * The subject rides in the request path (ADR-0003), so the body stays a pure
  * projection of one game and says nothing about whose it is.
  *
- * @param rt Room runtime the snapshot came from (unused beyond context).
+ * @param server_room Room runtime the snapshot came from (unused beyond context).
  * @param room_name Room the subject is playing in.
  * @param pid The subject player.
  * @param snap Snapshot to encode and push.
  */
-void	room_rt_push_state(t_room_rt *rt, const char *room_name,
+void	server_room_push_state(t_server_room *server_room, const char *room_name,
 		t_player_id pid, const t_sb_state *snap)
 {
 	t_htttp_message	msg;
 	unsigned char	*bytes;
-	char			path[TD_LINE_MAX];
-	char			body[TD_BODY_MAX];
+	char			path[TETRISD_CONFIG_LINE_MAX];
+	char			body[TETRISD_BODY_MAX_BYTES];
 	size_t			len;
 	int				body_len;
 
 	body_len = sb_state_encode(snap, body, sizeof(body));
-	if (rt == NULL || body_len <= 0)
+	if (server_room == NULL || body_len <= 0)
 		return ;
 	snprintf(path, sizeof(path), "/room/%s/player/%llu", room_name,
 		(unsigned long long)pid);
@@ -250,7 +250,7 @@ void	room_rt_push_state(t_room_rt *rt, const char *room_name,
 		&& htttp_message_set_body(&msg, body, (size_t)body_len) == HTTTP_OK
 		&& htttp_serialize(&msg, &bytes, &len) == HTTTP_OK)
 	{
-		if (reg_enqueue(&rt->srv->reg, pid, bytes, len, true) != 0)
+		if (registry_enqueue(&server_room->srv->reg, pid, bytes, len, true) != 0)
 			free(bytes);
 	}
 	htttp_message_free(&msg);
@@ -273,106 +273,106 @@ static void	*ticker_main(void *arg)
 	t_sb_state		snaps[TD_MAX_GAMES];
 	t_player_id		pids[TD_MAX_GAMES];
 	struct timespec	period;
-	t_room_rt		*rt;
+	t_server_room		*server_room;
 	char			name[ROOM_NAME_MAX];
 	int				n;
 
-	rt = arg;
+	server_room = arg;
 	period.tv_sec = 0;
-	while (atomic_load(&rt->running) && atomic_load(&rt->srv->running))
+	while (atomic_load(&server_room->running) && atomic_load(&server_room->srv->running))
 	{
-		period.tv_nsec = (long)atomic_load(&rt->srv->tick_ms) * 1000000L;
+		period.tv_nsec = (long)atomic_load(&server_room->srv->tick_ms) * 1000000L;
 		nanosleep(&period, NULL);
-		pthread_mutex_lock(&rt->mutex);
-		snprintf(name, sizeof(name), "%s", rt->room->name);
-		pthread_mutex_unlock(&rt->mutex);
-		n = tick_once(rt, snaps, pids);
+		pthread_mutex_lock(&server_room->mutex);
+		snprintf(name, sizeof(name), "%s", server_room->room->name);
+		pthread_mutex_unlock(&server_room->mutex);
+		n = tick_once(server_room, snaps, pids);
 		while (n > 0)
 		{
 			n--;
-			room_rt_push_state(rt, name, pids[n], &snaps[n]);
+			server_room_push_state(server_room, name, pids[n], &snaps[n]);
 		}
-		if (room_is_over(rt))
+		if (room_is_over(server_room))
 		{
-			n = tick_once(rt, snaps, pids);
+			n = tick_once(server_room, snaps, pids);
 			while (n > 0)
 			{
 				n--;
-				room_rt_push_state(rt, name, pids[n], &snaps[n]);
+				server_room_push_state(server_room, name, pids[n], &snaps[n]);
 			}
 			break ;
 		}
 	}
-	record_and_reset(rt);
-	destroy_if_empty(rt);
-	atomic_store(&rt->running, false);
+	record_and_reset(server_room);
+	destroy_if_empty(server_room);
+	atomic_store(&server_room->running, false);
 	return (NULL);
 }
 
 /**
  * @brief Advances every live game in the room and collects what changed.
  *
- * @param rt Room runtime to advance.
+ * @param server_room Room runtime to advance.
  * @param snaps Receives one snapshot per changed game.
  * @param pids Receives the matching subject player ids.
  * @return Number of snapshots collected.
  */
-static int	tick_once(t_room_rt *rt, t_sb_state *snaps, t_player_id *pids)
+static int	tick_once(t_server_room *server_room, t_sb_state *snaps, t_player_id *pids)
 {
 	int	elapsed;
 	int	slot;
 	int	n;
 
 	n = 0;
-	pthread_mutex_lock(&rt->mutex);
-	elapsed = net_elapsed_ms(&rt->last_tick);
+	pthread_mutex_lock(&server_room->mutex);
+	elapsed = clock_elapsed_ms(&server_room->last_tick);
 	slot = 0;
-	while (slot < rt->room->slot_count && slot < TD_MAX_GAMES)
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		if (rt->games[slot].player_id != 0)
+		if (server_room->games[slot].player_id != 0)
 		{
-			if (game_gravity(&rt->games[slot], elapsed))
-				rt->dirty[slot] = true;
-			if (rt->dirty[slot])
+			if (game_gravity(&server_room->games[slot], elapsed))
+				server_room->dirty[slot] = true;
+			if (server_room->dirty[slot])
 			{
-				game_snapshot(&rt->games[slot], &snaps[n]);
-				pids[n] = rt->games[slot].player_id;
-				rt->dirty[slot] = false;
+				game_snapshot(&server_room->games[slot], &snaps[n]);
+				pids[n] = server_room->games[slot].player_id;
+				server_room->dirty[slot] = false;
 				n++;
 			}
 		}
 		slot++;
 	}
-	pthread_mutex_unlock(&rt->mutex);
+	pthread_mutex_unlock(&server_room->mutex);
 	return (n);
 }
 
 /**
  * @brief Reports whether the room has nothing left to tick.
  *
- * @param rt Room runtime to check.
+ * @param server_room Room runtime to check.
  * @return true when every game has ended or every player has left.
  */
-static bool	room_is_over(t_room_rt *rt)
+static bool	room_is_over(t_server_room *server_room)
 {
 	bool	over;
 	int		slot;
 
 	over = true;
-	pthread_mutex_lock(&rt->mutex);
-	if (rt->room->number_of_players == 0)
+	pthread_mutex_lock(&server_room->mutex);
+	if (server_room->room->number_of_players == 0)
 	{
-		pthread_mutex_unlock(&rt->mutex);
+		pthread_mutex_unlock(&server_room->mutex);
 		return (true);
 	}
 	slot = 0;
-	while (slot < rt->room->slot_count && slot < TD_MAX_GAMES)
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		if (rt->games[slot].active)
+		if (server_room->games[slot].active)
 			over = false;
 		slot++;
 	}
-	pthread_mutex_unlock(&rt->mutex);
+	pthread_mutex_unlock(&server_room->mutex);
 	return (over);
 }
 
@@ -384,34 +384,34 @@ static bool	room_is_over(t_room_rt *rt)
  * room domain's rule), so the room ends empty and is handed back to the
  * lobby; players who want another game join a fresh one.
  *
- * @param rt Room runtime whose game has ended.
+ * @param server_room Room runtime whose game has ended.
  */
-static void	record_and_reset(t_room_rt *rt)
+static void	record_and_reset(t_server_room *server_room)
 {
 	t_game	played[TD_MAX_GAMES];
 	int		n;
 	int		slot;
 
 	n = 0;
-	pthread_mutex_lock(&rt->mutex);
+	pthread_mutex_lock(&server_room->mutex);
 	slot = 0;
-	while (slot < rt->room->slot_count && slot < TD_MAX_GAMES)
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		if (rt->games[slot].player_id != 0 && !rt->games[slot].recorded)
+		if (server_room->games[slot].player_id != 0 && !server_room->games[slot].recorded)
 		{
-			rt->games[slot].recorded = true;
-			played[n++] = rt->games[slot];
+			server_room->games[slot].recorded = true;
+			played[n++] = server_room->games[slot];
 		}
-		game_reset(&rt->games[slot]);
-		rt->dirty[slot] = false;
+		game_reset(&server_room->games[slot]);
+		server_room->dirty[slot] = false;
 		slot++;
 	}
-	room_finish(rt->room);
-	pthread_mutex_unlock(&rt->mutex);
+	room_finish(server_room->room);
+	pthread_mutex_unlock(&server_room->mutex);
 	while (n > 0)
 	{
 		n--;
-		db_record_game(rt->srv->db, played[n].player_id,
+		db_record_game(server_room->srv->db, played[n].player_id,
 			(int64_t)played[n].score.total, coins_earned(&played[n]),
 			!played[n].topped_out);
 	}
@@ -420,24 +420,24 @@ static void	record_and_reset(t_room_rt *rt)
 /**
  * @brief Ends one slot's game so the leaver's result can be recorded.
  *
- * @param rt Room runtime, with its mutex already held.
+ * @param server_room Room runtime, with its mutex already held.
  * @param slot 1-based slot index the player occupied.
  * @param out Receives the finished game, or a blank game when there was none.
  */
-static void	forfeit_slot(t_room_rt *rt, int slot, t_game *out)
+static void	forfeit_slot(t_server_room *server_room, int slot, t_game *out)
 {
 	int	index;
 
 	index = slot - 1;
 	if (index < 0 || index >= TD_MAX_GAMES)
 		return ;
-	if (rt->games[index].player_id == 0 || rt->games[index].recorded)
+	if (server_room->games[index].player_id == 0 || server_room->games[index].recorded)
 		return ;
-	rt->games[index].active = false;
-	rt->games[index].recorded = true;
-	*out = rt->games[index];
-	game_reset(&rt->games[index]);
-	rt->dirty[index] = false;
+	server_room->games[index].active = false;
+	server_room->games[index].recorded = true;
+	*out = server_room->games[index];
+	game_reset(&server_room->games[index]);
+	server_room->dirty[index] = false;
 }
 
 /**
@@ -453,21 +453,21 @@ static void	forfeit_slot(t_room_rt *rt, int slot, t_game *out)
  * locks depending on who was asking - which is a data race, not a lock order.
  * Taking the lobby first keeps the documented order intact.
  *
- * @param rt Room runtime to check; its mutex must not be held.
+ * @param server_room Room runtime to check; its mutex must not be held.
  */
-static void	destroy_if_empty(t_room_rt *rt)
+static void	destroy_if_empty(t_server_room *server_room)
 {
 	char	name[ROOM_NAME_MAX];
 	bool	empty;
 
-	pthread_mutex_lock(&rt->srv->lobby_mutex);
-	pthread_mutex_lock(&rt->mutex);
-	empty = rt->room->number_of_players == 0;
-	snprintf(name, sizeof(name), "%s", rt->room->name);
+	pthread_mutex_lock(&server_room->srv->lobby_mutex);
+	pthread_mutex_lock(&server_room->mutex);
+	empty = server_room->room->number_of_players == 0;
+	snprintf(name, sizeof(name), "%s", server_room->room->name);
 	if (empty)
-		lobby_destroy_room(&rt->srv->lobby, name);
-	pthread_mutex_unlock(&rt->mutex);
-	pthread_mutex_unlock(&rt->srv->lobby_mutex);
+		lobby_destroy_room(&server_room->srv->lobby, name);
+	pthread_mutex_unlock(&server_room->mutex);
+	pthread_mutex_unlock(&server_room->srv->lobby_mutex);
 }
 
 /**

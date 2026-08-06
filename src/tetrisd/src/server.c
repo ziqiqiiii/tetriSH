@@ -3,7 +3,7 @@
 // Static Functions
 static void	*loop_main(void *arg);
 static void	accept_ready(t_server *srv);
-static int	bring_up(t_server *srv, const t_cfg *cfg);
+static int	bring_up(t_server *srv, const t_config *cfg);
 static void	stop_rooms(t_server *srv);
 static void	destroy(t_server *srv);
 
@@ -18,13 +18,13 @@ static void	destroy(t_server *srv);
  * @param out Receives the running server.
  * @return 0 on success, -1 when the configuration or a resource failed.
  */
-int	server_start(const t_cfg *cfg, t_server **out)
+int	server_start(const t_config *cfg, t_server **out)
 {
 	t_server	*srv;
 
 	if (cfg == NULL || out == NULL)
 		return (-1);
-	if (cfg_validate(cfg) != 0)
+	if (config_validate(cfg) != 0)
 		return (-1);
 	srv = calloc(1, sizeof(*srv));
 	if (srv == NULL)
@@ -42,7 +42,7 @@ int	server_start(const t_cfg *cfg, t_server **out)
 		return (-1);
 	}
 	srv->loop_started = true;
-	log_emit(&srv->log, CIPC_LOG_INFO, "tetrisd listening on port %d",
+	logger_emit(&srv->log, CIPC_LOG_INFO, "tetrisd listening on port %d",
 		srv->port);
 	*out = srv;
 	return (0);
@@ -56,7 +56,7 @@ int	server_start(const t_cfg *cfg, t_server **out)
  * room tickers and close the store.
  *
  * Clients are drained before the rooms on purpose. A client thread can be
- * inside START - and therefore inside room_rt_begin - at any moment, so
+ * inside START - and therefore inside server_room_begin - at any moment, so
  * stopping the tickers while clients still exist would race one thread
  * creating a ticker against another joining it. Once the registry is empty no
  * such thread remains, which removes the race rather than synchronising it.
@@ -76,11 +76,11 @@ void	server_stop(t_server *srv)
 	if (srv->loop_started)
 		pthread_join(srv->loop, NULL);
 	srv->loop_started = false;
-	reg_shutdown_all(&srv->reg);
-	reg_wait_empty(&srv->reg);
+	registry_shutdown_all(&srv->reg);
+	registry_wait_empty(&srv->reg);
 	stop_rooms(srv);
-	log_emit(&srv->log, CIPC_LOG_INFO, "tetrisd stopped (%llu logs dropped)",
-		(unsigned long long)log_dropped(&srv->log));
+	logger_emit(&srv->log, CIPC_LOG_INFO, "tetrisd stopped (%llu logs dropped)",
+		(unsigned long long)logger_dropped_count(&srv->log));
 	destroy(srv);
 }
 
@@ -139,13 +139,13 @@ void	server_request_stop(t_server *srv)
  */
 void	server_reload(t_server *srv)
 {
-	t_cfg	fresh;
+	t_config	fresh;
 
 	if (srv == NULL)
 		return ;
-	if (cfg_load(&fresh, srv->cfg.rc_path) != 0)
+	if (config_load(&fresh, srv->cfg.rc_path) != 0)
 	{
-		log_emit(&srv->log, CIPC_LOG_WARNING,
+		logger_emit(&srv->log, CIPC_LOG_WARNING,
 			"reload failed: %s has an invalid setting", srv->cfg.rc_path);
 		return ;
 	}
@@ -153,7 +153,7 @@ void	server_reload(t_server *srv)
 	atomic_store(&srv->log.level, fresh.log_level);
 	srv->cfg.tick_ms = fresh.tick_ms;
 	atomic_store(&srv->tick_ms, fresh.tick_ms);
-	log_emit(&srv->log, CIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
+	logger_emit(&srv->log, CIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
 }
 
 /**
@@ -189,8 +189,8 @@ static void	*loop_main(void *arg)
 				atomic_store(&srv->running, false);
 			if (signals_take_reload())
 				server_reload(srv);
-			if (signals_take_dump())
-				state_dump(srv);
+			if (signals_take_state_dump())
+				server_state_dump(srv);
 		}
 		if (pfds[0].revents & POLLIN)
 			accept_ready(srv);
@@ -207,15 +207,15 @@ static void	accept_ready(t_server *srv)
 {
 	int	fd;
 
-	fd = net_accept(srv->listen_fd);
+	fd = listener_accept(srv->listen_fd);
 	while (fd >= 0)
 	{
-		if (cli_spawn(srv, fd) != 0)
-			log_emit(&srv->log, CIPC_LOG_WARNING,
+		if (client_spawn(srv, fd) != 0)
+			logger_emit(&srv->log, CIPC_LOG_WARNING,
 				"refused a connection: client limit reached");
 		if (!atomic_load(&srv->running))
 			return ;
-		fd = net_accept(srv->listen_fd);
+		fd = listener_accept(srv->listen_fd);
 	}
 }
 
@@ -226,35 +226,35 @@ static void	accept_ready(t_server *srv)
  * @param cfg Configuration to run with.
  * @return 0 on success, -1 when any resource could not be opened.
  */
-static int	bring_up(t_server *srv, const t_cfg *cfg)
+static int	bring_up(t_server *srv, const t_config *cfg)
 {
 	srv->cfg = *cfg;
 	srv->listen_fd = -1;
 	srv->wake[SP_READ] = -1;
 	srv->wake[SP_WRITE] = -1;
 	atomic_store(&srv->tick_ms, cfg->tick_ms);
-	srv->started_ms = net_now_ms();
-	log_blank(&srv->log);
+	srv->started_ms = clock_now_ms();
+	logger_blank(&srv->log);
 	pthread_mutex_init(&srv->lobby_mutex, NULL);
 	lobby_init(&srv->lobby, LOBBY_MAX_ROOMS, cfg->br_slots);
-	room_rt_init_all(srv);
-	if (net_mkdir_p(cfg->data_dir) != 0)
+	server_room_init_all(srv);
+	if (cd_mkdir_p(cfg->data_dir) != 0)
 		return (-1);
-	if (log_init(&srv->log, &srv->cfg) != 0)
+	if (logger_init(&srv->log, &srv->cfg) != 0)
 		return (-1);
 	if (db_open(cfg->data_dir, cfg->config_dir, &srv->db) != DB_OK)
 	{
-		log_emit(&srv->log, CIPC_LOG_ERROR, "cannot open the player store");
+		logger_emit(&srv->log, CIPC_LOG_ERROR, "cannot open the player store");
 		return (-1);
 	}
-	if (reg_init(&srv->reg, (size_t)cfg->max_clients) != 0)
+	if (registry_init(&srv->reg, (size_t)cfg->max_clients) != 0)
 		return (-1);
 	if (sp_pipe(srv->wake) != 0)
 		return (-1);
-	srv->listen_fd = net_listen(cfg->port, &srv->port);
+	srv->listen_fd = listener_open(cfg->port, &srv->port);
 	if (srv->listen_fd < 0)
 	{
-		log_emit(&srv->log, CIPC_LOG_ERROR, "cannot listen on port %d",
+		logger_emit(&srv->log, CIPC_LOG_ERROR, "cannot listen on port %d",
 			cfg->port);
 		return (-1);
 	}
@@ -273,7 +273,7 @@ static void	stop_rooms(t_server *srv)
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
 	{
-		room_rt_stop(&srv->rooms[i]);
+		server_room_stop(&srv->rooms[i]);
 		i++;
 	}
 }
@@ -303,9 +303,9 @@ static void	destroy(t_server *srv)
 		i++;
 	}
 	pthread_mutex_destroy(&srv->lobby_mutex);
-	reg_destroy(&srv->reg);
+	registry_destroy(&srv->reg);
 	if (srv->db != NULL)
 		db_close(srv->db);
-	log_shutdown(&srv->log);
+	logger_shutdown(&srv->log);
 	free(srv);
 }

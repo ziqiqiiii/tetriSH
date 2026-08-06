@@ -1,8 +1,8 @@
 #include "tetrisd.h"
 
 // Static Functions
-static void	free_msg(t_outmsg *msg);
-static bool	take_next(t_outbox *ob, t_outmsg *out);
+static void	free_msg(t_outbound_message *msg);
+static bool	take_next(t_outbox *ob, t_outbound_message *out);
 
 /**
  * @brief Prepares an empty outbox for one client.
@@ -10,7 +10,7 @@ static bool	take_next(t_outbox *ob, t_outmsg *out);
  * @param ob Outbox to initialise.
  * @return 0 on success, -1 when the mutex or condition variable failed.
  */
-int	ob_init(t_outbox *ob)
+int	outbox_init(t_outbox *ob)
 {
 	if (ob == NULL)
 		return (-1);
@@ -37,21 +37,21 @@ int	ob_init(t_outbox *ob)
  * @param len Length of bytes.
  * @return 0 when queued, -1 when the outbox is closed or full.
  */
-int	ob_push(t_outbox *ob, unsigned char *bytes, size_t len)
+int	outbox_push(t_outbox *ob, unsigned char *bytes, size_t len)
 {
 	size_t	slot;
 
 	if (ob == NULL || bytes == NULL)
 		return (-1);
 	pthread_mutex_lock(&ob->mutex);
-	if (ob->closed || ob->count == TD_OUTBOX_CAP)
+	if (ob->closed || ob->count == TETRISD_OUTBOX_CAPACITY)
 	{
 		if (!ob->closed)
 			atomic_store(&ob->overflowed, true);
 		pthread_mutex_unlock(&ob->mutex);
 		return (-1);
 	}
-	slot = (ob->head + ob->count) % TD_OUTBOX_CAP;
+	slot = (ob->head + ob->count) % TETRISD_OUTBOX_CAPACITY;
 	ob->slots[slot].bytes = bytes;
 	ob->slots[slot].len = len;
 	ob->count++;
@@ -72,7 +72,7 @@ int	ob_push(t_outbox *ob, unsigned char *bytes, size_t len)
  * @param len Length of bytes.
  * @return 0 when mailed, -1 when the outbox is closed.
  */
-int	ob_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
+int	outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
 {
 	if (ob == NULL || bytes == NULL)
 		return (-1);
@@ -94,7 +94,7 @@ int	ob_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
 /**
  * @brief Waits for the next message to send, blocking while the outbox is idle.
  *
- * Queued responses go out before the STATE mailbox: a reply is part of a
+ * Queued responses go out before the STATE mailbox: a request_reply is part of a
  * request the client is waiting on, while a snapshot is only ever the latest
  * truth. The caller owns the returned bytes.
  *
@@ -102,7 +102,7 @@ int	ob_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
  * @param out Receives the message.
  * @return 0 when a message was taken, -1 once the outbox is closed and empty.
  */
-int	ob_pop(t_outbox *ob, t_outmsg *out)
+int	outbox_pop(t_outbox *ob, t_outbound_message *out)
 {
 	if (ob == NULL || out == NULL)
 		return (-1);
@@ -126,7 +126,7 @@ int	ob_pop(t_outbox *ob, t_outmsg *out)
  *
  * @param ob Outbox to close.
  */
-void	ob_close(t_outbox *ob)
+void	outbox_close(t_outbox *ob)
 {
 	size_t	i;
 
@@ -137,7 +137,7 @@ void	ob_close(t_outbox *ob)
 	i = 0;
 	while (i < ob->count)
 	{
-		free_msg(&ob->slots[(ob->head + i) % TD_OUTBOX_CAP]);
+		free_msg(&ob->slots[(ob->head + i) % TETRISD_OUTBOX_CAPACITY]);
 		i++;
 	}
 	ob->count = 0;
@@ -153,11 +153,11 @@ void	ob_close(t_outbox *ob)
  *
  * @param ob Outbox to destroy; must have no waiters left.
  */
-void	ob_destroy(t_outbox *ob)
+void	outbox_destroy(t_outbox *ob)
 {
 	if (ob == NULL)
 		return ;
-	ob_close(ob);
+	outbox_close(ob);
 	pthread_cond_destroy(&ob->cond);
 	pthread_mutex_destroy(&ob->mutex);
 }
@@ -167,7 +167,7 @@ void	ob_destroy(t_outbox *ob)
  *
  * @param msg Message slot to clear.
  */
-static void	free_msg(t_outmsg *msg)
+static void	free_msg(t_outbound_message *msg)
 {
 	free(msg->bytes);
 	msg->bytes = NULL;
@@ -181,14 +181,14 @@ static void	free_msg(t_outmsg *msg)
  * @param out Receives the message.
  * @return true when a message was taken, false when there was nothing left.
  */
-static bool	take_next(t_outbox *ob, t_outmsg *out)
+static bool	take_next(t_outbox *ob, t_outbound_message *out)
 {
 	if (ob->count > 0)
 	{
 		*out = ob->slots[ob->head];
 		ob->slots[ob->head].bytes = NULL;
 		ob->slots[ob->head].len = 0;
-		ob->head = (ob->head + 1) % TD_OUTBOX_CAP;
+		ob->head = (ob->head + 1) % TETRISD_OUTBOX_CAPACITY;
 		ob->count--;
 		return (true);
 	}

@@ -54,51 +54,51 @@
 ** with it.
 */
 
-# define TD_PATH_MAX		1024
-# define TD_COMPONENT		"tetrisd"
+# define TETRISD_FS_PATH_MAX					1024
+# define TETRISD_COMPONENT_NAME					"tetrisd"
 
 /* config defaults - every one of them overridable from .tetrishrc */
-# define TD_DEF_PORT		4242
-# define TD_DEF_DATA_DIR	"tmp/tetrisd"
-# define TD_DEF_CONFIG_DIR	"lib/libmacminidb/config"
-# define TD_DEF_CERT		"certs/server.crt"
-# define TD_DEF_KEY			"certs/server.key"
-# define TD_DEF_CA			"certs/ca.crt"
-# define TD_DEF_LOG_IPC		"tmp/tetrisd/tetrislogd.sock"
-# define TD_DEF_PID			"tmp/tetrisd/tetrisd.pid"
-# define TD_DEF_ERR			"tmp/tetrisd/tetrisd.err"
-# define TD_DEF_MAX_CLIENTS	64
-# define TD_DEF_TICK_MS		12
-# define TD_DEF_BR_SLOTS	4
-# define TD_DEF_INPUT_BURST	120
-# define TD_DEF_INPUT_RATE	60
-# define TD_RC_NAME			".tetrishrc"
-# define TD_KEY_PREFIX		"TETRISD_"
+# define TETRISD_DEFAULT_PORT					4242
+# define TETRISD_DEFAULT_DATA_DIR				"tmp/tetrisd"
+# define TETRISD_DEFAULT_CONFIG_DIR				"lib/libmacminidb/config"
+# define TETRISD_DEFAULT_CERT_PATH				"certs/server.crt"
+# define TETRISD_DEFAULT_KEY_PATH				"certs/server.key"
+# define TETRISD_DEFAULT_CA_PATH				"certs/ca.crt"
+# define TETRISD_DEFAULT_LOG_IPC_PATH			"tmp/tetrisd/tetrislogd.sock"
+# define TETRISD_DEFAULT_PID_PATH				"tmp/tetrisd/tetrisd.pid"
+# define TETRISD_DEFAULT_ERR_PATH				"tmp/tetrisd/tetrisd.err"
+# define TETRISD_DEFAULT_MAX_CLIENTS			64
+# define TETRISD_DEFAULT_TICK_MS				12
+# define TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS	4
+# define TETRISD_DEFAULT_INPUT_BURST			120
+# define TETRISD_DEFAULT_INPUT_RATE				60
+# define TETRISD_RC_FILENAME					".tetrishrc"
+# define TETRISD_CONFIG_KEY_PREFIX				"TETRISD_"
 
-# define TD_MIN_PORT		0
-# define TD_MAX_PORT		65535
-# define TD_MIN_TICK_MS		1
-# define TD_MAX_TICK_MS		1000
-# define TD_MAX_CLIENT_CAP	4096
-# define TD_MIN_INPUT_LIMIT	1
-# define TD_MAX_INPUT_LIMIT	10000
+# define TETRISD_PORT_MIN						0
+# define TETRISD_PORT_MAX						65535
+# define TETRISD_TICK_MS_MIN					1
+# define TETRISD_TICK_MS_MAX					1000
+# define TETRISD_MAX_CLIENTS_LIMIT				4096
+# define TETRISD_INPUT_LIMIT_MIN				1
+# define TETRISD_INPUT_LIMIT_MAX				10000
 
 /*
 ** The token bucket is counted in thousandths of a token, so a refill rate in
 ** whole tokens per second turns into an exact integer per millisecond and no
 ** floating point is needed on the input path.
 */
-# define TD_TOKEN_SCALE		1000
+# define TETRISD_TOKEN_SCALE					1000
 
 /* buffers */
-# define TD_FRAME_MAX		HTTTP_MAX_MESSAGE_SIZE
-# define TD_BODY_MAX		8192
-# define TD_LINE_MAX		512
-# define TD_OUTBOX_CAP		32
-# define TD_LOG_RING_CAP	1024
-# define TD_LOG_DRAIN_MAX	64
-# define TD_SHIPPER_WAIT_MS	20
-# define TD_PASSWORD_MAX	128
+# define TETRISD_FRAME_MAX_BYTES				HTTTP_MAX_MESSAGE_SIZE
+# define TETRISD_BODY_MAX_BYTES					8192
+# define TETRISD_CONFIG_LINE_MAX				512
+# define TETRISD_OUTBOX_CAPACITY				32
+# define TETRISD_LOG_RING_CAPACITY				1024
+# define TETRISD_LOG_DRAIN_MAX					64
+# define TETRISD_LOG_SHIPPER_WAIT_MS			20
+# define TETRISD_PASSWORD_MAX					128
 
 /*
 ** How long a LOGIN waits for the connection it displaced to finish tearing
@@ -106,20 +106,20 @@
 ** thread wakes at once; this is only a guard against waiting forever if it
 ** somehow does not.
 */
-# define TD_DISPLACE_WAIT_MS	3000
+# define TD_DISPLACE_WAIT_MS					3000
 
 /*
 ** Games a single room can run at once. The room domain allows 99 slots, but
 ** a game is a whole board: sizing every room for the maximum would cost tens
 ** of megabytes for rooms that hold one or four players.
 */
-# define TD_MAX_GAMES		16
+# define TD_MAX_GAMES							16
 
 /* content types and the routes M1 serves */
-# define TD_PATH_ACCOUNT	"/account"
-# define TD_PATH_SESSION	"/session"
-# define TD_PATH_ROOMS		"/rooms"
-# define TD_PATH_ROOM		"/room/"
+# define TETRISD_ROUTE_ACCOUNT					"/account"
+# define TETRISD_ROUTE_SESSION					"/session"
+# define TETRISD_ROUTE_ROOMS					"/rooms"
+# define TETRISD_ROUTE_ROOM_PREFIX				"/room/"
 
 typedef struct s_server	t_server;
 typedef struct s_client	t_client;
@@ -128,25 +128,25 @@ typedef struct s_client	t_client;
 ** Every setting tetrisd reads out of .tetrishrc, plus the rc path it was
 ** read from (SIGHUP re-reads the same file).
 */
-typedef struct s_cfg
+typedef struct s_config
 {
 	int		port;
-	char	data_dir[TD_PATH_MAX];
-	char	config_dir[TD_PATH_MAX];
-	char	cert_path[TD_PATH_MAX];
-	char	key_path[TD_PATH_MAX];
-	char	ca_path[TD_PATH_MAX];
-	char	log_ipc[TD_PATH_MAX];
-	char	pid_path[TD_PATH_MAX];
-	char	err_path[TD_PATH_MAX];
-	char	rc_path[TD_PATH_MAX];
+	char	data_dir[TETRISD_FS_PATH_MAX];
+	char	config_dir[TETRISD_FS_PATH_MAX];
+	char	cert_path[TETRISD_FS_PATH_MAX];
+	char	key_path[TETRISD_FS_PATH_MAX];
+	char	ca_path[TETRISD_FS_PATH_MAX];
+	char	log_ipc[TETRISD_FS_PATH_MAX];
+	char	pid_path[TETRISD_FS_PATH_MAX];
+	char	err_path[TETRISD_FS_PATH_MAX];
+	char	rc_path[TETRISD_FS_PATH_MAX];
 	int		log_level;
 	int		max_clients;
 	int		tick_ms;
 	int		br_slots;
 	int		input_burst;
 	int		input_rate;
-}	t_cfg;
+}	t_config;
 
 /*
 ** Log path. Producers push into the ring and never block; the shipper thread
@@ -159,7 +159,7 @@ typedef struct s_logger
 	int				sock_fd;
 	int				wake[2];
 	atomic_int		level;
-	char			ipc_path[TD_PATH_MAX];
+	char			ipc_path[TETRISD_FS_PATH_MAX];
 	pthread_t		shipper;
 	bool			shipper_started;
 	atomic_bool		running;
@@ -167,11 +167,11 @@ typedef struct s_logger
 }	t_logger;
 
 /* one serialised message waiting for its client's writer thread */
-typedef struct s_outmsg
+typedef struct s_outbound_message
 {
 	unsigned char	*bytes;
 	size_t			len;
-}	t_outmsg;
+}	t_outbound_message;
 
 /*
 ** A bounded FIFO of responses plus a one-slot mailbox holding the latest
@@ -181,15 +181,15 @@ typedef struct s_outmsg
 */
 typedef struct s_outbox
 {
-	t_outmsg		slots[TD_OUTBOX_CAP];
-	size_t			head;
-	size_t			count;
-	t_outmsg		state;
-	bool			state_pending;
-	bool			closed;
-	atomic_bool		overflowed;
-	pthread_mutex_t	mutex;
-	pthread_cond_t	cond;
+	t_outbound_message	slots[TETRISD_OUTBOX_CAPACITY];
+	size_t				head;
+	size_t				count;
+	t_outbound_message	state;
+	bool				state_pending;
+	bool				closed;
+	atomic_bool			overflowed;
+	pthread_mutex_t		mutex;
+	pthread_cond_t		cond;
 }	t_outbox;
 
 /*
@@ -220,7 +220,7 @@ typedef struct s_game
 ** A room's mutable runtime beside the pure t_room domain object: the mutex
 ** that guards both, the per-slot games, and the ticker driving them.
 */
-typedef struct s_room_rt
+typedef struct s_server_room
 {
 	pthread_mutex_t	mutex;
 	t_room			*room;
@@ -232,7 +232,7 @@ typedef struct s_room_rt
 	atomic_bool		running;
 	t_server		*srv;
 	int				index;
-}	t_room_rt;
+}	t_server_room;
 
 /* what one input request asks the game to do */
 typedef enum e_input_action
@@ -292,13 +292,13 @@ typedef struct s_registry
 
 struct s_server
 {
-	t_cfg			cfg;
+	t_config			cfg;
 	t_logger		log;
 	t_db			*db;
 	t_registry		reg;
 	t_lobby			lobby;
 	pthread_mutex_t	lobby_mutex;
-	t_room_rt		rooms[LOBBY_MAX_ROOMS];
+	t_server_room		rooms[LOBBY_MAX_ROOMS];
 	int				listen_fd;
 	int				port;
 	int				wake[2];
@@ -316,89 +316,90 @@ struct s_server
 };
 
 /* one request in flight: what a handler answers with */
-typedef struct s_reqctx
+typedef struct s_request_context
 {
 	t_client				*cli;
 	t_server				*srv;
 	const t_htttp_message	*msg;
-	char					body[TD_BODY_MAX];
+	char					body[TETRISD_BODY_MAX_BYTES];
 	size_t					body_len;
 	const char				*content_type;
-}	t_reqctx;
+}	t_request_context;
 
-/* CFG.C */
-void			cfg_defaults(t_cfg *cfg);
-int				cfg_resolve_rc(const char *override, char *out, size_t cap);
-int				cfg_set(t_cfg *cfg, const char *key, const char *value);
-int				cfg_parse_line(t_cfg *cfg, const char *line);
-int				cfg_load(t_cfg *cfg, const char *override);
-int				cfg_validate(const t_cfg *cfg);
+/* CONFIG.C */
+void			config_defaults(t_config *cfg);
+int				config_resolve_rc_path(const char *override, char *out, size_t cap);
+int				config_set(t_config *cfg, const char *key, const char *value);
+int				config_parse_line(t_config *cfg, const char *line);
+int				config_load(t_config *cfg, const char *override);
+int				config_validate(const t_config *cfg);
 
-/* LOG.C */
-void			log_blank(t_logger *lg);
-int				log_init(t_logger *lg, const t_cfg *cfg);
-void			log_emit(t_logger *lg, t_log_level level, const char *fmt, ...);
-uint64_t		log_dropped(const t_logger *lg);
-void			log_shutdown(t_logger *lg);
+/* LOGGER.C */
+void			logger_blank(t_logger *lg);
+int				logger_init(t_logger *lg, const t_config *cfg);
+void			logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...);
+uint64_t		logger_dropped_count(const t_logger *lg);
+void			logger_shutdown(t_logger *lg);
 
-/* NET.C */
-int				net_listen(int port, int *out_port);
-int				net_accept(int listen_fd);
-int				net_mkdir_p(const char *path);
-uint64_t		net_now_ms(void);
-int				net_elapsed_ms(struct timespec *last);
+/* LISTENER.C */
+int				listener_open(int port, int *out_port);
+int				listener_accept(int listen_fd);
+
+/* CLOCK.C */
+uint64_t		clock_now_ms(void);
+int				clock_elapsed_ms(struct timespec *last);
 
 /* OUTBOX.C */
-int				ob_init(t_outbox *ob);
-int				ob_push(t_outbox *ob, unsigned char *bytes, size_t len);
-int				ob_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
-int				ob_pop(t_outbox *ob, t_outmsg *out);
-void			ob_close(t_outbox *ob);
-void			ob_destroy(t_outbox *ob);
+int				outbox_init(t_outbox *ob);
+int				outbox_push(t_outbox *ob, unsigned char *bytes, size_t len);
+int				outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
+int				outbox_pop(t_outbox *ob, t_outbound_message *out);
+void			outbox_close(t_outbox *ob);
+void			outbox_destroy(t_outbox *ob);
 
 /* REGISTRY.C */
-int				reg_init(t_registry *rg, size_t cap);
-int				reg_add(t_registry *rg, t_client *cli);
-void			reg_remove(t_registry *rg, t_client *cli);
-int				reg_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len, bool is_state);
-void			reg_bind(t_registry *rg, t_client *cli, t_player_id pid, const char *username);
-void			reg_mark_state(t_registry *rg, t_client *cli, t_client_state state);
-bool			reg_displace(t_registry *rg, t_player_id pid, const t_client *keep);
-int				reg_wait_absent(t_registry *rg, t_player_id pid, const t_client *keep, int timeout_ms);
-void			reg_shutdown_all(t_registry *rg);
-void			reg_wait_empty(t_registry *rg);
-bool			reg_player_online(t_registry *rg, t_player_id pid);
-void			reg_destroy(t_registry *rg);
+int				registry_init(t_registry *rg, size_t cap);
+int				registry_add(t_registry *rg, t_client *cli);
+void			registry_remove(t_registry *rg, t_client *cli);
+int				registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len, bool is_state);
+void			registry_bind(t_registry *rg, t_client *cli, t_player_id pid, const char *username);
+void			registry_mark_state(t_registry *rg, t_client *cli, t_client_state state);
+bool			registry_displace(t_registry *rg, t_player_id pid, const t_client *keep);
+int				registry_wait_absent(t_registry *rg, t_player_id pid, const t_client *keep, int timeout_ms);
+void			registry_shutdown_all(t_registry *rg);
+void			registry_wait_empty(t_registry *rg);
+bool			registry_player_online(t_registry *rg, t_player_id pid);
+void			registry_destroy(t_registry *rg);
 
 /* CLIENT.C */
-int				cli_spawn(t_server *srv, int fd);
-void			cli_send(t_client *cli, t_htttp_message *msg, bool is_state);
+int				client_spawn(t_server *srv, int fd);
+void			client_send(t_client *cli, t_htttp_message *msg, bool is_state);
 
 /* DISPATCH.C */
-void			cli_handle_frame(t_client *cli, const unsigned char *frame, size_t len);
-void			reply(t_client *cli, unsigned int status, const char *body, size_t body_len);
-const char		*req_body_field(const t_reqctx *ctx, const char *key, char *out, size_t cap);
-void			req_bodyf(t_reqctx *ctx, const char *fmt, ...);
-int				req_refuse(t_reqctx *ctx, const char *reason);
+void			client_handle_frame(t_client *cli, const unsigned char *frame, size_t len);
+void			request_reply(t_client *cli, unsigned int status, const char *body, size_t body_len);
+const char		*request_body_field(const t_request_context *ctx, const char *key, char *out, size_t cap);
+void			request_body_printf(t_request_context *ctx, const char *fmt, ...);
+int				request_refuse(t_request_context *ctx, const char *reason);
 
-/* H_ACCOUNT.C */
-int				h_signup(const t_htttp_message *msg, void *context);
-int				h_login(const t_htttp_message *msg, void *context);
-int				h_hash_password(const char *password, const char *salt, char *out, size_t cap);
-int				h_make_salt(char *out, size_t cap);
+/* HANDLERS_ACCOUNT.C */
+int				signup_handler(const t_htttp_message *msg, void *context);
+int				login_handler(const t_htttp_message *msg, void *context);
+int				password_hash(const char *password, const char *salt, char *out, size_t cap);
+int				salt_generate(char *out, size_t cap);
 
-/* H_LOBBY.C */
-int				h_list(const t_htttp_message *msg, void *context);
-int				h_join(const t_htttp_message *msg, void *context);
-int				h_leave(const t_htttp_message *msg, void *context);
-int				h_start(const t_htttp_message *msg, void *context);
-bool			h_authorised(t_reqctx *ctx);
+/* HANDLERS_LOBBY.C */
+int				list_handler(const t_htttp_message *msg, void *context);
+int				join_handler(const t_htttp_message *msg, void *context);
+int				leave_handler(const t_htttp_message *msg, void *context);
+int				start_handler(const t_htttp_message *msg, void *context);
+bool			request_is_authorised(t_request_context *ctx);
 
-/* H_INPUT.C */
-bool			input_take_token(t_client *cli);
-int				h_move(const t_htttp_message *msg, void *context);
-int				h_rotate(const t_htttp_message *msg, void *context);
-int				h_drop(const t_htttp_message *msg, void *context);
+/* HANDLERS_INPUT.C */
+bool			rate_limit_take_token(t_client *cli);
+int				move_handler(const t_htttp_message *msg, void *context);
+int				rotate_handler(const t_htttp_message *msg, void *context);
+int				drop_handler(const t_htttp_message *msg, void *context);
 
 /* GAME.C */
 void			game_reset(t_game *g);
@@ -410,18 +411,18 @@ bool			game_drop(t_game *g, bool hard);
 void			game_snapshot(const t_game *g, t_sb_state *out);
 
 /* ROOM.C */
-void			room_rt_init_all(t_server *srv);
-t_room_rt		*room_rt_at(t_server *srv, int index);
-t_room_rt		*room_rt_find(t_server *srv, const char *name);
-bool			room_rt_probe(void *ctx, t_player_id pid);
-bool			room_rt_seated(t_server *srv, t_client *cli);
-int				room_rt_begin(t_room_rt *rt, t_server *srv);
-void			room_rt_stop(t_room_rt *rt);
-void			room_rt_forfeit(t_server *srv, t_client *cli);
-void			room_rt_push_state(t_room_rt *rt, const char *room_name, t_player_id pid, const t_sb_state *snap);
+void			server_room_init_all(t_server *srv);
+t_server_room		*server_room_at(t_server *srv, int index);
+t_server_room		*server_room_find(t_server *srv, const char *name);
+bool			server_room_probe(void *ctx, t_player_id pid);
+bool			server_room_seated(t_server *srv, t_client *cli);
+int				server_room_begin(t_server_room *rt, t_server *srv);
+void			server_room_stop(t_server_room *rt);
+void			server_room_forfeit(t_server *srv, t_client *cli);
+void			server_room_push_state(t_server_room *rt, const char *room_name, t_player_id pid, const t_sb_state *snap);
 
 /* SERVER.C */
-int				server_start(const t_cfg *cfg, t_server **out);
+int				server_start(const t_config *cfg, t_server **out);
 void			server_stop(t_server *srv);
 int				server_port(const t_server *srv);
 void			server_wait(t_server *srv);
@@ -433,9 +434,9 @@ void			signals_install(t_server *srv);
 bool			signals_take_stop(void);
 void			signals_restore(void);
 bool			signals_take_reload(void);
-bool			signals_take_dump(void);
+bool			signals_take_state_dump(void);
 
 /* DUMP.C */
-void			state_dump(t_server *srv);
+void			server_state_dump(t_server *srv);
 
 # endif

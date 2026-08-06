@@ -215,9 +215,10 @@ src/tetrisd/
 ├── include/tetrisd.h     Every type and prototype; src/*.c include only this
 ├── src/
 │   ├── main.c            Thin shim over server_start / server_stop
-│   ├── cfg.c             .tetrishrc parsing and validation
-│   ├── log.c             Ring buffer, shipper thread, stderr fallback
-│   ├── net.c             Listener, accept, paths, monotonic time
+│   ├── config.c          .tetrishrc parsing and validation
+│   ├── logger.c          Ring buffer, shipper thread, stderr fallback
+│   ├── listener.c        Listening socket: open and accept
+│   ├── clock.c           Wall-clock and monotonic milliseconds
 │   ├── server.c          Bring-up, main loop, shutdown, SIGHUP reload
 │   ├── signals.c         Handlers: a flag and one byte down the self-pipe
 │   ├── dump.c            SIGUSR1 state dump
@@ -225,9 +226,9 @@ src/tetrisd/
 │   ├── client.c          Reader and writer threads, teardown
 │   ├── outbox.c          Bounded FIFO + latest-STATE mailbox
 │   ├── dispatch.c        Frame → route → response, status mapping
-│   ├── h_account.c       SIGNUP, LOGIN, password hashing
-│   ├── h_lobby.c         LIST, JOIN, LEAVE, START
-│   ├── h_input.c         MOVE, ROTATE, DROP
+│   ├── handlers_account.c  SIGNUP, LOGIN, password hashing
+│   ├── handlers_lobby.c    LIST, JOIN, LEAVE, START
+│   ├── handlers_input.c    MOVE, ROTATE, DROP
 │   ├── game.c            The per-player game aggregate over libtetrisbrain
 │   └── room.c            Room runtime, ticker, STATE push, forfeit
 ├── tests/                harness.c is the headless client; test_*.c the suites

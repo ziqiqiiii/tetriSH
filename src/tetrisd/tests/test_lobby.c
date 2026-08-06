@@ -241,7 +241,7 @@ static size_t	list_rooms(t_harness *hc, t_sb_room_row *rows, size_t cap)
 	size_t			count;
 
 	count = 0;
-	if (hc_request(hc, "LIST", TD_PATH_ROOMS, NULL, &resp) != 0)
+	if (hc_request(hc, "LIST", TETRISD_ROUTE_ROOMS, NULL, &resp) != 0)
 		return (0);
 	assert(resp.status_code == 200);
 	if (resp.body != NULL && resp.body_len > 0)

@@ -2,15 +2,15 @@
 
 // Static Functions
 static size_t		list_rooms(t_server *srv, t_sb_room_row *rows);
-static int			read_mode(t_reqctx *ctx, t_game_mode *out);
-static int			create_room(t_reqctx *ctx, t_game_mode mode);
-static const char	*room_name_from_path(const t_reqctx *ctx);
-static int			join_room(t_reqctx *ctx, const char *name);
-static void			bind_room(t_client *cli, t_room_rt *rt, int slot);
-static const char	*seated_room_name(t_reqctx *ctx);
-static int			start_games(t_room_rt *rt);
-static void			rollback_start(t_room_rt *rt);
-static int			start_status(t_reqctx *ctx, t_start_verdict verdict);
+static int			read_mode(t_request_context *ctx, t_game_mode *out);
+static int			create_room(t_request_context *ctx, t_game_mode mode);
+static const char	*room_name_from_path(const t_request_context *ctx);
+static int			join_room(t_request_context *ctx, const char *name);
+static void			bind_room(t_client *cli, t_server_room *sroom, int slot);
+static const char	*seated_room_name(t_request_context *ctx);
+static int			start_games(t_server_room *sroom);
+static void			rollback_start(t_server_room *sroom);
+static int			start_status(t_request_context *ctx, t_start_verdict verdict);
 
 /**
  * @brief Checks that the request really comes from the player it claims.
@@ -22,7 +22,7 @@ static int			start_status(t_reqctx *ctx, t_start_verdict verdict);
  * @param ctx Request context.
  * @return true when the connection is authenticated and the header matches.
  */
-bool	h_authorised(t_reqctx *ctx)
+bool	request_is_authorised(t_request_context *ctx)
 {
 	const char	*header;
 	char		*end;
@@ -51,16 +51,16 @@ bool	h_authorised(t_reqctx *ctx)
  * @param context The request context.
  * @return 200 with the room rows, or 401 when unauthenticated.
  */
-int	h_list(const t_htttp_message *msg, void *context)
+int	list_handler(const t_htttp_message *msg, void *context)
 {
 	t_sb_room_row	rows[LOBBY_MAX_ROOMS];
-	t_reqctx		*ctx;
+	t_request_context		*ctx;
 	size_t			count;
 	int				len;
 
 	(void)msg;
 	ctx = context;
-	if (!h_authorised(ctx))
+	if (!request_is_authorised(ctx))
 		return (401);
 	count = list_rooms(ctx->srv, rows);
 	len = sb_rooms_encode(rows, count, ctx->body, sizeof(ctx->body));
@@ -82,23 +82,23 @@ int	h_list(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 201 on create, 200 on join, 4xx with the verdict otherwise.
  */
-int	h_join(const t_htttp_message *msg, void *context)
+int	join_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
+	t_request_context	*ctx;
 	t_game_mode	mode;
 	const char	*name;
 
 	(void)msg;
 	ctx = context;
-	if (!h_authorised(ctx))
+	if (!request_is_authorised(ctx))
 		return (401);
-	if (room_rt_seated(ctx->srv, ctx->cli))
+	if (server_room_seated(ctx->srv, ctx->cli))
 	{
-		req_bodyf(ctx, "reason already-in-room\nroom %s\n",
+		request_body_printf(ctx, "reason already-in-room\nroom %s\n",
 			ctx->cli->room_name);
 		return (409);
 	}
-	if (strcmp(ctx->msg->path, TD_PATH_ROOMS) == 0)
+	if (strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) == 0)
 	{
 		if (read_mode(ctx, &mode) != 0)
 			return (400);
@@ -117,22 +117,22 @@ int	h_join(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 200 on success, 404 when the caller is not in that room.
  */
-int	h_leave(const t_htttp_message *msg, void *context)
+int	leave_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
+	t_request_context	*ctx;
 	const char	*name;
 
 	(void)msg;
 	ctx = context;
-	if (!h_authorised(ctx))
+	if (!request_is_authorised(ctx))
 		return (401);
 	name = seated_room_name(ctx);
 	if (name == NULL)
 		return (404);
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s left %s",
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s left %s",
 		ctx->cli->username, name);
-	room_rt_forfeit(ctx->srv, ctx->cli);
-	req_bodyf(ctx, "room %s\nstatus left\n", name);
+	server_room_forfeit(ctx->srv, ctx->cli);
+	request_body_printf(ctx, "room %s\nstatus left\n", name);
 	return (200);
 }
 
@@ -146,37 +146,37 @@ int	h_leave(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 200 when the game started, 403 for a non-owner, 409 otherwise.
  */
-int	h_start(const t_htttp_message *msg, void *context)
+int	start_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx		*ctx;
-	t_room_rt		*rt;
+	t_request_context		*ctx;
+	t_server_room		*sroom;
 	const char		*name;
 	t_start_verdict	verdict;
 
 	(void)msg;
 	ctx = context;
-	if (!h_authorised(ctx))
+	if (!request_is_authorised(ctx))
 		return (401);
 	name = seated_room_name(ctx);
 	if (name == NULL)
 		return (404);
-	rt = room_rt_at(ctx->srv, ctx->cli->room_index);
-	if (rt == NULL)
+	sroom = server_room_at(ctx->srv, ctx->cli->room_index);
+	if (sroom == NULL)
 		return (409);
-	pthread_mutex_lock(&rt->mutex);
-	verdict = room_start(rt->room, ctx->cli->player_id);
+	pthread_mutex_lock(&sroom->mutex);
+	verdict = room_start(sroom->room, ctx->cli->player_id);
 	if (verdict == START_ACCEPTED)
-		start_games(rt);
-	pthread_mutex_unlock(&rt->mutex);
+		start_games(sroom);
+	pthread_mutex_unlock(&sroom->mutex);
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
-	if (room_rt_begin(rt, ctx->srv) != 0)
+	if (server_room_begin(sroom, ctx->srv) != 0)
 	{
-		rollback_start(rt);
+		rollback_start(sroom);
 		return (500);
 	}
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "game started in %s", name);
-	req_bodyf(ctx, "room %s\nstatus in-game\n", name);
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "game started in %s", name);
+	request_body_printf(ctx, "room %s\nstatus in-game\n", name);
 	return (200);
 }
 
@@ -187,30 +187,30 @@ int	h_start(const t_htttp_message *msg, void *context)
  * @param mode Mode the room is created with.
  * @return 201 on success, 409 when the lobby is full or seating failed.
  */
-static int	create_room(t_reqctx *ctx, t_game_mode mode)
+static int	create_room(t_request_context *ctx, t_game_mode mode)
 {
-	t_room_rt	*rt;
+	t_server_room	*sroom;
 	t_room		*room;
 	int			slot;
 
 	slot = -1;
-	rt = NULL;
+	sroom = NULL;
 	pthread_mutex_lock(&ctx->srv->lobby_mutex);
 	if (lobby_create_room(&ctx->srv->lobby, mode, &room) == 0)
 	{
-		rt = room_rt_at(ctx->srv, (int)(room - ctx->srv->lobby.rooms));
-		pthread_mutex_lock(&rt->mutex);
+		sroom = server_room_at(ctx->srv, (int)(room - ctx->srv->lobby.rooms));
+		pthread_mutex_lock(&sroom->mutex);
 		slot = room_seat(room, ctx->cli->player_id, ctx->cli->username,
-				room_rt_probe, ctx->srv);
-		pthread_mutex_unlock(&rt->mutex);
+				server_room_probe, ctx->srv);
+		pthread_mutex_unlock(&sroom->mutex);
 	}
 	pthread_mutex_unlock(&ctx->srv->lobby_mutex);
-	if (rt == NULL || slot < 0)
-		return (req_refuse(ctx, "lobby-full"));
-	bind_room(ctx->cli, rt, slot);
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s created room %s",
-		ctx->cli->username, rt->room->name);
-	req_bodyf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->room_name, slot);
+	if (sroom == NULL || slot < 0)
+		return (request_refuse(ctx, "lobby-full"));
+	bind_room(ctx->cli, sroom, slot);
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s created room %s",
+		ctx->cli->username, sroom->room->name);
+	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->room_name, slot);
 	return (201);
 }
 
@@ -221,32 +221,32 @@ static int	create_room(t_reqctx *ctx, t_game_mode mode)
  * @param name Room display name from the path.
  * @return 200 on success, 404 when unknown, 409 when full or in game.
  */
-static int	join_room(t_reqctx *ctx, const char *name)
+static int	join_room(t_request_context *ctx, const char *name)
 {
-	t_room_rt		*rt;
+	t_server_room		*sroom;
 	t_join_verdict	verdict;
 	int				slot;
 
-	rt = room_rt_find(ctx->srv, name);
-	if (rt == NULL)
+	sroom = server_room_find(ctx->srv, name);
+	if (sroom == NULL)
 		return (404);
 	slot = -1;
-	pthread_mutex_lock(&rt->mutex);
-	verdict = room_can_accept(rt->room);
+	pthread_mutex_lock(&sroom->mutex);
+	verdict = room_can_accept(sroom->room);
 	if (verdict == JOIN_ACCEPTED)
-		slot = room_seat(rt->room, ctx->cli->player_id, ctx->cli->username,
-				room_rt_probe, ctx->srv);
-	pthread_mutex_unlock(&rt->mutex);
+		slot = room_seat(sroom->room, ctx->cli->player_id, ctx->cli->username,
+				server_room_probe, ctx->srv);
+	pthread_mutex_unlock(&sroom->mutex);
 	if (verdict == JOIN_FULL)
-		return (req_refuse(ctx, "full"));
+		return (request_refuse(ctx, "full"));
 	if (verdict == JOIN_IN_GAME)
-		return (req_refuse(ctx, "in-game"));
+		return (request_refuse(ctx, "in-game"));
 	if (slot < 0)
-		return (req_refuse(ctx, "seat-refused"));
-	bind_room(ctx->cli, rt, slot);
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s joined %s",
+		return (request_refuse(ctx, "seat-refused"));
+	bind_room(ctx->cli, sroom, slot);
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s joined %s",
 		ctx->cli->username, name);
-	req_bodyf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->room_name,
+	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->room_name,
 		slot);
 	return (200);
 }
@@ -257,14 +257,14 @@ static int	join_room(t_reqctx *ctx, const char *name)
  * @param ctx Request context holding the path.
  * @return Borrowed pointer to the name, or NULL when the path is not a room.
  */
-static const char	*room_name_from_path(const t_reqctx *ctx)
+static const char	*room_name_from_path(const t_request_context *ctx)
 {
 	const char	*name;
 
 	if (ctx->msg->path == NULL
-		|| strncmp(ctx->msg->path, TD_PATH_ROOM, strlen(TD_PATH_ROOM)) != 0)
+		|| strncmp(ctx->msg->path, TETRISD_ROUTE_ROOM_PREFIX, strlen(TETRISD_ROUTE_ROOM_PREFIX)) != 0)
 		return (NULL);
-	name = ctx->msg->path + strlen(TD_PATH_ROOM);
+	name = ctx->msg->path + strlen(TETRISD_ROUTE_ROOM_PREFIX);
 	if (name[0] == '\0' || strchr(name, '/') != NULL
 		|| strlen(name) >= ROOM_NAME_MAX)
 		return (NULL);
@@ -278,12 +278,12 @@ static const char	*room_name_from_path(const t_reqctx *ctx)
  * @param out Receives the mode; Single when the body omits it.
  * @return 0 on success, -1 when the named mode is not a mode.
  */
-static int	read_mode(t_reqctx *ctx, t_game_mode *out)
+static int	read_mode(t_request_context *ctx, t_game_mode *out)
 {
 	char	value[32];
 
 	*out = MODE_SINGLE;
-	if (req_body_field(ctx, "mode", value, sizeof(value)) == NULL)
+	if (request_body_field(ctx, "mode", value, sizeof(value)) == NULL)
 		return (0);
 	if (strcmp(value, "single") == 0)
 		return (0);
@@ -304,23 +304,23 @@ static int	read_mode(t_reqctx *ctx, t_game_mode *out)
  * @brief Records which room and slot a connection now occupies.
  *
  * @param cli Client that was seated.
- * @param rt Room runtime it was seated in.
+ * @param sroom Room runtime it was seated in.
  * @param slot The 1-based slot index.
  */
-static void	bind_room(t_client *cli, t_room_rt *rt, int slot)
+static void	bind_room(t_client *cli, t_server_room *sroom, int slot)
 {
-	cli->room_index = rt->index;
+	cli->room_index = sroom->index;
 	cli->slot_index = slot;
-	snprintf(cli->room_name, sizeof(cli->room_name), "%s", rt->room->name);
+	snprintf(cli->room_name, sizeof(cli->room_name), "%s", sroom->room->name);
 }
 
 /**
  * @brief Deals every seated player a board, under the room's mutex.
  *
- * @param rt Room runtime whose game is starting.
+ * @param sroom Room runtime whose game is starting.
  * @return The number of games started.
  */
-static int	start_games(t_room_rt *rt)
+static int	start_games(t_server_room *sroom)
 {
 	uint32_t	seed;
 	int			started;
@@ -328,15 +328,15 @@ static int	start_games(t_room_rt *rt)
 
 	started = 0;
 	i = 0;
-	while (i < rt->room->slot_count && i < TD_MAX_GAMES)
+	while (i < sroom->room->slot_count && i < TD_MAX_GAMES)
 	{
-		if (rt->room->slots[i].occupied)
+		if (sroom->room->slots[i].occupied)
 		{
-			seed = (uint32_t)(net_now_ms() + (uint64_t)i * 7919u
-					+ rt->room->slots[i].membership.player_id);
-			game_start(&rt->games[i], rt->room->slots[i].membership.player_id,
+			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
+					+ sroom->room->slots[i].membership.player_id);
+			game_start(&sroom->games[i], sroom->room->slots[i].membership.player_id,
 				seed);
-			rt->dirty[i] = true;
+			sroom->dirty[i] = true;
 			started++;
 		}
 		i++;
@@ -352,22 +352,22 @@ static int	start_games(t_room_rt *rt)
  * room domain will not seat or start anybody while it believes a game is
  * running. The players keep their slots and can simply try again.
  *
- * @param rt Room runtime whose start is being undone.
+ * @param sroom Room runtime whose start is being undone.
  */
-static void	rollback_start(t_room_rt *rt)
+static void	rollback_start(t_server_room *sroom)
 {
 	int	i;
 
-	pthread_mutex_lock(&rt->mutex);
+	pthread_mutex_lock(&sroom->mutex);
 	i = 0;
 	while (i < TD_MAX_GAMES)
 	{
-		game_reset(&rt->games[i]);
-		rt->dirty[i] = false;
+		game_reset(&sroom->games[i]);
+		sroom->dirty[i] = false;
 		i++;
 	}
-	room_abort_start(rt->room);
-	pthread_mutex_unlock(&rt->mutex);
+	room_abort_start(sroom->room);
+	pthread_mutex_unlock(&sroom->mutex);
 }
 
 /**
@@ -381,16 +381,16 @@ static void	rollback_start(t_room_rt *rt)
  * @param verdict Verdict from the room domain.
  * @return 403 for a non-owner, 409 for too few players or a running game.
  */
-static int	start_status(t_reqctx *ctx, t_start_verdict verdict)
+static int	start_status(t_request_context *ctx, t_start_verdict verdict)
 {
 	if (verdict == START_NOT_OWNER)
 	{
-		req_bodyf(ctx, "reason not-owner\n");
+		request_body_printf(ctx, "reason not-owner\n");
 		return (403);
 	}
 	if (verdict == START_TOO_FEW_PLAYERS)
-		return (req_refuse(ctx, "too-few-players"));
-	return (req_refuse(ctx, "already-started"));
+		return (request_refuse(ctx, "too-few-players"));
+	return (request_refuse(ctx, "already-started"));
 }
 
 /**
@@ -402,12 +402,12 @@ static int	start_status(t_reqctx *ctx, t_start_verdict verdict)
  * @param ctx Request context holding the path.
  * @return The room name, or NULL when the caller is not seated there.
  */
-static const char	*seated_room_name(t_reqctx *ctx)
+static const char	*seated_room_name(t_request_context *ctx)
 {
 	const char	*name;
 
 	name = room_name_from_path(ctx);
-	if (name == NULL || !room_rt_seated(ctx->srv, ctx->cli)
+	if (name == NULL || !server_room_seated(ctx->srv, ctx->cli)
 		|| strcmp(name, ctx->cli->room_name) != 0)
 		return (NULL);
 	return (name);

@@ -82,7 +82,7 @@ bool	signals_take_reload(void)
  *
  * @return true when SIGUSR1 arrived since the last call.
  */
-bool	signals_take_dump(void)
+bool	signals_take_state_dump(void)
 {
 	if (g_dump_pending == 0)
 		return (false);

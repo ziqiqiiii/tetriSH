@@ -7,7 +7,7 @@ static int			set_level(int *dst, const char *value);
 static int			split_assignment(const char *line, char *key, size_t key_cap, char *value, size_t value_cap);
 static const char	*skip_ws(const char *s);
 static void			strip_quotes(char *value);
-static int			apply_env(t_cfg *cfg);
+static int			apply_env(t_config *cfg);
 
 /**
  * @brief Fills a configuration with the values tetrisd boots with unset.
@@ -18,26 +18,26 @@ static int			apply_env(t_cfg *cfg);
  *
  * @param cfg Configuration to fill (ignored when NULL).
  */
-void	cfg_defaults(t_cfg *cfg)
+void	config_defaults(t_config *cfg)
 {
 	if (cfg == NULL)
 		return ;
 	memset(cfg, 0, sizeof(*cfg));
-	cfg->port = TD_DEF_PORT;
-	snprintf(cfg->data_dir, TD_PATH_MAX, "%s", TD_DEF_DATA_DIR);
-	snprintf(cfg->config_dir, TD_PATH_MAX, "%s", TD_DEF_CONFIG_DIR);
-	snprintf(cfg->cert_path, TD_PATH_MAX, "%s", TD_DEF_CERT);
-	snprintf(cfg->key_path, TD_PATH_MAX, "%s", TD_DEF_KEY);
-	snprintf(cfg->ca_path, TD_PATH_MAX, "%s", TD_DEF_CA);
-	snprintf(cfg->log_ipc, TD_PATH_MAX, "%s", TD_DEF_LOG_IPC);
-	snprintf(cfg->pid_path, TD_PATH_MAX, "%s", TD_DEF_PID);
-	snprintf(cfg->err_path, TD_PATH_MAX, "%s", TD_DEF_ERR);
+	cfg->port = TETRISD_DEFAULT_PORT;
+	snprintf(cfg->data_dir, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_DATA_DIR);
+	snprintf(cfg->config_dir, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CONFIG_DIR);
+	snprintf(cfg->cert_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CERT_PATH);
+	snprintf(cfg->key_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_KEY_PATH);
+	snprintf(cfg->ca_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_CA_PATH);
+	snprintf(cfg->log_ipc, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_LOG_IPC_PATH);
+	snprintf(cfg->pid_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_PID_PATH);
+	snprintf(cfg->err_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_ERR_PATH);
 	cfg->log_level = CIPC_LOG_INFO;
-	cfg->max_clients = TD_DEF_MAX_CLIENTS;
-	cfg->tick_ms = TD_DEF_TICK_MS;
-	cfg->input_burst = TD_DEF_INPUT_BURST;
-	cfg->input_rate = TD_DEF_INPUT_RATE;
-	cfg->br_slots = TD_DEF_BR_SLOTS;
+	cfg->max_clients = TETRISD_DEFAULT_MAX_CLIENTS;
+	cfg->tick_ms = TETRISD_DEFAULT_TICK_MS;
+	cfg->input_burst = TETRISD_DEFAULT_INPUT_BURST;
+	cfg->input_rate = TETRISD_DEFAULT_INPUT_RATE;
+	cfg->br_slots = TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS;
 }
 
 /**
@@ -52,7 +52,7 @@ void	cfg_defaults(t_cfg *cfg)
  * @param cap Size of out.
  * @return 0 on success, -1 on invalid arguments or an overlong path.
  */
-int	cfg_resolve_rc(const char *override, char *out, size_t cap)
+int	config_resolve_rc_path(const char *override, char *out, size_t cap)
 {
 	const char	*env;
 
@@ -63,7 +63,7 @@ int	cfg_resolve_rc(const char *override, char *out, size_t cap)
 	env = getenv("TETRISHRC");
 	if (env != NULL && env[0] != '\0')
 		return (set_str(out, cap, env));
-	return (set_str(out, cap, "./" TD_RC_NAME));
+	return (set_str(out, cap, "./" TETRISD_RC_FILENAME));
 }
 
 /**
@@ -78,43 +78,43 @@ int	cfg_resolve_rc(const char *override, char *out, size_t cap)
  * @param value Value text, already unquoted.
  * @return 0 when applied, -1 for an unknown key or an invalid value.
  */
-int	cfg_set(t_cfg *cfg, const char *key, const char *value)
+int	config_set(t_config *cfg, const char *key, const char *value)
 {
 	if (cfg == NULL || key == NULL || value == NULL)
 		return (-1);
-	if (strncmp(key, TD_KEY_PREFIX, strlen(TD_KEY_PREFIX)) != 0)
+	if (strncmp(key, TETRISD_CONFIG_KEY_PREFIX, strlen(TETRISD_CONFIG_KEY_PREFIX)) != 0)
 		return (-1);
-	key += strlen(TD_KEY_PREFIX);
+	key += strlen(TETRISD_CONFIG_KEY_PREFIX);
 	if (strcmp(key, "PORT") == 0)
-		return (set_int(&cfg->port, value, TD_MIN_PORT, TD_MAX_PORT));
+		return (set_int(&cfg->port, value, TETRISD_PORT_MIN, TETRISD_PORT_MAX));
 	if (strcmp(key, "DATA_DIR") == 0)
-		return (set_str(cfg->data_dir, TD_PATH_MAX, value));
+		return (set_str(cfg->data_dir, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "CONFIG_DIR") == 0)
-		return (set_str(cfg->config_dir, TD_PATH_MAX, value));
+		return (set_str(cfg->config_dir, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "CERT_PATH") == 0)
-		return (set_str(cfg->cert_path, TD_PATH_MAX, value));
+		return (set_str(cfg->cert_path, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "KEY_PATH") == 0)
-		return (set_str(cfg->key_path, TD_PATH_MAX, value));
+		return (set_str(cfg->key_path, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "CA_PATH") == 0)
-		return (set_str(cfg->ca_path, TD_PATH_MAX, value));
+		return (set_str(cfg->ca_path, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "LOG_IPC") == 0)
-		return (set_str(cfg->log_ipc, TD_PATH_MAX, value));
+		return (set_str(cfg->log_ipc, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "PID_PATH") == 0)
-		return (set_str(cfg->pid_path, TD_PATH_MAX, value));
+		return (set_str(cfg->pid_path, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "ERR_PATH") == 0)
-		return (set_str(cfg->err_path, TD_PATH_MAX, value));
+		return (set_str(cfg->err_path, TETRISD_FS_PATH_MAX, value));
 	if (strcmp(key, "LOG_LEVEL") == 0)
 		return (set_level(&cfg->log_level, value));
 	if (strcmp(key, "MAX_CLIENTS") == 0)
-		return (set_int(&cfg->max_clients, value, 1, TD_MAX_CLIENT_CAP));
+		return (set_int(&cfg->max_clients, value, 1, TETRISD_MAX_CLIENTS_LIMIT));
 	if (strcmp(key, "TICK_MS") == 0)
-		return (set_int(&cfg->tick_ms, value, TD_MIN_TICK_MS, TD_MAX_TICK_MS));
+		return (set_int(&cfg->tick_ms, value, TETRISD_TICK_MS_MIN, TETRISD_TICK_MS_MAX));
 	if (strcmp(key, "INPUT_BURST") == 0)
-		return (set_int(&cfg->input_burst, value, TD_MIN_INPUT_LIMIT,
-				TD_MAX_INPUT_LIMIT));
+		return (set_int(&cfg->input_burst, value, TETRISD_INPUT_LIMIT_MIN,
+				TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "INPUT_RATE") == 0)
-		return (set_int(&cfg->input_rate, value, TD_MIN_INPUT_LIMIT,
-				TD_MAX_INPUT_LIMIT));
+		return (set_int(&cfg->input_rate, value, TETRISD_INPUT_LIMIT_MIN,
+				TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "BR_SLOTS") == 0)
 		return (set_int(&cfg->br_slots, value, 2, ROOM_MAX_SLOTS));
 	return (-1);
@@ -131,18 +131,18 @@ int	cfg_set(t_cfg *cfg, const char *key, const char *value)
  * @param line One raw line, with or without its newline.
  * @return 0 when applied or deliberately ignored, -1 for a bad value.
  */
-int	cfg_parse_line(t_cfg *cfg, const char *line)
+int	config_parse_line(t_config *cfg, const char *line)
 {
-	char	key[TD_LINE_MAX];
-	char	value[TD_LINE_MAX];
+	char	key[TETRISD_CONFIG_LINE_MAX];
+	char	value[TETRISD_CONFIG_LINE_MAX];
 
 	if (cfg == NULL || line == NULL)
 		return (-1);
 	if (split_assignment(line, key, sizeof(key), value, sizeof(value)) != 0)
 		return (0);
-	if (strncmp(key, TD_KEY_PREFIX, strlen(TD_KEY_PREFIX)) != 0)
+	if (strncmp(key, TETRISD_CONFIG_KEY_PREFIX, strlen(TETRISD_CONFIG_KEY_PREFIX)) != 0)
 		return (0);
-	return (cfg_set(cfg, key, value));
+	return (config_set(cfg, key, value));
 }
 
 /**
@@ -156,16 +156,16 @@ int	cfg_parse_line(t_cfg *cfg, const char *line)
  * @param override Path from argv, or NULL to resolve the usual way.
  * @return 0 on success, -1 when a setting carried an invalid value.
  */
-int	cfg_load(t_cfg *cfg, const char *override)
+int	config_load(t_config *cfg, const char *override)
 {
-	char	line[TD_LINE_MAX];
+	char	line[TETRISD_CONFIG_LINE_MAX];
 	FILE	*f;
 	int		rc;
 
 	if (cfg == NULL)
 		return (-1);
-	cfg_defaults(cfg);
-	if (cfg_resolve_rc(override, cfg->rc_path, TD_PATH_MAX) != 0)
+	config_defaults(cfg);
+	if (config_resolve_rc_path(override, cfg->rc_path, TETRISD_FS_PATH_MAX) != 0)
 		return (-1);
 	rc = 0;
 	f = fopen(cfg->rc_path, "r");
@@ -173,7 +173,7 @@ int	cfg_load(t_cfg *cfg, const char *override)
 	{
 		while (fgets(line, sizeof(line), f) != NULL)
 		{
-			if (cfg_parse_line(cfg, line) != 0)
+			if (config_parse_line(cfg, line) != 0)
 				rc = -1;
 		}
 		fclose(f);
@@ -193,7 +193,7 @@ int	cfg_load(t_cfg *cfg, const char *override)
  * @param cfg Configuration to check.
  * @return 0 when usable, -1 when a required file is missing or unreadable.
  */
-int	cfg_validate(const t_cfg *cfg)
+int	config_validate(const t_config *cfg)
 {
 	if (cfg == NULL)
 		return (-1);
@@ -350,7 +350,7 @@ static void	strip_quotes(char *value)
  * @param cfg Configuration to update.
  * @return 0 on success, -1 when an environment value was invalid.
  */
-static int	apply_env(t_cfg *cfg)
+static int	apply_env(t_config *cfg)
 {
 	static const char	*names[] = {
 		"TETRISD_PORT", "TETRISD_DATA_DIR",
@@ -369,7 +369,7 @@ static int	apply_env(t_cfg *cfg)
 	{
 		value = getenv(names[i]);
 		if (value != NULL && value[0] != '\0'
-			&& cfg_set(cfg, names[i], value) != 0)
+			&& config_set(cfg, names[i], value) != 0)
 			rc = -1;
 		i++;
 	}

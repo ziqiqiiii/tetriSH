@@ -61,8 +61,8 @@ static void	test_a_second_login_displaces_the_first(void)
 	assert(hc_connect(&second, &fx) == 0);
 	assert(hc_login(&second, "amber", "hunter2") == 200);
 	assert(second.player_id == first.player_id);
-	assert(hc_request(&first, "LIST", TD_PATH_ROOMS, NULL, &resp) == -1);
-	assert(hc_request(&second, "LIST", TD_PATH_ROOMS, NULL, &resp) == 0);
+	assert(hc_request(&first, "LIST", TETRISD_ROUTE_ROOMS, NULL, &resp) == -1);
+	assert(hc_request(&second, "LIST", TETRISD_ROUTE_ROOMS, NULL, &resp) == 0);
 	assert(resp.status_code == 200);
 	htttp_message_free(&resp);
 	hc_close(&second);
@@ -153,11 +153,11 @@ static void	test_authenticated_route_needs_a_player_id(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
-	assert(raw_request(&hc, "LIST", TD_PATH_ROOMS, NULL, NULL) == 401);
+	assert(raw_request(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL, NULL) == 401);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
-	assert(raw_request(&hc, "LIST", TD_PATH_ROOMS, "1", NULL) == 401);
+	assert(raw_request(&hc, "LIST", TETRISD_ROUTE_ROOMS, "1", NULL) == 401);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	assert(raw_request(&hc, "LIST", TD_PATH_ROOMS, NULL, NULL) == 401);
+	assert(raw_request(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL, NULL) == 401);
 	hc_close(&hc);
 	fx_stop(&fx);
 	printf("PASS test_authenticated_route_needs_a_player_id\n");
@@ -179,7 +179,7 @@ static void	test_forged_player_id_is_refused(void)
 	assert(hc_login(&mallory, "mallory", "hunter2") == 200);
 	snprintf(claimed, sizeof(claimed), "%llu",
 		(unsigned long long)amber.player_id);
-	assert(raw_request(&mallory, "LIST", TD_PATH_ROOMS, claimed, NULL) == 401);
+	assert(raw_request(&mallory, "LIST", TETRISD_ROUTE_ROOMS, claimed, NULL) == 401);
 	hc_close(&mallory);
 	hc_close(&amber);
 	fx_stop(&fx);
@@ -197,7 +197,7 @@ static void	test_unknown_method_and_malformed_frame(void)
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
 	assert(raw_request(&hc, "TELEPORT", "/room/S-01", NULL, NULL) == 501);
 	assert(session_send(&hc.sess, "GARBAGE\r\n\r\n", 11) == 11);
-	assert(raw_request(&hc, "LIST", TD_PATH_ROOMS, NULL, NULL) == 400);
+	assert(raw_request(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL, NULL) == 400);
 	hc_close(&hc);
 	fx_stop(&fx);
 	printf("PASS test_unknown_method_and_malformed_frame\n");
@@ -249,7 +249,7 @@ static void	test_a_body_without_a_content_type_is_refused(void)
 	assert(fx_start(&fx) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	htttp_message_init(&req);
-	assert(htttp_message_make_request(&req, "SIGNUP", TD_PATH_ACCOUNT)
+	assert(htttp_message_make_request(&req, "SIGNUP", TETRISD_ROUTE_ACCOUNT)
 		== HTTTP_OK);
 	assert(htttp_message_set_body(&req, "username amber\npassword hunter2\n",
 			31) == HTTTP_OK);

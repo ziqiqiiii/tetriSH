@@ -29,7 +29,7 @@ typedef struct s_harness
 typedef struct s_fixture
 {
 	t_server	*srv;
-	t_cfg		cfg;
+	t_config		cfg;
 	char		dir[96];
 	char		ca_path[192];
 }	t_fixture;

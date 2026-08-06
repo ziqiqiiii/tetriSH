@@ -8,7 +8,7 @@ static void	test_level_filter_skips_quieter_records(void);
 static void	test_absent_logger_falls_back_to_stderr(void);
 
 static void	make_tmp_dir(char *out, size_t cap);
-static void	logger_cfg(t_cfg *cfg, const char *sock_path, int level);
+static void	logger_cfg(t_config *cfg, const char *sock_path, int level);
 static int	wait_record(int fd, t_log_record *out, int timeout_ms);
 
 int	main(void)
@@ -23,7 +23,7 @@ static void	test_records_reach_the_logger(void)
 {
 	t_log_record	rec;
 	t_logger		lg;
-	t_cfg			cfg;
+	t_config			cfg;
 	char			dir[128];
 	char			sock[192];
 	int				rx;
@@ -33,16 +33,16 @@ static void	test_records_reach_the_logger(void)
 	rx = us_dgram_bind(sock, 0600);
 	assert(rx >= 0);
 	logger_cfg(&cfg, sock, CIPC_LOG_DEBUG);
-	assert(log_init(&lg, &cfg) == 0);
-	log_emit(&lg, CIPC_LOG_INFO, "player %llu joined %s",
+	assert(logger_init(&lg, &cfg) == 0);
+	logger_emit(&lg, CIPC_LOG_INFO, "player %llu joined %s",
 		(unsigned long long)7, "S-01");
 	assert(wait_record(rx, &rec, 2000) == 0);
 	assert(lr_validate(&rec, sizeof(rec)) == 0);
 	assert(rec.level == CIPC_LOG_INFO);
-	assert(strcmp(rec.component, TD_COMPONENT) == 0);
+	assert(strcmp(rec.component, TETRISD_COMPONENT_NAME) == 0);
 	assert(strcmp(rec.msg, "player 7 joined S-01") == 0);
-	assert(log_dropped(&lg) == 0);
-	log_shutdown(&lg);
+	assert(logger_dropped_count(&lg) == 0);
+	logger_shutdown(&lg);
 	us_close_unlink(rx, sock);
 	rmdir(dir);
 	printf("PASS test_records_reach_the_logger\n");
@@ -52,7 +52,7 @@ static void	test_level_filter_skips_quieter_records(void)
 {
 	t_log_record	rec;
 	t_logger		lg;
-	t_cfg			cfg;
+	t_config			cfg;
 	char			dir[128];
 	char			sock[192];
 	int				rx;
@@ -62,15 +62,15 @@ static void	test_level_filter_skips_quieter_records(void)
 	rx = us_dgram_bind(sock, 0600);
 	assert(rx >= 0);
 	logger_cfg(&cfg, sock, CIPC_LOG_WARNING);
-	assert(log_init(&lg, &cfg) == 0);
-	log_emit(&lg, CIPC_LOG_DEBUG, "chatter");
-	log_emit(&lg, CIPC_LOG_INFO, "chatter");
-	log_emit(&lg, CIPC_LOG_ERROR, "the roof is on fire");
+	assert(logger_init(&lg, &cfg) == 0);
+	logger_emit(&lg, CIPC_LOG_DEBUG, "chatter");
+	logger_emit(&lg, CIPC_LOG_INFO, "chatter");
+	logger_emit(&lg, CIPC_LOG_ERROR, "the roof is on fire");
 	assert(wait_record(rx, &rec, 2000) == 0);
 	assert(rec.level == CIPC_LOG_ERROR);
 	assert(strcmp(rec.msg, "the roof is on fire") == 0);
 	assert(wait_record(rx, &rec, 100) == -1);
-	log_shutdown(&lg);
+	logger_shutdown(&lg);
 	us_close_unlink(rx, sock);
 	rmdir(dir);
 	printf("PASS test_level_filter_skips_quieter_records\n");
@@ -79,7 +79,7 @@ static void	test_level_filter_skips_quieter_records(void)
 static void	test_absent_logger_falls_back_to_stderr(void)
 {
 	t_logger	lg;
-	t_cfg		cfg;
+	t_config		cfg;
 	char		dir[128];
 	char		sock[192];
 	char		out[192];
@@ -97,9 +97,9 @@ static void	test_absent_logger_falls_back_to_stderr(void)
 	saved = dup(STDERR_FILENO);
 	assert(saved >= 0);
 	assert(dup2(fd, STDERR_FILENO) >= 0);
-	assert(log_init(&lg, &cfg) == 0);
-	log_emit(&lg, CIPC_LOG_ERROR, "logger is missing");
-	log_shutdown(&lg);
+	assert(logger_init(&lg, &cfg) == 0);
+	logger_emit(&lg, CIPC_LOG_ERROR, "logger is missing");
+	logger_shutdown(&lg);
 	fflush(stderr);
 	assert(dup2(saved, STDERR_FILENO) >= 0);
 	close(saved);
@@ -118,14 +118,14 @@ static void	test_absent_logger_falls_back_to_stderr(void)
 static void	make_tmp_dir(char *out, size_t cap)
 {
 	snprintf(out, cap, "tests/tmp/logXXXXXX");
-	assert(net_mkdir_p("tests/tmp") == 0);
+	assert(cd_mkdir_p("tests/tmp") == 0);
 	assert(mkdtemp(out) != NULL);
 }
 
-static void	logger_cfg(t_cfg *cfg, const char *sock_path, int level)
+static void	logger_cfg(t_config *cfg, const char *sock_path, int level)
 {
-	cfg_defaults(cfg);
-	snprintf(cfg->log_ipc, TD_PATH_MAX, "%s", sock_path);
+	config_defaults(cfg);
+	snprintf(cfg->log_ipc, TETRISD_FS_PATH_MAX, "%s", sock_path);
 	cfg->log_level = level;
 }
 

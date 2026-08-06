@@ -17,7 +17,7 @@ static void	teardown(t_client *cli);
  * @param fd Accepted socket descriptor; closed here on failure.
  * @return 0 when a reader thread took over, -1 when the client was refused.
  */
-int	cli_spawn(t_server *srv, int fd)
+int	client_spawn(t_server *srv, int fd)
 {
 	t_client	*cli;
 
@@ -35,17 +35,17 @@ int	cli_spawn(t_server *srv, int fd)
 	cli->room_index = -1;
 	cli->slot_index = -1;
 	cli->state = CLI_HANDSHAKE;
-	if (ob_init(&cli->outbox) != 0 || reg_add(&srv->reg, cli) != 0)
+	if (outbox_init(&cli->outbox) != 0 || registry_add(&srv->reg, cli) != 0)
 	{
-		ob_destroy(&cli->outbox);
+		outbox_destroy(&cli->outbox);
 		close(fd);
 		free(cli);
 		return (-1);
 	}
 	if (start_reader(cli) != 0)
 	{
-		reg_remove(&srv->reg, cli);
-		ob_destroy(&cli->outbox);
+		registry_remove(&srv->reg, cli);
+		outbox_destroy(&cli->outbox);
 		close(fd);
 		free(cli);
 		return (-1);
@@ -63,7 +63,7 @@ int	cli_spawn(t_server *srv, int fd)
  * @param msg Message to serialise; the caller still owns and frees it.
  * @param is_state true for a STATE push (latest-wins mailbox).
  */
-void	cli_send(t_client *cli, t_htttp_message *msg, bool is_state)
+void	client_send(t_client *cli, t_htttp_message *msg, bool is_state)
 {
 	unsigned char	*bytes;
 	size_t			len;
@@ -74,9 +74,9 @@ void	cli_send(t_client *cli, t_htttp_message *msg, bool is_state)
 	if (htttp_serialize(msg, &bytes, &len) != HTTTP_OK)
 		return ;
 	if (is_state)
-		rc = ob_push_state(&cli->outbox, bytes, len);
+		rc = outbox_push_state(&cli->outbox, bytes, len);
 	else
-		rc = ob_push(&cli->outbox, bytes, len);
+		rc = outbox_push(&cli->outbox, bytes, len);
 	if (rc != 0)
 	{
 		free(bytes);
@@ -126,7 +126,7 @@ static void	*reader_main(void *arg)
 	if (buf != NULL && session_handshake_server(cli->fd, &cli->sess,
 			cli->srv->cfg.cert_path, cli->srv->cfg.key_path) == 0)
 	{
-		reg_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
+		registry_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
 		if (pthread_create(&cli->writer, NULL, writer_main, cli) == 0)
 			cli->writer_started = true;
 		while (cli->writer_started && atomic_load(&cli->srv->running))
@@ -134,11 +134,11 @@ static void	*reader_main(void *arg)
 			n = session_recv(&cli->sess, buf, TETRISSH_MAX_PLAINTEXT);
 			if (n <= 0 || atomic_load(&cli->outbox.overflowed))
 				break ;
-			cli_handle_frame(cli, buf, (size_t)n);
+			client_handle_frame(cli, buf, (size_t)n);
 		}
 	}
 	else
-		log_emit(&cli->srv->log, CIPC_LOG_WARNING,
+		logger_emit(&cli->srv->log, CIPC_LOG_WARNING,
 			"handshake failed on fd %d", cli->fd);
 	free(buf);
 	teardown(cli);
@@ -157,11 +157,11 @@ static void	*reader_main(void *arg)
 static void	*writer_main(void *arg)
 {
 	t_client	*cli;
-	t_outmsg	msg;
+	t_outbound_message	msg;
 	ssize_t		sent;
 
 	cli = arg;
-	while (ob_pop(&cli->outbox, &msg) == 0)
+	while (outbox_pop(&cli->outbox, &msg) == 0)
 	{
 		sent = session_send(&cli->sess, msg.bytes, msg.len);
 		free(msg.bytes);
@@ -189,16 +189,16 @@ static void	teardown(t_client *cli)
 	t_server	*srv;
 
 	srv = cli->srv;
-	room_rt_forfeit(srv, cli);
-	reg_remove(&srv->reg, cli);
+	server_room_forfeit(srv, cli);
+	registry_remove(&srv->reg, cli);
 	shutdown(cli->fd, SHUT_RDWR);
-	ob_close(&cli->outbox);
+	outbox_close(&cli->outbox);
 	if (cli->writer_started)
 		pthread_join(cli->writer, NULL);
 	session_close(&cli->sess);
 	close(cli->fd);
-	ob_destroy(&cli->outbox);
-	log_emit(&srv->log, CIPC_LOG_INFO, "client %s disconnected",
+	outbox_destroy(&cli->outbox);
+	logger_emit(&srv->log, CIPC_LOG_INFO, "client %s disconnected",
 		cli->username[0] != '\0' ? cli->username : "(anonymous)");
 	free(cli);
 }

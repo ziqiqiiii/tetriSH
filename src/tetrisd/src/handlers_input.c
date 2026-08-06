@@ -1,9 +1,9 @@
 #include "tetrisd.h"
 
 // Static Functions
-static int	input_target(t_reqctx *ctx, t_room_rt **out);
-static int	body_token(t_reqctx *ctx, char *out, size_t cap);
-static int	apply_input(t_reqctx *ctx, t_room_rt *rt, t_input_action action, int argument);
+static int	input_target(t_request_context *ctx, t_server_room **out);
+static int	body_token(t_request_context *ctx, char *out, size_t cap);
+static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_action action, int argument);
 
 /**
  * @brief MOVE /room/<name>/player/<pid> - translate the falling piece.
@@ -12,24 +12,24 @@ static int	apply_input(t_reqctx *ctx, t_room_rt *rt, t_input_action action, int 
  * @param context The request context.
  * @return 200 when applied, 409 when the move was blocked, 400 on a bad body.
  */
-int	h_move(const t_htttp_message *msg, void *context)
+int	move_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
-	t_room_rt	*rt;
+	t_request_context	*ctx;
+	t_server_room	*sroom;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &rt);
+	status = input_target(ctx, &sroom);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "LEFT") == 0)
-		return (apply_input(ctx, rt, INPUT_MOVE, -1));
+		return (apply_input(ctx, sroom, INPUT_MOVE, -1));
 	if (strcmp(token, "RIGHT") == 0)
-		return (apply_input(ctx, rt, INPUT_MOVE, 1));
+		return (apply_input(ctx, sroom, INPUT_MOVE, 1));
 	return (400);
 }
 
@@ -40,24 +40,24 @@ int	h_move(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 200 when applied, 409 when every kick was blocked, 400 otherwise.
  */
-int	h_rotate(const t_htttp_message *msg, void *context)
+int	rotate_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
-	t_room_rt	*rt;
+	t_request_context	*ctx;
+	t_server_room	*sroom;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &rt);
+	status = input_target(ctx, &sroom);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "CW") == 0)
-		return (apply_input(ctx, rt, INPUT_ROTATE, 1));
+		return (apply_input(ctx, sroom, INPUT_ROTATE, 1));
 	if (strcmp(token, "CCW") == 0)
-		return (apply_input(ctx, rt, INPUT_ROTATE, -1));
+		return (apply_input(ctx, sroom, INPUT_ROTATE, -1));
 	return (400);
 }
 
@@ -68,24 +68,24 @@ int	h_rotate(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 200 when applied, 409 when the game is not running, 400 otherwise.
  */
-int	h_drop(const t_htttp_message *msg, void *context)
+int	drop_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
-	t_room_rt	*rt;
+	t_request_context	*ctx;
+	t_server_room	*sroom;
 	char		token[16];
 	int			status;
 
 	(void)msg;
 	ctx = context;
-	status = input_target(ctx, &rt);
+	status = input_target(ctx, &sroom);
 	if (status != 0)
 		return (status);
 	if (body_token(ctx, token, sizeof(token)) != 0)
 		return (400);
 	if (strcmp(token, "SOFT") == 0)
-		return (apply_input(ctx, rt, INPUT_DROP, 0));
+		return (apply_input(ctx, sroom, INPUT_DROP, 0));
 	if (strcmp(token, "HARD") == 0)
-		return (apply_input(ctx, rt, INPUT_DROP, 1));
+		return (apply_input(ctx, sroom, INPUT_DROP, 1));
 	return (400);
 }
 
@@ -104,13 +104,13 @@ int	h_drop(const t_htttp_message *msg, void *context)
  * @param cli Client spending a token.
  * @return true when a token was available, false when the budget is empty.
  */
-bool	input_take_token(t_client *cli)
+bool	rate_limit_take_token(t_client *cli)
 {
 	uint64_t	now;
 	int			cap;
 
-	cap = cli->srv->cfg.input_burst * TD_TOKEN_SCALE;
-	now = net_now_ms();
+	cap = cli->srv->cfg.input_burst * TETRISD_TOKEN_SCALE;
+	now = clock_now_ms();
 	if (cli->tokens_at_ms == 0)
 	{
 		cli->tokens = cap;
@@ -124,9 +124,9 @@ bool	input_take_token(t_client *cli)
 	}
 	if (cli->tokens > cap)
 		cli->tokens = cap;
-	if (cli->tokens < TD_TOKEN_SCALE)
+	if (cli->tokens < TETRISD_TOKEN_SCALE)
 		return (false);
-	cli->tokens -= TD_TOKEN_SCALE;
+	cli->tokens -= TETRISD_TOKEN_SCALE;
 	return (true);
 }
 
@@ -141,7 +141,7 @@ bool	input_take_token(t_client *cli)
  * @param out Receives the addressed room runtime.
  * @return 0 when the request may proceed, otherwise the status to answer.
  */
-static int	input_target(t_reqctx *ctx, t_room_rt **out)
+static int	input_target(t_request_context *ctx, t_server_room **out)
 {
 	char		name[ROOM_NAME_MAX];
 	const char	*path;
@@ -149,15 +149,15 @@ static int	input_target(t_reqctx *ctx, t_room_rt **out)
 	size_t		len;
 
 	*out = NULL;
-	if (!h_authorised(ctx))
+	if (!request_is_authorised(ctx))
 		return (401);
-	if (!input_take_token(ctx->cli))
+	if (!rate_limit_take_token(ctx->cli))
 		return (429);
 	path = ctx->msg->path;
 	if (path == NULL
-		|| strncmp(path, TD_PATH_ROOM, strlen(TD_PATH_ROOM)) != 0)
+		|| strncmp(path, TETRISD_ROUTE_ROOM_PREFIX, strlen(TETRISD_ROUTE_ROOM_PREFIX)) != 0)
 		return (404);
-	path += strlen(TD_PATH_ROOM);
+	path += strlen(TETRISD_ROUTE_ROOM_PREFIX);
 	sep = strstr(path, "/player/");
 	if (sep == NULL)
 		return (404);
@@ -170,7 +170,7 @@ static int	input_target(t_reqctx *ctx, t_room_rt **out)
 		return (403);
 	if (ctx->cli->room_index < 0 || strcmp(name, ctx->cli->room_name) != 0)
 		return (409);
-	*out = room_rt_at(ctx->srv, ctx->cli->room_index);
+	*out = server_room_at(ctx->srv, ctx->cli->room_index);
 	if (*out == NULL)
 		return (409);
 	return (0);
@@ -184,7 +184,7 @@ static int	input_target(t_reqctx *ctx, t_room_rt **out)
  * @param cap Size of out.
  * @return 0 on success, -1 when the body is empty or too long to be a token.
  */
-static int	body_token(t_reqctx *ctx, char *out, size_t cap)
+static int	body_token(t_request_context *ctx, char *out, size_t cap)
 {
 	size_t	len;
 	size_t	i;
@@ -216,12 +216,12 @@ static int	body_token(t_reqctx *ctx, char *out, size_t cap)
  * instead of two racing ones.
  *
  * @param ctx Request context.
- * @param rt Room runtime holding the game.
+ * @param sroom Room runtime holding the game.
  * @param action Which input to apply.
  * @param argument Direction for a move or rotation, hard flag for a drop.
  * @return 200 when the input was applied, 409 when it was refused.
  */
-static int	apply_input(t_reqctx *ctx, t_room_rt *rt, t_input_action action,
+static int	apply_input(t_request_context *ctx, t_server_room *sroom, t_input_action action,
 			int argument)
 {
 	t_game	*game;
@@ -232,8 +232,8 @@ static int	apply_input(t_reqctx *ctx, t_room_rt *rt, t_input_action action,
 	if (index < 0 || index >= TD_MAX_GAMES)
 		return (409);
 	ok = false;
-	pthread_mutex_lock(&rt->mutex);
-	game = &rt->games[index];
+	pthread_mutex_lock(&sroom->mutex);
+	game = &sroom->games[index];
 	if (game->player_id == ctx->cli->player_id && game->active)
 	{
 		if (action == INPUT_MOVE)
@@ -243,10 +243,10 @@ static int	apply_input(t_reqctx *ctx, t_room_rt *rt, t_input_action action,
 		else
 			ok = game_drop(game, argument != 0);
 		if (ok)
-			rt->dirty[index] = true;
+			sroom->dirty[index] = true;
 	}
-	pthread_mutex_unlock(&rt->mutex);
+	pthread_mutex_unlock(&sroom->mutex);
 	if (!ok)
-		return (req_refuse(ctx, "input-blocked"));
+		return (request_refuse(ctx, "input-blocked"));
 	return (200);
 }

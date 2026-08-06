@@ -14,7 +14,7 @@ static int	bind_any(int fd, int port);
  * @param out_port Receives the bound port (may be NULL).
  * @return The listening descriptor, or -1 on failure.
  */
-int	net_listen(int port, int *out_port)
+int	listener_open(int port, int *out_port)
 {
 	struct sockaddr_in	addr;
 	socklen_t			len;
@@ -49,7 +49,7 @@ int	net_listen(int port, int *out_port)
  * @param listen_fd The listening descriptor.
  * @return The connected descriptor, or -1 when nothing was pending.
  */
-int	net_accept(int listen_fd)
+int	listener_accept(int listen_fd)
 {
 	int	fd;
 	int	on;
@@ -61,79 +61,6 @@ int	net_accept(int listen_fd)
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 	return (fd);
 }
-
-/**
- * @brief Creates a directory and every missing parent along its path.
- *
- * Runtime paths come from .tetrishrc, so the directories they name may not
- * exist yet on a fresh clone; an already-existing directory is success.
- *
- * @param path Directory path to create.
- * @return 0 on success, -1 on failure.
- */
-int	net_mkdir_p(const char *path)
-{
-	char	buf[TD_PATH_MAX];
-	size_t	i;
-
-	if (path == NULL || path[0] == '\0' || strlen(path) >= sizeof(buf))
-		return (-1);
-	snprintf(buf, sizeof(buf), "%s", path);
-	i = 1;
-	while (buf[i] != '\0')
-	{
-		if (buf[i] == '/')
-		{
-			buf[i] = '\0';
-			if (mkdir(buf, 0755) != 0 && errno != EEXIST)
-				return (-1);
-			buf[i] = '/';
-		}
-		i++;
-	}
-	if (mkdir(buf, 0755) != 0 && errno != EEXIST)
-		return (-1);
-	return (0);
-}
-
-/**
- * @brief Returns wall-clock milliseconds, for log record timestamps.
- *
- * @return Milliseconds since the epoch.
- */
-uint64_t	net_now_ms(void)
-{
-	struct timespec	ts;
-
-	if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-		return (0);
-	return ((uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000));
-}
-
-/**
- * @brief Measures elapsed monotonic milliseconds and rearms the marker.
- *
- * Gravity accumulates real elapsed time rather than assuming the ticker slept
- * exactly its period, so a descheduled thread does not slow the game down.
- *
- * @param last Marker holding the previous reading; updated to now.
- * @return Milliseconds since the previous reading, never negative.
- */
-int	net_elapsed_ms(struct timespec *last)
-{
-	struct timespec	now;
-	long			ms;
-
-	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-		return (0);
-	ms = (now.tv_sec - last->tv_sec) * 1000
-		+ (now.tv_nsec - last->tv_nsec) / 1000000;
-	*last = now;
-	if (ms < 0)
-		return (0);
-	return ((int)ms);
-}
-
 /**
  * @brief Binds a socket to every interface on the given port.
  *

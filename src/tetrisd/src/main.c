@@ -1,7 +1,7 @@
 #include "tetrisd.h"
 
 // Static Functions
-static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready);
+static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready);
 
 /**
  * @brief Runs tetrisd: read .tetrishrc, detach, start the server, stop cleanly.
@@ -23,15 +23,15 @@ int	main(int argc, char **argv)
 {
 	t_pidfile	pf;
 	t_server	*srv;
-	t_cfg		cfg;
+	t_config		cfg;
 	int			ready;
 
-	if (cfg_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
+	if (config_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
 	{
 		fprintf(stderr, "tetrisd: %s holds an invalid setting\n", cfg.rc_path);
 		return (EXIT_FAILURE);
 	}
-	if (cfg_validate(&cfg) != 0)
+	if (config_validate(&cfg) != 0)
 	{
 		fprintf(stderr, "tetrisd: cannot read %s and %s - run `make certs`\n",
 			cfg.cert_path, cfg.key_path);
@@ -73,23 +73,23 @@ int	main(int argc, char **argv)
  * @param ready Receives the readiness descriptor for cd_ready.
  * @return 0 on success, -1 after reporting why on stderr.
  */
-static int	go_background(const t_cfg *cfg, t_pidfile *pf, int *ready)
+static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready)
 {
 	cd_pid_blank(pf);
 	if (cd_detach(ready) != 0)
 	{
 		fprintf(stderr, "%s: cannot detach: %s\n",
-			TD_COMPONENT, strerror(errno));
+			TETRISD_COMPONENT_NAME, strerror(errno));
 		return (-1);
 	}
 	if (cd_pid_claim(pf, cfg->pid_path) != 0)
 	{
 		if (errno == EWOULDBLOCK || errno == EAGAIN)
 			fprintf(stderr, "%s: already running (%s)\n",
-				TD_COMPONENT, cfg->pid_path);
+				TETRISD_COMPONENT_NAME, cfg->pid_path);
 		else
 			fprintf(stderr, "%s: cannot claim %s: %s\n",
-				TD_COMPONENT, cfg->pid_path, strerror(errno));
+				TETRISD_COMPONENT_NAME, cfg->pid_path, strerror(errno));
 		return (-1);
 	}
 	return (0);

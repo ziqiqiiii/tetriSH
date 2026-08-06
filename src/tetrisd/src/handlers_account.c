@@ -1,10 +1,10 @@
 #include "tetrisd.h"
 
 // Static Functions
-static int	read_credentials(t_reqctx *ctx, char *username, char *password);
+static int	read_credentials(t_request_context *ctx, char *username, char *password);
 static int	signup_status(t_db_result res);
-static int	displace_previous(t_reqctx *ctx, t_player_id pid);
-static void	bind_identity(t_reqctx *ctx, const t_player *player);
+static int	displace_previous(t_request_context *ctx, t_player_id pid);
+static void	bind_identity(t_request_context *ctx, const t_player *player);
 static void	to_hex(const unsigned char *bytes, size_t len, char *out);
 
 /**
@@ -17,11 +17,11 @@ static void	to_hex(const unsigned char *bytes, size_t len, char *out);
  * @param context The request context.
  * @return 201 on success, 409 when taken, 400 on a bad body, 500 otherwise.
  */
-int	h_signup(const t_htttp_message *msg, void *context)
+int	signup_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
+	t_request_context	*ctx;
 	char		username[DB_MAX_USERNAME];
-	char		password[TD_PASSWORD_MAX];
+	char		password[TETRISD_PASSWORD_MAX];
 	char		salt[DB_SALT_LEN + 1];
 	char		hash[DB_HASH_LEN + 1];
 	t_player_id	id;
@@ -31,15 +31,15 @@ int	h_signup(const t_htttp_message *msg, void *context)
 	ctx = context;
 	if (read_credentials(ctx, username, password) != 0)
 		return (400);
-	if (h_make_salt(salt, sizeof(salt)) != 0
-		|| h_hash_password(password, salt, hash, sizeof(hash)) != 0)
+	if (salt_generate(salt, sizeof(salt)) != 0
+		|| password_hash(password, salt, hash, sizeof(hash)) != 0)
 		return (500);
 	res = db_signup(ctx->srv->db, username, hash, salt, &id);
 	if (res != DB_OK)
 		return (signup_status(res));
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "signup %s -> player %llu",
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "signup %s -> player %llu",
 		username, (unsigned long long)id);
-	req_bodyf(ctx, "player-id %llu\nusername %s\n",
+	request_body_printf(ctx, "player-id %llu\nusername %s\n",
 		(unsigned long long)id, username);
 	return (201);
 }
@@ -55,11 +55,11 @@ int	h_signup(const t_htttp_message *msg, void *context)
  * @param context The request context.
  * @return 200 on success, 401 on bad credentials, 400 on a bad body.
  */
-int	h_login(const t_htttp_message *msg, void *context)
+int	login_handler(const t_htttp_message *msg, void *context)
 {
-	t_reqctx	*ctx;
+	t_request_context	*ctx;
 	char		username[DB_MAX_USERNAME];
-	char		password[TD_PASSWORD_MAX];
+	char		password[TETRISD_PASSWORD_MAX];
 	char		salt[DB_SALT_LEN + 1];
 	char		hash[DB_HASH_LEN + 1];
 	t_player	player;
@@ -73,20 +73,20 @@ int	h_login(const t_htttp_message *msg, void *context)
 	memset(salt, 'x', DB_SALT_LEN);
 	salt[DB_SALT_LEN] = '\0';
 	db_get_salt(ctx->srv->db, username, salt, sizeof(salt) - 1);
-	if (h_hash_password(password, salt, hash, sizeof(hash)) != 0)
+	if (password_hash(password, salt, hash, sizeof(hash)) != 0)
 		return (500);
 	if (db_login(ctx->srv->db, username, hash, &player) != DB_OK)
 	{
-		log_emit(&ctx->srv->log, CIPC_LOG_WARNING, "login refused for %s",
+		logger_emit(&ctx->srv->log, CIPC_LOG_WARNING, "login refused for %s",
 			username);
 		return (401);
 	}
 	if (displace_previous(ctx, player.player_id) != 0)
 		return (503);
 	bind_identity(ctx, &player);
-	log_emit(&ctx->srv->log, CIPC_LOG_INFO, "login %s -> player %llu",
+	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "login %s -> player %llu",
 		username, (unsigned long long)player.player_id);
-	req_bodyf(ctx, "player-id %llu\nusername %s\nscore %lld\nwallet %lld\n",
+	request_body_printf(ctx, "player-id %llu\nusername %s\nscore %lld\nwallet %lld\n",
 		(unsigned long long)player.player_id, player.username,
 		(long long)player.leaderboard_score, (long long)player.wallet_points);
 	return (200);
@@ -105,18 +105,18 @@ int	h_login(const t_htttp_message *msg, void *context)
  * @param cap Size of out.
  * @return 0 on success, -1 on invalid arguments.
  */
-int	h_hash_password(const char *password, const char *salt, char *out,
+int	password_hash(const char *password, const char *salt, char *out,
 		size_t cap)
 {
 	unsigned char	digest[SHA256_DIGEST_LENGTH];
-	unsigned char	input[DB_SALT_LEN + TD_PASSWORD_MAX];
+	unsigned char	input[DB_SALT_LEN + TETRISD_PASSWORD_MAX];
 	size_t			len;
 
 	if (password == NULL || salt == NULL || out == NULL
 		|| cap < DB_HASH_LEN + 1)
 		return (-1);
 	len = strlen(password);
-	if (len == 0 || len >= TD_PASSWORD_MAX)
+	if (len == 0 || len >= TETRISD_PASSWORD_MAX)
 		return (-1);
 	memcpy(input, salt, DB_SALT_LEN);
 	memcpy(input + DB_SALT_LEN, password, len);
@@ -132,7 +132,7 @@ int	h_hash_password(const char *password, const char *salt, char *out,
  * @param cap Size of out.
  * @return 0 on success, -1 when the buffer is too small or entropy failed.
  */
-int	h_make_salt(char *out, size_t cap)
+int	salt_generate(char *out, size_t cap)
 {
 	unsigned char	raw[DB_SALT_LEN / 2];
 
@@ -149,14 +149,14 @@ int	h_make_salt(char *out, size_t cap)
  *
  * @param ctx Request context holding the body.
  * @param username Buffer of DB_MAX_USERNAME bytes.
- * @param password Buffer of TD_PASSWORD_MAX bytes.
+ * @param password Buffer of TETRISD_PASSWORD_MAX bytes.
  * @return 0 when both are present and usable, -1 otherwise.
  */
-static int	read_credentials(t_reqctx *ctx, char *username, char *password)
+static int	read_credentials(t_request_context *ctx, char *username, char *password)
 {
-	if (req_body_field(ctx, "username", username, DB_MAX_USERNAME) == NULL)
+	if (request_body_field(ctx, "username", username, DB_MAX_USERNAME) == NULL)
 		return (-1);
-	if (req_body_field(ctx, "password", password, TD_PASSWORD_MAX) == NULL)
+	if (request_body_field(ctx, "password", password, TETRISD_PASSWORD_MAX) == NULL)
 		return (-1);
 	if (username[0] == '\0' || password[0] == '\0')
 		return (-1);
@@ -195,17 +195,17 @@ static int	signup_status(t_db_result res)
  * @return 0 when the player is free to bind, -1 when the old connection would
  *         not go away in time.
  */
-static int	displace_previous(t_reqctx *ctx, t_player_id pid)
+static int	displace_previous(t_request_context *ctx, t_player_id pid)
 {
-	if (!reg_displace(&ctx->srv->reg, pid, ctx->cli))
+	if (!registry_displace(&ctx->srv->reg, pid, ctx->cli))
 		return (0);
-	log_emit(&ctx->srv->log, CIPC_LOG_WARNING,
+	logger_emit(&ctx->srv->log, CIPC_LOG_WARNING,
 		"player %llu logged in again; closing the previous connection",
 		(unsigned long long)pid);
-	if (reg_wait_absent(&ctx->srv->reg, pid, ctx->cli,
+	if (registry_wait_absent(&ctx->srv->reg, pid, ctx->cli,
 			TD_DISPLACE_WAIT_MS) != 0)
 	{
-		log_emit(&ctx->srv->log, CIPC_LOG_ERROR,
+		logger_emit(&ctx->srv->log, CIPC_LOG_ERROR,
 			"player %llu still bound after %d ms; refusing the login",
 			(unsigned long long)pid, TD_DISPLACE_WAIT_MS);
 		return (-1);
@@ -222,9 +222,9 @@ static int	displace_previous(t_reqctx *ctx, t_player_id pid)
  * @param ctx Request context holding the client and the registry.
  * @param player The authenticated player.
  */
-static void	bind_identity(t_reqctx *ctx, const t_player *player)
+static void	bind_identity(t_request_context *ctx, const t_player *player)
 {
-	reg_bind(&ctx->srv->reg, ctx->cli, player->player_id, player->username);
+	registry_bind(&ctx->srv->reg, ctx->cli, player->player_id, player->username);
 }
 
 /**

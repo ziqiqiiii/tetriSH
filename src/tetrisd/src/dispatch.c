@@ -2,15 +2,15 @@
 
 // Static Variables
 static const t_htttp_route	g_routes[] = {
-	{"SIGNUP", 0u, h_signup},
-	{"LOGIN", 0u, h_login},
-	{"LIST", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_list},
-	{"JOIN", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_join},
-	{"LEAVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_leave},
-	{"START", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_start},
-	{"MOVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_move},
-	{"ROTATE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_rotate},
-	{"DROP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, h_drop}
+	{"SIGNUP", 0u, signup_handler},
+	{"LOGIN", 0u, login_handler},
+	{"LIST", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, list_handler},
+	{"JOIN", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, join_handler},
+	{"LEAVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, leave_handler},
+	{"START", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, start_handler},
+	{"MOVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, move_handler},
+	{"ROTATE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, rotate_handler},
+	{"DROP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, drop_handler}
 };
 
 // Static Functions
@@ -29,10 +29,10 @@ static bool			body_declares_itself(const t_htttp_message *msg);
  * @param frame Decrypted plaintext of one HTTTP message.
  * @param len Length of frame.
  */
-void	cli_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
+void	client_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
 {
 	t_htttp_message	msg;
-	t_reqctx		ctx;
+	t_request_context		ctx;
 	t_htttp_result	res;
 	int				status;
 
@@ -42,13 +42,13 @@ void	cli_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
 	res = htttp_parse(frame, len, &msg);
 	if (res != HTTTP_OK)
 	{
-		reply(cli, result_status(res, NULL), NULL, 0);
+		request_reply(cli, result_status(res, NULL), NULL, 0);
 		htttp_message_free(&msg);
 		return ;
 	}
 	if (!body_declares_itself(&msg))
 	{
-		reply(cli, 400u, NULL, 0);
+		request_reply(cli, 400u, NULL, 0);
 		htttp_message_free(&msg);
 		return ;
 	}
@@ -60,7 +60,7 @@ void	cli_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
 	res = htttp_dispatch(&msg, g_routes, sizeof(g_routes) / sizeof(g_routes[0]), &ctx, &status);
 	if (res != HTTTP_OK)
 		status = (int)result_status(res, &msg);
-	reply(cli, (unsigned int)status, ctx.body, ctx.body_len);
+	request_reply(cli, (unsigned int)status, ctx.body, ctx.body_len);
 	htttp_message_free(&msg);
 }
 
@@ -77,7 +77,7 @@ void	cli_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
  * @param body Body bytes, or NULL for an empty response.
  * @param body_len Length of body.
  */
-void	reply(t_client *cli, unsigned int status, const char *body,
+void	request_reply(t_client *cli, unsigned int status, const char *body,
 		size_t body_len)
 {
 	t_htttp_message	resp;
@@ -104,7 +104,7 @@ void	reply(t_client *cli, unsigned int status, const char *body,
 				HTTTP_CONTENT_TYPE_STATUS);
 			htttp_message_set_body(&resp, body, body_len);
 		}
-		cli_send(cli, &resp, false);
+		client_send(cli, &resp, false);
 	}
 	htttp_message_free(&resp);
 }
@@ -121,7 +121,7 @@ void	reply(t_client *cli, unsigned int status, const char *body,
  * @param cap Size of out.
  * @return out on success, NULL when the key is absent or does not fit.
  */
-const char	*req_body_field(const t_reqctx *ctx, const char *key, char *out,
+const char	*request_body_field(const t_request_context *ctx, const char *key, char *out,
 			size_t cap)
 {
 	const unsigned char	*body;
@@ -163,7 +163,7 @@ const char	*req_body_field(const t_reqctx *ctx, const char *key, char *out,
  * @param ctx Request context whose body is written.
  * @param fmt printf-style format for the whole body.
  */
-void	req_bodyf(t_reqctx *ctx, const char *fmt, ...)
+void	request_body_printf(t_request_context *ctx, const char *fmt, ...)
 {
 	va_list	ap;
 	int		n;
@@ -192,9 +192,9 @@ void	req_bodyf(t_reqctx *ctx, const char *fmt, ...)
  * @param reason Short machine-readable verdict name.
  * @return Always 409.
  */
-int	req_refuse(t_reqctx *ctx, const char *reason)
+int	request_refuse(t_request_context *ctx, const char *reason)
 {
-	req_bodyf(ctx, "reason %s\n", reason);
+	request_body_printf(ctx, "reason %s\n", reason);
 	return (409);
 }
 

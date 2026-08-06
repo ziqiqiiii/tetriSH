@@ -28,24 +28,24 @@ int	fx_start(t_fixture *fx)
 
 	memset(fx, 0, sizeof(*fx));
 	snprintf(fx->dir, sizeof(fx->dir), "tests/tmp/srvXXXXXX");
-	if (net_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
+	if (cd_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
 		return (-1);
 	if (generate_certs(fx) != 0)
 		return (-1);
-	cfg_defaults(&fx->cfg);
+	config_defaults(&fx->cfg);
 	fx->cfg.port = 0;
 	fx->cfg.log_level = CIPC_LOG_ERROR;
 	snprintf(path, sizeof(path), "%s/data", fx->dir);
-	snprintf(fx->cfg.data_dir, TD_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.config_dir, TD_PATH_MAX, "%s",
+	snprintf(fx->cfg.data_dir, TETRISD_FS_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.config_dir, TETRISD_FS_PATH_MAX, "%s",
 		"../../lib/libmacminidb/config");
 	snprintf(path, sizeof(path), "%s/certs/server.crt", fx->dir);
-	snprintf(fx->cfg.cert_path, TD_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.cert_path, TETRISD_FS_PATH_MAX, "%s", path);
 	snprintf(path, sizeof(path), "%s/certs/server.key", fx->dir);
-	snprintf(fx->cfg.key_path, TD_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.ca_path, TD_PATH_MAX, "%s", fx->ca_path);
+	snprintf(fx->cfg.key_path, TETRISD_FS_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.ca_path, TETRISD_FS_PATH_MAX, "%s", fx->ca_path);
 	snprintf(path, sizeof(path), "%s/log.sock", fx->dir);
-	snprintf(fx->cfg.log_ipc, TD_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.log_ipc, TETRISD_FS_PATH_MAX, "%s", path);
 	return (server_start(&fx->cfg, &fx->srv));
 }
 
@@ -111,7 +111,7 @@ void	hc_close(t_harness *hc)
  *
  * STATE pushes that arrive while waiting are kept as the latest snapshot
  * rather than dropped: a client's read loop cannot assume one request means
- * the next message is its reply, and a renderer would route them onward.
+ * the next message is its request_reply, and a renderer would route them onward.
  *
  * @param hc Connected client.
  * @param method HTTTP method.
@@ -234,7 +234,7 @@ int	hc_signup(t_harness *hc, const char *username, const char *password)
 
 	snprintf(body, sizeof(body), "username %s\npassword %s\n", username,
 		password);
-	if (hc_request(hc, "SIGNUP", TD_PATH_ACCOUNT, body, &resp) != 0)
+	if (hc_request(hc, "SIGNUP", TETRISD_ROUTE_ACCOUNT, body, &resp) != 0)
 		return (-1);
 	status = (int)resp.status_code;
 	htttp_message_free(&resp);
@@ -258,7 +258,7 @@ int	hc_login(t_harness *hc, const char *username, const char *password)
 
 	snprintf(body, sizeof(body), "username %s\npassword %s\n", username,
 		password);
-	if (hc_request(hc, "LOGIN", TD_PATH_SESSION, body, &resp) != 0)
+	if (hc_request(hc, "LOGIN", TETRISD_ROUTE_SESSION, body, &resp) != 0)
 		return (-1);
 	status = (int)resp.status_code;
 	if (status == 200 && body_field(&resp, "player-id", value,
@@ -287,7 +287,7 @@ int	hc_join_new(t_harness *hc, const char *mode, char *room_out, size_t cap)
 	int				status;
 
 	snprintf(body, sizeof(body), "mode %s\n", mode);
-	if (hc_request(hc, "JOIN", TD_PATH_ROOMS, body, &resp) != 0)
+	if (hc_request(hc, "JOIN", TETRISD_ROUTE_ROOMS, body, &resp) != 0)
 		return (-1);
 	status = (int)resp.status_code;
 	if (room_out != NULL && cap > 0)
@@ -378,7 +378,7 @@ static int	send_message(t_harness *hc, t_htttp_message *msg)
 static int	body_field(const t_htttp_message *msg, const char *key, char *out,
 			size_t cap)
 {
-	char		text[TD_BODY_MAX];
+	char		text[TETRISD_BODY_MAX_BYTES];
 	const char	*line;
 	size_t		key_len;
 

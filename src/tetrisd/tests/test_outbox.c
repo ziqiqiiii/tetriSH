@@ -37,12 +37,12 @@ static void	test_responses_come_out_in_order(void)
 {
 	t_outbox	ob;
 
-	assert(ob_init(&ob) == 0);
+	assert(outbox_init(&ob) == 0);
 	assert(push_text(&ob, "first", false) == 0);
 	assert(push_text(&ob, "second", false) == 0);
 	expect_text(&ob, "first");
 	expect_text(&ob, "second");
-	ob_destroy(&ob);
+	outbox_destroy(&ob);
 	printf("PASS test_responses_come_out_in_order\n");
 }
 
@@ -51,9 +51,9 @@ static void	test_overflow_is_reported_not_grown(void)
 	t_outbox	ob;
 	int			i;
 
-	assert(ob_init(&ob) == 0);
+	assert(outbox_init(&ob) == 0);
 	i = 0;
-	while (i < TD_OUTBOX_CAP)
+	while (i < TETRISD_OUTBOX_CAPACITY)
 	{
 		assert(push_text(&ob, "payload", false) == 0);
 		i++;
@@ -62,7 +62,7 @@ static void	test_overflow_is_reported_not_grown(void)
 	assert(atomic_load(&ob.overflowed) == true);
 	expect_text(&ob, "payload");
 	assert(push_text(&ob, "room again", false) == 0);
-	ob_destroy(&ob);
+	outbox_destroy(&ob);
 	printf("PASS test_overflow_is_reported_not_grown\n");
 }
 
@@ -70,12 +70,12 @@ static void	test_state_mailbox_keeps_only_the_latest(void)
 {
 	t_outbox	ob;
 
-	assert(ob_init(&ob) == 0);
+	assert(outbox_init(&ob) == 0);
 	assert(push_text(&ob, "snapshot 1", true) == 0);
 	assert(push_text(&ob, "snapshot 2", true) == 0);
 	assert(push_text(&ob, "snapshot 3", true) == 0);
 	expect_text(&ob, "snapshot 3");
-	ob_destroy(&ob);
+	outbox_destroy(&ob);
 	printf("PASS test_state_mailbox_keeps_only_the_latest\n");
 }
 
@@ -83,27 +83,27 @@ static void	test_responses_outrank_state(void)
 {
 	t_outbox	ob;
 
-	assert(ob_init(&ob) == 0);
+	assert(outbox_init(&ob) == 0);
 	assert(push_text(&ob, "snapshot", true) == 0);
 	assert(push_text(&ob, "response", false) == 0);
 	expect_text(&ob, "response");
 	expect_text(&ob, "snapshot");
-	ob_destroy(&ob);
+	outbox_destroy(&ob);
 	printf("PASS test_responses_outrank_state\n");
 }
 
 static void	test_close_wakes_the_writer_and_frees_pending(void)
 {
 	t_outbox	ob;
-	t_outmsg	msg;
+	t_outbound_message	msg;
 
-	assert(ob_init(&ob) == 0);
+	assert(outbox_init(&ob) == 0);
 	assert(push_text(&ob, "never sent", false) == 0);
 	assert(push_text(&ob, "never sent either", true) == 0);
-	ob_close(&ob);
-	assert(ob_pop(&ob, &msg) == -1);
+	outbox_close(&ob);
+	assert(outbox_pop(&ob, &msg) == -1);
 	assert(push_text(&ob, "after close", false) == -1);
-	ob_destroy(&ob);
+	outbox_destroy(&ob);
 	printf("PASS test_close_wakes_the_writer_and_frees_pending\n");
 }
 
@@ -118,9 +118,9 @@ static int	push_text(t_outbox *ob, const char *text, bool as_state)
 	assert(bytes != NULL);
 	memcpy(bytes, text, len + 1);
 	if (as_state)
-		rc = ob_push_state(ob, bytes, len);
+		rc = outbox_push_state(ob, bytes, len);
 	else
-		rc = ob_push(ob, bytes, len);
+		rc = outbox_push(ob, bytes, len);
 	if (rc != 0)
 		free(bytes);
 	return (rc);
@@ -128,9 +128,9 @@ static int	push_text(t_outbox *ob, const char *text, bool as_state)
 
 static void	expect_text(t_outbox *ob, const char *text)
 {
-	t_outmsg	msg;
+	t_outbound_message	msg;
 
-	assert(ob_pop(ob, &msg) == 0);
+	assert(outbox_pop(ob, &msg) == 0);
 	assert(msg.len == strlen(text));
 	assert(memcmp(msg.bytes, text, msg.len) == 0);
 	free(msg.bytes);

@@ -17,7 +17,7 @@ static void		deadline_in(struct timespec *ts, int ms);
  * @param cap Maximum simultaneous clients.
  * @return 0 on success, -1 on invalid capacity or allocation failure.
  */
-int	reg_init(t_registry *rg, size_t cap)
+int	registry_init(t_registry *rg, size_t cap)
 {
 	if (rg == NULL || cap == 0)
 		return (-1);
@@ -47,7 +47,7 @@ int	reg_init(t_registry *rg, size_t cap)
  * @param cli Client to publish; its index is recorded on success.
  * @return 0 on success, -1 when the registry is full.
  */
-int	reg_add(t_registry *rg, t_client *cli)
+int	registry_add(t_registry *rg, t_client *cli)
 {
 	size_t	i;
 
@@ -84,7 +84,7 @@ int	reg_add(t_registry *rg, t_client *cli)
  * @param rg Registry to remove from.
  * @param cli Client to unlink.
  */
-void	reg_remove(t_registry *rg, t_client *cli)
+void	registry_remove(t_registry *rg, t_client *cli)
 {
 	if (rg == NULL || cli == NULL || cli->index < 0)
 		return ;
@@ -116,7 +116,7 @@ void	reg_remove(t_registry *rg, t_client *cli)
  * @param is_state true for a STATE snapshot (mailbox), false for a response.
  * @return 0 when queued, -1 when the player is gone or the queue overflowed.
  */
-int	reg_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
+int	registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
 		size_t len, bool is_state)
 {
 	t_client	*cli;
@@ -132,9 +132,9 @@ int	reg_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
 		return (-1);
 	}
 	if (is_state)
-		rc = ob_push_state(&cli->outbox, bytes, len);
+		rc = outbox_push_state(&cli->outbox, bytes, len);
 	else
-		rc = ob_push(&cli->outbox, bytes, len);
+		rc = outbox_push(&cli->outbox, bytes, len);
 	if (rc != 0 && atomic_load(&cli->outbox.overflowed))
 		shutdown(cli->fd, SHUT_RDWR);
 	pthread_rwlock_unlock(&rg->lock);
@@ -154,7 +154,7 @@ int	reg_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
  * @param pid Player the connection now acts as.
  * @param username That player's name.
  */
-void	reg_bind(t_registry *rg, t_client *cli, t_player_id pid,
+void	registry_bind(t_registry *rg, t_client *cli, t_player_id pid,
 		const char *username)
 {
 	if (rg == NULL || cli == NULL)
@@ -173,7 +173,7 @@ void	reg_bind(t_registry *rg, t_client *cli, t_player_id pid,
  * @param cli Client whose state changes.
  * @param state The state to move to.
  */
-void	reg_mark_state(t_registry *rg, t_client *cli, t_client_state state)
+void	registry_mark_state(t_registry *rg, t_client *cli, t_client_state state)
 {
 	if (rg == NULL || cli == NULL)
 		return ;
@@ -196,7 +196,7 @@ void	reg_mark_state(t_registry *rg, t_client *cli, t_client_state state)
  * @param keep The claiming connection, which is never displaced.
  * @return true when a connection was displaced.
  */
-bool	reg_displace(t_registry *rg, t_player_id pid, const t_client *keep)
+bool	registry_displace(t_registry *rg, t_player_id pid, const t_client *keep)
 {
 	bool	found;
 	size_t	i;
@@ -214,7 +214,7 @@ bool	reg_displace(t_registry *rg, t_player_id pid, const t_client *keep)
 		{
 			rg->slots[i]->state = CLI_CLOSING;
 			shutdown(rg->slots[i]->fd, SHUT_RDWR);
-			ob_close(&rg->slots[i]->outbox);
+			outbox_close(&rg->slots[i]->outbox);
 			found = true;
 		}
 		i++;
@@ -237,7 +237,7 @@ bool	reg_displace(t_registry *rg, t_player_id pid, const t_client *keep)
  * @param timeout_ms How long to wait before giving up.
  * @return 0 once no other connection holds the player, -1 on timeout.
  */
-int	reg_wait_absent(t_registry *rg, t_player_id pid, const t_client *keep,
+int	registry_wait_absent(t_registry *rg, t_player_id pid, const t_client *keep,
 		int timeout_ms)
 {
 	struct timespec	deadline;
@@ -267,7 +267,7 @@ int	reg_wait_absent(t_registry *rg, t_player_id pid, const t_client *keep,
  *
  * @param rg Registry whose clients are being stopped.
  */
-void	reg_shutdown_all(t_registry *rg)
+void	registry_shutdown_all(t_registry *rg)
 {
 	size_t	i;
 
@@ -280,7 +280,7 @@ void	reg_shutdown_all(t_registry *rg)
 		if (rg->slots[i] != NULL)
 		{
 			shutdown(rg->slots[i]->fd, SHUT_RDWR);
-			ob_close(&rg->slots[i]->outbox);
+			outbox_close(&rg->slots[i]->outbox);
 		}
 		i++;
 	}
@@ -295,7 +295,7 @@ void	reg_shutdown_all(t_registry *rg)
  *
  * @param rg Registry to wait on.
  */
-void	reg_wait_empty(t_registry *rg)
+void	registry_wait_empty(t_registry *rg)
 {
 	if (rg == NULL)
 		return ;
@@ -315,7 +315,7 @@ void	reg_wait_empty(t_registry *rg)
  * @param pid Player to look for.
  * @return true when that player is connected and authenticated.
  */
-bool	reg_player_online(t_registry *rg, t_player_id pid)
+bool	registry_player_online(t_registry *rg, t_player_id pid)
 {
 	bool	online;
 
@@ -332,7 +332,7 @@ bool	reg_player_online(t_registry *rg, t_player_id pid)
  *
  * @param rg Registry to destroy; must already be empty.
  */
-void	reg_destroy(t_registry *rg)
+void	registry_destroy(t_registry *rg)
 {
 	if (rg == NULL)
 		return ;

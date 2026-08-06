@@ -11,13 +11,13 @@ static void	reconnect(t_logger *lg);
  * @brief Puts a zeroed logger into the "nothing is open yet" state.
  *
  * Descriptors default to 0, which is stdin - so a logger that was never
- * initialised would have log_shutdown close the caller's standard input. Boot
- * can fail before log_init runs, and teardown is shared between that path and
+ * initialised would have logger_shutdown close the caller's standard input. Boot
+ * can fail before logger_init runs, and teardown is shared between that path and
  * an ordinary stop, so the safe state has to exist before anything can fail.
  *
  * @param lg Logger to blank.
  */
-void	log_blank(t_logger *lg)
+void	logger_blank(t_logger *lg)
 {
 	if (lg == NULL)
 		return ;
@@ -38,14 +38,14 @@ void	log_blank(t_logger *lg)
  * @param cfg Configuration supplying the IPC path and the level filter.
  * @return 0 on success, -1 when the ring or the shipper could not start.
  */
-int	log_init(t_logger *lg, const t_cfg *cfg)
+int	logger_init(t_logger *lg, const t_config *cfg)
 {
 	if (lg == NULL || cfg == NULL)
 		return (-1);
-	log_blank(lg);
+	logger_blank(lg);
 	atomic_store(&lg->level, cfg->log_level);
-	snprintf(lg->ipc_path, TD_PATH_MAX, "%s", cfg->log_ipc);
-	if (rb_init(&lg->ring, sizeof(t_log_record), TD_LOG_RING_CAP) != 0)
+	snprintf(lg->ipc_path, TETRISD_FS_PATH_MAX, "%s", cfg->log_ipc);
+	if (rb_init(&lg->ring, sizeof(t_log_record), TETRISD_LOG_RING_CAPACITY) != 0)
 		return (-1);
 	if (sp_pipe(lg->wake) != 0)
 	{
@@ -58,7 +58,7 @@ int	log_init(t_logger *lg, const t_cfg *cfg)
 	if (pthread_create(&lg->shipper, NULL, shipper_main, lg) != 0)
 	{
 		atomic_store(&lg->running, false);
-		log_shutdown(lg);
+		logger_shutdown(lg);
 		return (-1);
 	}
 	lg->shipper_started = true;
@@ -76,7 +76,7 @@ int	log_init(t_logger *lg, const t_cfg *cfg)
  * @param level Severity; anything below the configured level is skipped.
  * @param fmt printf-style format for the message text.
  */
-void	log_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
+void	logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
 {
 	t_log_record	rec;
 	char			msg[CIPC_LOG_MSG_MAX];
@@ -87,8 +87,8 @@ void	log_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	va_end(ap);
-	if (lr_make(&rec, level, net_now_ms(), (uint32_t)getpid(),
-			TD_COMPONENT, msg) != 0)
+	if (lr_make(&rec, level, clock_now_ms(), (uint32_t)getpid(),
+			TETRISD_COMPONENT_NAME, msg) != 0)
 		return ;
 	rb_push(&lg->ring, &rec);
 }
@@ -99,7 +99,7 @@ void	log_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
  * @param lg Logger to query, or NULL.
  * @return Total records dropped since start-up, 0 when lg is NULL.
  */
-uint64_t	log_dropped(const t_logger *lg)
+uint64_t	logger_dropped_count(const t_logger *lg)
 {
 	if (lg == NULL)
 		return (0);
@@ -114,7 +114,7 @@ uint64_t	log_dropped(const t_logger *lg)
  *
  * @param lg Logger to shut down; safe on a partially initialised logger.
  */
-void	log_shutdown(t_logger *lg)
+void	logger_shutdown(t_logger *lg)
 {
 	if (lg == NULL)
 		return ;
@@ -160,7 +160,7 @@ static void	*shipper_main(void *arg)
 		pfd.fd = lg->wake[SP_READ];
 		pfd.events = POLLIN;
 		pfd.revents = 0;
-		if (poll(&pfd, 1, TD_SHIPPER_WAIT_MS) > 0 && (pfd.revents & POLLIN))
+		if (poll(&pfd, 1, TETRISD_LOG_SHIPPER_WAIT_MS) > 0 && (pfd.revents & POLLIN))
 			sp_drain(lg->wake[SP_READ]);
 		drain_once(lg);
 		ticks++;
@@ -180,11 +180,11 @@ static void	*shipper_main(void *arg)
  */
 static void	drain_once(t_logger *lg)
 {
-	t_log_record	batch[TD_LOG_DRAIN_MAX];
+	t_log_record	batch[TETRISD_LOG_DRAIN_MAX];
 	size_t			got;
 	size_t			i;
 
-	got = rb_drain(&lg->ring, batch, TD_LOG_DRAIN_MAX);
+	got = rb_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
 	while (got > 0)
 	{
 		i = 0;
@@ -193,7 +193,7 @@ static void	drain_once(t_logger *lg)
 			ship_one(lg, &batch[i]);
 			i++;
 		}
-		got = rb_drain(&lg->ring, batch, TD_LOG_DRAIN_MAX);
+		got = rb_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
 	}
 }
 
