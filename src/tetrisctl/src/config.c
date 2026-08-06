@@ -130,8 +130,8 @@ int	config_resolve(t_ctl *ctl)
 	ctl->count = 0;
 	if (ctl->order[0] == '\0')
 	{
-		fprintf(stderr, "%s: %sDAEMONS is not set in %s\n",
-			TETRISCTL_COMPONENT_NAME, TETRISCTL_CONFIG_KEY_PREFIX, ctl->rc_path);
+		snprintf(work, TETRISCTL_CONFIG_LINE_MAX, "is not set in %s", ctl->rc_path);
+		daemon_report_error(TETRISCTL_COMPONENT_NAME, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS", work);
 		return (-1);
 	}
 	snprintf(work, TETRISCTL_CONFIG_LINE_MAX, "%s", ctl->order);
@@ -246,25 +246,30 @@ const t_managed	*ctl_find_daemon(const t_ctl *ctl, const char *name)
  */
 static int	add_daemon(t_ctl *ctl, const char *name)
 {
-	int	i;
+	char	reason[TETRISCTL_CONFIG_LINE_MAX];
+	int		i;
 
 	i = name_index(name);
 	if (i < 0)
 	{
-		fprintf(stderr, "%s: %s is not a daemon this build manages\n",
-			TETRISCTL_COMPONENT_NAME, name);
+		daemon_report_error(TETRISCTL_COMPONENT_NAME, name,
+			"is not a daemon this build manages");
 		return (-1);
 	}
 	if (ctl->count >= TETRISCTL_MAX_DAEMONS)
 	{
-		fprintf(stderr, "%s: more than %d daemons in %sDAEMONS\n",
-			TETRISCTL_COMPONENT_NAME, TETRISCTL_MAX_DAEMONS, TETRISCTL_CONFIG_KEY_PREFIX);
+		snprintf(reason, sizeof(reason), "more than %d daemons",
+			TETRISCTL_MAX_DAEMONS);
+		daemon_report_error(TETRISCTL_COMPONENT_NAME,
+			TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS", reason);
 		return (-1);
 	}
 	if (ctl->paths[i][0] == '\0')
 	{
-		fprintf(stderr, "%s: %s is not set in %s, so %s has no pidfile\n",
-			TETRISCTL_COMPONENT_NAME, g_known[i].pid_key, ctl->rc_path, name);
+		snprintf(reason, sizeof(reason),
+			"is not set in %s, so %s has no pidfile", ctl->rc_path, name);
+		daemon_report_error(TETRISCTL_COMPONENT_NAME, g_known[i].pid_key,
+			reason);
 		return (-1);
 	}
 	snprintf(ctl->daemons[ctl->count].name, TETRISCTL_NAME_MAX, "%s", name);
