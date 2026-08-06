@@ -1,10 +1,5 @@
 #include "coreipc.h"
 
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-
 // Static Functions
 static int	fill_addr(struct sockaddr_un *addr, const char *path);
 static int	fail(int fd, int err);

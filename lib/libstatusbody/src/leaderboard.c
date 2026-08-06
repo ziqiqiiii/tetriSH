@@ -1,7 +1,5 @@
 #include "body_util.h"
 
-#include <inttypes.h>
-
 // Static Functions
 static int	decode_row(const char *line, t_body_leaderboard_row *row);
 

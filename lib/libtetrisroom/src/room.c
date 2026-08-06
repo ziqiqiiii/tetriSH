@@ -1,7 +1,5 @@
 #include "tetrisroom.h"
 
-#include <stdio.h>
-
 // Static Variables
 // id prefix per t_game_mode; const table, not mutable module state
 static const char	*g_mode_prefix[] = {"S", "D", "BR"};

@@ -1,8 +1,5 @@
 #include "coreipc.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 // Static Functions
 static void	*slot_at(t_ring_buffer *rb, size_t index);
 static size_t	advance(const t_ring_buffer *rb, size_t index);

@@ -4,6 +4,7 @@
 # include <assert.h>
 # include <ctype.h>
 # include <errno.h>
+# include <fcntl.h>
 # include <inttypes.h>
 # include <poll.h>
 # include <stdint.h>
@@ -15,6 +16,7 @@
 # include <sys/wait.h>
 # include <sys/select.h>
 # include <sys/ioctl.h>
+# include <sys/stat.h>
 # include <notcurses/notcurses.h>
 # include "tetrisbrain.h"
 

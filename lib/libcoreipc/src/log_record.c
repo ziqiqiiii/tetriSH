@@ -1,10 +1,5 @@
 #include "coreipc.h"
 
-#include <inttypes.h>
-#include <stdio.h>
-#include <string.h>
-#include <strings.h>
-
 static const char	*g_level_names[] = {"DEBUG", "INFO", "WARNING", "ERROR"};
 
 /**

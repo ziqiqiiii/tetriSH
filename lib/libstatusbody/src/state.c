@@ -1,7 +1,5 @@
 #include "body_util.h"
 
-#include <inttypes.h>
-
 // Static Variables
 static const char *const	g_phases[] = {
 								"active", 

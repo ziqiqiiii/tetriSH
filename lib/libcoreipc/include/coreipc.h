@@ -2,13 +2,24 @@
 # define COREIPC_H
 
 # include <errno.h>
+# include <fcntl.h>
+# include <inttypes.h>
 # include <mqueue.h>
+# include <poll.h>
 # include <pthread.h>
 # include <stdatomic.h>
 # include <stddef.h>
 # include <stdint.h>
+# include <stdio.h>
+# include <stdlib.h>
+# include <string.h>
+# include <strings.h>
+# include <sys/socket.h>
 # include <sys/stat.h>
 # include <sys/types.h>
+# include <sys/un.h>
+# include <time.h>
+# include <unistd.h>
 
 # define SELFPIPE_READ	0
 # define SELFPIPE_WRITE	1

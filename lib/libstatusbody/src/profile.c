@@ -1,7 +1,5 @@
 #include "body_util.h"
 
-#include <inttypes.h>
-
 // Static Functions
 static int	encode_owned(const char *key, const uint32_t *ids, size_t count, char *out, size_t cap, size_t *off);
 static int	decode_identity(t_body_cursor *c, t_body_profile *out);

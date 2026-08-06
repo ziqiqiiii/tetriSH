@@ -1,10 +1,5 @@
 #include "coreipc.h"
 
-#include <fcntl.h>
-#include <poll.h>
-#include <string.h>
-#include <time.h>
-
 // Static Functions
 static void	deadline_from_now(struct timespec *ts, int timeout_ms);
 static int	remaining_ms(const struct timespec *deadline);

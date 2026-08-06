@@ -1,8 +1,5 @@
 #include "coreipc.h"
 
-#include <fcntl.h>
-#include <unistd.h>
-
 /**
  * @brief Add O_NONBLOCK to an existing descriptor.
  *

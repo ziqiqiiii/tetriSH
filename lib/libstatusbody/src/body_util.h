@@ -3,6 +3,7 @@
 
 # include "statusbody.h"
 
+# include <inttypes.h>
 # include <stdarg.h>
 
 /*
