@@ -138,7 +138,7 @@ static void	*reader_main(void *arg)
 		}
 	}
 	else
-		logger_emit(&cli->srv->log, CIPC_LOG_WARNING,
+		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING,
 			"handshake failed on fd %d", cli->fd);
 	free(buf);
 	teardown(cli);
@@ -198,7 +198,7 @@ static void	teardown(t_client *cli)
 	session_close(&cli->sess);
 	close(cli->fd);
 	outbox_destroy(&cli->outbox);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "client %s disconnected",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "client %s disconnected",
 		cli->username[0] != '\0' ? cli->username : "(anonymous)");
 	free(cli);
 }

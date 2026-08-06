@@ -329,36 +329,36 @@ classDiagram
 
     class ring_buffer {
         <<module>> ring_buffer.c
-        +rb_init(rb, record_size, capacity) int
-        +rb_push(rb, record) int
-        +rb_pop(rb, out) int
-        +rb_drain(rb, out, max) size_t
-        +rb_drops(rb) uint64
-        +rb_destroy(rb)
+        +ring_init(rb, record_size, capacity) int
+        +ring_push(rb, record) int
+        +ring_pop(rb, out) int
+        +ring_drain(rb, out, max) size_t
+        +ring_dropped_count(rb) uint64
+        +ring_destroy(rb)
     }
     class unix_socket {
         <<module>> unix_socket.c
-        +us_dgram_bind(path, mode) int
-        +us_dgram_open(path) int
-        +us_dgram_send_nb(fd, buf, len) int
-        +us_stream_listen(path, backlog, mode) int
-        +us_stream_connect(path) int
-        +us_send_all / us_recv_all
-        +us_set_nonblock(fd)
+        +unixsock_dgram_bind(path, mode) int
+        +unixsock_dgram_open(path) int
+        +unixsock_dgram_send_nonblock(fd, buf, len) int
+        +unixsock_stream_listen(path, backlog, mode) int
+        +unixsock_stream_connect(path) int
+        +unixsock_send_all / unixsock_recv_all
+        +unixsock_set_nonblock(fd)
     }
-    class mq_helpers {
-        <<module>> mq_helpers.c
-        +mqh_open(name, ...) mqd_t
-        +mqh_send_nb(mq, buf, len) int
-        +mqh_recv_nb(mq, buf, len) int
-        +mqh_close(mq)
-        +mqh_unlink(name)
+    class msgqueue {
+        <<module>> msgqueue.c
+        +msgqueue_open(name, ...) mqd_t
+        +msgqueue_send_nonblock(mq, buf, len) int
+        +msgqueue_recv_nonblock(mq, buf, len) int
+        +msgqueue_close(mq)
+        +msgqueue_unlink(name)
     }
 
     ring_buffer *--> t_ring_buffer : manages
 
     note for ring_buffer "MPSC bounded ring, non-blocking push, atomic drop counter"
-    note for mq_helpers "POSIX mq wrappers, O_NONBLOCK drop semantics"
+    note for msgqueue "POSIX mq wrappers, O_NONBLOCK drop semantics"
 ```
 
 ---

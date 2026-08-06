@@ -35,7 +35,7 @@ void	signals_install(t_server *srv)
 
 	if (srv == NULL)
 		return ;
-	g_wake_fd = srv->wake[SP_WRITE];
+	g_wake_fd = srv->wake[SELFPIPE_WRITE];
 	g_stop_pending = 0;
 	g_reload_pending = 0;
 	memset(&act, 0, sizeof(act));
@@ -118,7 +118,7 @@ static void	on_stop(int sig)
 	(void)sig;
 	g_stop_pending = 1;
 	if (g_wake_fd >= 0)
-		sp_notify((int)g_wake_fd);
+		selfpipe_notify((int)g_wake_fd);
 }
 
 /**
@@ -131,7 +131,7 @@ static void	on_reload(int sig)
 	(void)sig;
 	g_reload_pending = 1;
 	if (g_wake_fd >= 0)
-		sp_notify((int)g_wake_fd);
+		selfpipe_notify((int)g_wake_fd);
 }
 
 /**
@@ -144,5 +144,5 @@ static void	on_dump(int sig)
 	(void)sig;
 	g_dump_pending = 1;
 	if (g_wake_fd >= 0)
-		sp_notify((int)g_wake_fd);
+		selfpipe_notify((int)g_wake_fd);
 }

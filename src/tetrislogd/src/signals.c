@@ -84,7 +84,7 @@ static void	on_signal(int signo)
 	else if (signo == SIGUSR1)
 		g_pending |= TL_SIG_DUMP;
 	if (g_wake_fd >= 0)
-		sp_notify((int)g_wake_fd);
+		selfpipe_notify((int)g_wake_fd);
 }
 
 /**

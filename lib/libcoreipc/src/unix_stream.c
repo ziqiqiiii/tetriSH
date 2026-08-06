@@ -21,7 +21,7 @@ static int	fail(int fd, int err);
  * @param mode Permission bits applied to the bound socket file.
  * @return The listening fd on success, -1 with errno set on failure.
  */
-int	us_stream_listen(const char *path, int backlog, mode_t mode)
+int	unixsock_stream_listen(const char *path, int backlog, mode_t mode)
 {
 	struct sockaddr_un	addr;
 	int					fd;
@@ -45,10 +45,10 @@ int	us_stream_listen(const char *path, int backlog, mode_t mode)
 /**
  * @brief Accept one connection from a listening socket.
  *
- * @param listen_fd A listening fd from us_stream_listen.
+ * @param listen_fd A listening fd from unixsock_stream_listen.
  * @return The accepted connection fd, or -1 with errno set on failure.
  */
-int	us_stream_accept(int listen_fd)
+int	unixsock_stream_accept(int listen_fd)
 {
 	int	fd;
 
@@ -65,7 +65,7 @@ int	us_stream_accept(int listen_fd)
  * @return The connected fd on success, -1 with errno set on failure
  *         (ENOENT no socket file, ECONNREFUSED nothing listening).
  */
-int	us_stream_connect(const char *path)
+int	unixsock_stream_connect(const char *path)
 {
 	struct sockaddr_un	addr;
 	int					fd;
@@ -91,7 +91,7 @@ int	us_stream_connect(const char *path)
  * @param len Number of bytes to send.
  * @return 0 when all len bytes were sent, -1 with errno set otherwise.
  */
-int	us_send_all(int fd, const void *buf, size_t len)
+int	unixsock_send_all(int fd, const void *buf, size_t len)
 {
 	const unsigned char	*p;
 	size_t				sent;
@@ -126,7 +126,7 @@ int	us_send_all(int fd, const void *buf, size_t len)
  * @param len Number of bytes required.
  * @return 0 when all len bytes were read, -1 with errno set otherwise.
  */
-int	us_recv_all(int fd, void *buf, size_t len)
+int	unixsock_recv_all(int fd, void *buf, size_t len)
 {
 	unsigned char	*p;
 	size_t			got;

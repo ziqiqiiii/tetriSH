@@ -32,7 +32,7 @@ void	config_defaults(t_config *cfg)
 	snprintf(cfg->log_ipc, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_LOG_IPC_PATH);
 	snprintf(cfg->pid_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_PID_PATH);
 	snprintf(cfg->err_path, TETRISD_FS_PATH_MAX, "%s", TETRISD_DEFAULT_ERR_PATH);
-	cfg->log_level = CIPC_LOG_INFO;
+	cfg->log_level = COREIPC_LOG_INFO;
 	cfg->max_clients = TETRISD_DEFAULT_MAX_CLIENTS;
 	cfg->tick_ms = TETRISD_DEFAULT_TICK_MS;
 	cfg->input_burst = TETRISD_DEFAULT_INPUT_BURST;
@@ -260,7 +260,7 @@ static int	set_level(int *dst, const char *value)
 {
 	int	level;
 
-	level = lr_level_parse(value);
+	level = logrecord_level_parse(value);
 	if (level < 0)
 		return (-1);
 	*dst = level;

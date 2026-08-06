@@ -18,7 +18,7 @@ static size_t	advance(const t_ring_buffer *rb, size_t index);
  * @param capacity Number of records the buffer holds; must be non-zero.
  * @return 0 on success, -1 with errno set (EINVAL, ENOMEM) on failure.
  */
-int	rb_init(t_ring_buffer *rb, size_t record_size, size_t capacity)
+int	ring_init(t_ring_buffer *rb, size_t record_size, size_t capacity)
 {
 	if (!rb || record_size == 0 || capacity == 0)
 	{
@@ -55,7 +55,7 @@ int	rb_init(t_ring_buffer *rb, size_t record_size, size_t capacity)
  * @param record Source of record_size bytes, copied by value.
  * @return 0 when the record was stored, -1 when the ring was full (dropped).
  */
-int	rb_push(t_ring_buffer *rb, const void *record)
+int	ring_push(t_ring_buffer *rb, const void *record)
 {
 	size_t	next;
 
@@ -81,13 +81,13 @@ int	rb_push(t_ring_buffer *rb, const void *record)
 /**
  * @brief Remove the oldest record from the ring.
  *
- * Single-consumer only: one thread may call rb_pop or rb_drain on a buffer.
+ * Single-consumer only: one thread may call ring_pop or ring_drain on a buffer.
  *
  * @param rb The initialised buffer.
  * @param out Destination for record_size bytes.
  * @return 0 when a record was copied out, -1 when the ring was empty.
  */
-int	rb_pop(t_ring_buffer *rb, void *out)
+int	ring_pop(t_ring_buffer *rb, void *out)
 {
 	if (!rb || !rb->slots || !out)
 	{
@@ -114,7 +114,7 @@ int	rb_pop(t_ring_buffer *rb, void *out)
  * @param max_records Ceiling on how many records to copy.
  * @return The number of records copied, 0 when the ring was empty.
  */
-size_t	rb_drain(t_ring_buffer *rb, void *out, size_t max_records)
+size_t	ring_drain(t_ring_buffer *rb, void *out, size_t max_records)
 {
 	size_t	n;
 
@@ -134,15 +134,15 @@ size_t	rb_drain(t_ring_buffer *rb, void *out, size_t max_records)
 }
 
 /**
- * @brief Read the running total of records dropped by rb_push.
+ * @brief Read the running total of records dropped by ring_push.
  *
  * Takes no lock, so the tetrisctl dropped-logs path never contends with the
  * producers. Monotonic: never reset for the lifetime of the buffer.
  *
  * @param rb The initialised buffer.
- * @return Total records dropped since rb_init.
+ * @return Total records dropped since ring_init.
  */
-uint64_t	rb_drops(const t_ring_buffer *rb)
+uint64_t	ring_dropped_count(const t_ring_buffer *rb)
 {
 	if (!rb)
 		return (0);
@@ -157,7 +157,7 @@ uint64_t	rb_drops(const t_ring_buffer *rb)
  *
  * @param rb The buffer to destroy.
  */
-void	rb_destroy(t_ring_buffer *rb)
+void	ring_destroy(t_ring_buffer *rb)
 {
 	if (!rb || !rb->slots)
 		return ;

@@ -57,7 +57,7 @@ static void	test_defaults_are_complete(void)
 	assert(cfg.max_clients == TETRISD_DEFAULT_MAX_CLIENTS);
 	assert(cfg.tick_ms == TETRISD_DEFAULT_TICK_MS);
 	assert(cfg.br_slots == TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS);
-	assert(cfg.log_level == CIPC_LOG_INFO);
+	assert(cfg.log_level == COREIPC_LOG_INFO);
 	printf("PASS test_defaults_are_complete\n");
 }
 
@@ -87,7 +87,7 @@ static void	test_set_known_keys(void)
 	assert(config_set(&cfg, "TETRISD_DATA_DIR", "/var/lib/tetrisd") == 0);
 	assert(strcmp(cfg.data_dir, "/var/lib/tetrisd") == 0);
 	assert(config_set(&cfg, "TETRISD_LOG_LEVEL", "debug") == 0);
-	assert(cfg.log_level == CIPC_LOG_DEBUG);
+	assert(cfg.log_level == COREIPC_LOG_DEBUG);
 	assert(config_set(&cfg, "TETRISD_TICK_MS", "16") == 0);
 	assert(cfg.tick_ms == 16);
 	assert(config_set(&cfg, "TETRISD_BR_SLOTS", "8") == 0);

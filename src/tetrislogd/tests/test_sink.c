@@ -107,7 +107,7 @@ static void	test_open_fails_when_the_parent_is_a_file(void)
 }
 
 /*
-** lr_format_line already ends the line with a newline. Adding a second one is
+** logrecord_format_line already ends the line with a newline. Adding a second one is
 ** what makes tetrisd's stderr fallback print a blank line after every record,
 ** and a file full of blank lines is a file nobody greps twice.
 */

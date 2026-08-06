@@ -26,7 +26,7 @@ static int	g_wake[2] = {-1, -1};
 
 int	main(void)
 {
-	assert(sp_pipe(g_wake) == 0);
+	assert(selfpipe_open(g_wake) == 0);
 	assert(sig_install(g_wake[1]) == 0);
 	test_take_starts_empty_and_clears();
 	test_repeated_signals_coalesce();
@@ -115,14 +115,14 @@ static void	test_hup_rotates_the_sink(void)
 	snprintf(moved, sizeof(moved), "%s.1", fx.file_path);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_INFO, "before the move") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "before the move") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(rename(fx.file_path, moved) == 0);
 	raise(SIGHUP);
 	assert(logd_run_once(&lg) == 0);
 	assert(lg.running == true);
 	assert(sink_is_open(&lg.sink) == true);
-	assert(fx_send(tx, CIPC_LOG_INFO, "after the move") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "after the move") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(fx_contains(moved, "before the move") == 1);
 	assert(fx_contains(fx.file_path, "after the move") == 1);
@@ -147,7 +147,7 @@ static void	test_usr1_reports_the_counters(void)
 	assert(boot(&fx, &lg) == 0);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_INFO, "one record") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "one record") == 0);
 	assert(logd_run_once(&lg) == 0);
 	raise(SIGUSR1);
 	assert(logd_run_once(&lg) == 0);

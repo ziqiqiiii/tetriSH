@@ -37,7 +37,7 @@ int	signup_handler(const t_htttp_message *msg, void *context)
 	res = db_signup(ctx->srv->db, username, hash, salt, &id);
 	if (res != DB_OK)
 		return (signup_status(res));
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "signup %s -> player %llu",
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "signup %s -> player %llu",
 		username, (unsigned long long)id);
 	request_body_printf(ctx, "player-id %llu\nusername %s\n",
 		(unsigned long long)id, username);
@@ -77,14 +77,14 @@ int	login_handler(const t_htttp_message *msg, void *context)
 		return (500);
 	if (db_login(ctx->srv->db, username, hash, &player) != DB_OK)
 	{
-		logger_emit(&ctx->srv->log, CIPC_LOG_WARNING, "login refused for %s",
+		logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING, "login refused for %s",
 			username);
 		return (401);
 	}
 	if (displace_previous(ctx, player.player_id) != 0)
 		return (503);
 	bind_identity(ctx, &player);
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "login %s -> player %llu",
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "login %s -> player %llu",
 		username, (unsigned long long)player.player_id);
 	request_body_printf(ctx, "player-id %llu\nusername %s\nscore %lld\nwallet %lld\n",
 		(unsigned long long)player.player_id, player.username,
@@ -199,13 +199,13 @@ static int	displace_previous(t_request_context *ctx, t_player_id pid)
 {
 	if (!registry_displace(&ctx->srv->reg, pid, ctx->cli))
 		return (0);
-	logger_emit(&ctx->srv->log, CIPC_LOG_WARNING,
+	logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING,
 		"player %llu logged in again; closing the previous connection",
 		(unsigned long long)pid);
 	if (registry_wait_absent(&ctx->srv->reg, pid, ctx->cli,
 			TD_DISPLACE_WAIT_MS) != 0)
 	{
-		logger_emit(&ctx->srv->log, CIPC_LOG_ERROR,
+		logger_emit(&ctx->srv->log, COREIPC_LOG_ERROR,
 			"player %llu still bound after %d ms; refusing the login",
 			(unsigned long long)pid, TD_DISPLACE_WAIT_MS);
 		return (-1);

@@ -23,8 +23,8 @@ void	logger_blank(t_logger *lg)
 		return ;
 	memset(lg, 0, sizeof(*lg));
 	lg->sock_fd = -1;
-	lg->wake[SP_READ] = -1;
-	lg->wake[SP_WRITE] = -1;
+	lg->wake[SELFPIPE_READ] = -1;
+	lg->wake[SELFPIPE_WRITE] = -1;
 }
 
 /**
@@ -45,14 +45,14 @@ int	logger_init(t_logger *lg, const t_config *cfg)
 	logger_blank(lg);
 	atomic_store(&lg->level, cfg->log_level);
 	snprintf(lg->ipc_path, TETRISD_FS_PATH_MAX, "%s", cfg->log_ipc);
-	if (rb_init(&lg->ring, sizeof(t_log_record), TETRISD_LOG_RING_CAPACITY) != 0)
+	if (ring_init(&lg->ring, sizeof(t_log_record), TETRISD_LOG_RING_CAPACITY) != 0)
 		return (-1);
-	if (sp_pipe(lg->wake) != 0)
+	if (selfpipe_open(lg->wake) != 0)
 	{
-		rb_destroy(&lg->ring);
+		ring_destroy(&lg->ring);
 		return (-1);
 	}
-	lg->sock_fd = us_dgram_open(lg->ipc_path);
+	lg->sock_fd = unixsock_dgram_open(lg->ipc_path);
 	atomic_store(&lg->fallback, lg->sock_fd < 0);
 	atomic_store(&lg->running, true);
 	if (pthread_create(&lg->shipper, NULL, shipper_main, lg) != 0)
@@ -79,7 +79,7 @@ int	logger_init(t_logger *lg, const t_config *cfg)
 void	logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
 {
 	t_log_record	rec;
-	char			msg[CIPC_LOG_MSG_MAX];
+	char			msg[COREIPC_LOG_MSG_MAX];
 	va_list			ap;
 
 	if (lg == NULL || fmt == NULL || (int)level < atomic_load(&lg->level))
@@ -87,10 +87,10 @@ void	logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	va_end(ap);
-	if (lr_make(&rec, level, clock_now_ms(), (uint32_t)getpid(),
+	if (logrecord_make(&rec, level, clock_now_ms(), (uint32_t)getpid(),
 			TETRISD_COMPONENT_NAME, msg) != 0)
 		return ;
-	rb_push(&lg->ring, &rec);
+	ring_push(&lg->ring, &rec);
 }
 
 /**
@@ -103,7 +103,7 @@ uint64_t	logger_dropped_count(const t_logger *lg)
 {
 	if (lg == NULL)
 		return (0);
-	return (rb_drops(&lg->ring));
+	return (ring_dropped_count(&lg->ring));
 }
 
 /**
@@ -119,8 +119,8 @@ void	logger_shutdown(t_logger *lg)
 	if (lg == NULL)
 		return ;
 	atomic_store(&lg->running, false);
-	if (lg->wake[SP_WRITE] >= 0)
-		sp_notify(lg->wake[SP_WRITE]);
+	if (lg->wake[SELFPIPE_WRITE] >= 0)
+		selfpipe_notify(lg->wake[SELFPIPE_WRITE]);
 	if (lg->shipper_started)
 		pthread_join(lg->shipper, NULL);
 	lg->shipper_started = false;
@@ -128,13 +128,13 @@ void	logger_shutdown(t_logger *lg)
 	if (lg->sock_fd >= 0)
 		close(lg->sock_fd);
 	lg->sock_fd = -1;
-	if (lg->wake[SP_READ] >= 0)
-		close(lg->wake[SP_READ]);
-	if (lg->wake[SP_WRITE] >= 0)
-		close(lg->wake[SP_WRITE]);
-	lg->wake[SP_READ] = -1;
-	lg->wake[SP_WRITE] = -1;
-	rb_destroy(&lg->ring);
+	if (lg->wake[SELFPIPE_READ] >= 0)
+		close(lg->wake[SELFPIPE_READ]);
+	if (lg->wake[SELFPIPE_WRITE] >= 0)
+		close(lg->wake[SELFPIPE_WRITE]);
+	lg->wake[SELFPIPE_READ] = -1;
+	lg->wake[SELFPIPE_WRITE] = -1;
+	ring_destroy(&lg->ring);
 }
 
 /**
@@ -157,11 +157,11 @@ static void	*shipper_main(void *arg)
 	ticks = 0;
 	while (atomic_load(&lg->running))
 	{
-		pfd.fd = lg->wake[SP_READ];
+		pfd.fd = lg->wake[SELFPIPE_READ];
 		pfd.events = POLLIN;
 		pfd.revents = 0;
 		if (poll(&pfd, 1, TETRISD_LOG_SHIPPER_WAIT_MS) > 0 && (pfd.revents & POLLIN))
-			sp_drain(lg->wake[SP_READ]);
+			selfpipe_drain(lg->wake[SELFPIPE_READ]);
 		drain_once(lg);
 		ticks++;
 		if (lg->sock_fd < 0 && ticks % 50 == 0)
@@ -184,7 +184,7 @@ static void	drain_once(t_logger *lg)
 	size_t			got;
 	size_t			i;
 
-	got = rb_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
+	got = ring_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
 	while (got > 0)
 	{
 		i = 0;
@@ -193,7 +193,7 @@ static void	drain_once(t_logger *lg)
 			ship_one(lg, &batch[i]);
 			i++;
 		}
-		got = rb_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
+		got = ring_drain(&lg->ring, batch, TETRISD_LOG_DRAIN_MAX);
 	}
 }
 
@@ -206,7 +206,7 @@ static void	drain_once(t_logger *lg)
 static void	ship_one(t_logger *lg, const t_log_record *rec)
 {
 	if (lg->sock_fd >= 0
-		&& us_dgram_send_nb(lg->sock_fd, rec, sizeof(*rec)) == 0)
+		&& unixsock_dgram_send_nonblock(lg->sock_fd, rec, sizeof(*rec)) == 0)
 	{
 		atomic_store(&lg->fallback, false);
 		return ;
@@ -230,10 +230,10 @@ static void	ship_one(t_logger *lg, const t_log_record *rec)
  */
 static void	to_stderr(t_logger *lg, const t_log_record *rec)
 {
-	char	line[CIPC_LOG_MSG_MAX + 128];
+	char	line[COREIPC_LOG_MSG_MAX + 128];
 
 	atomic_store(&lg->fallback, true);
-	if (lr_format_line(rec, line, sizeof(line)) > 0)
+	if (logrecord_format_line(rec, line, sizeof(line)) > 0)
 		fprintf(stderr, "%s\n", line);
 }
 
@@ -244,7 +244,7 @@ static void	to_stderr(t_logger *lg, const t_log_record *rec)
  */
 static void	reconnect(t_logger *lg)
 {
-	lg->sock_fd = us_dgram_open(lg->ipc_path);
+	lg->sock_fd = unixsock_dgram_open(lg->ipc_path);
 	if (lg->sock_fd >= 0)
 		atomic_store(&lg->fallback, false);
 }

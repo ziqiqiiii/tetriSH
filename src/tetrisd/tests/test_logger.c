@@ -30,20 +30,20 @@ static void	test_records_reach_the_logger(void)
 
 	make_tmp_dir(dir, sizeof(dir));
 	snprintf(sock, sizeof(sock), "%s/log.sock", dir);
-	rx = us_dgram_bind(sock, 0600);
+	rx = unixsock_dgram_bind(sock, 0600);
 	assert(rx >= 0);
-	logger_cfg(&cfg, sock, CIPC_LOG_DEBUG);
+	logger_cfg(&cfg, sock, COREIPC_LOG_DEBUG);
 	assert(logger_init(&lg, &cfg) == 0);
-	logger_emit(&lg, CIPC_LOG_INFO, "player %llu joined %s",
+	logger_emit(&lg, COREIPC_LOG_INFO, "player %llu joined %s",
 		(unsigned long long)7, "S-01");
 	assert(wait_record(rx, &rec, 2000) == 0);
-	assert(lr_validate(&rec, sizeof(rec)) == 0);
-	assert(rec.level == CIPC_LOG_INFO);
+	assert(logrecord_validate(&rec, sizeof(rec)) == 0);
+	assert(rec.level == COREIPC_LOG_INFO);
 	assert(strcmp(rec.component, TETRISD_COMPONENT_NAME) == 0);
 	assert(strcmp(rec.msg, "player 7 joined S-01") == 0);
 	assert(logger_dropped_count(&lg) == 0);
 	logger_shutdown(&lg);
-	us_close_unlink(rx, sock);
+	unixsock_close_unlink(rx, sock);
 	rmdir(dir);
 	printf("PASS test_records_reach_the_logger\n");
 }
@@ -59,19 +59,19 @@ static void	test_level_filter_skips_quieter_records(void)
 
 	make_tmp_dir(dir, sizeof(dir));
 	snprintf(sock, sizeof(sock), "%s/log.sock", dir);
-	rx = us_dgram_bind(sock, 0600);
+	rx = unixsock_dgram_bind(sock, 0600);
 	assert(rx >= 0);
-	logger_cfg(&cfg, sock, CIPC_LOG_WARNING);
+	logger_cfg(&cfg, sock, COREIPC_LOG_WARNING);
 	assert(logger_init(&lg, &cfg) == 0);
-	logger_emit(&lg, CIPC_LOG_DEBUG, "chatter");
-	logger_emit(&lg, CIPC_LOG_INFO, "chatter");
-	logger_emit(&lg, CIPC_LOG_ERROR, "the roof is on fire");
+	logger_emit(&lg, COREIPC_LOG_DEBUG, "chatter");
+	logger_emit(&lg, COREIPC_LOG_INFO, "chatter");
+	logger_emit(&lg, COREIPC_LOG_ERROR, "the roof is on fire");
 	assert(wait_record(rx, &rec, 2000) == 0);
-	assert(rec.level == CIPC_LOG_ERROR);
+	assert(rec.level == COREIPC_LOG_ERROR);
 	assert(strcmp(rec.msg, "the roof is on fire") == 0);
 	assert(wait_record(rx, &rec, 100) == -1);
 	logger_shutdown(&lg);
-	us_close_unlink(rx, sock);
+	unixsock_close_unlink(rx, sock);
 	rmdir(dir);
 	printf("PASS test_level_filter_skips_quieter_records\n");
 }
@@ -91,14 +91,14 @@ static void	test_absent_logger_falls_back_to_stderr(void)
 	make_tmp_dir(dir, sizeof(dir));
 	snprintf(sock, sizeof(sock), "%s/nobody.sock", dir);
 	snprintf(out, sizeof(out), "%s/stderr.txt", dir);
-	logger_cfg(&cfg, sock, CIPC_LOG_DEBUG);
+	logger_cfg(&cfg, sock, COREIPC_LOG_DEBUG);
 	fd = open(out, O_CREAT | O_TRUNC | O_WRONLY, 0600);
 	assert(fd >= 0);
 	saved = dup(STDERR_FILENO);
 	assert(saved >= 0);
 	assert(dup2(fd, STDERR_FILENO) >= 0);
 	assert(logger_init(&lg, &cfg) == 0);
-	logger_emit(&lg, CIPC_LOG_ERROR, "logger is missing");
+	logger_emit(&lg, COREIPC_LOG_ERROR, "logger is missing");
 	logger_shutdown(&lg);
 	fflush(stderr);
 	assert(dup2(saved, STDERR_FILENO) >= 0);
@@ -138,7 +138,7 @@ static int	wait_record(int fd, t_log_record *out, int timeout_ms)
 	pfd.revents = 0;
 	if (poll(&pfd, 1, timeout_ms) <= 0)
 		return (-1);
-	if (us_dgram_recv(fd, out, sizeof(*out)) != (ssize_t)sizeof(*out))
+	if (unixsock_dgram_recv(fd, out, sizeof(*out)) != (ssize_t)sizeof(*out))
 		return (-1);
 	return (0);
 }

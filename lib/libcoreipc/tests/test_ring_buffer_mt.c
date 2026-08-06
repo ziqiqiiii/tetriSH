@@ -41,7 +41,7 @@ void	test_concurrent_push_drain_accounting(void)
 	assert(g_seen != NULL);
 	g_popped = 0;
 	g_done = 0;
-	assert(rb_init(&g_rb, sizeof(t_rec), CAPACITY) == 0);
+	assert(ring_init(&g_rb, sizeof(t_rec), CAPACITY) == 0);
 	assert(pthread_create(&consumer, NULL, consumer_fn, NULL) == 0);
 	i = 0;
 	while (i < PRODUCERS)
@@ -54,8 +54,8 @@ void	test_concurrent_push_drain_accounting(void)
 		assert(pthread_join(producers[i++], NULL) == 0);
 	g_done = 1;
 	assert(pthread_join(consumer, NULL) == 0);
-	assert(g_popped + rb_drops(&g_rb) == TOTAL);
-	rb_destroy(&g_rb);
+	assert(g_popped + ring_dropped_count(&g_rb) == TOTAL);
+	ring_destroy(&g_rb);
 	free(g_seen);
 	printf("PASS test_concurrent_push_drain_accounting\n");
 }
@@ -63,7 +63,7 @@ void	test_concurrent_push_drain_accounting(void)
 void	test_drops_are_observed_under_pressure(void)
 {
 	// A 256-slot ring taking 40k records from 4 threads is expected to drop;
-	// a run with zero drops would mean rb_push blocked or retried instead.
+	// a run with zero drops would mean ring_push blocked or retried instead.
 	printf("PASS test_drops_are_observed_under_pressure\n");
 }
 
@@ -85,7 +85,7 @@ static void	*producer_fn(void *arg)
 	{
 		rec.seq = i;
 		rec.check = rec.producer ^ rec.seq;
-		rb_push(&g_rb, &rec);
+		ring_push(&g_rb, &rec);
 		i++;
 	}
 	return (NULL);
@@ -104,7 +104,7 @@ static void	*consumer_fn(void *arg)
 	(void)arg;
 	while (1)
 	{
-		n = rb_drain(&g_rb, batch, BATCH);
+		n = ring_drain(&g_rb, batch, BATCH);
 		i = 0;
 		while (i < n)
 		{

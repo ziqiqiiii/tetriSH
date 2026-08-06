@@ -80,7 +80,7 @@ static void	test_a_valid_record_is_written_and_counted(void)
 	before = lg.count.written;
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_INFO, "room 3 started") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "room 3 started") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(lg.count.written == before + 1);
 	assert(lg.count.rejected == 0 && lg.count.degraded == 0);
@@ -109,7 +109,7 @@ static void	test_a_malformed_record_is_rejected(void)
 	before = lg.count.written;
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(lr_make(&rec, CIPC_LOG_ERROR, 1, 2, "tetrisd", "bad") == 0);
+	assert(logrecord_make(&rec, COREIPC_LOG_ERROR, 1, 2, "tetrisd", "bad") == 0);
 	rec.magic = 0xDEADBEEFu;
 	assert(fx_send_raw(tx, &rec, sizeof(rec)) == 0);
 	assert(logd_run_once(&lg) == 0);
@@ -162,7 +162,7 @@ static void	test_an_oversized_datagram_is_rejected(void)
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
 	memset(buf, 0, sizeof(buf));
-	assert(lr_make((t_log_record *)buf, CIPC_LOG_INFO, 1, 2,
+	assert(logrecord_make((t_log_record *)buf, COREIPC_LOG_INFO, 1, 2,
 			"tetrisd", "valid head, junk tail") == 0);
 	assert(fx_send_raw(tx, buf, sizeof(buf)) == 0);
 	assert(logd_run_once(&lg) == 0);
@@ -195,7 +195,7 @@ static void	test_a_burst_drains_in_one_iteration(void)
 	i = 0;
 	while (i < 8)
 	{
-		assert(fx_send(tx, CIPC_LOG_DEBUG, "burst") == 0);
+		assert(fx_send(tx, COREIPC_LOG_DEBUG, "burst") == 0);
 		i++;
 	}
 	assert(logd_run_once(&lg) == 0);
@@ -224,7 +224,7 @@ static void	test_records_degrade_when_the_sink_is_gone(void)
 	sink_close(&lg.sink);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_WARNING, "sink is gone") == 0);
+	assert(fx_send(tx, COREIPC_LOG_WARNING, "sink is gone") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(lg.count.degraded == 1);
 	assert(lg.count.written == before);
@@ -251,12 +251,12 @@ static void	test_the_sink_recovers_on_the_idle_tick(void)
 	sink_close(&lg.sink);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_ERROR, "while degraded") == 0);
+	assert(fx_send(tx, COREIPC_LOG_ERROR, "while degraded") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(sink_is_open(&lg.sink) == false);
 	assert(logd_run_once(&lg) == 0);
 	assert(sink_is_open(&lg.sink) == true);
-	assert(fx_send(tx, CIPC_LOG_ERROR, "after recovery") == 0);
+	assert(fx_send(tx, COREIPC_LOG_ERROR, "after recovery") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(fx_contains(fx.file_path, "after recovery") == 1);
 	close(tx);
@@ -289,7 +289,7 @@ static void	test_a_deleted_log_file_is_reclaimed(void)
 	assert(fx_contains(fx.file_path, "sink replaced") == 1);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_INFO, "after the wipe") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "after the wipe") == 0);
 	assert(logd_run_once(&lg) == 0);
 	assert(fx_contains(fx.file_path, "after the wipe") == 1);
 	close(tx);
@@ -299,7 +299,7 @@ static void	test_a_deleted_log_file_is_reclaimed(void)
 }
 
 /*
-** us_dgram_bind unlinks the path before binding, so a second launch that got
+** unixsock_dgram_bind unlinks the path before binding, so a second launch that got
 ** as far as logd_start would silently steal the socket and leave the first
 ** logger deaf. Nothing inside logd_start prevents that any more - the guard
 ** is the pidfile main.c claims first (docs/adr/0007), and this case pins the
@@ -347,7 +347,7 @@ static void	test_stop_drains_what_is_still_queued(void)
 	assert(boot(&fx, &lg) == 0);
 	tx = fx_producer(&fx);
 	assert(tx >= 0);
-	assert(fx_send(tx, CIPC_LOG_INFO, "last words") == 0);
+	assert(fx_send(tx, COREIPC_LOG_INFO, "last words") == 0);
 	close(tx);
 	logd_stop(&lg);
 	assert(fx_contains(fx.file_path, "last words") == 1);

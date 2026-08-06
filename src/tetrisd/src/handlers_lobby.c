@@ -129,7 +129,7 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 	name = seated_room_name(ctx);
 	if (name == NULL)
 		return (404);
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s left %s",
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s left %s",
 		ctx->cli->username, name);
 	server_room_forfeit(ctx->srv, ctx->cli);
 	request_body_printf(ctx, "room %s\nstatus left\n", name);
@@ -175,7 +175,7 @@ int	start_handler(const t_htttp_message *msg, void *context)
 		rollback_start(sroom);
 		return (500);
 	}
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "game started in %s", name);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
 	request_body_printf(ctx, "room %s\nstatus in-game\n", name);
 	return (200);
 }
@@ -208,7 +208,7 @@ static int	create_room(t_request_context *ctx, t_game_mode mode)
 	if (sroom == NULL || slot < 0)
 		return (request_refuse(ctx, "lobby-full"));
 	bind_room(ctx->cli, sroom, slot);
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s created room %s",
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s created room %s",
 		ctx->cli->username, sroom->room->name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->room_name, slot);
 	return (201);
@@ -244,7 +244,7 @@ static int	join_room(t_request_context *ctx, const char *name)
 	if (slot < 0)
 		return (request_refuse(ctx, "seat-refused"));
 	bind_room(ctx->cli, sroom, slot);
-	logger_emit(&ctx->srv->log, CIPC_LOG_INFO, "%s joined %s",
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s joined %s",
 		ctx->cli->username, name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->room_name,
 		slot);

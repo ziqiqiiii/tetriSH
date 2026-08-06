@@ -204,7 +204,7 @@ An empty room returns to the lobby. A player holds at most one connection, so a 
 
 ### Logging
 
-Every significant event becomes a `libcoreipc` log record pushed into a ring buffer. The shipper thread drains it and datagrams each record to `tetrislogd`, falling back to stderr and retrying while the logger is unreachable. Under pressure records are **dropped and counted**, never waited on — `rb_drops()` is the number `tetrisctl dropped-logs` reports.
+Every significant event becomes a `libcoreipc` log record pushed into a ring buffer. The shipper thread drains it and datagrams each record to `tetrislogd`, falling back to stderr and retrying while the logger is unreachable. Under pressure records are **dropped and counted**, never waited on — `ring_dropped_count()` is the number `tetrisctl dropped-logs` reports.
 
 ---
 

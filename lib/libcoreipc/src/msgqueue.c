@@ -20,7 +20,7 @@ static int	wait_readable(mqd_t q, int timeout_ms);
  * @param mode Permission bits for the created queue.
  * @return The open descriptor, or (mqd_t)-1 with errno set on failure.
  */
-mqd_t	mqh_open(const char *name, long maxmsg, long msgsize, mode_t mode)
+mqd_t	msgqueue_open(const char *name, long maxmsg, long msgsize, mode_t mode)
 {
 	struct mq_attr	attr;
 
@@ -46,7 +46,7 @@ mqd_t	mqh_open(const char *name, long maxmsg, long msgsize, mode_t mode)
  * @param len Length of msg; must not exceed the queue's msgsize.
  * @return 0 when the message was queued, -1 with errno set otherwise.
  */
-int	mqh_send_nb(mqd_t q, const void *msg, size_t len)
+int	msgqueue_send_nonblock(mqd_t q, const void *msg, size_t len)
 {
 	if (!msg)
 	{
@@ -65,7 +65,7 @@ int	mqh_send_nb(mqd_t q, const void *msg, size_t len)
  * @param buflen Capacity of buf in bytes.
  * @return Bytes received, or -1 with errno set (EAGAIN when empty).
  */
-ssize_t	mqh_recv_nb(mqd_t q, void *buf, size_t buflen)
+ssize_t	msgqueue_recv_nonblock(mqd_t q, void *buf, size_t buflen)
 {
 	ssize_t	n;
 
@@ -84,10 +84,10 @@ ssize_t	mqh_recv_nb(mqd_t q, void *buf, size_t buflen)
  * @brief Receive one message, waiting up to timeout_ms for one to arrive.
  *
  * The only blocking call in the library: no lock may be held across it, and
- * callers holding a room mutex use mqh_recv_nb instead. The wait is on the
- * descriptor rather than in mq_timedreceive, because mqh_open leaves the
+ * callers holding a room mutex use msgqueue_recv_nonblock instead. The wait is on the
+ * descriptor rather than in mq_timedreceive, because msgqueue_open leaves the
  * queue non-blocking - a timed receive on it would return at once. Toggling
- * O_NONBLOCK instead would race with any concurrent mqh_recv_nb. The deadline
+ * O_NONBLOCK instead would race with any concurrent msgqueue_recv_nonblock. The deadline
  * is absolute, so an interrupted wait never extends it.
  *
  * @param q An open queue descriptor.
@@ -96,7 +96,7 @@ ssize_t	mqh_recv_nb(mqd_t q, void *buf, size_t buflen)
  * @param timeout_ms Milliseconds to wait; 0 polls once.
  * @return Bytes received, or -1 with errno set (ETIMEDOUT when none arrived).
  */
-ssize_t	mqh_recv_timed(mqd_t q, void *buf, size_t buflen, int timeout_ms)
+ssize_t	msgqueue_recv_timed(mqd_t q, void *buf, size_t buflen, int timeout_ms)
 {
 	struct timespec	deadline;
 	ssize_t			n;
@@ -126,12 +126,12 @@ ssize_t	mqh_recv_timed(mqd_t q, void *buf, size_t buflen, int timeout_ms)
 /**
  * @brief Close a queue descriptor.
  *
- * The queue itself outlives every descriptor until mqh_unlink removes it.
+ * The queue itself outlives every descriptor until msgqueue_unlink removes it.
  *
  * @param q The descriptor to close.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	mqh_close(mqd_t q)
+int	msgqueue_close(mqd_t q)
 {
 	return (mq_close(q));
 }
@@ -147,7 +147,7 @@ int	mqh_close(mqd_t q)
  * @param name The POSIX queue name to remove.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	mqh_unlink(const char *name)
+int	msgqueue_unlink(const char *name)
 {
 	if (!name)
 	{

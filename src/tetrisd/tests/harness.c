@@ -34,7 +34,7 @@ int	fx_start(t_fixture *fx)
 		return (-1);
 	config_defaults(&fx->cfg);
 	fx->cfg.port = 0;
-	fx->cfg.log_level = CIPC_LOG_ERROR;
+	fx->cfg.log_level = COREIPC_LOG_ERROR;
 	snprintf(path, sizeof(path), "%s/data", fx->dir);
 	snprintf(fx->cfg.data_dir, TETRISD_FS_PATH_MAX, "%s", path);
 	snprintf(fx->cfg.config_dir, TETRISD_FS_PATH_MAX, "%s",

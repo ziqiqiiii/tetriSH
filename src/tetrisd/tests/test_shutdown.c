@@ -54,7 +54,7 @@ static void	test_sigusr1_dumps_the_whole_server_state(void)
 	int			fd;
 
 	assert(fx_start(&fx) == 0);
-	atomic_store(&fx.srv->log.level, CIPC_LOG_INFO);
+	atomic_store(&fx.srv->log.level, COREIPC_LOG_INFO);
 	assert(player(&fx, &hc, "amber") == 0);
 	assert(hc_join_new(&hc, "single", out, sizeof(out)) == 201);
 	snprintf(out, sizeof(out), "%s/stderr.txt", fx.dir);
@@ -150,7 +150,7 @@ static void	test_sighup_rereads_the_configuration(void)
 	assert(player(&fx, &hc, "amber") == 0);
 	assert(simple(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL) == 200);
 	assert(atomic_load(&fx.srv->tick_ms) == 25);
-	assert(fx.srv->cfg.log_level == CIPC_LOG_ERROR);
+	assert(fx.srv->cfg.log_level == COREIPC_LOG_ERROR);
 	signals_restore();
 	hc_close(&hc);
 	fx_stop(&fx);

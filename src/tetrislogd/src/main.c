@@ -61,7 +61,7 @@ int	main(int argc, char **argv)
  *
  * The order is the whole single-instance guard. Claiming comes after the
  * fork, because the pid written has to be the detached process's; it comes
- * before logd_start, because us_dgram_bind unlinks its socket path
+ * before logd_start, because unixsock_dgram_bind unlinks its socket path
  * unconditionally, so a second instance has to lose the race and leave
  * before it can steal a running logger's socket.
  *

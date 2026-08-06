@@ -55,7 +55,7 @@ int	sink_open(t_sink *sk, const char *path)
 /**
  * @brief Appends one already-formatted line to the log file.
  *
- * Nothing is added to the text: lr_format_line already terminates the line
+ * Nothing is added to the text: logrecord_format_line already terminates the line
  * with a newline, and appending a second one is what puts a blank line after
  * every record in tetrisd's stderr fallback.
  *

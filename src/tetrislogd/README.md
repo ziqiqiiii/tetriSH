@@ -115,7 +115,7 @@ Config is cold: paths are resolved once at boot and change only by restarting th
 
 ## Log Format
 
-One record is one line, formatted by `lr_format_line`:
+One record is one line, formatted by `logrecord_format_line`:
 
 ```text
 <timestamp_ms> <level>  <component>[<pid>]: <message>
@@ -140,8 +140,8 @@ The words are not interchangeable, and only two of them are counted here:
 
 | Fate | Meaning | Counted by |
 |---|---|---|
-| **Dropped** | `tetrisd`'s ring buffer was full; the record never left `tetrisd` | `tetrisd` (`rb_drops`) |
-| **Rejected** | Arrived here but failed `lr_validate`; discarded | `tetrislogd` |
+| **Dropped** | `tetrisd`'s ring buffer was full; the record never left `tetrisd` | `tetrisd` (`ring_dropped_count`) |
+| **Rejected** | Arrived here but failed `logrecord_validate`; discarded | `tetrislogd` |
 | **Degraded** | Valid, but the sink was unavailable; written to stderr | `tetrislogd` |
 
 A Degraded record went to stderr rather than to the sink. Once the daemon has detached, stderr is the file named by `TETRISLOGD_ERR`; the daemon reopens it onto that path itself, after boot succeeds, which is why a boot *failure* still reaches the terminal instead. That makes a degraded record recoverable, not retained: the error file lives in the `tmp/` that `make reset` wipes, and nothing reclaims that descriptor the way the sink reclaims its own. The counter is the guarantee — it says how many took that route. `written` and `degraded` together are every valid record the logger handled; `rejected` is the malformed remainder.
@@ -151,7 +151,7 @@ A Degraded record went to stderr rather than to the sink. Once the daemon has de
 ```text
 poll(socket, self-pipe, idle_ms)
      │
-     ├── self-pipe ready   sp_drain, then act on sig_take: STOP, HUP, DUMP
+     ├── self-pipe ready   selfpipe_drain, then act on sig_take: STOP, HUP, DUMP
      │
      ├── socket ready      recv → logd_accept, repeated until EAGAIN
      │                     so a burst is handled in one pass, not one per poll
@@ -177,7 +177,7 @@ Reclaim is now only about the sink. It used to have to restore the `flock` as we
 
 ### Boot order
 
-`main.c` claims the pidfile *before* calling `logd_start`, and that ordering is the guard. `us_dgram_bind` unlinks its path unconditionally, so binding the socket is the point at which a second instance would damage the first; losing the pidfile race happens before the bind is ever reached, while the running logger's socket is still intact. Reversing those two lines is silent: both instances start, and the older one goes deaf.
+`main.c` claims the pidfile *before* calling `logd_start`, and that ordering is the guard. `unixsock_dgram_bind` unlinks its path unconditionally, so binding the socket is the point at which a second instance would damage the first; losing the pidfile race happens before the bind is ever reached, while the running logger's socket is still intact. Reversing those two lines is silent: both instances start, and the older one goes deaf.
 
 The claim also comes *after* `cd_detach`, because the pid written has to be the detached process's and the lock has to be held by the process that will still be there to hold it. Both the fork and the claim live in `main.c` alone — behind `logd_start` they would make every in-process test suite fork.
 

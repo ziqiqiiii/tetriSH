@@ -24,8 +24,8 @@ void	logd_blank(t_logd *lg)
 	memset(lg, 0, sizeof(*lg));
 	sink_blank(&lg->sink);
 	lg->sock_fd = -1;
-	lg->wake[SP_READ] = -1;
-	lg->wake[SP_WRITE] = -1;
+	lg->wake[SELFPIPE_READ] = -1;
+	lg->wake[SELFPIPE_WRITE] = -1;
 	lg->idle_ms = TL_IDLE_MS;
 	lg->running = false;
 }
@@ -57,7 +57,7 @@ int	logd_start(t_logd *lg, const t_cfg *cfg)
 		return (-1);
 	}
 	lg->running = true;
-	logd_emit(lg, CIPC_LOG_INFO, "listening on %s, writing %s",
+	logd_emit(lg, COREIPC_LOG_INFO, "listening on %s, writing %s",
 		lg->cfg.sock_path, lg->cfg.file_path);
 	logd_report(lg, "boot");
 	return (0);
@@ -84,14 +84,14 @@ int	logd_run_once(t_logd *lg)
 	pfd[0].fd = lg->sock_fd;
 	pfd[0].events = POLLIN;
 	pfd[0].revents = 0;
-	pfd[1].fd = lg->wake[SP_READ];
+	pfd[1].fd = lg->wake[SELFPIPE_READ];
 	pfd[1].events = POLLIN;
 	pfd[1].revents = 0;
 	n = poll(pfd, 2, lg->idle_ms);
 	if (n < 0 && errno != EINTR)
 		return (-1);
 	if (pfd[1].revents & POLLIN)
-		sp_drain(lg->wake[SP_READ]);
+		selfpipe_drain(lg->wake[SELFPIPE_READ]);
 	apply_signals(lg, sig_take());
 	if (pfd[0].revents & POLLIN)
 		drain_socket(lg);
@@ -125,14 +125,14 @@ void	logd_stop(t_logd *lg)
 	sig_detach();
 	sink_close(&lg->sink);
 	if (lg->sock_fd >= 0)
-		us_close_unlink(lg->sock_fd, lg->cfg.sock_path);
+		unixsock_close_unlink(lg->sock_fd, lg->cfg.sock_path);
 	lg->sock_fd = -1;
-	if (lg->wake[SP_READ] >= 0)
-		close(lg->wake[SP_READ]);
-	if (lg->wake[SP_WRITE] >= 0)
-		close(lg->wake[SP_WRITE]);
-	lg->wake[SP_READ] = -1;
-	lg->wake[SP_WRITE] = -1;
+	if (lg->wake[SELFPIPE_READ] >= 0)
+		close(lg->wake[SELFPIPE_READ]);
+	if (lg->wake[SELFPIPE_WRITE] >= 0)
+		close(lg->wake[SELFPIPE_WRITE]);
+	lg->wake[SELFPIPE_READ] = -1;
+	lg->wake[SELFPIPE_WRITE] = -1;
 	lg->running = false;
 }
 
@@ -159,8 +159,8 @@ int	logd_accept(t_logd *lg, const void *buf, size_t len)
 	if (lg == NULL)
 		return (-1);
 	n = -1;
-	if (lr_validate(buf, len) == 0)
-		n = lr_format_line((const t_log_record *)buf, line, sizeof(line));
+	if (logrecord_validate(buf, len) == 0)
+		n = logrecord_format_line((const t_log_record *)buf, line, sizeof(line));
 	if (n <= 0)
 	{
 		lg->count.rejected++;
@@ -191,7 +191,7 @@ int	logd_accept(t_logd *lg, const void *buf, size_t len)
 void	logd_emit(t_logd *lg, t_log_level level, const char *fmt, ...)
 {
 	t_log_record	rec;
-	char			msg[CIPC_LOG_MSG_MAX];
+	char			msg[COREIPC_LOG_MSG_MAX];
 	va_list			ap;
 
 	if (lg == NULL || fmt == NULL)
@@ -199,7 +199,7 @@ void	logd_emit(t_logd *lg, t_log_level level, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	va_end(ap);
-	if (lr_make(&rec, level, now_ms(), (uint32_t)getpid(),
+	if (logrecord_make(&rec, level, now_ms(), (uint32_t)getpid(),
 			TL_COMPONENT, msg) != 0)
 		return ;
 	logd_accept(lg, &rec, sizeof(rec));
@@ -221,7 +221,7 @@ void	logd_report(t_logd *lg, const char *event)
 {
 	if (lg == NULL || event == NULL)
 		return ;
-	logd_emit(lg, CIPC_LOG_INFO,
+	logd_emit(lg, COREIPC_LOG_INFO,
 		"%s: %llu written, %llu rejected, %llu degraded", event,
 		(unsigned long long)lg->count.written,
 		(unsigned long long)lg->count.rejected,
@@ -231,7 +231,7 @@ void	logd_report(t_logd *lg, const char *event)
 /**
  * @brief Opens everything logd_start needs, in the order that order matters.
  *
- * The socket is bound last, and that is the part worth guarding: us_dgram_bind
+ * The socket is bound last, and that is the part worth guarding: unixsock_dgram_bind
  * unlinks its path unconditionally, so binding it is the point of no return
  * for anyone else's socket. Nothing here excludes a second instance any more
  * - main.c's pidfile claim did that before this function ran (docs/adr/0007).
@@ -244,13 +244,13 @@ static int	bring_up(t_logd *lg, const t_cfg *cfg)
 {
 	if (sink_open(&lg->sink, cfg->file_path) != 0)
 		return (-1);
-	if (sp_pipe(lg->wake) != 0)
+	if (selfpipe_open(lg->wake) != 0)
 		return (-1);
-	if (sig_install(lg->wake[SP_WRITE]) != 0)
+	if (sig_install(lg->wake[SELFPIPE_WRITE]) != 0)
 		return (-1);
 	if (cfg_mkdir_parent(cfg->sock_path) != 0)
 		return (-1);
-	lg->sock_fd = us_dgram_bind(cfg->sock_path, TL_SOCK_MODE);
+	lg->sock_fd = unixsock_dgram_bind(cfg->sock_path, TL_SOCK_MODE);
 	if (lg->sock_fd < 0)
 		return (-1);
 	return (0);
@@ -269,12 +269,12 @@ static void	unwind(t_logd *lg)
 {
 	sig_detach();
 	sink_close(&lg->sink);
-	if (lg->wake[SP_READ] >= 0)
-		close(lg->wake[SP_READ]);
-	if (lg->wake[SP_WRITE] >= 0)
-		close(lg->wake[SP_WRITE]);
-	lg->wake[SP_READ] = -1;
-	lg->wake[SP_WRITE] = -1;
+	if (lg->wake[SELFPIPE_READ] >= 0)
+		close(lg->wake[SELFPIPE_READ]);
+	if (lg->wake[SELFPIPE_WRITE] >= 0)
+		close(lg->wake[SELFPIPE_WRITE]);
+	lg->wake[SELFPIPE_READ] = -1;
+	lg->wake[SELFPIPE_WRITE] = -1;
 	lg->running = false;
 }
 
@@ -294,11 +294,11 @@ static void	drain_socket(t_logd *lg)
 
 	if (lg->sock_fd < 0)
 		return ;
-	n = us_dgram_recv(lg->sock_fd, buf, sizeof(buf));
+	n = unixsock_dgram_recv(lg->sock_fd, buf, sizeof(buf));
 	while (n > 0)
 	{
 		logd_accept(lg, buf, (size_t)n);
-		n = us_dgram_recv(lg->sock_fd, buf, sizeof(buf));
+		n = unixsock_dgram_recv(lg->sock_fd, buf, sizeof(buf));
 	}
 }
 

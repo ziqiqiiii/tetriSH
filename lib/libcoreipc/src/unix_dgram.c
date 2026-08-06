@@ -19,7 +19,7 @@ static int	fail(int fd, int err);
  * @param mode Permission bits applied to the bound socket file.
  * @return The bound fd on success, -1 with errno set on failure.
  */
-int	us_dgram_bind(const char *path, mode_t mode)
+int	unixsock_dgram_bind(const char *path, mode_t mode)
 {
 	struct sockaddr_un	addr;
 	int					fd;
@@ -35,7 +35,7 @@ int	us_dgram_bind(const char *path, mode_t mode)
 		return (fail(fd, errno));
 	if (chmod(path, mode) == -1)
 		return (fail(fd, errno));
-	if (us_set_nonblock(fd) == -1)
+	if (unixsock_set_nonblock(fd) == -1)
 		return (fail(fd, errno));
 	return (fd);
 }
@@ -44,12 +44,12 @@ int	us_dgram_bind(const char *path, mode_t mode)
  * @brief Open a connected datagram sender aimed at a bound path.
  *
  * Neither blocks nor requires the receiver to exist yet - a missing receiver
- * surfaces later as ECONNREFUSED from us_dgram_send_nb.
+ * surfaces later as ECONNREFUSED from unixsock_dgram_send_nonblock.
  *
  * @param path Filesystem path of the peer's bound socket.
  * @return The connected fd on success, -1 with errno set on failure.
  */
-int	us_dgram_open(const char *path)
+int	unixsock_dgram_open(const char *path)
 {
 	struct sockaddr_un	addr;
 	int					fd;
@@ -61,7 +61,7 @@ int	us_dgram_open(const char *path)
 		return (-1);
 	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
 		return (fail(fd, errno));
-	if (us_set_nonblock(fd) == -1)
+	if (unixsock_set_nonblock(fd) == -1)
 		return (fail(fd, errno));
 	return (fd);
 }
@@ -72,12 +72,12 @@ int	us_dgram_open(const char *path)
  * EAGAIN (receiver's queue full) and ECONNREFUSED (no receiver bound) both
  * mean dropped; the caller counts it.
  *
- * @param fd A sender fd from us_dgram_open.
+ * @param fd A sender fd from unixsock_dgram_open.
  * @param buf The record to send.
  * @param len Length of buf in bytes; must fit one datagram.
  * @return 0 when the datagram was queued, -1 with errno set otherwise.
  */
-int	us_dgram_send_nb(int fd, const void *buf, size_t len)
+int	unixsock_dgram_send_nonblock(int fd, const void *buf, size_t len)
 {
 	ssize_t	n;
 
@@ -103,12 +103,12 @@ int	us_dgram_send_nb(int fd, const void *buf, size_t len)
  * A datagram longer than buflen is truncated, so size buf to the largest
  * record published.
  *
- * @param fd A bound fd from us_dgram_bind.
+ * @param fd A bound fd from unixsock_dgram_bind.
  * @param buf Destination for the datagram.
  * @param buflen Capacity of buf in bytes.
  * @return Bytes received, or -1 with errno set (EAGAIN when nothing queued).
  */
-ssize_t	us_dgram_recv(int fd, void *buf, size_t buflen)
+ssize_t	unixsock_dgram_recv(int fd, void *buf, size_t buflen)
 {
 	ssize_t	n;
 

@@ -32,9 +32,9 @@
 **
 ** A record has exactly three fates, and they are three different words:
 **   Dropped   tetrisd's ring was full; the record never left tetrisd.
-**   Rejected  it arrived here but failed lr_validate; discarded.
+**   Rejected  it arrived here but failed logrecord_validate; discarded.
 **   Degraded  it was valid but the sink was unavailable; written to stderr.
-** Only the last two are counted here - Dropped belongs to tetrisd (rb_drops).
+** Only the last two are counted here - Dropped belongs to tetrisd (ring_dropped_count).
 **
 ** The logger survives tetrisd restarts and never exits because of one: a
 ** producer that goes away simply stops sending.

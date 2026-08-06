@@ -27,7 +27,7 @@ int	listener_open(int port, int *out_port)
 	on = 1;
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if (bind_any(fd, port) != 0 || listen(fd, SOMAXCONN) != 0
-		|| us_set_nonblock(fd) != 0)
+		|| unixsock_set_nonblock(fd) != 0)
 	{
 		close(fd);
 		return (-1);

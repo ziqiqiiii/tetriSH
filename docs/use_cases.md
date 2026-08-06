@@ -1387,7 +1387,7 @@ Content-Length: 104
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl dropped-logs`.
-2. `tetrisd` receives `DROPPED-LOGS /admin` and reads its own ring-buffer counter (`rb_drops`).
+2. `tetrisd` receives `DROPPED-LOGS /admin` and reads its own ring-buffer counter (`ring_dropped_count`).
 3. `tetrisd` replies `200 OK` with the count, labelled as producer-side Dropped records.
 4. `tetrisctl` prints the count; the query is logged.
 

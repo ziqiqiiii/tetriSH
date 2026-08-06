@@ -9,7 +9,7 @@
  * @param fd The descriptor to modify.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	us_set_nonblock(int fd)
+int	unixsock_set_nonblock(int fd)
 {
 	int	flags;
 
@@ -25,13 +25,13 @@ int	us_set_nonblock(int fd)
  * @brief Close a bound socket and remove its filesystem entry.
  *
  * Binding leaves a socket file that outlives the process; shutdown paths use
- * this rather than relying on the unlink-stale fallback in us_dgram_bind.
+ * this rather than relying on the unlink-stale fallback in unixsock_dgram_bind.
  *
  * @param fd The bound or listening fd to close.
  * @param path The path the fd was bound to.
  * @return 0 when both close and unlink succeeded, -1 with errno set otherwise.
  */
-int	us_close_unlink(int fd, const char *path)
+int	unixsock_close_unlink(int fd, const char *path)
 {
 	int	saved;
 
@@ -51,13 +51,13 @@ int	us_close_unlink(int fd, const char *path)
 /**
  * @brief Create a non-blocking self-pipe for signal-to-event-loop wakeups.
  *
- * The loop polls fds[SP_READ] alongside its sockets, so SIGTERM and SIGHUP
+ * The loop polls fds[SELFPIPE_READ] alongside its sockets, so SIGTERM and SIGHUP
  * are handled in the loop's context rather than in handler context.
  *
- * @param fds Filled with the read end at SP_READ and the write end at SP_WRITE.
+ * @param fds Filled with the read end at SELFPIPE_READ and the write end at SELFPIPE_WRITE.
  * @return 0 on success, -1 with errno set on failure.
  */
-int	sp_pipe(int fds[2])
+int	selfpipe_open(int fds[2])
 {
 	if (!fds)
 	{
@@ -75,9 +75,9 @@ int	sp_pipe(int fds[2])
  * The only async-signal-safe function in the library. A failed write means a
  * wakeup is already pending, which is exactly the outcome the caller wanted.
  *
- * @param write_fd The write end from sp_pipe (fds[SP_WRITE]).
+ * @param write_fd The write end from selfpipe_open (fds[SELFPIPE_WRITE]).
  */
-void	sp_notify(int write_fd)
+void	selfpipe_notify(int write_fd)
 {
 	int		saved;
 	ssize_t	n;
@@ -93,10 +93,10 @@ void	sp_notify(int write_fd)
  *
  * Coalescing is intended: N signals between two iterations are one wakeup.
  *
- * @param read_fd The read end from sp_pipe (fds[SP_READ]).
+ * @param read_fd The read end from selfpipe_open (fds[SELFPIPE_READ]).
  * @return 0 once the pipe is empty, -1 with errno set on a real read error.
  */
-int	sp_drain(int read_fd)
+int	selfpipe_drain(int read_fd)
 {
 	char	buf[64];
 	ssize_t	n;

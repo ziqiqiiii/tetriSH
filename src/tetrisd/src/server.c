@@ -42,7 +42,7 @@ int	server_start(const t_config *cfg, t_server **out)
 		return (-1);
 	}
 	srv->loop_started = true;
-	logger_emit(&srv->log, CIPC_LOG_INFO, "tetrisd listening on port %d",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "tetrisd listening on port %d",
 		srv->port);
 	*out = srv;
 	return (0);
@@ -71,15 +71,15 @@ void	server_stop(t_server *srv)
 		return ;
 	atomic_store(&srv->stopping, true);
 	atomic_store(&srv->running, false);
-	if (srv->wake[SP_WRITE] >= 0)
-		sp_notify(srv->wake[SP_WRITE]);
+	if (srv->wake[SELFPIPE_WRITE] >= 0)
+		selfpipe_notify(srv->wake[SELFPIPE_WRITE]);
 	if (srv->loop_started)
 		pthread_join(srv->loop, NULL);
 	srv->loop_started = false;
 	registry_shutdown_all(&srv->reg);
 	registry_wait_empty(&srv->reg);
 	stop_rooms(srv);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "tetrisd stopped (%llu logs dropped)",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "tetrisd stopped (%llu logs dropped)",
 		(unsigned long long)logger_dropped_count(&srv->log));
 	destroy(srv);
 }
@@ -124,8 +124,8 @@ void	server_request_stop(t_server *srv)
 	if (srv == NULL)
 		return ;
 	atomic_store(&srv->running, false);
-	if (srv->wake[SP_WRITE] >= 0)
-		sp_notify(srv->wake[SP_WRITE]);
+	if (srv->wake[SELFPIPE_WRITE] >= 0)
+		selfpipe_notify(srv->wake[SELFPIPE_WRITE]);
 }
 
 /**
@@ -145,7 +145,7 @@ void	server_reload(t_server *srv)
 		return ;
 	if (config_load(&fresh, srv->cfg.rc_path) != 0)
 	{
-		logger_emit(&srv->log, CIPC_LOG_WARNING,
+		logger_emit(&srv->log, COREIPC_LOG_WARNING,
 			"reload failed: %s has an invalid setting", srv->cfg.rc_path);
 		return ;
 	}
@@ -153,7 +153,7 @@ void	server_reload(t_server *srv)
 	atomic_store(&srv->log.level, fresh.log_level);
 	srv->cfg.tick_ms = fresh.tick_ms;
 	atomic_store(&srv->tick_ms, fresh.tick_ms);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
 }
 
 /**
@@ -177,14 +177,14 @@ static void	*loop_main(void *arg)
 		pfds[0].fd = srv->listen_fd;
 		pfds[0].events = POLLIN;
 		pfds[0].revents = 0;
-		pfds[1].fd = srv->wake[SP_READ];
+		pfds[1].fd = srv->wake[SELFPIPE_READ];
 		pfds[1].events = POLLIN;
 		pfds[1].revents = 0;
 		if (poll(pfds, 2, -1) < 0 && errno != EINTR)
 			break ;
 		if (pfds[1].revents & POLLIN)
 		{
-			sp_drain(srv->wake[SP_READ]);
+			selfpipe_drain(srv->wake[SELFPIPE_READ]);
 			if (signals_take_stop())
 				atomic_store(&srv->running, false);
 			if (signals_take_reload())
@@ -211,7 +211,7 @@ static void	accept_ready(t_server *srv)
 	while (fd >= 0)
 	{
 		if (client_spawn(srv, fd) != 0)
-			logger_emit(&srv->log, CIPC_LOG_WARNING,
+			logger_emit(&srv->log, COREIPC_LOG_WARNING,
 				"refused a connection: client limit reached");
 		if (!atomic_load(&srv->running))
 			return ;
@@ -230,8 +230,8 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 {
 	srv->cfg = *cfg;
 	srv->listen_fd = -1;
-	srv->wake[SP_READ] = -1;
-	srv->wake[SP_WRITE] = -1;
+	srv->wake[SELFPIPE_READ] = -1;
+	srv->wake[SELFPIPE_WRITE] = -1;
 	atomic_store(&srv->tick_ms, cfg->tick_ms);
 	srv->started_ms = clock_now_ms();
 	logger_blank(&srv->log);
@@ -244,17 +244,17 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 		return (-1);
 	if (db_open(cfg->data_dir, cfg->config_dir, &srv->db) != DB_OK)
 	{
-		logger_emit(&srv->log, CIPC_LOG_ERROR, "cannot open the player store");
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the player store");
 		return (-1);
 	}
 	if (registry_init(&srv->reg, (size_t)cfg->max_clients) != 0)
 		return (-1);
-	if (sp_pipe(srv->wake) != 0)
+	if (selfpipe_open(srv->wake) != 0)
 		return (-1);
 	srv->listen_fd = listener_open(cfg->port, &srv->port);
 	if (srv->listen_fd < 0)
 	{
-		logger_emit(&srv->log, CIPC_LOG_ERROR, "cannot listen on port %d",
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot listen on port %d",
 			cfg->port);
 		return (-1);
 	}
@@ -292,10 +292,10 @@ static void	destroy(t_server *srv)
 
 	if (srv->listen_fd >= 0)
 		close(srv->listen_fd);
-	if (srv->wake[SP_READ] >= 0)
-		close(srv->wake[SP_READ]);
-	if (srv->wake[SP_WRITE] >= 0)
-		close(srv->wake[SP_WRITE]);
+	if (srv->wake[SELFPIPE_READ] >= 0)
+		close(srv->wake[SELFPIPE_READ]);
+	if (srv->wake[SELFPIPE_WRITE] >= 0)
+		close(srv->wake[SELFPIPE_WRITE]);
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
 	{

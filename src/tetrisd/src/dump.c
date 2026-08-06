@@ -33,7 +33,7 @@ void	server_state_dump(t_server *srv)
 	dump_header(srv);
 	dump_clients(srv);
 	dump_rooms(srv);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "state dump: logs dropped %llu",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "state dump: logs dropped %llu",
 		(unsigned long long)logger_dropped_count(&srv->log));
 }
 
@@ -47,11 +47,11 @@ static void	dump_header(t_server *srv)
 	uint64_t	uptime;
 
 	uptime = (clock_now_ms() - srv->started_ms) / 1000;
-	logger_emit(&srv->log, CIPC_LOG_INFO,
+	logger_emit(&srv->log, COREIPC_LOG_INFO,
 		"state dump: port %d, uptime %llus, tick %dms, max clients %d",
 		srv->port, (unsigned long long)uptime,
 		atomic_load(&srv->tick_ms), srv->cfg.max_clients);
-	logger_emit(&srv->log, CIPC_LOG_INFO,
+	logger_emit(&srv->log, COREIPC_LOG_INFO,
 		"state dump: rc %s, data %s, log ipc %s",
 		srv->cfg.rc_path, srv->cfg.data_dir, srv->cfg.log_ipc);
 }
@@ -67,14 +67,14 @@ static void	dump_clients(t_server *srv)
 	size_t		i;
 
 	pthread_rwlock_rdlock(&srv->reg.lock);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "state dump: clients %zu of %zu",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "state dump: clients %zu of %zu",
 		srv->reg.count, srv->reg.cap);
 	i = 0;
 	while (i < srv->reg.cap)
 	{
 		cli = srv->reg.slots[i];
 		if (cli != NULL)
-			logger_emit(&srv->log, CIPC_LOG_INFO,
+			logger_emit(&srv->log, COREIPC_LOG_INFO,
 				"state dump:   client fd %d %s player %llu %s room %s slot %d",
 				cli->fd, state_name(cli->state),
 				(unsigned long long)cli->player_id,
@@ -96,7 +96,7 @@ static void	dump_rooms(t_server *srv)
 	int	i;
 
 	pthread_mutex_lock(&srv->lobby_mutex);
-	logger_emit(&srv->log, CIPC_LOG_INFO, "state dump: rooms %zu of %d",
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "state dump: rooms %zu of %d",
 		lobby_room_count(&srv->lobby), LOBBY_MAX_ROOMS);
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
@@ -120,7 +120,7 @@ static void	dump_room(t_server *srv, t_server_room *server_room)
 	pthread_mutex_lock(&server_room->mutex);
 	if (server_room->room->number_of_players > 0)
 	{
-		logger_emit(&srv->log, CIPC_LOG_INFO,
+		logger_emit(&srv->log, COREIPC_LOG_INFO,
 			"state dump:   room %s mode %s status %s players %d/%d ticking %s",
 			server_room->room->name, mode_name(server_room->room->mode),
 			status_name(server_room->room->status), server_room->room->number_of_players,
@@ -130,7 +130,7 @@ static void	dump_room(t_server *srv, t_server_room *server_room)
 		while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 		{
 			if (server_room->games[slot].player_id != 0)
-				logger_emit(&srv->log, CIPC_LOG_INFO,
+				logger_emit(&srv->log, COREIPC_LOG_INFO,
 					"state dump:     slot %d player %llu score %d lines %d "
 					"level %d %s", slot + 1,
 					(unsigned long long)server_room->games[slot].player_id,

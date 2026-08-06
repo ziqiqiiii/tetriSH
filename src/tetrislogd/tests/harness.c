@@ -62,7 +62,7 @@ int	fx_producer(const t_fixture *fx)
 {
 	if (fx == NULL)
 		return (-1);
-	return (us_dgram_open(fx->sock_path));
+	return (unixsock_dgram_open(fx->sock_path));
 }
 
 /**
@@ -77,10 +77,10 @@ int	fx_send(int fd, t_log_level level, const char *msg)
 {
 	t_log_record	rec;
 
-	if (lr_make(&rec, level, 1700000000000ULL, (uint32_t)getpid(),
+	if (logrecord_make(&rec, level, 1700000000000ULL, (uint32_t)getpid(),
 			"tetrisd", msg) != 0)
 		return (-1);
-	return (us_dgram_send_nb(fd, &rec, sizeof(rec)));
+	return (unixsock_dgram_send_nonblock(fd, &rec, sizeof(rec)));
 }
 
 /**
@@ -93,7 +93,7 @@ int	fx_send(int fd, t_log_level level, const char *msg)
  */
 int	fx_send_raw(int fd, const void *buf, size_t len)
 {
-	return (us_dgram_send_nb(fd, buf, len));
+	return (unixsock_dgram_send_nonblock(fd, buf, len));
 }
 
 /**

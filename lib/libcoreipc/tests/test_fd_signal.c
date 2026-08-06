@@ -30,7 +30,7 @@ void	test_set_nonblock_preserves_existing_flags(void)
 	assert(fcntl(fds[0], F_SETFL, O_APPEND) == 0);
 	before = fcntl(fds[0], F_GETFL);
 	assert(before != -1 && (before & O_APPEND));
-	assert(us_set_nonblock(fds[0]) == 0);
+	assert(unixsock_set_nonblock(fds[0]) == 0);
 	after = fcntl(fds[0], F_GETFL);
 	assert(after & O_NONBLOCK);
 	assert(after & O_APPEND);
@@ -44,10 +44,10 @@ void	test_close_unlink_removes_socket_file(void)
 	int		fd;
 
 	tmp_path(path, sizeof(path), "gone.sock");
-	fd = us_dgram_bind(path, 0600);
+	fd = unixsock_dgram_bind(path, 0600);
 	assert(fd >= 0);
 	assert(access(path, F_OK) == 0);
-	assert(us_close_unlink(fd, path) == 0);
+	assert(unixsock_close_unlink(fd, path) == 0);
 	assert(access(path, F_OK) == -1);
 	assert(errno == ENOENT);
 	printf("PASS test_close_unlink_removes_socket_file\n");
@@ -57,12 +57,12 @@ void	test_pipe_ends_are_nonblocking_and_cloexec(void)
 {
 	int	fds[2];
 
-	assert(sp_pipe(fds) == 0);
-	assert(fcntl(fds[SP_READ], F_GETFL) & O_NONBLOCK);
-	assert(fcntl(fds[SP_WRITE], F_GETFL) & O_NONBLOCK);
-	assert(fcntl(fds[SP_READ], F_GETFD) & FD_CLOEXEC);
-	assert(fcntl(fds[SP_WRITE], F_GETFD) & FD_CLOEXEC);
-	assert(close(fds[SP_READ]) == 0 && close(fds[SP_WRITE]) == 0);
+	assert(selfpipe_open(fds) == 0);
+	assert(fcntl(fds[SELFPIPE_READ], F_GETFL) & O_NONBLOCK);
+	assert(fcntl(fds[SELFPIPE_WRITE], F_GETFL) & O_NONBLOCK);
+	assert(fcntl(fds[SELFPIPE_READ], F_GETFD) & FD_CLOEXEC);
+	assert(fcntl(fds[SELFPIPE_WRITE], F_GETFD) & FD_CLOEXEC);
+	assert(close(fds[SELFPIPE_READ]) == 0 && close(fds[SELFPIPE_WRITE]) == 0);
 	printf("PASS test_pipe_ends_are_nonblocking_and_cloexec\n");
 }
 
@@ -70,10 +70,10 @@ void	test_drain_on_quiet_pipe_succeeds(void)
 {
 	int	fds[2];
 
-	assert(sp_pipe(fds) == 0);
-	assert(readable(fds[SP_READ]) == 0);
-	assert(sp_drain(fds[SP_READ]) == 0);
-	assert(close(fds[SP_READ]) == 0 && close(fds[SP_WRITE]) == 0);
+	assert(selfpipe_open(fds) == 0);
+	assert(readable(fds[SELFPIPE_READ]) == 0);
+	assert(selfpipe_drain(fds[SELFPIPE_READ]) == 0);
+	assert(close(fds[SELFPIPE_READ]) == 0 && close(fds[SELFPIPE_WRITE]) == 0);
 	printf("PASS test_drain_on_quiet_pipe_succeeds\n");
 }
 
@@ -81,12 +81,12 @@ void	test_notify_wakes_poll_then_drain_clears(void)
 {
 	int	fds[2];
 
-	assert(sp_pipe(fds) == 0);
-	sp_notify(fds[SP_WRITE]);
-	assert(readable(fds[SP_READ]) == 1);
-	assert(sp_drain(fds[SP_READ]) == 0);
-	assert(readable(fds[SP_READ]) == 0);
-	assert(close(fds[SP_READ]) == 0 && close(fds[SP_WRITE]) == 0);
+	assert(selfpipe_open(fds) == 0);
+	selfpipe_notify(fds[SELFPIPE_WRITE]);
+	assert(readable(fds[SELFPIPE_READ]) == 1);
+	assert(selfpipe_drain(fds[SELFPIPE_READ]) == 0);
+	assert(readable(fds[SELFPIPE_READ]) == 0);
+	assert(close(fds[SELFPIPE_READ]) == 0 && close(fds[SELFPIPE_WRITE]) == 0);
 	printf("PASS test_notify_wakes_poll_then_drain_clears\n");
 }
 
@@ -95,17 +95,17 @@ void	test_repeated_notifies_coalesce_to_one_wakeup(void)
 	int	fds[2];
 	int	i;
 
-	assert(sp_pipe(fds) == 0);
+	assert(selfpipe_open(fds) == 0);
 	i = 0;
 	while (i < 64)
 	{
-		sp_notify(fds[SP_WRITE]);
+		selfpipe_notify(fds[SELFPIPE_WRITE]);
 		i++;
 	}
-	assert(readable(fds[SP_READ]) == 1);
-	assert(sp_drain(fds[SP_READ]) == 0);
-	assert(readable(fds[SP_READ]) == 0);
-	assert(close(fds[SP_READ]) == 0 && close(fds[SP_WRITE]) == 0);
+	assert(readable(fds[SELFPIPE_READ]) == 1);
+	assert(selfpipe_drain(fds[SELFPIPE_READ]) == 0);
+	assert(readable(fds[SELFPIPE_READ]) == 0);
+	assert(close(fds[SELFPIPE_READ]) == 0 && close(fds[SELFPIPE_WRITE]) == 0);
 	printf("PASS test_repeated_notifies_coalesce_to_one_wakeup\n");
 }
 
@@ -114,19 +114,19 @@ void	test_notify_from_a_real_signal_handler(void)
 	struct sigaction	sa;
 	int					saved;
 
-	assert(sp_pipe(g_sp) == 0);
+	assert(selfpipe_open(g_sp) == 0);
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = on_sigusr1;
 	assert(sigaction(SIGUSR1, &sa, NULL) == 0);
 	errno = EEXIST;
 	assert(raise(SIGUSR1) == 0);
 	saved = errno;
-	// sp_notify saves and restores errno, so the interrupted code must not
+	// selfpipe_notify saves and restores errno, so the interrupted code must not
 	// observe a change across handler entry.
 	assert(saved == EEXIST);
-	assert(readable(g_sp[SP_READ]) == 1);
-	assert(sp_drain(g_sp[SP_READ]) == 0);
-	assert(close(g_sp[SP_READ]) == 0 && close(g_sp[SP_WRITE]) == 0);
+	assert(readable(g_sp[SELFPIPE_READ]) == 1);
+	assert(selfpipe_drain(g_sp[SELFPIPE_READ]) == 0);
+	assert(close(g_sp[SELFPIPE_READ]) == 0 && close(g_sp[SELFPIPE_WRITE]) == 0);
 	printf("PASS test_notify_from_a_real_signal_handler\n");
 }
 
@@ -147,7 +147,7 @@ int	main(void)
 static void	on_sigusr1(int sig)
 {
 	(void)sig;
-	sp_notify(g_sp[SP_WRITE]);
+	selfpipe_notify(g_sp[SELFPIPE_WRITE]);
 }
 
 static int	readable(int fd)
