@@ -69,8 +69,8 @@ dkms.conf
 # debug information files
 *.dwo
 
-# claude
-*.claude
+# settings
+settings*
 
 .scratch/*
 docs/adr/*
