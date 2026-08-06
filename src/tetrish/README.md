@@ -54,8 +54,8 @@ make -C ../.. deps AUTO_INSTALL_DEPS=0
 Clone the repository and build with `make`:
 
 ```bash
-git clone https://github.com/ziqiqiiii/MacMini_Shell.git
-cd MacMini_Shell
+git clone https://github.com/ziqiqiiii/MacMini_tetriSH.git
+cd MacMini_tetriSH
 make
 ```
 
@@ -180,7 +180,7 @@ One global variable `g_exit_status` tracks the most recent foreground pipeline e
 ## Project Structure
 
 ```
-MacMini_Shell/
+src/tetrish/
 ├── src/
 │   ├── shell/         Shell pipeline sources (numbered by stage) → macmini_shell
 │   ├── system/        Standalone system programs → bin/
