@@ -13,7 +13,7 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio; no gameplay or networking yet |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens; no networking yet, and the match screens are still scaffolds |
 | `lib/libtetrisbrain` | implemented — all six modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |

@@ -74,14 +74,14 @@ static void	test_home_destinations_and_back(void)
 		APP_NAV_OPEN_MARKETPLACE,
 		APP_NAV_OPEN_SETTINGS,
 		APP_NAV_OPEN_LEADERBOARD,
-		APP_NAV_OPEN_LOBBY
+		APP_NAV_OPEN_MULTIPLAYER_MODE
 	};
 	static const app_screen_t		screens[] = {
 		APP_SCREEN_SOLO,
 		APP_SCREEN_MARKETPLACE,
 		APP_SCREEN_SETTINGS,
 		APP_SCREEN_LEADERBOARD,
-		APP_SCREEN_LOBBY
+		APP_SCREEN_MULTIPLAYER_MODE
 	};
 	app_navigation_t				navigation;
 	size_t							index;
@@ -107,6 +107,15 @@ static void	test_multiplayer_navigation_chain(void)
 	app_navigation_t	navigation;
 
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
+	/* Multiplayer now opens the mode picker; the lobby hangs off that. */
+	assert(!app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
+	assert(app_navigation_dispatch(&navigation,
+			APP_NAV_OPEN_MULTIPLAYER_MODE));
+	assert(navigation.current == APP_SCREEN_MULTIPLAYER_MODE);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
+	assert(navigation.current == APP_SCREEN_LOBBY);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_MULTIPLAYER_MODE);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_CREATE_ROOM));
 	assert(navigation.current == APP_SCREEN_CREATE_ROOM_MODAL);
@@ -135,6 +144,12 @@ static void	test_invalid_transitions_are_rejected(void)
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
 	assert(!app_navigation_dispatch(&navigation, APP_NAV_START_DOUBLE));
 	assert(!app_navigation_dispatch(&navigation, APP_NAV_OPEN_WAITING_ROOM));
+	assert(navigation.current == APP_SCREEN_HOME);
+	/* Multiplayer is online-only, so an offline session cannot reach it. */
+	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_PLAY_OFFLINE));
+	assert(!app_navigation_dispatch(&navigation,
+			APP_NAV_OPEN_MULTIPLAYER_MODE));
 	assert(navigation.current == APP_SCREEN_HOME);
 	printf("PASS test_invalid_transitions_are_rejected\n");
 }

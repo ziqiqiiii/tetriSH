@@ -102,6 +102,7 @@
 	ASSET_DIR "/default_theme/ownership_notification.png"
 # define ABILITY_POPOVER_PATH \
 	ASSET_DIR "/default_theme/ability_popover.png"
+# define MULTIPLAYER_ASSET_PATH	ASSET_DIR "/multiplayer_background.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH \
@@ -420,6 +421,195 @@
 # define MARKETPLACE_REF_DETAIL_DESC_GLYPH	8
 # define MARKETPLACE_REF_DETAIL_DESC_STEP	13
 
+/* MULTIPLAYER_LAYOUT.C / RENDER_MP_*.C */
+/*
+ * The four multiplayer surfaces - mode select, lobby, create-room and waiting
+ * room - share the Settings reference contract: a 4:3 backdrop measured in
+ * 1448x1086 units and mapped into fitted pixels once per geometry. Every
+ * rectangle below is the single source of truth for the bitmap compositors and
+ * for the disjointness sweeps in tests/test_multiplayer_layout.c.
+ *
+ * Region rectangles are separated by at least the coarsest supported cell:
+ * 1086/20 = 55 units vertically and 1448/44 = 33 horizontally. Every gap below
+ * is well past that, because map_rect() truncation costs another unit or two on
+ * top of the cell rounding.
+ */
+# define MULTIPLAYER_REFERENCE_WIDTH	1448
+# define MULTIPLAYER_REFERENCE_HEIGHT	1086
+
+/* Mode select: one opaque panel over the home artwork, one focus region. */
+# define MP_MODE_REF_PANEL_X	120
+# define MP_MODE_REF_PANEL_Y	560
+# define MP_MODE_REF_PANEL_WIDTH	1208
+# define MP_MODE_REF_PANEL_HEIGHT	480
+# define MP_MODE_REF_TITLE_Y	592
+# define MP_MODE_REF_TITLE_HEIGHT	54
+# define MP_MODE_REF_SUBTITLE_Y	652
+# define MP_MODE_REF_SUBTITLE_HEIGHT	34
+# define MP_MODE_REF_CARDS_X	160
+# define MP_MODE_REF_CARDS_Y	700
+# define MP_MODE_REF_CARDS_WIDTH	1128
+# define MP_MODE_REF_CARDS_HEIGHT	240
+/*
+ * The card strip's plane also carries the control legend and the result line.
+ * A separate plane for them would sit 28 units under the cards, well inside the
+ * one-cell rounding floor, and two planes that round onto the same cell blank
+ * each other on a stationary protocol.
+ */
+# define MP_MODE_REF_REGION_HEIGHT	320
+# define MP_MODE_REF_CARD_WIDTH	540
+# define MP_MODE_REF_CARD_STEP_X	588
+# define MP_MODE_REF_CARD_NAME_Y	40
+# define MP_MODE_REF_CARD_NAME_GLYPH	22
+# define MP_MODE_REF_CARD_PLAYERS_Y	104
+# define MP_MODE_REF_CARD_BODY_Y	150
+# define MP_MODE_REF_CARD_BODY_GLYPH	11
+# define MP_MODE_REF_CARD_BODY_STEP	26
+# define MP_MODE_REF_CONTROLS_Y	968
+# define MP_MODE_REF_CONTROLS_HEIGHT	48
+
+/* Lobby: room table on the left, join-by-id on the right, status underneath. */
+# define LOBBY_REF_CONTENT_X	120
+# define LOBBY_REF_CONTENT_WIDTH	1208
+# define LOBBY_REF_TITLE_Y	34
+# define LOBBY_REF_TITLE_HEIGHT	58
+# define LOBBY_REF_IDENTITY_Y	46
+# define LOBBY_REF_IDENTITY_HEIGHT	38
+# define LOBBY_REF_DIVIDER_Y	114
+# define LOBBY_REF_ROOMS_X	120
+# define LOBBY_REF_ROOMS_Y	160
+# define LOBBY_REF_ROOMS_WIDTH	700
+# define LOBBY_REF_ROOMS_HEIGHT	580
+# define LOBBY_REF_ROOMS_TITLE_Y	178
+# define LOBBY_REF_ROOMS_HEADER_Y	224
+# define LOBBY_REF_LIST_X	132
+# define LOBBY_REF_LIST_Y	168
+# define LOBBY_REF_LIST_WIDTH	676
+# define LOBBY_REF_LIST_HEIGHT	552
+/* Offsets inside the list region: its own heading, then the column names. */
+# define LOBBY_REF_LIST_TITLE_Y	10
+# define LOBBY_REF_LIST_HEADER_Y	56
+# define LOBBY_REF_LIST_FIRST_ROW_Y	88
+# define LOBBY_REF_LIST_ROW_STEP	56
+# define LOBBY_REF_LIST_ROW_HEIGHT	48
+/* Table columns, as offsets inside the list rectangle. */
+# define LOBBY_REF_COL_MARK	0
+# define LOBBY_REF_COL_ID	26
+# define LOBBY_REF_COL_MODE	228
+# define LOBBY_REF_COL_PLAYERS	330
+# define LOBBY_REF_COL_STATE	440
+# define LOBBY_REF_COL_OWNER	560
+# define LOBBY_REF_JOIN_X	880
+# define LOBBY_REF_JOIN_Y	160
+# define LOBBY_REF_JOIN_WIDTH	448
+# define LOBBY_REF_JOIN_HEIGHT	580
+# define LOBBY_REF_JOIN_TITLE_Y	178
+# define LOBBY_REF_FIELD_X	896
+# define LOBBY_REF_FIELD_Y	256
+# define LOBBY_REF_FIELD_WIDTH	416
+# define LOBBY_REF_FIELD_HEIGHT	170
+# define LOBBY_REF_FIELD_BOX_Y	36
+# define LOBBY_REF_FIELD_BOX_HEIGHT	62
+# define LOBBY_REF_JOIN_HINT_Y	470
+# define LOBBY_REF_STATUS_X	120
+# define LOBBY_REF_STATUS_Y	800
+# define LOBBY_REF_STATUS_WIDTH	1208
+# define LOBBY_REF_STATUS_HEIGHT	64
+# define LOBBY_REF_LEGEND_Y	896
+# define LOBBY_REF_CONTROLS_Y	948
+# define LOBBY_REF_CONTROLS_HEIGHT	48
+/*
+ * Opaque bands behind the two strips that fall outside the panels. The backdrop
+ * is only quiet in its middle, so the title row and the control legend need one
+ * or they land on the skull frieze and the tetromino rubble respectively.
+ */
+# define LOBBY_REF_BAND_TOP_Y	16
+# define LOBBY_REF_BAND_TOP_HEIGHT	108
+# define LOBBY_REF_BAND_BOTTOM_Y	782
+# define LOBBY_REF_BAND_BOTTOM_HEIGHT	228
+# define LOBBY_REF_HEADING_GLYPH	13
+# define LOBBY_REF_ROW_GLYPH	13
+
+/* Create room: a modal-looking panel drawn as its own screen, one region. */
+# define CREATE_REF_PANEL_X	260
+# define CREATE_REF_PANEL_Y	300
+# define CREATE_REF_PANEL_WIDTH	928
+# define CREATE_REF_PANEL_HEIGHT	480
+# define CREATE_REF_TITLE_Y	334
+# define CREATE_REF_PROMPT_Y	400
+# define CREATE_REF_OPTIONS_X	292
+# define CREATE_REF_OPTIONS_Y	452
+# define CREATE_REF_OPTIONS_WIDTH	864
+# define CREATE_REF_OPTIONS_HEIGHT	216
+# define CREATE_REF_OPTIONS_FEEDBACK_Y	180
+# define CREATE_REF_OPTION_STEP_Y	86
+# define CREATE_REF_OPTION_HEIGHT	76
+# define CREATE_REF_OPTION_NAME_X	40
+# define CREATE_REF_OPTION_COUNT_X	400
+# define CREATE_REF_OPTION_TAG_X	640
+# define CREATE_REF_DIVIDER_Y	678
+# define CREATE_REF_CONTROLS_Y	708
+# define CREATE_REF_CONTROLS_HEIGHT	48
+
+/* Waiting room: slots and status on the left, chat column on the right. */
+# define ROOM_REF_CONTENT_X	120
+# define ROOM_REF_TITLE_Y	34
+# define ROOM_REF_TITLE_HEIGHT	58
+# define ROOM_REF_SHARE_Y	108
+# define ROOM_REF_SHARE_HEIGHT	34
+# define ROOM_REF_DIVIDER_Y	158
+# define ROOM_REF_SLOTS_PLATE_X	120
+# define ROOM_REF_SLOTS_PLATE_Y	190
+# define ROOM_REF_SLOTS_PLATE_WIDTH	760
+# define ROOM_REF_SLOTS_PLATE_HEIGHT	520
+# define ROOM_REF_SLOTS_TITLE_Y	208
+# define ROOM_REF_SLOTS_X	134
+# define ROOM_REF_SLOTS_Y	196
+# define ROOM_REF_SLOTS_WIDTH	732
+# define ROOM_REF_SLOTS_HEIGHT	508
+/* Offsets inside the slots region: its own heading, then the seat rows. */
+# define ROOM_REF_SLOTS_HEADING_Y	10
+# define ROOM_REF_SLOT_FIRST_Y	62
+# define ROOM_REF_SLOT_STEP_Y	54
+# define ROOM_REF_SLOT_HEIGHT	46
+# define ROOM_REF_SLOT_BADGE_X	472
+# define ROOM_REF_STATUS_X	120
+# define ROOM_REF_STATUS_Y	780
+# define ROOM_REF_STATUS_WIDTH	760
+# define ROOM_REF_STATUS_HEIGHT	92
+# define ROOM_REF_STATUS_FEEDBACK_Y	52
+# define ROOM_REF_CHAT_PLATE_X	940
+# define ROOM_REF_CHAT_PLATE_Y	190
+# define ROOM_REF_CHAT_PLATE_WIDTH	388
+# define ROOM_REF_CHAT_PLATE_HEIGHT	676
+# define ROOM_REF_CHAT_TITLE_Y	208
+# define ROOM_REF_CHAT_X	950
+# define ROOM_REF_CHAT_Y	246
+# define ROOM_REF_CHAT_WIDTH	368
+# define ROOM_REF_CHAT_HEIGHT	610
+# define ROOM_REF_CHAT_LINE_STEP	28
+# define ROOM_REF_CHAT_GLYPH	10
+# define ROOM_REF_CHAT_COMPOSE_HEIGHT	58
+# define ROOM_REF_CONTROLS_Y	920
+# define ROOM_REF_CONTROLS_HEIGHT	48
+# define ROOM_REF_BAND_TOP_Y	16
+# define ROOM_REF_BAND_TOP_HEIGHT	152
+# define ROOM_REF_BAND_BOTTOM_Y	758
+# define ROOM_REF_BAND_BOTTOM_HEIGHT	234
+# define ROOM_REF_HEADING_GLYPH	13
+# define ROOM_REF_ROW_GLYPH	12
+
+/* MULTIPLAYER_SCREEN.C / LOBBY_SCREEN.C / WAITING_ROOM_SCREEN.C */
+# define LOBBY_ROOM_ID_MAX	24
+# define APP_ROOM_CHAT_MAX	24
+# define APP_ROOM_CHAT_TEXT_MAX	96
+# define MP_MODE_CARD_COUNT	2
+/* One second per step, matching the visible "starting in N" copy. */
+# define WAITING_ROOM_COUNTDOWN_START	5
+# define WAITING_ROOM_COUNTDOWN_STEP_MS	1000
+# define WAITING_ROOM_DOUBLE_PLAYERS	2
+# define WAITING_ROOM_ROYALE_MIN_PLAYERS	4
+
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
 # define MENU_PANEL_Y_RATIO		0.700
@@ -557,6 +747,7 @@ typedef enum e_app_screen
 	APP_SCREEN_MARKETPLACE,
 	APP_SCREEN_SETTINGS,
 	APP_SCREEN_LEADERBOARD,
+	APP_SCREEN_MULTIPLAYER_MODE,
 	APP_SCREEN_LOBBY,
 	APP_SCREEN_CREATE_ROOM_MODAL,
 	APP_SCREEN_WAITING_ROOM,
@@ -577,6 +768,7 @@ typedef enum e_app_nav_action
 	APP_NAV_OPEN_MARKETPLACE,
 	APP_NAV_OPEN_SETTINGS,
 	APP_NAV_OPEN_LEADERBOARD,
+	APP_NAV_OPEN_MULTIPLAYER_MODE,
 	APP_NAV_OPEN_LOBBY,
 	APP_NAV_OPEN_CREATE_ROOM,
 	APP_NAV_OPEN_WAITING_ROOM,
@@ -927,17 +1119,30 @@ typedef struct s_marketplace_layout
 	marketplace_rect_t	buttons[MARKETPLACE_BUTTON_COUNT];
 }	marketplace_layout_t;
 
+typedef enum e_app_room_state
+{
+	APP_ROOM_STATE_WAITING,
+	APP_ROOM_STATE_IN_GAME
+}	app_room_state_t;
+
 typedef struct s_app_room_summary_view_model
 {
-	char			id[APP_TEXT_MAX];
-	char			owner[APP_TEXT_MAX];
-	app_game_mode_t	mode;
-	int				players;
-	int				capacity;
+	char				id[APP_TEXT_MAX];
+	char				owner[APP_TEXT_MAX];
+	app_game_mode_t		mode;
+	app_room_state_t	state;
+	int					players;
+	int					capacity;
 }	app_room_summary_view_model_t;
 
+/*
+ * The lobby header carries the same username, score and rank the wireframe
+ * shows, so the profile travels with the room list rather than being fetched
+ * again by the renderer.
+ */
 typedef struct s_app_lobby_view_model
 {
+	app_profile_view_model_t		profile;
 	int							count;
 	app_room_summary_view_model_t	rooms[APP_LOBBY_MAX_ROOMS];
 }	app_lobby_view_model_t;
@@ -949,13 +1154,31 @@ typedef struct s_app_room_player_view_model
 	bool	ready;
 }	app_room_player_view_model_t;
 
+/*
+ * Chat lives on the room model rather than beside it: the waiting room is the
+ * only screen that shows it, and a server push will replace the whole room
+ * snapshot at once. system entries are room events (joins, leaves, countdown)
+ * and are drawn without an author.
+ */
+typedef struct s_app_room_chat_view_model
+{
+	char	author[APP_TEXT_MAX];
+	char	text[APP_ROOM_CHAT_TEXT_MAX];
+	bool	system;
+}	app_room_chat_view_model_t;
+
 typedef struct s_app_room_view_model
 {
 	char						id[APP_TEXT_MAX];
 	app_game_mode_t				mode;
+	app_room_state_t			state;
 	int							required_players;
+	int							capacity;
 	int							player_count;
+	int							local_slot;
 	app_room_player_view_model_t	players[APP_ROOM_MAX_PLAYERS];
+	int							chat_count;
+	app_room_chat_view_model_t	chat[APP_ROOM_CHAT_MAX];
 }	app_room_view_model_t;
 
 typedef struct s_app_match_view_model
@@ -965,6 +1188,194 @@ typedef struct s_app_match_view_model
 	int				player_count;
 	char			status[APP_TEXT_MAX];
 }	app_match_view_model_t;
+
+/*
+ * Multiplayer mode select. Two cards over the home artwork; the chosen mode
+ * becomes the lobby's list filter, so picking Double lands on a lobby showing
+ * duel rooms with Battle Royale one keystroke away rather than hidden.
+ */
+typedef enum e_mp_mode_focus
+{
+	MP_MODE_FOCUS_DOUBLE,
+	MP_MODE_FOCUS_BATTLE_ROYALE
+}	mp_mode_focus_t;
+
+typedef enum e_mp_mode_action
+{
+	MP_MODE_ACTION_NONE,
+	MP_MODE_ACTION_SELECT,
+	MP_MODE_ACTION_BACK,
+	MP_MODE_ACTION_VOLUME_DOWN,
+	MP_MODE_ACTION_VOLUME_UP,
+	MP_MODE_ACTION_QUIT
+}	mp_mode_action_t;
+
+typedef enum e_mp_mode_feedback
+{
+	MP_MODE_FEEDBACK_NONE,
+	MP_MODE_FEEDBACK_VOLUME
+}	mp_mode_feedback_t;
+
+typedef struct s_mp_mode_state
+{
+	mp_mode_focus_t		focus;
+	mp_mode_feedback_t	feedback;
+	int					feedback_value;
+}	mp_mode_state_t;
+
+/*
+ * Create room is its own screen rather than a plane raised over the lobby. A
+ * raised plane damages the cells it covers, and on a stationary protocol that
+ * retransmits the full-screen bitmap underneath over every region above it -
+ * the failure that blanked the Marketplace. Drawing the panel into a screen of
+ * its own looks identical and cannot blank anything.
+ */
+typedef enum e_create_room_action
+{
+	CREATE_ROOM_ACTION_NONE,
+	CREATE_ROOM_ACTION_CREATE,
+	CREATE_ROOM_ACTION_CANCEL,
+	CREATE_ROOM_ACTION_VOLUME_DOWN,
+	CREATE_ROOM_ACTION_VOLUME_UP,
+	CREATE_ROOM_ACTION_QUIT
+}	create_room_action_t;
+
+typedef struct s_create_room_state
+{
+	app_game_mode_t		mode;
+	mp_mode_feedback_t	feedback;
+	int					feedback_value;
+}	create_room_state_t;
+
+/*
+ * The lobby is navigated as two sections side by side. While the join field
+ * holds focus every printable key is text, so the single-letter commands are
+ * only live in the room table; Escape steps out of the field rather than off
+ * the screen.
+ */
+typedef enum e_lobby_section
+{
+	LOBBY_SECTION_ROOMS,
+	LOBBY_SECTION_JOIN
+}	lobby_section_t;
+
+typedef enum e_lobby_feedback
+{
+	LOBBY_FEEDBACK_NONE,
+	LOBBY_FEEDBACK_REFRESHED,
+	LOBBY_FEEDBACK_FULL,
+	LOBBY_FEEDBACK_IN_GAME,
+	LOBBY_FEEDBACK_EMPTY_LIST,
+	LOBBY_FEEDBACK_EMPTY_ID,
+	LOBBY_FEEDBACK_UNKNOWN_ID,
+	LOBBY_FEEDBACK_FILTER,
+	LOBBY_FEEDBACK_VOLUME
+}	lobby_feedback_t;
+
+typedef enum e_lobby_action
+{
+	LOBBY_ACTION_NONE,
+	LOBBY_ACTION_JOIN,
+	LOBBY_ACTION_JOIN_BY_ID,
+	LOBBY_ACTION_CREATE,
+	LOBBY_ACTION_REFRESH,
+	LOBBY_ACTION_BACK,
+	LOBBY_ACTION_VOLUME_DOWN,
+	LOBBY_ACTION_VOLUME_UP,
+	LOBBY_ACTION_QUIT
+}	lobby_action_t;
+
+typedef struct s_lobby_state
+{
+	lobby_section_t		section;
+	lobby_feedback_t	feedback;
+	int					feedback_value;
+	int					selected;
+	int					visible_count;
+	app_game_mode_t		filter;
+	char				room_id[LOBBY_ROOM_ID_MAX];
+	int					room_id_length;
+}	lobby_state_t;
+
+typedef enum e_room_feedback
+{
+	ROOM_FEEDBACK_NONE,
+	ROOM_FEEDBACK_READY,
+	ROOM_FEEDBACK_NOT_READY,
+	ROOM_FEEDBACK_NEED_PLAYERS,
+	ROOM_FEEDBACK_NEED_READY,
+	ROOM_FEEDBACK_NOT_OWNER,
+	ROOM_FEEDBACK_CANCELLED,
+	ROOM_FEEDBACK_CHAT_SENT,
+	ROOM_FEEDBACK_CHAT_EMPTY,
+	ROOM_FEEDBACK_CHAT_FULL,
+	ROOM_FEEDBACK_VOLUME
+}	room_feedback_t;
+
+typedef enum e_room_action
+{
+	ROOM_ACTION_NONE,
+	ROOM_ACTION_TOGGLE_READY,
+	ROOM_ACTION_START,
+	ROOM_ACTION_SEND_CHAT,
+	ROOM_ACTION_LEAVE,
+	ROOM_ACTION_LAUNCH,
+	ROOM_ACTION_VOLUME_DOWN,
+	ROOM_ACTION_VOLUME_UP,
+	ROOM_ACTION_QUIT
+}	room_action_t;
+
+/*
+ * countdown is the only value on this screen that moves without a keystroke, so
+ * it lives in the status region alone: one small plane repaints per second and
+ * nothing else on the screen is touched.
+ */
+typedef struct s_waiting_room_state
+{
+	bool			chatting;
+	bool			counting_down;
+	int				countdown;
+	room_feedback_t	feedback;
+	int				feedback_value;
+	char			compose[APP_ROOM_CHAT_TEXT_MAX];
+	int				compose_length;
+}	waiting_room_state_t;
+
+typedef struct s_mp_rect
+{
+	int	x;
+	int	y;
+	int	width;
+	int	height;
+}	mp_rect_t;
+
+/* Reference-coordinate geometry shared by every multiplayer compositor. */
+typedef struct s_mp_layout
+{
+	int			origin_y;
+	int			origin_x;
+	int			rows;
+	int			cols;
+	int			pixel_width;
+	int			pixel_height;
+	int			cell_px_x;
+	int			cell_px_y;
+	bool		opaque_background;
+	mp_rect_t	panel;
+	mp_rect_t	cards;
+	mp_rect_t	card_slots[MP_MODE_CARD_COUNT];
+	mp_rect_t	rooms_plate;
+	mp_rect_t	list;
+	mp_rect_t	join_plate;
+	mp_rect_t	field;
+	mp_rect_t	status;
+	mp_rect_t	options;
+	mp_rect_t	slots_plate;
+	mp_rect_t	slots;
+	mp_rect_t	chat_plate;
+	mp_rect_t	chat;
+	mp_rect_t	controls;
+}	mp_layout_t;
 
 typedef union u_app_screen_data
 {
@@ -1013,6 +1424,14 @@ typedef struct s_app_data_provider
 	app_provider_result_t	(*load_lobby)(void *userdata,
 			app_lobby_view_model_t *view);
 	app_provider_result_t	(*load_room)(void *userdata, const char *room_id,
+			app_room_view_model_t *view);
+	/*
+	 * Creating and joining are separate calls because the room they produce
+	 * differs: a created room holds its owner alone and cannot start, a joined
+	 * one already has the players the lobby listed. A server will need the same
+	 * split, so the seam is the same shape now as it will be then.
+	 */
+	app_provider_result_t	(*create_room)(void *userdata, app_game_mode_t mode,
 			app_room_view_model_t *view);
 }	app_data_provider_t;
 
@@ -1219,6 +1638,19 @@ typedef struct
 	struct ncplane		*marketplace_themes_plane;
 	struct ncplane		*marketplace_detail_plane;
 	struct ncplane		*marketplace_controls_plane;
+	/*
+	 * One set of region planes serves all four multiplayer screens. They never
+	 * coexist - the loop tears the previous screen down before the next one
+	 * draws - so naming them per role rather than per screen keeps the teardown
+	 * path single and total.
+	 */
+	struct ncplane		*mp_cards_plane;
+	struct ncplane		*mp_list_plane;
+	struct ncplane		*mp_field_plane;
+	struct ncplane		*mp_status_plane;
+	struct ncplane		*mp_options_plane;
+	struct ncplane		*mp_slots_plane;
+	struct ncplane		*mp_chat_plane;
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
@@ -1226,6 +1658,7 @@ typedef struct
 	struct ncvisual		*auth_font_visual;
 	struct ncvisual		*settings_font_visual;
 	struct ncvisual		*marketplace_font_visual;
+	struct ncvisual		*mp_font_visual;
 	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
@@ -1316,6 +1749,29 @@ typedef struct
 	uint64_t			marketplace_themes_signature;
 	uint64_t			marketplace_detail_signature;
 	uint64_t			marketplace_controls_signature;
+	/*
+	 * mp_screen and mp_background_source are part of the static cache key: the
+	 * four multiplayer screens share these buffers but not their artwork, so a
+	 * screen change must invalidate the composed frame even when the terminal
+	 * geometry has not moved.
+	 */
+	uint32_t			*mp_background_pixels;
+	uint32_t			*mp_static_pixels;
+	int					mp_pixels_width;
+	int					mp_pixels_height;
+	bool				mp_background_ready;
+	int					mp_background_rows;
+	int					mp_background_cols;
+	char				mp_background_source[APP_ASSET_PATH_MAX];
+	app_screen_t		mp_screen;
+	uint64_t			mp_static_signature;
+	uint64_t			mp_cards_signature;
+	uint64_t			mp_list_signature;
+	uint64_t			mp_field_signature;
+	uint64_t			mp_status_signature;
+	uint64_t			mp_options_signature;
+	uint64_t			mp_slots_signature;
+	uint64_t			mp_chat_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	tetrisu_pixel_policy_t	pixels;
@@ -1642,6 +2098,12 @@ app_provider_result_t	app_screen_view_load_for_session(
 void			app_settings_apply_local_controls(
 					app_settings_view_model_t *view, int music_volume,
 					tetrisu_renderer_mode_t renderer_mode);
+app_provider_result_t	app_room_view_load(
+					const app_data_provider_t *provider, const char *room_id,
+					app_screen_view_model_t *view);
+app_provider_result_t	app_room_view_create(
+					const app_data_provider_t *provider, app_game_mode_t mode,
+					app_screen_view_model_t *view);
 const char		*app_data_status_name(app_data_status_t status);
 const char		*app_game_mode_name(app_game_mode_t mode);
 
@@ -1682,6 +2144,8 @@ uint64_t		ui_notification_now_ms(void);
 render_ctx_t	render_init(const char *image_path);
 uint32_t		render_wait_key(render_ctx_t *ctx);
 uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
+uint32_t		render_wait_input_timeout(render_ctx_t *ctx, ncinput *input,
+					int timeout_ms);
 void			render_teardown(render_ctx_t *ctx);
 int				render_background_replace(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
@@ -1860,6 +2324,122 @@ bool			render_marketplace_pixel_show(render_ctx_t *ctx,
 					const app_screen_view_model_t *view,
 					const marketplace_state_t *state, bool rebuild_background);
 void			render_marketplace_pixel_destroy(render_ctx_t *ctx);
+
+/* MULTIPLAYER_SCREEN.C */
+void			mp_mode_state_init(mp_mode_state_t *state);
+mp_mode_action_t	mp_mode_handle_key(mp_mode_state_t *state, uint32_t key);
+bool			mp_mode_state_view_changed(const mp_mode_state_t *before,
+					const mp_mode_state_t *after);
+bool			mp_mode_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
+bool			mp_mode_action_leaves_screen(mp_mode_action_t action);
+app_game_mode_t	mp_mode_focused_mode(const mp_mode_state_t *state);
+const char		*mp_mode_card_name(int index);
+const char		*mp_mode_card_players(int index);
+const char		*mp_mode_card_line(int index, int line);
+void			create_room_state_init(create_room_state_t *state,
+					app_game_mode_t mode);
+create_room_action_t	create_room_handle_key(create_room_state_t *state,
+					uint32_t key);
+bool			create_room_state_view_changed(
+					const create_room_state_t *before,
+					const create_room_state_t *after);
+bool			create_room_action_leaves_screen(create_room_action_t action);
+int				create_room_focused_index(const create_room_state_t *state);
+const char		*mp_feedback_text(mp_mode_feedback_t feedback, int value,
+					char *out, size_t size);
+
+/* LOBBY_SCREEN.C */
+void			lobby_state_init(lobby_state_t *state, app_game_mode_t filter,
+					const app_lobby_view_model_t *lobby);
+void			lobby_state_sync(lobby_state_t *state,
+					const app_lobby_view_model_t *lobby);
+lobby_action_t	lobby_handle_key(lobby_state_t *state, uint32_t key);
+bool			lobby_state_view_changed(const lobby_state_t *before,
+					const lobby_state_t *after);
+bool			lobby_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
+bool			lobby_action_leaves_screen(lobby_action_t action);
+int				lobby_visible_count(const app_lobby_view_model_t *lobby,
+					app_game_mode_t filter);
+const app_room_summary_view_model_t	*lobby_visible_room(
+					const app_lobby_view_model_t *lobby,
+					app_game_mode_t filter, int index);
+const app_room_summary_view_model_t	*lobby_selected_room(
+					const app_lobby_view_model_t *lobby,
+					const lobby_state_t *state);
+const app_room_summary_view_model_t	*lobby_room_by_id(
+					const app_lobby_view_model_t *lobby, const char *id);
+lobby_feedback_t	lobby_join_blocker(
+					const app_room_summary_view_model_t *room);
+const char		*lobby_mode_tag(app_game_mode_t mode);
+const char		*lobby_state_tag(app_room_state_t state);
+const char		*lobby_filter_name(app_game_mode_t filter);
+void			lobby_set_feedback(lobby_state_t *state,
+					lobby_feedback_t feedback, int value);
+const char		*lobby_feedback_text(const lobby_state_t *state, char *out,
+					size_t size);
+
+/* WAITING_ROOM_SCREEN.C */
+void			waiting_room_state_init(waiting_room_state_t *state);
+room_action_t	waiting_room_handle_key(waiting_room_state_t *state,
+					uint32_t key);
+bool			waiting_room_state_view_changed(
+					const waiting_room_state_t *before,
+					const waiting_room_state_t *after);
+bool			waiting_room_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
+bool			waiting_room_action_leaves_screen(room_action_t action);
+int				waiting_room_ready_count(const app_room_view_model_t *room);
+int				waiting_room_required_ready(const app_room_view_model_t *room);
+bool			waiting_room_can_start(const app_room_view_model_t *room);
+bool			waiting_room_local_is_owner(const app_room_view_model_t *room);
+bool			waiting_room_local_ready(const app_room_view_model_t *room);
+bool			waiting_room_toggle_ready(app_room_view_model_t *room);
+room_feedback_t	waiting_room_start_blocker(const app_room_view_model_t *room);
+bool			waiting_room_begin_countdown(waiting_room_state_t *state);
+bool			waiting_room_cancel_countdown(waiting_room_state_t *state);
+bool			waiting_room_tick(waiting_room_state_t *state);
+bool			waiting_room_append_chat(app_room_view_model_t *room,
+					const char *author, const char *text, bool system);
+bool			waiting_room_send_chat(app_room_view_model_t *room,
+					waiting_room_state_t *state);
+const char		*waiting_room_status_text(const app_room_view_model_t *room,
+					const waiting_room_state_t *state, char *out, size_t size);
+const char		*waiting_room_slot_label(const app_room_view_model_t *room,
+					int index, char *out, size_t size);
+const char		*waiting_room_badge_text(const app_room_view_model_t *room,
+					int index);
+const char		*waiting_room_feedback_text(const waiting_room_state_t *state,
+					char *out, size_t size);
+app_nav_action_t	waiting_room_launch_action(
+					const app_room_view_model_t *room);
+
+/* MULTIPLAYER_LAYOUT.C */
+void			mp_layout_build(app_screen_t screen, int origin_y, int origin_x,
+					int rows, int cols, int cell_px_y, int cell_px_x,
+					mp_layout_t *layout);
+
+/* RENDER_MULTIPLAYER.C */
+bool			render_mp_mode_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const mp_mode_state_t *state, bool rebuild_background);
+bool			render_lobby_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const lobby_state_t *state, bool rebuild_background);
+bool			render_create_room_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const create_room_state_t *state, bool rebuild_background);
+bool			render_waiting_room_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const waiting_room_state_t *state, bool rebuild_background);
+void			render_multiplayer_destroy(render_ctx_t *ctx);
+
+/* RENDER_MULTIPLAYER_FONT.C */
+bool			render_mp_pixel_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view, const void *state,
+					bool rebuild_background);
+void			render_mp_pixel_destroy(render_ctx_t *ctx);
 
 /* RENDER_LEADERBOARD.C */
 bool			render_leaderboard_show(render_ctx_t *ctx,

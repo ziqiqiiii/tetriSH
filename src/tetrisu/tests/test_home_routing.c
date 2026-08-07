@@ -102,7 +102,7 @@ static void	test_multiplayer_fixture_navigates(void)
 
 	route = home_menu_route(1, false);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
-	assert(route.nav_action == APP_NAV_OPEN_LOBBY);
+	assert(route.nav_action == APP_NAV_OPEN_MULTIPLAYER_MODE);
 	printf("PASS test_multiplayer_fixture_navigates\n");
 }
 

@@ -39,7 +39,7 @@ home_route_t	home_menu_route(int selected, bool offline)
 		if (selected == 1)
 		{
 			route.action = HOME_ROUTE_NAVIGATE;
-			route.nav_action = APP_NAV_OPEN_LOBBY;
+			route.nav_action = APP_NAV_OPEN_MULTIPLAYER_MODE;
 			route.label = "Multiplayer";
 		}
 		else if (selected == 2)

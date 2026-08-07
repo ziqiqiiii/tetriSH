@@ -3,6 +3,22 @@
 # define SETTINGS_INPUT_BATCH_MAX	64
 # define LEADERBOARD_INPUT_BATCH_MAX	64
 # define MARKETPLACE_INPUT_BATCH_MAX	64
+# define MULTIPLAYER_INPUT_BATCH_MAX	64
+
+/*
+ * What the four multiplayer screens hand to each other. The picker chooses the
+ * mode, the lobby or the create-room panel chooses the room, and the waiting
+ * room is the only one that holds a model across keystrokes because its ready
+ * flags and its transcript are edited in place rather than reloaded.
+ */
+typedef struct s_mp_session
+{
+	app_game_mode_t			mode;
+	char					room_id[LOBBY_ROOM_ID_MAX];
+	bool					create_pending;
+	app_screen_view_model_t	room_view;
+	waiting_room_state_t	room_state;
+}	mp_session_t;
 
 // Static Functions
 static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
@@ -38,6 +54,29 @@ static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
 				app_screen_view_model_t *view, marketplace_state_t *state);
 static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
 				app_screen_view_model_t *view, marketplace_state_t *state);
+static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, mp_session_t *session);
+static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, mp_session_t *session);
+static void	apply_lobby_join(app_screen_view_model_t *view,
+				lobby_state_t *state, app_navigation_t *navigation,
+				mp_session_t *session, bool by_id);
+static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, mp_session_t *session);
+static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, mp_session_t *session);
+static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
+				app_navigation_t *navigation, mp_session_t *session,
+				room_action_t action);
+static bool	load_room_view(const app_data_provider_t *provider,
+				mp_session_t *session);
+static bool	is_multiplayer_screen(app_screen_t screen);
+static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
+				const menu_selection_t *menu);
 static void	discard_queued_input(render_ctx_t *ctx);
 static void	leaderboard_loading_view(const app_data_provider_t *provider,
 				app_screen_view_model_t *view);
@@ -58,6 +97,7 @@ int	main(void)
 	menu_selection_t	menu;
 	auth_form_t		auth_form;
 	sign_in_modal_t	sign_in;
+	mp_session_t		mp_session;
 	render_ctx_t		ctx;
 	audio_ctx_t			audio;
 	ncinput				input;
@@ -66,6 +106,8 @@ int	main(void)
 
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
+	memset(&mp_session, 0, sizeof(mp_session));
+	mp_session.mode = APP_GAME_MODE_DOUBLE;
 	ctx = render_init(SPLASH_ASSET_PATH);
 	audio_init(&audio);
 	render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
@@ -120,6 +162,42 @@ int	main(void)
 		{
 			if (run_marketplace_screen(&ctx, &audio, &provider,
 					&navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_MULTIPLAYER_MODE)
+		{
+			if (run_multiplayer_mode_screen(&ctx, &audio, &provider,
+					&navigation, &mp_session) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			if (leave_multiplayer(&ctx, &navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_LOBBY)
+		{
+			if (run_lobby_screen(&ctx, &audio, &provider, &navigation,
+					&mp_session) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			if (leave_multiplayer(&ctx, &navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_CREATE_ROOM_MODAL)
+		{
+			if (run_create_room_screen(&ctx, &audio, &provider, &navigation,
+					&mp_session) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			if (leave_multiplayer(&ctx, &navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_WAITING_ROOM)
+		{
+			if (run_waiting_room_screen(&ctx, &audio, &provider, &navigation,
+					&mp_session) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			if (leave_multiplayer(&ctx, &navigation, &menu) < 0)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
@@ -191,6 +269,7 @@ int	main(void)
 	}
 	audio_teardown(&audio);
 	render_sign_in_destroy(&ctx, &sign_in);
+	render_multiplayer_destroy(&ctx);
 	render_marketplace_destroy(&ctx);
 	render_settings_destroy(&ctx);
 	render_screen_destroy(&ctx);
@@ -1018,6 +1097,610 @@ static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
 	else
 		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_LOCKED, 0);
 	return (render_marketplace_show(ctx, view, state, false));
+}
+
+/**
+ * @brief Runs the multiplayer mode picker over the home artwork.
+ *
+ * The chosen mode becomes the lobby's list filter rather than a restriction, so
+ * this screen narrows the browser without closing anything off.
+ */
+static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	mp_session_t *session)
+{
+	app_screen_view_model_t	view;
+	mp_mode_state_t			state;
+	mp_mode_state_t			previous;
+	mp_mode_action_t		action;
+	ncinput					input;
+	ncinput					queued_input;
+	ncinput					pending_input;
+	uint32_t				key;
+	uint32_t				queued_key;
+	uint32_t				pending_key;
+	int						drained;
+	bool					has_pending;
+
+	if (app_screen_view_load_for_session(provider, APP_SCREEN_MULTIPLAYER_MODE,
+			navigation->offline, &view) == APP_PROVIDER_INVALID)
+		return (-1);
+	mp_mode_state_init(&state);
+	if (session->mode == APP_GAME_MODE_BATTLE_ROYALE)
+		state.focus = MP_MODE_FOCUS_BATTLE_ROYALE;
+	/*
+	 * Every multiplayer screen is keyboard-only, and every one of them clears
+	 * the notification stack on entry: a card left over from another screen is
+	 * a plane raised over these regions, and on a stationary protocol raising
+	 * or dropping one blanks whatever it covers.
+	 */
+	(void)notcurses_mice_disable(ctx->nc);
+	render_notification_destroy(ctx);
+	if (!render_mp_mode_show(ctx, &view, &state, true))
+		return (-1);
+	has_pending = false;
+	while (navigation->current == APP_SCREEN_MULTIPLAYER_MODE)
+	{
+		if (has_pending)
+		{
+			input = pending_input;
+			key = pending_key;
+			has_pending = false;
+		}
+		else
+			key = render_wait_input(ctx, &input);
+		action = MP_MODE_ACTION_NONE;
+		previous = state;
+		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+			continue ;
+		if (key == (uint32_t)-1)
+			action = MP_MODE_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_mp_mode_show(ctx, &view, &state, true))
+				return (-1);
+			continue ;
+		}
+		else
+			action = mp_mode_handle_key(&state, key);
+		drained = 0;
+		while (action == MP_MODE_ACTION_NONE
+			&& mp_mode_navigation_keys_coalesce(key, key)
+			&& drained < MULTIPLAYER_INPUT_BATCH_MAX)
+		{
+			memset(&queued_input, 0, sizeof(queued_input));
+			queued_key = notcurses_get_nblock(ctx->nc, &queued_input);
+			if (queued_key == 0)
+				break ;
+			drained++;
+			if (queued_input.evtype == NCTYPE_RELEASE
+				|| nckey_mouse_p(queued_key))
+				continue ;
+			if (!mp_mode_navigation_keys_coalesce(key, queued_key))
+			{
+				pending_input = queued_input;
+				pending_key = queued_key;
+				has_pending = true;
+				break ;
+			}
+			(void)mp_mode_handle_key(&state, queued_key);
+		}
+		if (mp_mode_state_view_changed(&previous, &state))
+		{
+			audio_play_menu_move(audio);
+			if (!render_mp_mode_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		if (mp_mode_action_leaves_screen(action))
+			discard_queued_input(ctx);
+		if (action == MP_MODE_ACTION_VOLUME_UP
+			|| action == MP_MODE_ACTION_VOLUME_DOWN)
+		{
+			audio_play_menu_select(audio);
+			if (action == MP_MODE_ACTION_VOLUME_UP)
+				audio_volume_up(audio);
+			else
+				audio_volume_down(audio);
+			state.feedback = MP_MODE_FEEDBACK_VOLUME;
+			state.feedback_value
+				= ui_notification_volume_percent(audio->music_volume);
+			if (!render_mp_mode_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == MP_MODE_ACTION_SELECT)
+		{
+			audio_play_menu_select(audio);
+			session->mode = mp_mode_focused_mode(&state);
+			(void)app_navigation_dispatch(navigation, APP_NAV_OPEN_LOBBY);
+		}
+		else if (action == MP_MODE_ACTION_BACK)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == MP_MODE_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
+	return (0);
+}
+
+/**
+ * @brief Runs the room browser: pick a room, type an id, or open a new one.
+ */
+static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	mp_session_t *session)
+{
+	app_screen_view_model_t	view;
+	lobby_state_t			state;
+	lobby_state_t			previous;
+	lobby_action_t			action;
+	ncinput					input;
+	ncinput					queued_input;
+	ncinput					pending_input;
+	uint32_t				key;
+	uint32_t				queued_key;
+	uint32_t				pending_key;
+	int						drained;
+	bool					has_pending;
+	bool					refresh;
+
+	if (app_screen_view_load_for_session(provider, APP_SCREEN_LOBBY,
+			navigation->offline, &view) == APP_PROVIDER_INVALID)
+		return (-1);
+	lobby_state_init(&state, session->mode, &view.data.lobby);
+	(void)notcurses_mice_disable(ctx->nc);
+	render_notification_destroy(ctx);
+	if (!render_lobby_show(ctx, &view, &state, true))
+		return (-1);
+	has_pending = false;
+	while (navigation->current == APP_SCREEN_LOBBY)
+	{
+		if (has_pending)
+		{
+			input = pending_input;
+			key = pending_key;
+			has_pending = false;
+		}
+		else
+			key = render_wait_input(ctx, &input);
+		action = LOBBY_ACTION_NONE;
+		previous = state;
+		refresh = false;
+		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+			continue ;
+		if (key == (uint32_t)-1)
+			action = LOBBY_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_lobby_show(ctx, &view, &state, true))
+				return (-1);
+			continue ;
+		}
+		else
+			action = lobby_handle_key(&state, key);
+		drained = 0;
+		while (action == LOBBY_ACTION_NONE
+			&& lobby_navigation_keys_coalesce(key, key)
+			&& drained < MULTIPLAYER_INPUT_BATCH_MAX)
+		{
+			memset(&queued_input, 0, sizeof(queued_input));
+			queued_key = notcurses_get_nblock(ctx->nc, &queued_input);
+			if (queued_key == 0)
+				break ;
+			drained++;
+			if (queued_input.evtype == NCTYPE_RELEASE
+				|| nckey_mouse_p(queued_key))
+				continue ;
+			if (!lobby_navigation_keys_coalesce(key, queued_key))
+			{
+				pending_input = queued_input;
+				pending_key = queued_key;
+				has_pending = true;
+				break ;
+			}
+			(void)lobby_handle_key(&state, queued_key);
+		}
+		if (action == LOBBY_ACTION_REFRESH)
+		{
+			audio_play_menu_select(audio);
+			if (app_screen_view_load_for_session(provider, APP_SCREEN_LOBBY,
+					navigation->offline, &view) == APP_PROVIDER_INVALID)
+				return (-1);
+			lobby_state_sync(&state, &view.data.lobby);
+			lobby_set_feedback(&state, LOBBY_FEEDBACK_REFRESHED, 0);
+			refresh = true;
+		}
+		else if (action == LOBBY_ACTION_VOLUME_UP
+			|| action == LOBBY_ACTION_VOLUME_DOWN)
+		{
+			audio_play_menu_select(audio);
+			if (action == LOBBY_ACTION_VOLUME_UP)
+				audio_volume_up(audio);
+			else
+				audio_volume_down(audio);
+			lobby_set_feedback(&state, LOBBY_FEEDBACK_VOLUME,
+				ui_notification_volume_percent(audio->music_volume));
+			refresh = true;
+		}
+		else if (action == LOBBY_ACTION_JOIN
+			|| action == LOBBY_ACTION_JOIN_BY_ID)
+		{
+			audio_play_menu_select(audio);
+			apply_lobby_join(&view, &state, navigation, session,
+				action == LOBBY_ACTION_JOIN_BY_ID);
+			refresh = true;
+		}
+		else if (action == LOBBY_ACTION_CREATE)
+		{
+			audio_play_menu_select(audio);
+			session->mode = state.filter == APP_GAME_MODE_BATTLE_ROYALE
+				? APP_GAME_MODE_BATTLE_ROYALE : APP_GAME_MODE_DOUBLE;
+			(void)app_navigation_dispatch(navigation, APP_NAV_OPEN_CREATE_ROOM);
+		}
+		else if (action == LOBBY_ACTION_BACK)
+		{
+			audio_play_menu_select(audio);
+			session->mode = state.filter;
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == LOBBY_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+		if (lobby_action_leaves_screen(action))
+			discard_queued_input(ctx);
+		if ((refresh || lobby_state_view_changed(&previous, &state))
+			&& navigation->current == APP_SCREEN_LOBBY)
+		{
+			if (!refresh)
+				audio_play_menu_move(audio);
+			if (!render_lobby_show(ctx, &view, &state, false))
+				return (-1);
+		}
+	}
+	return (0);
+}
+
+/**
+ * @brief Resolves one join request into a room, or explains why it failed.
+ *
+ * Joining by id ignores the list filter deliberately: a room id is how a friend
+ * shares a room, and a filter the player happens to have set must not hide the
+ * room they were invited to.
+ */
+static void	apply_lobby_join(app_screen_view_model_t *view,
+	lobby_state_t *state, app_navigation_t *navigation, mp_session_t *session,
+	bool by_id)
+{
+	const app_room_summary_view_model_t	*room;
+	lobby_feedback_t					blocker;
+
+	if (by_id)
+	{
+		if (state->room_id_length == 0)
+		{
+			lobby_set_feedback(state, LOBBY_FEEDBACK_EMPTY_ID, 0);
+			return ;
+		}
+		room = lobby_room_by_id(&view->data.lobby, state->room_id);
+		if (room == NULL)
+		{
+			lobby_set_feedback(state, LOBBY_FEEDBACK_UNKNOWN_ID, 0);
+			return ;
+		}
+	}
+	else
+		room = lobby_selected_room(&view->data.lobby, state);
+	blocker = lobby_join_blocker(room);
+	if (blocker != LOBBY_FEEDBACK_NONE)
+	{
+		lobby_set_feedback(state, blocker, 0);
+		return ;
+	}
+	/*
+	 * The session id field is the one the join box types into, and it is
+	 * shorter than the model's. The explicit precision keeps the copy inside it
+	 * and lets the compiler prove nothing is truncated.
+	 */
+	snprintf(session->room_id, sizeof(session->room_id), "%.*s",
+		(int)sizeof(session->room_id) - 1, room->id);
+	session->mode = room->mode;
+	session->create_pending = false;
+	(void)app_navigation_dispatch(navigation, APP_NAV_OPEN_WAITING_ROOM);
+}
+
+/**
+ * @brief Runs the create-room panel and hands the chosen mode to the room.
+ */
+static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	mp_session_t *session)
+{
+	app_screen_view_model_t	view;
+	create_room_state_t		state;
+	create_room_state_t		previous;
+	create_room_action_t	action;
+	ncinput					input;
+	uint32_t				key;
+
+	if (app_screen_view_load_for_session(provider,
+			APP_SCREEN_CREATE_ROOM_MODAL, navigation->offline, &view)
+		== APP_PROVIDER_INVALID)
+		return (-1);
+	create_room_state_init(&state, session->mode);
+	(void)notcurses_mice_disable(ctx->nc);
+	render_notification_destroy(ctx);
+	if (!render_create_room_show(ctx, &view, &state, true))
+		return (-1);
+	while (navigation->current == APP_SCREEN_CREATE_ROOM_MODAL)
+	{
+		key = render_wait_input(ctx, &input);
+		action = CREATE_ROOM_ACTION_NONE;
+		previous = state;
+		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+			continue ;
+		if (key == (uint32_t)-1)
+			action = CREATE_ROOM_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_create_room_show(ctx, &view, &state, true))
+				return (-1);
+			continue ;
+		}
+		else
+			action = create_room_handle_key(&state, key);
+		if (action == CREATE_ROOM_ACTION_VOLUME_UP
+			|| action == CREATE_ROOM_ACTION_VOLUME_DOWN)
+		{
+			audio_play_menu_select(audio);
+			if (action == CREATE_ROOM_ACTION_VOLUME_UP)
+				audio_volume_up(audio);
+			else
+				audio_volume_down(audio);
+			state.feedback = MP_MODE_FEEDBACK_VOLUME;
+			state.feedback_value
+				= ui_notification_volume_percent(audio->music_volume);
+		}
+		if (create_room_state_view_changed(&previous, &state))
+		{
+			audio_play_menu_move(audio);
+			if (!render_create_room_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		if (create_room_action_leaves_screen(action))
+			discard_queued_input(ctx);
+		if (action == CREATE_ROOM_ACTION_CREATE)
+		{
+			audio_play_menu_select(audio);
+			session->mode = state.mode;
+			session->create_pending = true;
+			session->room_id[0] = '\0';
+			(void)app_navigation_dispatch(navigation,
+				APP_NAV_OPEN_WAITING_ROOM);
+		}
+		else if (action == CREATE_ROOM_ACTION_CANCEL)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == CREATE_ROOM_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
+	return (0);
+}
+
+/**
+ * @brief Runs the waiting room, including chat and the pre-match countdown.
+ *
+ * The countdown is the only thing in the client that advances without input, so
+ * this is the only loop that waits on a deadline as well as on a keystroke. It
+ * repaints the status region alone once a second; everything else on the screen
+ * is left untouched.
+ */
+static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	mp_session_t *session)
+{
+	waiting_room_state_t	previous;
+	room_action_t			action;
+	ncinput					input;
+	uint32_t				key;
+	uint64_t				deadline;
+	uint64_t				now;
+	int						wait_ms;
+
+	if (!load_room_view(provider, session))
+		return (-1);
+	waiting_room_state_init(&session->room_state);
+	(void)notcurses_mice_disable(ctx->nc);
+	render_notification_destroy(ctx);
+	if (!render_waiting_room_show(ctx, &session->room_view,
+			&session->room_state, true))
+		return (-1);
+	deadline = 0;
+	while (navigation->current == APP_SCREEN_WAITING_ROOM)
+	{
+		wait_ms = -1;
+		if (session->room_state.counting_down)
+		{
+			now = ui_notification_now_ms();
+			wait_ms = deadline > now ? (int)(deadline - now) : 0;
+		}
+		key = render_wait_input_timeout(ctx, &input, wait_ms);
+		action = ROOM_ACTION_NONE;
+		previous = session->room_state;
+		if (key == 0)
+		{
+			deadline += WAITING_ROOM_COUNTDOWN_STEP_MS;
+			if (waiting_room_tick(&session->room_state))
+				action = ROOM_ACTION_LAUNCH;
+		}
+		else if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+			continue ;
+		else if (key == (uint32_t)-1)
+			action = ROOM_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_waiting_room_show(ctx, &session->room_view,
+					&session->room_state, true))
+				return (-1);
+			continue ;
+		}
+		else
+			action = waiting_room_handle_key(&session->room_state, key);
+		if (!apply_room_action(ctx, audio, navigation, session, action))
+			return (-1);
+		/*
+		 * A room that has met its start conditions begins counting down on its
+		 * own. The owner's [S] arms the same countdown a moment earlier; it is
+		 * not the only way in, because a duel whose second seat readies up is
+		 * ready to play whether or not its owner is at the keyboard.
+		 */
+		if (waiting_room_can_start(&session->room_view.data.room))
+			(void)waiting_room_begin_countdown(&session->room_state);
+		if (session->room_state.counting_down && previous.counting_down == false)
+			deadline = ui_notification_now_ms()
+				+ WAITING_ROOM_COUNTDOWN_STEP_MS;
+		if (waiting_room_action_leaves_screen(action))
+			discard_queued_input(ctx);
+		if (navigation->current == APP_SCREEN_WAITING_ROOM
+			&& waiting_room_state_view_changed(&previous,
+				&session->room_state)
+			&& !render_waiting_room_show(ctx, &session->room_view,
+				&session->room_state, false))
+			return (-1);
+	}
+	return (0);
+}
+
+/**
+ * @brief Applies one waiting-room action to the room model and navigation.
+ *
+ * Readying and starting are resolved locally because there is no server yet;
+ * both go through the same policy helpers a server-driven build will call, so
+ * only the source of the room snapshot changes later.
+ */
+static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
+	app_navigation_t *navigation, mp_session_t *session, room_action_t action)
+{
+	app_room_view_model_t	*room;
+	room_feedback_t			blocker;
+
+	(void)ctx;
+	room = &session->room_view.data.room;
+	if (action == ROOM_ACTION_TOGGLE_READY)
+	{
+		audio_play_menu_select(audio);
+		if (waiting_room_toggle_ready(room))
+			session->room_state.feedback = waiting_room_local_ready(room)
+				? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+		/* Un-readying mid-countdown stops it: the room is no longer eligible. */
+		if (session->room_state.counting_down && !waiting_room_can_start(room))
+			(void)waiting_room_cancel_countdown(&session->room_state);
+		return (true);
+	}
+	if (action == ROOM_ACTION_START)
+	{
+		audio_play_menu_select(audio);
+		if (session->room_state.counting_down)
+			return (true);
+		blocker = waiting_room_start_blocker(room);
+		if (blocker != ROOM_FEEDBACK_NONE)
+			session->room_state.feedback = blocker;
+		else
+			(void)waiting_room_begin_countdown(&session->room_state);
+		return (true);
+	}
+	if (action == ROOM_ACTION_SEND_CHAT)
+	{
+		if (waiting_room_send_chat(room, &session->room_state))
+			audio_play_menu_select(audio);
+		return (true);
+	}
+	if (action == ROOM_ACTION_VOLUME_UP || action == ROOM_ACTION_VOLUME_DOWN)
+	{
+		audio_play_menu_select(audio);
+		if (action == ROOM_ACTION_VOLUME_UP)
+			audio_volume_up(audio);
+		else
+			audio_volume_down(audio);
+		session->room_state.feedback = ROOM_FEEDBACK_VOLUME;
+		session->room_state.feedback_value
+			= ui_notification_volume_percent(audio->music_volume);
+		return (true);
+	}
+	if (action == ROOM_ACTION_LAUNCH)
+	{
+		audio_play_menu_select(audio);
+		(void)app_navigation_dispatch(navigation,
+			waiting_room_launch_action(room));
+		return (true);
+	}
+	if (action == ROOM_ACTION_LEAVE)
+	{
+		audio_play_menu_select(audio);
+		(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+	}
+	else if (action == ROOM_ACTION_QUIT)
+		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	return (true);
+}
+
+/**
+ * @brief Loads the room the previous screen chose, creating it when asked to.
+ */
+static bool	load_room_view(const app_data_provider_t *provider,
+	mp_session_t *session)
+{
+	app_provider_result_t	result;
+
+	if (session->create_pending)
+		result = app_room_view_create(provider, session->mode,
+				&session->room_view);
+	else
+		result = app_room_view_load(provider, session->room_id,
+				&session->room_view);
+	session->create_pending = false;
+	if (result != APP_PROVIDER_INVALID)
+		snprintf(session->room_id, sizeof(session->room_id), "%.*s",
+			(int)sizeof(session->room_id) - 1,
+			session->room_view.data.room.id);
+	return (result != APP_PROVIDER_INVALID);
+}
+
+/**
+ * @brief Reports whether a screen belongs to the multiplayer group.
+ *
+ * The four screens share one set of region planes and one static cache, so the
+ * teardown that frees them only runs when the whole group is left rather than
+ * on every step between them.
+ */
+static bool	is_multiplayer_screen(app_screen_t screen)
+{
+	return (screen == APP_SCREEN_MULTIPLAYER_MODE
+		|| screen == APP_SCREEN_LOBBY
+		|| screen == APP_SCREEN_CREATE_ROOM_MODAL
+		|| screen == APP_SCREEN_WAITING_ROOM);
+}
+
+/**
+ * @brief Releases the multiplayer planes once the group is actually left.
+ */
+static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
+	const menu_selection_t *menu)
+{
+	if (is_multiplayer_screen(navigation->current))
+		return (0);
+	render_multiplayer_destroy(ctx);
+	if (navigation->current != APP_SCREEN_HOME)
+		return (0);
+	if (reflow_home(ctx, menu) < 0)
+		return (-1);
+	enable_home_mouse(ctx);
+	return (0);
 }
 
 /**

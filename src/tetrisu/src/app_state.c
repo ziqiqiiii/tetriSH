@@ -57,8 +57,15 @@ app_screen_t	app_screen_parent(app_screen_t screen)
 		return (APP_SCREEN_LOGIN);
 	if (screen == APP_SCREEN_SOLO || screen == APP_SCREEN_MARKETPLACE
 		|| screen == APP_SCREEN_SETTINGS || screen == APP_SCREEN_LEADERBOARD
-		|| screen == APP_SCREEN_LOBBY)
+		|| screen == APP_SCREEN_MULTIPLAYER_MODE)
 		return (APP_SCREEN_HOME);
+	/*
+	 * Back out of the lobby returns to the mode picker rather than the home
+	 * menu, so changing your mind about Double versus Battle Royale costs one
+	 * key instead of a round trip through Home.
+	 */
+	if (screen == APP_SCREEN_LOBBY)
+		return (APP_SCREEN_MULTIPLAYER_MODE);
 	if (screen == APP_SCREEN_CREATE_ROOM_MODAL
 		|| screen == APP_SCREEN_WAITING_ROOM)
 		return (APP_SCREEN_LOBBY);
@@ -82,6 +89,7 @@ const char	*app_screen_name(app_screen_t screen)
 		"Marketplace",
 		"Settings",
 		"Leaderboard",
+		"Multiplayer",
 		"Multiplayer Lobby",
 		"Create Room",
 		"Waiting Room",
@@ -199,7 +207,11 @@ static bool	navigation_target(const app_navigation_t *navigation,
 	else if (action == APP_NAV_OPEN_LEADERBOARD
 		&& current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_LEADERBOARD;
-	else if (action == APP_NAV_OPEN_LOBBY && current == APP_SCREEN_HOME)
+	else if (action == APP_NAV_OPEN_MULTIPLAYER_MODE
+		&& !navigation->offline && current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_MULTIPLAYER_MODE;
+	else if (action == APP_NAV_OPEN_LOBBY
+		&& current == APP_SCREEN_MULTIPLAYER_MODE)
 		*target = APP_SCREEN_LOBBY;
 	else if (action == APP_NAV_OPEN_CREATE_ROOM
 		&& current == APP_SCREEN_LOBBY)

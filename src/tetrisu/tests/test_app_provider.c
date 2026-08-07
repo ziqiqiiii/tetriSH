@@ -29,7 +29,7 @@ static void	test_fixture_provider_contract(void)
 	assert(provider.login != NULL && provider.sign_up != NULL);
 	assert(provider.load_profile != NULL && provider.load_catalogue != NULL);
 	assert(provider.load_leaderboard != NULL && provider.load_lobby != NULL);
-	assert(provider.load_room != NULL);
+	assert(provider.load_room != NULL && provider.create_room != NULL);
 	assert(provider.login(provider.userdata, "", "password", "example.com",
 			&auth)
 		== APP_PROVIDER_INVALID);
@@ -41,10 +41,21 @@ static void	test_fixture_provider_contract(void)
 	{
 		app_room_view_model_t	room;
 
-		assert(provider.load_room(provider.userdata, "BR-008", &room)
+		assert(provider.load_room(provider.userdata, "arena-88", &room)
 			== APP_PROVIDER_OK);
 		assert(room.mode == APP_GAME_MODE_BATTLE_ROYALE);
-		assert(room.required_players == 4);
+		assert(room.required_players == WAITING_ROOM_ROYALE_MIN_PLAYERS);
+		/* A joined room seats the players the lobby advertised. */
+		assert(room.player_count == WAITING_ROOM_ROYALE_MIN_PLAYERS);
+		assert(room.chat_count > 0);
+		/* A created room seats its owner alone, whatever the mode. */
+		assert(provider.create_room(provider.userdata, APP_GAME_MODE_DOUBLE,
+				&room) == APP_PROVIDER_OK);
+		assert(room.mode == APP_GAME_MODE_DOUBLE);
+		assert(room.player_count == 1);
+		assert(room.players[0].owner && !room.players[0].ready);
+		assert(provider.create_room(provider.userdata, APP_GAME_MODE_NONE,
+				&room) == APP_PROVIDER_INVALID);
 	}
 	printf("PASS test_fixture_provider_contract\n");
 }
@@ -92,13 +103,18 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	assert(view.data.leaderboard.entries[9].position == 10);
 	assert(app_screen_view_load(&provider, APP_SCREEN_LOBBY, &view)
 		== APP_PROVIDER_OK);
-	assert(view.local_preview && view.data.lobby.count == 2);
-	assert(view.data.lobby.rooms[1].mode
-		== APP_GAME_MODE_BATTLE_ROYALE);
+	assert(view.local_preview && view.data.lobby.count == 6);
+	/* The lobby header carries the identity strip alongside the room list. */
+	assert(view.data.lobby.profile.username[0] != '\0');
+	assert(view.data.lobby.rooms[3].mode == APP_GAME_MODE_BATTLE_ROYALE);
+	assert(view.data.lobby.rooms[1].state == APP_ROOM_STATE_IN_GAME);
 	assert(app_screen_view_load(&provider, APP_SCREEN_WAITING_ROOM, &view)
 		== APP_PROVIDER_OK);
-	assert(view.data.room.player_count == 2);
+	assert(view.data.room.player_count == WAITING_ROOM_DOUBLE_PLAYERS);
 	assert(view.data.room.players[0].owner);
+	assert(app_screen_view_load(&provider, APP_SCREEN_MULTIPLAYER_MODE, &view)
+		== APP_PROVIDER_OK);
+	assert(view.data.profile.signed_in);
 	assert(app_screen_view_load(&provider, APP_SCREEN_BATTLE_ROYALE, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.match.mode == APP_GAME_MODE_BATTLE_ROYALE);

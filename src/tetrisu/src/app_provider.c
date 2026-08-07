@@ -23,6 +23,14 @@ static app_provider_result_t	fixture_load_lobby(void *userdata,
 				app_lobby_view_model_t *view);
 static app_provider_result_t	fixture_load_room(void *userdata,
 				const char *room_id, app_room_view_model_t *view);
+static app_provider_result_t	fixture_create_room(void *userdata,
+				app_game_mode_t mode, app_room_view_model_t *view);
+static void	set_room_summary(app_room_summary_view_model_t *room,
+				const char *id, const char *owner, app_game_mode_t mode,
+				app_room_state_t state, int players, int capacity);
+static void	set_room_player(app_room_player_view_model_t *player,
+				const char *username, bool owner, bool ready);
+static void	seed_room_chat(app_room_view_model_t *view);
 static void	set_catalogue_item(app_catalogue_item_view_model_t *item,
 				const char *id, const char *name, int price, bool owned,
 				bool equipped);
@@ -58,6 +66,63 @@ void	app_fixture_provider_init(app_data_provider_t *provider)
 	provider->load_leaderboard = fixture_load_leaderboard;
 	provider->load_lobby = fixture_load_lobby;
 	provider->load_room = fixture_load_room;
+	provider->create_room = fixture_create_room;
+}
+
+/**
+ * @brief Loads one waiting room by id through the provider.
+ *
+ * Kept separate from app_screen_view_load_for_session() because the room a
+ * screen shows is chosen at runtime - by the lobby cursor or by the join
+ * field - rather than implied by the screen itself.
+ */
+app_provider_result_t	app_room_view_load(
+	const app_data_provider_t *provider, const char *room_id,
+	app_screen_view_model_t *view)
+{
+	app_provider_result_t	result;
+
+	if (view == NULL)
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	view->screen = APP_SCREEN_WAITING_ROOM;
+	view->local_preview = provider != NULL && provider->local_fixtures;
+	snprintf(view->title, sizeof(view->title), "%s",
+		app_screen_name(APP_SCREEN_WAITING_ROOM));
+	set_screen_copy(view, "Ready-state room model");
+	if (provider == NULL || provider->load_room == NULL)
+		result = APP_PROVIDER_UNAVAILABLE;
+	else
+		result = provider->load_room(provider->userdata, room_id,
+				&view->data.room);
+	view->status = status_from_result(result);
+	return (result);
+}
+
+/**
+ * @brief Creates a room in the requested mode and returns its waiting-room model.
+ */
+app_provider_result_t	app_room_view_create(
+	const app_data_provider_t *provider, app_game_mode_t mode,
+	app_screen_view_model_t *view)
+{
+	app_provider_result_t	result;
+
+	if (view == NULL)
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	view->screen = APP_SCREEN_WAITING_ROOM;
+	view->local_preview = provider != NULL && provider->local_fixtures;
+	snprintf(view->title, sizeof(view->title), "%s",
+		app_screen_name(APP_SCREEN_WAITING_ROOM));
+	set_screen_copy(view, "Ready-state room model");
+	if (provider == NULL || provider->create_room == NULL)
+		result = APP_PROVIDER_UNAVAILABLE;
+	else
+		result = provider->create_room(provider->userdata, mode,
+				&view->data.room);
+	view->status = status_from_result(result);
+	return (result);
 }
 
 /**
@@ -388,7 +453,10 @@ static app_provider_result_t	fixture_load_leaderboard(void *userdata,
 }
 
 /**
- * @brief Supplies two rooms for lobby layout work.
+ * @brief Supplies a mixed room browser covering both modes and both states.
+ *
+ * Deliberately spans full, joinable, waiting and in-game rooms so the lobby's
+ * join guards and its state colouring are all exercised without a server.
  */
 static app_provider_result_t	fixture_load_lobby(void *userdata,
 	app_lobby_view_model_t *view)
@@ -397,44 +465,140 @@ static app_provider_result_t	fixture_load_lobby(void *userdata,
 	if (view == NULL)
 		return (APP_PROVIDER_INVALID);
 	memset(view, 0, sizeof(*view));
-	view->count = 2;
-	snprintf(view->rooms[0].id, sizeof(view->rooms[0].id), "ROOM-042");
-	snprintf(view->rooms[0].owner, sizeof(view->rooms[0].owner), "BlockBunny");
-	view->rooms[0].mode = APP_GAME_MODE_DOUBLE;
-	view->rooms[0].players = 1;
-	view->rooms[0].capacity = 2;
-	snprintf(view->rooms[1].id, sizeof(view->rooms[1].id), "BR-008");
-	snprintf(view->rooms[1].owner, sizeof(view->rooms[1].owner), "MoonStack");
-	view->rooms[1].mode = APP_GAME_MODE_BATTLE_ROYALE;
-	view->rooms[1].players = 4;
-	view->rooms[1].capacity = 8;
+	view->count = 6;
+	set_room_summary(&view->rooms[0], "duel-42", "JenniFire",
+		APP_GAME_MODE_DOUBLE, APP_ROOM_STATE_WAITING, 1, 2);
+	set_room_summary(&view->rooms[1], "duel-47", "YuMin",
+		APP_GAME_MODE_DOUBLE, APP_ROOM_STATE_IN_GAME, 2, 2);
+	set_room_summary(&view->rooms[2], "duel-51", "StackWitch",
+		APP_GAME_MODE_DOUBLE, APP_ROOM_STATE_WAITING, 2, 2);
+	set_room_summary(&view->rooms[3], "arena-88", "Naf",
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 4, 8);
+	set_room_summary(&view->rooms[4], "arena-89", "Coke Zero",
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_IN_GAME, 8, 8);
+	set_room_summary(&view->rooms[5], "arena-93", "NeonMino",
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 6, 8);
 	return (APP_PROVIDER_OK);
 }
 
 /**
- * @brief Supplies a waiting-room snapshot with explicit ready states.
+ * @brief Supplies a waiting-room snapshot for a room that already has players.
+ *
+ * Joining an existing room lands in the wireframe's second state: the seats the
+ * lobby advertised are occupied and their occupants are ready, so the only
+ * thing between the player and the countdown is their own ready flag.
  */
 static app_provider_result_t	fixture_load_room(void *userdata,
 	const char *room_id, app_room_view_model_t *view)
 {
+	static const char	*names[] = {
+		"BlockBunny", "MoonStack", "SoftDrop", "LineDancer",
+		"GhostPiece", "TinyTSpin", "NeonMino"
+	};
+	int					index;
+
 	(void)userdata;
 	if (view == NULL)
 		return (APP_PROVIDER_INVALID);
 	memset(view, 0, sizeof(*view));
 	snprintf(view->id, sizeof(view->id), "%s",
-		room_id == NULL || room_id[0] == '\0' ? "ROOM-042" : room_id);
-	view->mode = strncmp(view->id, "BR-", 3) == 0
+		room_id == NULL || room_id[0] == '\0' ? "duel-42" : room_id);
+	view->mode = strncmp(view->id, "arena", 5) == 0
 		? APP_GAME_MODE_BATTLE_ROYALE : APP_GAME_MODE_DOUBLE;
-	view->required_players = view->mode == APP_GAME_MODE_DOUBLE ? 2 : 4;
-	view->player_count = 2;
-	snprintf(view->players[0].username,
-		sizeof(view->players[0].username), "PreviewPlayer");
-	view->players[0].owner = true;
-	view->players[0].ready = true;
-	snprintf(view->players[1].username,
-		sizeof(view->players[1].username), "BlockBunny");
-	view->players[1].ready = false;
+	view->state = APP_ROOM_STATE_WAITING;
+	view->capacity = view->mode == APP_GAME_MODE_DOUBLE
+		? WAITING_ROOM_DOUBLE_PLAYERS : APP_ROOM_MAX_PLAYERS;
+	view->required_players = view->mode == APP_GAME_MODE_DOUBLE
+		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
+	view->player_count = view->mode == APP_GAME_MODE_DOUBLE
+		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
+	set_room_player(&view->players[0], names[0], true, true);
+	index = 1;
+	while (index < view->player_count - 1)
+	{
+		set_room_player(&view->players[index], names[index], false, true);
+		index++;
+	}
+	/* The local player is the seat that joined last and is never ready yet. */
+	view->local_slot = view->player_count - 1;
+	set_room_player(&view->players[view->local_slot], "PreviewPlayer",
+		false, false);
+	seed_room_chat(view);
 	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Supplies a freshly created room holding only its owner.
+ *
+ * This is the wireframe's first state: one filled seat, the rest empty, and a
+ * status line asking for opponents.
+ */
+static app_provider_result_t	fixture_create_room(void *userdata,
+	app_game_mode_t mode, app_room_view_model_t *view)
+{
+	(void)userdata;
+	if (view == NULL || (mode != APP_GAME_MODE_DOUBLE
+			&& mode != APP_GAME_MODE_BATTLE_ROYALE))
+		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
+	snprintf(view->id, sizeof(view->id), "%s",
+		mode == APP_GAME_MODE_DOUBLE ? "duel-22" : "arena-31");
+	view->mode = mode;
+	view->state = APP_ROOM_STATE_WAITING;
+	view->capacity = mode == APP_GAME_MODE_DOUBLE
+		? WAITING_ROOM_DOUBLE_PLAYERS : APP_ROOM_MAX_PLAYERS;
+	view->required_players = mode == APP_GAME_MODE_DOUBLE
+		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
+	view->player_count = 1;
+	view->local_slot = 0;
+	set_room_player(&view->players[0], "PreviewPlayer", true, false);
+	seed_room_chat(view);
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Writes one bounded fixture room summary.
+ */
+static void	set_room_summary(app_room_summary_view_model_t *room,
+	const char *id, const char *owner, app_game_mode_t mode,
+	app_room_state_t state, int players, int capacity)
+{
+	snprintf(room->id, sizeof(room->id), "%s", id);
+	snprintf(room->owner, sizeof(room->owner), "%s", owner);
+	room->mode = mode;
+	room->state = state;
+	room->players = players;
+	room->capacity = capacity;
+}
+
+/**
+ * @brief Writes one bounded fixture room seat.
+ */
+static void	set_room_player(app_room_player_view_model_t *player,
+	const char *username, bool owner, bool ready)
+{
+	snprintf(player->username, sizeof(player->username), "%s", username);
+	player->owner = owner;
+	player->ready = ready;
+}
+
+/**
+ * @brief Seeds the room transcript so the chat column is never blank on entry.
+ */
+static void	seed_room_chat(app_room_view_model_t *view)
+{
+	char	line[APP_ROOM_CHAT_TEXT_MAX];
+
+	snprintf(line, sizeof(line), "room %s opened", view->id);
+	(void)waiting_room_append_chat(view, "", line, true);
+	if (view->player_count > 1)
+	{
+		snprintf(line, sizeof(line), "good luck everyone");
+		(void)waiting_room_append_chat(view, view->players[0].username, line,
+			false);
+	}
+	(void)waiting_room_append_chat(view, "",
+		"press C to chat, ESC to stop typing", true);
 }
 
 /**
@@ -568,21 +732,37 @@ static app_provider_result_t	load_provider_screen(
 		result = provider->load_leaderboard(provider->userdata,
 				&view->data.leaderboard);
 	}
+	else if (screen == APP_SCREEN_MULTIPLAYER_MODE)
+	{
+		/*
+		 * The mode picker shows the same identity strip the lobby does, so it
+		 * loads the profile rather than nothing at all.
+		 */
+		set_screen_copy(view, "Double or Battle Royale");
+		if (provider == NULL || provider->load_profile == NULL)
+			return (APP_PROVIDER_UNAVAILABLE);
+		result = provider->load_profile(provider->userdata,
+				&view->data.profile);
+	}
 	else if (screen == APP_SCREEN_LOBBY)
 	{
 		set_screen_copy(view, "Room browser model");
-		if (provider == NULL || provider->load_lobby == NULL)
+		if (provider == NULL || provider->load_lobby == NULL
+			|| provider->load_profile == NULL)
 			return (APP_PROVIDER_UNAVAILABLE);
 		result = provider->load_lobby(provider->userdata, &view->data.lobby);
+		if (result == APP_PROVIDER_OK)
+			result = provider->load_profile(provider->userdata,
+					&view->data.lobby.profile);
 	}
-	else if (screen == APP_SCREEN_CREATE_ROOM_MODAL
-		|| screen == APP_SCREEN_WAITING_ROOM)
+	else if (screen == APP_SCREEN_CREATE_ROOM_MODAL)
+		set_screen_copy(view, "Double or Battle Royale room");
+	else if (screen == APP_SCREEN_WAITING_ROOM)
 	{
-		set_screen_copy(view, screen == APP_SCREEN_CREATE_ROOM_MODAL
-			? "Double or Battle Royale room" : "Ready-state room model");
+		set_screen_copy(view, "Ready-state room model");
 		if (provider == NULL || provider->load_room == NULL)
 			return (APP_PROVIDER_UNAVAILABLE);
-		result = provider->load_room(provider->userdata, "ROOM-042",
+		result = provider->load_room(provider->userdata, "duel-42",
 				&view->data.room);
 	}
 	else if (screen == APP_SCREEN_DOUBLE

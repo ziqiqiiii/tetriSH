@@ -18,6 +18,7 @@ static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
 static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
 				uint32_t *key);
 static int	next_input_wait_ms(const render_ctx_t *ctx);
+static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms);
 
 /**
  * @brief Starts notcurses and renders the initial background image.
@@ -705,6 +706,87 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 		if ((input_fd.revents & POLLIN) == 0)
 			return ((uint32_t)-1);
 	}
+}
+
+/**
+ * @brief Waits for one input event, giving up after timeout_ms milliseconds.
+ *
+ * The waiting room's countdown is the only value in the client that advances
+ * without a keystroke, so it needs a wait that returns on its own deadline
+ * rather than only on input. 0 is the "nothing arrived" answer because that is
+ * already what notcurses_get_nblock() returns for an empty queue, so callers
+ * that drain the queue and callers that time out test the same value.
+ *
+ * @param ctx Pointer to the render context.
+ * @param input Optional destination for the complete Notcurses input event.
+ * @param timeout_ms Deadline in milliseconds; negative waits indefinitely.
+ * @return The key id, 0 when the deadline elapsed, or (uint32_t)-1 on error.
+ */
+uint32_t	render_wait_input_timeout(render_ctx_t *ctx, ncinput *input,
+	int timeout_ms)
+{
+	ncinput			local;
+	ncinput			*event;
+	struct pollfd	input_fd;
+	int				remaining_ms;
+	int				poll_result;
+	uint32_t		key;
+
+	event = input;
+	if (event == NULL)
+		event = &local;
+	if (timeout_ms < 0)
+		return (render_wait_input(ctx, event));
+	memset(&input_fd, 0, sizeof(input_fd));
+	input_fd.fd = notcurses_inputready_fd(ctx->nc);
+	input_fd.events = POLLIN;
+	remaining_ms = timeout_ms;
+	while (1)
+	{
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
+		if (take_parsed_event(ctx, event, &key))
+			return (key);
+		if (remaining_ms <= 0)
+			return (0);
+		poll_result = poll(&input_fd, 1, min_wait_ms(ctx, remaining_ms));
+		if (poll_result < 0)
+		{
+			if (errno == EINTR)
+				continue ;
+			return ((uint32_t)-1);
+		}
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
+		if (poll_result == 0)
+		{
+			/*
+			 * The poll slice is capped by the resize and notification deadlines,
+			 * so a zero return is not necessarily this call's timeout. Charge the
+			 * slice against the remaining budget and only give up once it runs
+			 * out.
+			 */
+			remaining_ms -= min_wait_ms(ctx, remaining_ms);
+			if (render_terminal_geometry_changed(ctx))
+				return (NCKEY_RESIZE);
+			continue ;
+		}
+		if ((input_fd.revents & POLLIN) == 0)
+			return ((uint32_t)-1);
+	}
+}
+
+/**
+ * @brief Returns the shorter of the shared poll slice and one caller deadline.
+ */
+static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms)
+{
+	int	wait_ms;
+
+	wait_ms = next_input_wait_ms(ctx);
+	if (deadline_ms < wait_ms)
+		return (deadline_ms);
+	return (wait_ms);
 }
 
 /**

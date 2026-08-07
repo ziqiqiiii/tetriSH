@@ -20,6 +20,8 @@ to get right.
 - [Step 4 — Write planes in place](#step-4--write-planes-in-place)
 - [Step 5 — Coalesce held keys](#step-5--coalesce-held-keys)
 - [Step 6 — Skip the render when nothing moved](#step-6--skip-the-render-when-nothing-moved)
+- [Screens that share a plane set](#screens-that-share-a-plane-set)
+- [Values that move without input](#values-that-move-without-input)
 - [The bugs](#the-bugs)
 - [Text metrics](#text-metrics)
 - [Checklist](#checklist)
@@ -92,13 +94,17 @@ notification planes    raised by render_notification_raise()
 
 Reference implementations:
 
-| Concern | Settings | Leaderboard | Marketplace |
-|---|---|---|---|
-| Layout | `src/settings_layout.c` | `src/leaderboard_presentation.c` | `src/marketplace_layout.c` |
-| Bitmap render | `src/render_settings_font.c` | `src/render_leaderboard_font.c` | `src/render_marketplace_font.c` |
-| Cell fallback | `src/render_settings.c` | `src/render_leaderboard.c` | `src/render_marketplace.c` |
-| Input state | `src/settings_screen.c` | `src/leaderboard_screen.c` | `src/marketplace_screen.c` |
-| Loop | `run_settings_screen()` in `src/main.c` | `run_leaderboard_screen()` | `run_marketplace_screen()` |
+| Concern | Settings | Leaderboard | Marketplace | Multiplayer (x4) |
+|---|---|---|---|---|
+| Layout | `src/settings_layout.c` | `src/leaderboard_presentation.c` | `src/marketplace_layout.c` | `src/multiplayer_layout.c` |
+| Bitmap render | `src/render_settings_font.c` | `src/render_leaderboard_font.c` | `src/render_marketplace_font.c` | `src/render_multiplayer_font.c` |
+| Cell fallback | `src/render_settings.c` | `src/render_leaderboard.c` | `src/render_marketplace.c` | `src/render_multiplayer.c` |
+| Input state | `src/settings_screen.c` | `src/leaderboard_screen.c` | `src/marketplace_screen.c` | `src/{multiplayer,lobby,waiting_room}_screen.c` |
+| Loop | `run_settings_screen()` in `src/main.c` | `run_leaderboard_screen()` | `run_marketplace_screen()` | `run_lobby_screen()` and three siblings |
+
+The multiplayer group is the one worth reading if you are adding **several**
+related screens rather than one: four surfaces share a backdrop, a layout
+function, a static canvas and one set of region planes.
 
 The Marketplace is the one screen whose backdrop carries no authored frames:
 it draws every plate and border itself against the quiet centre of a shop
@@ -245,6 +251,28 @@ The rule generalises: **a region's seed must cover everything its content
 depends on that it does not hash directly.** When you take a field out of the
 static layer, put it into the region seed in the same edit.
 
+**And nothing more than that.** The rule has a second edge, and one model hash
+shared by every region on a screen walks straight off it: correct, but every
+region repaints whenever any of them changes. The waiting room started that way,
+so posting a chat message repainted the seat list, and readying up repainted the
+transcript. Split the model hash along the same lines the regions are split:
+
+```c
+base      = room_players_signature(room, ctx->mp_static_signature);
+/* slots and status seed from base; chat seeds from the transcript instead */
+signature = room_chat_signature(room, ctx->mp_static_signature);
+```
+
+When a region draws a line that *quotes* a field it otherwise ignores, hash the
+**rendered text** rather than the field. The lobby's status line names the room
+id only in its unknown-id message; hashing the id itself repainted that plane on
+every keystroke in the join field, and hashing the formatted line does not:
+
+```c
+lobby_feedback_text(state, line, sizeof(line));
+signature = mp_hash_text(line, ctx->mp_static_signature);
+```
+
 ---
 
 ## Step 4 — Write planes in place
@@ -327,6 +355,72 @@ presenting even when no region changed.
 
 ---
 
+## Screens that share a plane set
+
+Four surfaces that belong to one flow will want the same backdrop, the same
+layout function and the same regions. Sharing is the right call - the cost is
+one rule.
+
+**Switching screens must destroy every region plane, not just the ones the next
+screen will not use.** The plane slots live on the render context, so a plane
+the previous screen created stays on the terminal until something destroys it.
+Leaving one behind strands a region of the old screen on top of the new one, and
+because its geometry still matches, the reuse path in Step 4 happily writes the
+*new* screen's content into the *old* screen's rectangle.
+
+Make the screen part of the static cache key, and tear down on the way in:
+
+```c
+screen_changed = ctx->mp_screen != view->screen;
+if (rebuild_background || screen_changed)
+{
+    render_screen_destroy(ctx);
+    forget_regions(ctx);          /* destroys all seven, clears all signatures */
+    ctx->mp_screen = view->screen;
+}
+```
+
+The backdrop needs the same treatment when the screens do not share one: cache
+the source path alongside the geometry, or a screen that changes artwork without
+changing size will reuse the previous screen's backdrop.
+
+A full rebuild on every screen change is correct and cheap here, because a
+screen change is not a keystroke. The rules in Step 1 are about what happens
+*within* a screen.
+
+---
+
+## Values that move without input
+
+A countdown, a timer, a server push: anything that changes while the user is not
+typing. Two consequences.
+
+**It needs a wait with a deadline, not a blocking read.**
+`render_wait_input_timeout()` returns `0` when its deadline elapses - the same
+value `notcurses_get_nblock()` returns for an empty queue, so a loop that drains
+input and a loop that times out test the same thing. Track the deadline against
+`ui_notification_now_ms()` rather than re-arming a fixed sleep, or every
+keystroke pushes the next tick back:
+
+```c
+now     = ui_notification_now_ms();
+wait_ms = deadline > now ? (int)(deadline - now) : 0;
+key     = render_wait_input_timeout(ctx, &input, wait_ms);
+if (key == 0)
+{
+    deadline += WAITING_ROOM_COUNTDOWN_STEP_MS;
+    ...
+}
+```
+
+**It must be alone on its region.** A ticking value repaints once a second
+whether or not anyone is at the keyboard, so anything sharing its plane pays
+that cost forever. The waiting room's countdown sits on the status region with
+nothing but the status line; the seats and the transcript are untouched between
+ticks.
+
+---
+
 ## The bugs
 
 Every one of these shipped at least once. They are all invisible to unit tests
@@ -341,6 +435,9 @@ and to the terminal you developed in.
 | Extra ~21 ms per keystroke | plane destroyed and recreated per frame | reuse the plane, blit in place |
 | Rows overlap the line below at some sizes | row pitch set from the glyph size | pitch rows from the ink band, not the cap height |
 | Whole screen blanks after an action | a notification plane raised over a full-screen bitmap | keep changing values in regions; report results inside one |
+| A region of the previous screen sits on top of the new one | screens sharing a plane set, and only some planes destroyed on the switch | destroy every region plane and clear every signature on a screen change |
+| Every region repaints when any one of them changes | one model hash seeding all of them | split the model hash along the same lines the regions are split |
+| A plane repaints on every keystroke in an unrelated field | a signature hashing a field the region only sometimes draws | hash the rendered line, not the field behind it |
 
 ### The blanking one, in full
 
@@ -425,6 +522,9 @@ Before calling a screen done:
 - [ ] Cell fallback path works under `TETRISU_RENDERER=cell`
 - [ ] Teardown frees planes, cached canvases, and resets signatures
 - [ ] Every action — not just every keystroke — leaves the whole screen drawn
+- [ ] Region seeds are scoped: no region repaints because an unrelated one changed
+- [ ] Screens sharing a plane set destroy every plane and signature on a switch
+- [ ] Anything that ticks without input sits alone on its region
 
 ---
 
@@ -479,7 +579,8 @@ and everything after works:
 |---|---|
 | `\e[6n` cursor position | `\e[1;1R` |
 | `\e[c` primary DA | `\e[?62;4;9;c` — the `4` claims Sixel |
-| `\e[>c` secondary DA | `\e[>0;276;0c` |
+| `\e[>c` secondary DA | `\e[>0;95;0c` — **not** `276`, which is Kitty's own id |
+| `\e_G…\e\\` Kitty graphics | leave unanswered on the stationary tier |
 | `\e[14t` / `\e[18t` | pixel size / cell size |
 | `\e[?<n>$p` DECRQM | `\e[?<n>;2$y` |
 | `\e[?<n>;…S` XTSMGRAPHICS | `\e[?<n>;0;256S` — status `0` means supported |
@@ -487,7 +588,18 @@ and everything after works:
 | OSC `4;n;?` / `10;?` / `11;?` | any plausible `rgb:….` |
 
 DA1 is the fence notcurses waits on, so everything else must be answered before
-it. With Sixel claimed, `TETRISU_RENDERER=stationary` exercises the real
+it.
+
+**Claiming Sixel is not enough on its own.** notcurses prefers the Kitty
+graphics protocol wherever it believes it is available, and it will conclude
+that from two things a careless harness hands it: a secondary DA of `276`, which
+is Kitty's own identifier, and *any* reply at all to the Kitty graphics query —
+including a refusal. Report a plain xterm DA2 and leave that query unanswered,
+or the run quietly exercises the movable tier and proves nothing about the one
+you were testing. The symptom is a capture full of `\e_G` chunks and not one
+`DCS`.
+
+With Sixel actually chosen, `TETRISU_RENDERER=stationary` exercises the real
 stationary path, and each frame arrives as `DCS … q … ST` preceded by a cursor
 move. Parse `\e[<row>;<col>H` to know where each bitmap lands, then either:
 

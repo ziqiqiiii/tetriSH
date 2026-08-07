@@ -1,8 +1,10 @@
 # tetrisu
 
 The terminal game client for tetriSH, implemented in C on notcurses. It renders
-the image-based home screen and now includes a local playable Endless Solo
-Battle while the authoritative `tetrisd` game loop is being built.
+the image-based home screen, a local playable Endless Solo Battle, and the
+complete multiplayer approach — mode picker, room browser, create-room panel and
+waiting room with chat and a pre-match countdown — while the authoritative
+`tetrisd` game loop is being built.
 
 ---
 
@@ -126,6 +128,31 @@ Battle while the authoritative `tetrisd` game loop is being built.
   reaches the top-right corner a notification would be raised into.
 - Locked artwork is desaturated on the shelf and in the detail card, so the
   panels read as stock rather than as inventory.
+- Multiplayer is four screens rather than a single lobby. `Multiplayer` opens a
+  mode picker drawn on the home artwork; choosing Double or Battle Royale opens
+  the room browser filtered to that mode, `M` cycles the filter without leaving
+  the screen, and `C` opens a create-room panel that arrives with the mode
+  already chosen.
+- The room browser lists id, mode, players, state and owner, and refuses a join
+  that cannot succeed with the reason on its status line - full, or already in
+  game. A room id can also be typed directly, which ignores the list filter: an
+  id is how a friend shares a room, and a filter the player happens to have set
+  must not hide the room they were invited to.
+- The waiting room shows every seat with a ready badge, a status line, and a
+  chat column on the right. `C` opens the composer, and while it is open every
+  printable key is text - so a message containing "s" cannot start the match.
+- A Double room starts when both seats are filled and both players are ready; a
+  Battle Royale room needs four players and a ready majority, so a lobby of
+  eight starts on five. Either way a five-second countdown runs first, and
+  un-readying during it cancels it. The owner's `S` arms the same countdown a
+  moment earlier.
+- The countdown is the only value in the client that advances without input, so
+  it is the only thing on its region plane: one small plane repaints per second
+  and nothing else on the screen is touched.
+- The lobby, the create-room panel and the waiting room share one duel-hall
+  backdrop and one set of region planes. Switching between them destroys the
+  planes the previous screen owned, because leaving one behind would strand a
+  region of the old screen on top of the new one.
 - Notification cards are sized from the artwork's own aspect rather than a
   fixed column count, and their lettering comes from the shared glyph atlas
   fitted to the plaque interior measured from the art. On the stationary tier
@@ -314,8 +341,21 @@ and graphics-protocol support at startup. It exits with
 | `Enter` in modal | Confirm the focused button |
 | Mouse click in modal | Confirm the clicked button |
 | `L` / `S` / `O` on Entry | Open Login / Sign Up / play offline |
-| `Enter` in Lobby/Create Room | Open the next room-flow scaffold |
-| `D` / `B` in Waiting Room | Open Double / Battle Royale scaffold |
+| `←` / `→` or `1` / `2` on the mode picker | Choose Double or Battle Royale |
+| `Enter` on the mode picker | Open the lobby filtered to that mode |
+| `↑` / `↓` in the Lobby | Move the room cursor (clamps at the ends) |
+| `Enter` in the Lobby | Join the room under the cursor |
+| `→` / `Tab` in the Lobby | Focus the join-by-id field; every printable key is then text |
+| `Enter` in the join field | Join the typed room id, whatever the list filter is |
+| `Esc` in the join field | Step back to the room table |
+| `C` / `R` / `M` / `B` in the Lobby | Create room / refresh / cycle the mode filter / back |
+| `↑` / `↓` or `1` / `2` in Create Room | Choose the room's mode |
+| `Enter` / `Esc` in Create Room | Create the room / cancel back to the lobby |
+| `R` in the Waiting Room | Toggle your ready flag |
+| `S` in the Waiting Room | Start, when the room's conditions are met and you own it |
+| `C` or `Enter` in the Waiting Room | Open the chat composer; `Esc` closes it |
+| `Enter` in the chat composer | Post the message |
+| `L` in the Waiting Room | Leave back to the lobby |
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
 | `q` | Quit |
@@ -367,7 +407,7 @@ and both Back and Refresh support mouse hover/click.
 | Item | Status |
 |---|---|
 | `Single Player` | Playable local Endless mode; can remain as offline play |
-| `Multiplayer` | Navigable lobby/create/waiting/match scaffolds |
+| `Multiplayer` | Mode picker, room browser, create-room panel and waiting room with chat and a pre-match countdown; the match itself is still a scaffold |
 | `Marketplace` | Dedicated shop screen: browse both catalogues, buy with wallet points, equip what is owned |
 | `Leaderboard` | Complete top-three podium and positions 4–10, with refresh/error states |
 | `Settings` | Dedicated live Profile/Settings screen; offline mode shows local controls only |
@@ -383,6 +423,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 |---|---|
 | `SPLASH_ASSET_PATH` | Clean home-screen artwork; five exact labels are rasterized from the shared pixel font at runtime |
 | `LEADERBOARD_BACKGROUND_PATH` | Dedicated 1448 x 1086 leaderboard backdrop; live data and controls are composited over it with the shared pixel font |
+| `MULTIPLAYER_ASSET_PATH` | Dedicated 1448 x 1086 duel-hall backdrop shared by the lobby, the create-room panel and the waiting room; the mode picker keeps the home artwork instead |
 | `BUNNY_ASSET_PATH` | Bunny selector sprite (PNG with alpha) |
 | `INTRO_VIDEO_PATH` | MP4 splash intro streamed over the background |
 | `INTRO_AUDIO_PATH` | MP3 played once alongside the intro |
@@ -439,6 +480,7 @@ render_menu_create         after authentication/offline entry, draw home menu
      ├── Enter Single Player -> solo_mode_run -> return to menu
      ├── Enter Leaderboard -> dedicated top-ten screen + refresh/back
      ├── Enter Settings -> live Profile/Settings screen + local controls
+     ├── Enter Multiplayer -> mode picker -> lobby -> create room / waiting room
      ├── Enter other item -> typed LOCAL UI PREVIEW scaffold
      ├── Esc    explicit parent screen
      ├── +/-   audio_volume_up / audio_volume_down
@@ -456,6 +498,12 @@ Modules (each a `.c` under `src/`):
 | `render_settings.c` | Live profile/inventory/settings panel; chooses the pixel renderer or self-contained cell fallback |
 | `render_settings_font.c` | Composes the cached v2 Settings frame, catalogue thumbnails, and focus/equipped overlays |
 | `leaderboard_screen.c` | Pure leaderboard focus and action handling |
+| `multiplayer_screen.c` | Pure mode-picker and create-room state, actions, and card copy |
+| `lobby_screen.c` | Pure room-browser state: filter, cursor, join-by-id field, and join guards |
+| `waiting_room_screen.c` | Pure ready/start policy, chat transcript, and the pre-match countdown |
+| `multiplayer_layout.c` | Reference-space geometry for all four multiplayer surfaces |
+| `render_multiplayer.c` | Chooses the multiplayer compositor or the self-contained cell fallback |
+| `render_multiplayer_font.c` | Composes the static frame and the region planes for all four multiplayer screens |
 | `leaderboard_presentation.c` | Pure leaderboard background policy, reference-space geometry, and pointer hit testing |
 | `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
@@ -489,6 +537,10 @@ tetrisu/
 │   ├── app_provider.c         Typed models + local fixture provider
 │   ├── leaderboard_screen.c   Pure leaderboard focus/actions → logic.a
 │   ├── leaderboard_presentation.c  Pure bitmap geometry/hit-test policy → logic.a
+│   ├── multiplayer_screen.c   Pure mode-picker + create-room state → logic.a
+│   ├── lobby_screen.c         Pure room-browser state → logic.a
+│   ├── waiting_room_screen.c  Pure ready/chat/countdown policy → logic.a
+│   ├── multiplayer_layout.c   Pure multiplayer bitmap geometry → logic.a
 │   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── renderer_policy.c      Renderer environment and compatibility policy
@@ -497,6 +549,8 @@ tetrisu/
 │   ├── render_auth.c          Auth artwork overlay + cell fallback
 │   ├── render_screen.c        Native-terminal screen scaffold
 │   ├── render_settings.c      Profile/settings screen + controls
+│   ├── render_multiplayer.c   Pixel/cell multiplayer renderer selection
+│   ├── render_multiplayer_font.c   Multiplayer static frame + region planes
 │   ├── render_leaderboard.c   Pixel/cell leaderboard renderer selection
 │   ├── render_leaderboard_font.c  Full shared-font leaderboard compositor
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
