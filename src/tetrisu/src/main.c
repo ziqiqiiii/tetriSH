@@ -4,6 +4,7 @@
 # define LEADERBOARD_INPUT_BATCH_MAX	64
 # define MARKETPLACE_INPUT_BATCH_MAX	64
 # define MULTIPLAYER_INPUT_BATCH_MAX	64
+# define DISCARD_INPUT_BATCH_MAX		256
 
 /*
  * What the four multiplayer screens hand to each other. The picker chooses the
@@ -21,7 +22,8 @@ typedef struct s_mp_session
 }	mp_session_t;
 
 // Static Functions
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
+static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu,
+				bool refresh_geometry, bool replace_background);
 static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, auth_form_t *form,
@@ -215,7 +217,7 @@ int	main(void)
 			(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 		else if (key == NCKEY_RESIZE || key == 12u)
 		{
-			if (reflow_home(&ctx, &menu) < 0)
+			if (reflow_home(&ctx, &menu, true, true) < 0)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 		}
 		else if (key == NCKEY_UP || key == NCKEY_DOWN)
@@ -259,7 +261,8 @@ int	main(void)
 			audio_volume_down(&audio);
 			render_notification_show_volume(&ctx, audio.music_volume);
 		}
-		else if (key == 'q' || key == 'Q')
+		else if ((key == 'q' || key == 'Q')
+			&& confirmation_prompt_run(&ctx, &audio, CONFIRM_QUIT_APP))
 			(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 		else if (key == NCKEY_ESC)
 		{
@@ -347,6 +350,9 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 				action = auth_form_handle_key(form, key);
 			drained++;
 		}
+		if (action == AUTH_ACTION_QUIT && (key == 'q' || key == 'Q')
+			&& !confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP))
+			action = AUTH_ACTION_NONE;
 		if (action != AUTH_ACTION_NONE
 			&& !apply_auth_action(ctx, audio, provider, navigation,
 				form, action))
@@ -355,7 +361,7 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 	render_auth_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
-		if (reflow_home(ctx, menu) < 0)
+		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);
 	}
@@ -524,11 +530,21 @@ static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
 		if (key == NCKEY_RESIZE || key == 12u)
 		{
 			render_sign_in_destroy(ctx, modal);
-			if (reflow_home(ctx, menu) < 0)
+			if (reflow_home(ctx, menu, false, true) < 0)
 				return (-1);
 			modal->visible = true;
 			if (!render_sign_in_show(ctx, modal))
 				return (-1);
+			continue ;
+		}
+		if (key == 'q' || key == 'Q')
+		{
+			if (confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP))
+			{
+				render_sign_in_destroy(ctx, modal);
+				(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+				return (0);
+			}
 			continue ;
 		}
 		if (nckey_mouse_p(key))
@@ -677,6 +693,8 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			if (!render_leaderboard_show(ctx, &view, &state, false))
 				return (-1);
 		}
+		if (leaderboard_action_leaves_screen(action))
+			discard_queued_input(ctx);
 		if (action == LEADERBOARD_ACTION_REFRESH)
 		{
 			audio_play_menu_select(audio);
@@ -687,13 +705,15 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_play_menu_select(audio);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
-		else if (action == LEADERBOARD_ACTION_QUIT)
+		else if (action == LEADERBOARD_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	}
 	render_leaderboard_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
-		if (reflow_home(ctx, menu) < 0)
+		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);
 	}
@@ -886,13 +906,15 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			(void)app_navigation_dispatch(navigation,
 				APP_NAV_OPEN_MARKETPLACE);
 		}
-		else if (action == SETTINGS_ACTION_QUIT)
+		else if (action == SETTINGS_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	}
 	render_settings_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
-		if (reflow_home(ctx, menu) < 0)
+		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);
 	}
@@ -1034,13 +1056,15 @@ static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_play_menu_select(audio);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
-		else if (action == MARKETPLACE_ACTION_QUIT)
+		else if (action == MARKETPLACE_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	}
 	render_marketplace_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
-		if (reflow_home(ctx, menu) < 0)
+		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);
 	}
@@ -1219,7 +1243,9 @@ static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_play_menu_select(audio);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
-		else if (action == MP_MODE_ACTION_QUIT)
+		else if (action == MP_MODE_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	}
 	return (0);
@@ -1303,6 +1329,8 @@ static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			}
 			(void)lobby_handle_key(&state, queued_key);
 		}
+		if (state.filter != previous.filter)
+			lobby_state_sync(&state, &view.data.lobby);
 		if (action == LOBBY_ACTION_REFRESH)
 		{
 			audio_play_menu_select(audio);
@@ -1321,9 +1349,7 @@ static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				audio_volume_up(audio);
 			else
 				audio_volume_down(audio);
-			lobby_set_feedback(&state, LOBBY_FEEDBACK_VOLUME,
-				ui_notification_volume_percent(audio->music_volume));
-			refresh = true;
+			render_notification_show_volume(ctx, audio->music_volume);
 		}
 		else if (action == LOBBY_ACTION_JOIN
 			|| action == LOBBY_ACTION_JOIN_BY_ID)
@@ -1346,7 +1372,9 @@ static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			session->mode = state.filter;
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
-		else if (action == LOBBY_ACTION_QUIT)
+		else if (action == LOBBY_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 		if (lobby_action_leaves_screen(action))
 			discard_queued_input(ctx);
@@ -1485,7 +1513,9 @@ static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_play_menu_select(audio);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
-		else if (action == CREATE_ROOM_ACTION_QUIT)
+		else if (action == CREATE_ROOM_ACTION_QUIT
+			&& ((key != 'q' && key != 'Q')
+				|| confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP)))
 			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	}
 	return (0);
@@ -1510,16 +1540,24 @@ static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	uint64_t				deadline;
 	uint64_t				now;
 	int						wait_ms;
+	bool					prompted;
 
 	if (!load_room_view(provider, session))
 		return (-1);
+	(void)waiting_room_sync_state(&session->room_view.data.room);
 	waiting_room_state_init(&session->room_state);
+	if (waiting_room_auto_start_allowed(&session->room_view.data.room))
+		(void)waiting_room_begin_countdown(&session->room_state);
 	(void)notcurses_mice_disable(ctx->nc);
 	render_notification_destroy(ctx);
 	if (!render_waiting_room_show(ctx, &session->room_view,
 			&session->room_state, true))
 		return (-1);
+	audio_play_room_entry(audio);
 	deadline = 0;
+	if (session->room_state.counting_down)
+		deadline = ui_notification_now_ms()
+			+ WAITING_ROOM_COUNTDOWN_STEP_MS;
 	while (navigation->current == APP_SCREEN_WAITING_ROOM)
 	{
 		wait_ms = -1;
@@ -1530,6 +1568,7 @@ static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 		key = render_wait_input_timeout(ctx, &input, wait_ms);
 		action = ROOM_ACTION_NONE;
+		prompted = false;
 		previous = session->room_state;
 		if (key == 0)
 		{
@@ -1550,16 +1589,30 @@ static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			continue ;
 		}
 		else
-			action = waiting_room_handle_key(&session->room_state, key);
+			action = waiting_room_handle_key(&session->room_state,
+					&session->room_view.data.room, key);
+		if (action == ROOM_ACTION_LEAVE)
+		{
+			prompted = true;
+			if (!confirmation_prompt_run(ctx, audio, CONFIRM_LEAVE_ROOM))
+				action = ROOM_ACTION_NONE;
+		}
+		else if (action == ROOM_ACTION_QUIT && (key == 'q' || key == 'Q'))
+		{
+			prompted = true;
+			if (!confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP))
+				action = ROOM_ACTION_NONE;
+		}
+		if (prompted && session->room_state.counting_down)
+			deadline = ui_notification_now_ms()
+				+ WAITING_ROOM_COUNTDOWN_STEP_MS;
 		if (!apply_room_action(ctx, audio, navigation, session, action))
 			return (-1);
-		/*
-		 * A room that has met its start conditions begins counting down on its
-		 * own. The owner's [S] arms the same countdown a moment earlier; it is
-		 * not the only way in, because a duel whose second seat readies up is
-		 * ready to play whether or not its owner is at the keyboard.
-		 */
-		if (waiting_room_can_start(&session->room_view.data.room))
+		/* Double auto-starts; Battle Royale can only enter here through the
+		 * owner's explicit Start action handled above. */
+		if (navigation->current == APP_SCREEN_WAITING_ROOM
+			&& waiting_room_auto_start_allowed(
+				&session->room_view.data.room))
 			(void)waiting_room_begin_countdown(&session->room_state);
 		if (session->room_state.counting_down && previous.counting_down == false)
 			deadline = ui_notification_now_ms()
@@ -1589,14 +1642,16 @@ static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
 	app_room_view_model_t	*room;
 	room_feedback_t			blocker;
 
-	(void)ctx;
 	room = &session->room_view.data.room;
 	if (action == ROOM_ACTION_TOGGLE_READY)
 	{
 		audio_play_menu_select(audio);
 		if (waiting_room_toggle_ready(room))
+		{
+			(void)waiting_room_sync_state(room);
 			session->room_state.feedback = waiting_room_local_ready(room)
 				? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+		}
 		/* Un-readying mid-countdown stops it: the room is no longer eligible. */
 		if (session->room_state.counting_down && !waiting_room_can_start(room))
 			(void)waiting_room_cancel_countdown(&session->room_state);
@@ -1627,14 +1682,13 @@ static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
 			audio_volume_up(audio);
 		else
 			audio_volume_down(audio);
-		session->room_state.feedback = ROOM_FEEDBACK_VOLUME;
-		session->room_state.feedback_value
-			= ui_notification_volume_percent(audio->music_volume);
+		render_notification_show_volume(ctx, audio->music_volume);
 		return (true);
 	}
 	if (action == ROOM_ACTION_LAUNCH)
 	{
 		audio_play_menu_select(audio);
+		room->state = APP_ROOM_STATE_IN_GAME;
 		(void)app_navigation_dispatch(navigation,
 			waiting_room_launch_action(room));
 		return (true);
@@ -1697,7 +1751,7 @@ static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
 	render_multiplayer_destroy(ctx);
 	if (navigation->current != APP_SCREEN_HOME)
 		return (0);
-	if (reflow_home(ctx, menu) < 0)
+	if (reflow_home(ctx, menu, false, true) < 0)
 		return (-1);
 	enable_home_mouse(ctx);
 	return (0);
@@ -1710,13 +1764,16 @@ static void	discard_queued_input(render_ctx_t *ctx)
 {
 	ncinput		input;
 	uint32_t	key;
+	int			drained;
 
-	while (true)
+	drained = 0;
+	while (drained < DISCARD_INPUT_BATCH_MAX)
 	{
 		memset(&input, 0, sizeof(input));
 		key = notcurses_get_nblock(ctx->nc, &input);
 		if (key == 0 || key == (uint32_t)-1)
 			return ;
+		drained++;
 	}
 }
 
@@ -1761,13 +1818,16 @@ static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 		action = scaffold_navigation_action(navigation->current, key);
 	if (action == APP_NAV_NONE)
 		return (0);
+	if (action == APP_NAV_QUIT && (key == 'q' || key == 'Q')
+		&& !confirmation_prompt_run(ctx, audio, CONFIRM_QUIT_APP))
+		return (0);
 	audio_play_menu_select(audio);
 	if (!app_navigation_dispatch(navigation, action))
 		return (0);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
 		render_screen_destroy(ctx);
-		if (reflow_home(ctx, menu) < 0)
+		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);
 	}
@@ -1817,12 +1877,14 @@ static void	enable_home_mouse(render_ctx_t *ctx)
 /**
  * @brief Rebuilds the home screen after resize or scaffold navigation.
  */
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu)
+static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu,
+	bool refresh_geometry, bool replace_background)
 {
 	render_screen_destroy(ctx);
 	render_menu_destroy(ctx);
-	if (render_geometry_refresh(ctx, true) < 0
-		|| render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+	if ((refresh_geometry && render_geometry_refresh(ctx, true) < 0)
+		|| (replace_background && render_background_replace(ctx,
+				SPLASH_ASSET_PATH, false) < 0))
 		return (-1);
 	render_menu_create(ctx);
 	render_menu_move_bunny(ctx, menu);

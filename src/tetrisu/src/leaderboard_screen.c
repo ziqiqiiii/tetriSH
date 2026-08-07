@@ -30,6 +30,18 @@ bool	leaderboard_navigation_keys_coalesce(uint32_t active_key,
 }
 
 /**
+ * @brief Reports whether an action ends the leaderboard input loop.
+ *
+ * @param action Action returned by leaderboard_handle_key().
+ * @return true when queued input must be discarded before navigation.
+ */
+bool	leaderboard_action_leaves_screen(leaderboard_action_t action)
+{
+	return (action == LEADERBOARD_ACTION_BACK
+		|| action == LEADERBOARD_ACTION_QUIT);
+}
+
+/**
  * @brief Maps keyboard input to semantic leaderboard actions.
  */
 leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,

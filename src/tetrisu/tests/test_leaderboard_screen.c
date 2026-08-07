@@ -72,6 +72,10 @@ static void	test_shortcuts_and_confirm(void)
 		== LEADERBOARD_ACTION_QUIT);
 	assert(leaderboard_handle_key(&state, 'x')
 		== LEADERBOARD_ACTION_NONE);
+	assert(leaderboard_action_leaves_screen(LEADERBOARD_ACTION_BACK));
+	assert(leaderboard_action_leaves_screen(LEADERBOARD_ACTION_QUIT));
+	assert(!leaderboard_action_leaves_screen(LEADERBOARD_ACTION_REFRESH));
+	assert(!leaderboard_action_leaves_screen(LEADERBOARD_ACTION_NONE));
 	printf("PASS test_shortcuts_and_confirm\n");
 }
 

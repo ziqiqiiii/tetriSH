@@ -1,6 +1,7 @@
 #include "tetrisu.h"
 
 static void	test_fixture_settings_model(void);
+static void	test_theme_preview_asset_contract(void);
 static void	test_offline_settings_are_account_free(void);
 static void	test_settings_focus_and_actions(void);
 static void	test_preview_gate_and_navigation(void);
@@ -18,6 +19,7 @@ int	main(void)
 {
 	test_region_planes_never_overlap();
 	test_fixture_settings_model();
+	test_theme_preview_asset_contract();
 	test_offline_settings_are_account_free();
 	test_settings_focus_and_actions();
 	test_preview_gate_and_navigation();
@@ -30,6 +32,50 @@ int	main(void)
 	test_backwards_focus_reaches_the_last_slot();
 	test_leaving_a_grid_focuses_the_button_below();
 	return (0);
+}
+
+/**
+ * @brief Every theme preview stays a canonical square RGBA PNG.
+ *
+ * The bitmap renderer preserves a source image's aspect ratio. Validating the
+ * IHDR directly catches portrait replacements that would otherwise become a
+ * narrow letterboxed thumbnail without making tests depend on Notcurses.
+ */
+static void	test_theme_preview_asset_contract(void)
+{
+	static const char	*paths[] = {
+		SETTINGS_THEME_CLASSIC_PREVIEW_PATH,
+		SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH,
+		SETTINGS_THEME_SNOWMAN_PREVIEW_PATH,
+		SETTINGS_THEME_HAALAND_PREVIEW_PATH,
+		SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH,
+		SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH,
+		SETTINGS_THEME_CLAUDING_PREVIEW_PATH
+	};
+	static const unsigned char	signature[] = {
+		137, 'P', 'N', 'G', 13, 10, 26, 10
+	};
+	unsigned char	header[26];
+	FILE			*file;
+	int				index;
+
+	index = 0;
+	while (index < (int)(sizeof(paths) / sizeof(paths[0])))
+	{
+		file = fopen(paths[index], "rb");
+		assert(file != NULL);
+		assert(fread(header, 1, sizeof(header), file) == sizeof(header));
+		assert(fclose(file) == 0);
+		assert(memcmp(header, signature, sizeof(signature)) == 0);
+		assert(memcmp(header + 12, "IHDR", 4) == 0);
+		assert(header[16] == 0 && header[17] == 0
+			&& header[18] == 0 && header[19] == 192);
+		assert(header[20] == 0 && header[21] == 0
+			&& header[22] == 0 && header[23] == 192);
+		assert(header[24] == 8 && header[25] == 6);
+		index++;
+	}
+	printf("PASS test_theme_preview_asset_contract\n");
 }
 
 /**

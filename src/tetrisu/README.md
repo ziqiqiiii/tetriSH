@@ -137,15 +137,24 @@ waiting room with chat and a pre-match countdown — while the authoritative
   that cannot succeed with the reason on its status line - full, or already in
   game. A room id can also be typed directly, which ignores the list filter: an
   id is how a friend shares a room, and a filter the player happens to have set
-  must not hide the room they were invited to.
-- The waiting room shows every seat with a ready badge, a status line, and a
-  chat column on the right. `C` opens the composer, and while it is open every
-  printable key is text - so a message containing "s" cannot start the match.
-- A Double room starts when both seats are filled and both players are ready; a
-  Battle Royale room needs four players and a ready majority, so a lobby of
-  eight starts on five. Either way a five-second countdown runs first, and
-  un-readying during it cancels it. The owner's `S` arms the same countdown a
-  moment earlier.
+  must not hide the room they were invited to. Both renderer tiers use the
+  same six-row scrolling viewport, so every modeled room remains visibly
+  selectable when the filter is set to every open room.
+- The waiting room shows eight seats at a time with ready badges plus the full
+  occupied/capacity count; Up/Down and Page Up/Page Down scroll the complete
+  roster. It also has a status line and a chat column on the right. `C` opens
+  the composer, and while it is open every printable key is text - so a message
+  containing "s" cannot start the match.
+- A Double room auto-starts when both seats are filled and ready. Battle Royale
+  supports capacities from 4 through 99, requires every occupied player to be
+  ready, and waits for the room owner to press `S`. Both paths run the same
+  five-second countdown, and un-readying during it cancels it.
+- Entering a waiting room plays the short dialog acknowledgement once. It uses
+  the menu-select mix level (48 rather than the normal gameplay 72), so the cue
+  stays softer than match effects and remains governed by the shared volume.
+- Lobby and waiting-room volume keys use the same floating music-volume card
+  as Home and Solo; they do not replace room-list, readiness, countdown, or
+  chat feedback.
 - The countdown is the only value in the client that advances without input, so
   it is the only thing on its region plane: one small plane repaints per second
   and nothing else on the screen is touched.
@@ -353,12 +362,13 @@ and graphics-protocol support at startup. It exits with
 | `Enter` / `Esc` in Create Room | Create the room / cancel back to the lobby |
 | `R` in the Waiting Room | Toggle your ready flag |
 | `S` in the Waiting Room | Start, when the room's conditions are met and you own it |
+| `↑` / `↓` or Page Up / Page Down in the Waiting Room | Scroll the player roster |
 | `C` or `Enter` in the Waiting Room | Open the chat composer; `Esc` closes it |
 | `Enter` in the chat composer | Post the message |
-| `L` in the Waiting Room | Leave back to the lobby |
+| `L` or `Esc` in the Waiting Room | Ask for confirmation, then leave back to the lobby only on Yes |
 | `+` / `=` | Raise music volume one step |
 | `-` / `_` | Lower music volume one step |
-| `q` | Quit |
+| `q` | Open the safe-default No/Yes quit confirmation; exit only on Yes |
 | `←` / `→` in the Settings control row | Cycle Back, Marketplace, Volume -, Volume + (Settings takes no mouse input) |
 | `↑` from the Settings control row | Focus the characters catalogue |
 | `←` / `→` at an inventory panel edge | Cross between the characters and themes panels |
@@ -390,7 +400,7 @@ and graphics-protocol support at startup. It exits with
 | Mouse hover/click | Show an ability description / activate its meter circle |
 | `P` | Pause/resume Solo |
 | `R` | Restart after top-out |
-| `Esc` or `Q` | Return from Solo to the home screen |
+| `Esc` or `Q` | Ask for confirmation, then return from Solo to Home only on Yes |
 
 Single Player opens the playable local mode. In offline mode, Multiplayer,
 Marketplace, and Leaderboard open a sign-in-required modal with Escape to
@@ -501,6 +511,8 @@ Modules (each a `.c` under `src/`):
 | `multiplayer_screen.c` | Pure mode-picker and create-room state, actions, and card copy |
 | `lobby_screen.c` | Pure room-browser state: filter, cursor, join-by-id field, and join guards |
 | `waiting_room_screen.c` | Pure ready/start policy, chat transcript, and the pre-match countdown |
+| `confirmation.c` | Pure safe-default Yes/No confirmation state and copy |
+| `render_confirmation.c` | Persistent confirmation plane and keyboard interaction loop |
 | `multiplayer_layout.c` | Reference-space geometry for all four multiplayer surfaces |
 | `render_multiplayer.c` | Chooses the multiplayer compositor or the self-contained cell fallback |
 | `render_multiplayer_font.c` | Composes the static frame and the region planes for all four multiplayer screens |

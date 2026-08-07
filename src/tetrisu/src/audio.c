@@ -355,6 +355,18 @@ void	audio_play_menu_select(audio_ctx_t *audio)
 }
 
 /**
+ * @brief Plays the short, restrained cue used when entering a room.
+ *
+ * The existing 300 ms dialog clip is intentionally reused: its mix level is
+ * 48 rather than the normal gameplay level of 72, so the acknowledgement is
+ * audible without competing with room chat or music.
+ */
+void	audio_play_room_entry(audio_ctx_t *audio)
+{
+	audio_play_menu_select(audio);
+}
+
+/**
  * @brief Sets music volume to an absolute level, clamped to the mixer range.
  *
  * @param audio Audio context returned by audio_init().

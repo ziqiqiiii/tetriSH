@@ -209,6 +209,28 @@ When two regions genuinely occupy the same space, make them **mutually
 exclusive** rather than stacked: keep at most one alive and destroy the other.
 The powers card and the signed-in volume readout do this.
 
+**When the gap cannot be made wide enough, stop making two planes.** The mode
+picker's control legend sits 28 units under its cards — half the vertical floor,
+and there is nowhere to move it to, because the panel it lives in is only so
+tall. Two planes that round onto the same cell blank each other, so the legend
+is drawn *into* the card region instead. It costs a few extra glyphs per
+keystroke and removes the failure entirely. Ask whether two rectangles need to
+be separate planes before asking how to separate them.
+
+**The layout struct holds more than planes.** It also holds plates, control
+rows, and anything else the compositors need in reference space, and some of
+those deliberately sit inside a region. A sweep that iterates the whole struct
+will flag those as overlaps, so the sweep needs an explicit per-screen list of
+the rectangles that actually become planes:
+
+```c
+static void	region_list(const mp_layout_t *layout, app_screen_t screen,
+	const mp_rect_t **regions, int *count)
+```
+
+Keep that list next to the sweep, not next to the renderer, and add to it when
+you add a plane. A rectangle missing from it is a plane nothing is checking.
+
 ---
 
 ## Step 3 — Give every layer a signature
@@ -336,6 +358,47 @@ Also drop keyboard release events (`NCTYPE_RELEASE`) so one tap moves once, and
 call `discard_queued_input()` on actions that leave the screen so repeats cannot
 leak into the next one.
 
+**Typed characters never coalesce.** Two identical letters in a room id are two
+edits, not a repeat of one, so a screen with a text field must keep its
+coalesce predicate to movement keys only. A screen with nothing worth repeating
+at all — the waiting room has no cursor to hold down — should return `false`
+unconditionally and say so, rather than leaving a predicate that looks like it
+does something.
+
+---
+
+## Screens with two input modes
+
+A text field on a screen that also has single-letter commands is not a focus
+state, it is a **mode**. Trying to make one key mean both is the trap: `c` is
+"create room" in the lobby's table and the letter `c` in its join field, and
+there is no clever rule that makes one keypress mean both.
+
+Split the key handler in two and pick between them at the top:
+
+```c
+if (state->section == LOBBY_SECTION_JOIN)
+    return (handle_join_key(state, key));
+return (handle_rooms_key(state, key));
+```
+
+Three rules that make the mode obvious to the person typing:
+
+- **Inside the field, every printable key is text.** The commands are
+  deliberately unreachable, not overridden. A chat message containing "s" must
+  not start the match.
+- **Escape leaves the field, not the screen.** It is the only key whose meaning
+  changes, and it changes in the direction users expect: one step out, not two.
+- **Draw the mode.** A caret while focused and none while not, a coloured field
+  border, a composer line that reads `[C] type a message` when closed and
+  `> text_` when open. Without that the two modes look identical and the same
+  key appears to do different things at random.
+
+Accept printable ASCII only (`0x20`–`0x7e`) and drop everything else rather than
+storing a placeholder. Arrow keys, function keys and multi-byte input all arrive
+as codepoints, and a `?` written into a room id is a room id the server will
+reject for a reason the user cannot see.
+
 ---
 
 ## Step 6 — Skip the render when nothing moved
@@ -421,6 +484,85 @@ ticks.
 
 ---
 
+## Drawing over authored art
+
+The backdrops are scenes, not frames. They are authored with a quiet middle and
+a decorated border, and the border is where legibility goes to die.
+
+**Panels are fine anywhere; loose text is not.** A panel draws its own opaque
+plate, so it can sit over anything. A title row, a legend, or a control strip
+outside every panel has nothing behind it, and lands straight on the skull
+frieze or the tetromino rubble. Both the lobby and the waiting room draw a
+plain opaque band behind those strips:
+
+```c
+static void	draw_band(uint32_t *pixels, int width, int height,
+	const mp_layout_t *layout, int ref_y_value, int ref_height)
+{
+	fill_ref_rect(pixels, width, height, layout, MP_BAND_X, ref_y_value,
+		MULTIPLAYER_REFERENCE_WIDTH - 2 * MP_BAND_X, ref_height, g_mp_plate,
+		238u);
+}
+```
+
+Bands belong in the static layer and are drawn **first**, so the panels' own
+plates land on top of them. Nothing about this is visible in a plane-emission
+trace — it is only found by looking at the pixels, which is the argument for
+decoding a frame rather than only counting them.
+
+**A modal is a screen, not a plane.** A panel raised over the screen it dims is
+the exact shape of the blanking bug: it damages the cells it covers, and a
+stationary protocol repairs that by retransmitting the full-screen bitmap
+underneath, over every region above it. Draw the dim wash and the panel into
+their own screen's static layer instead:
+
+```c
+fill_ref_rect(pixels, width, height, layout, 0, 0,
+	MULTIPLAYER_REFERENCE_WIDTH, MULTIPLAYER_REFERENCE_HEIGHT,
+	g_mp_shadow, 170u);
+draw_plate(pixels, width, height, layout, &layout->panel, g_mp_green);
+```
+
+It looks identical, it costs one screen change instead of one raised plane, and
+it cannot blank anything. Create Room is built this way.
+
+**Plates round with their regions.** Draw a panel's plate from the *fitted*
+rectangle in the layout struct, not from reference units recomputed at the draw
+site. A plate a pixel short of the region cropped out of it leaves a seam the
+stationary tier has nothing to fill with.
+
+---
+
+## The cell fallback
+
+`TETRISU_RENDERER=cell` gets a self-contained panel with no artwork, and it is
+not a smaller copy of the bitmap screen.
+
+**Stack what the bitmap tier puts side by side.** The lobby draws its room table
+and its join field in two columns; the cell panel puts the field under the
+table. That is what keeps the minimum inside a conventional terminal — side by
+side needed 80+ columns, stacked needs 58.
+
+**Derive the minimum from the widest thing you draw, and state it in a
+constant.** Then refuse smaller terminals with a notice rather than a broken
+frame:
+
+```
+MULTIPLAYER NEEDS 58x20
+RESIZE OR ESC
+```
+
+**Clip every value.** A username or a room id arrives from a provider and will
+one day arrive from a server. One long field with no clip walks straight through
+the frame border. A single `put_line()` that snprintf's with a width precision
+is enough, and it is worth routing everything through it.
+
+**Let a failed bitmap composition fall through to it.** The screen loops treat
+`false` as fatal, so a renderer that gives up must degrade rather than return
+it — opening a lobby must never be able to quit the client.
+
+---
+
 ## The bugs
 
 Every one of these shipped at least once. They are all invisible to unit tests
@@ -438,6 +580,10 @@ and to the terminal you developed in.
 | A region of the previous screen sits on top of the new one | screens sharing a plane set, and only some planes destroyed on the switch | destroy every region plane and clear every signature on a screen change |
 | Every region repaints when any one of them changes | one model hash seeding all of them | split the model hash along the same lines the regions are split |
 | A plane repaints on every keystroke in an unrelated field | a signature hashing a field the region only sometimes draws | hash the rendered line, not the field behind it |
+| Title or legend unreadable against the backdrop | loose text outside every panel, over the art's decorated border | draw an opaque band behind that strip, first, in the static layer |
+| A typed letter fires a command, or a command types a letter | one key handler for a screen that has a text field | split the handler by mode; inside a field every printable key is text |
+| A held key drops letters out of a typed field | a coalesce predicate that folds more than movement keys | never coalesce printable characters |
+| A long username or id walks through the cell frame | a cell-mode value drawn without a width clip | route every cell write through one clipping helper |
 
 ### The blanking one, in full
 
@@ -511,20 +657,24 @@ Before calling a screen done:
 - [ ] Static and region layers separated; nothing **focus- or action-sensitive** in the static layer
 - [ ] Region rectangles in the layout struct, read by both renderer and tests
 - [ ] Region planes pairwise disjoint across a geometry sweep, or mutually exclusive
+- [ ] The sweep's plane list names every rectangle that becomes a plane, and only those
 - [ ] No region reaches the top-right corner notifications are raised into
 - [ ] Every signature hashes fields, not structs
 - [ ] Every region signature seeded with the static signature **and the model**
 - [ ] Planes created once and written in place; replaced only on geometry change
 - [ ] No per-frame `ncplane_move_top()`
 - [ ] Row pitch clears the previous row's descenders; related labels share one fitted size
-- [ ] Identical movement keys coalesced; releases dropped; queue discarded on exit
+- [ ] Identical movement keys coalesced; typed characters never; releases dropped; queue discarded on exit
+- [ ] A screen with a text field splits its key handler by mode, and draws which mode it is in
 - [ ] `notcurses_render()` skipped when nothing changed and no notification is up
-- [ ] Cell fallback path works under `TETRISU_RENDERER=cell`
+- [ ] Cell fallback path works under `TETRISU_RENDERER=cell`, and every value it draws is clipped
+- [ ] Loose text outside every panel has a band behind it
 - [ ] Teardown frees planes, cached canvases, and resets signatures
 - [ ] Every action — not just every keystroke — leaves the whole screen drawn
 - [ ] Region seeds are scoped: no region repaints because an unrelated one changed
 - [ ] Screens sharing a plane set destroy every plane and signature on a switch
 - [ ] Anything that ticks without input sits alone on its region
+- [ ] One frame of the stationary tier decoded and **looked at**, not just counted
 
 ---
 
@@ -549,7 +699,10 @@ where the blanking bugs live, and holding an arrow key will not find them.
 
 `TETRISU_UI_PREVIEW=1` enables a fixture login (`p` on the login screen once
 focus reaches the primary button), which reaches signed-in screens without a
-server.
+server. Note the second half of that sentence: `p` typed while a text field
+holds focus is the letter `p`, so a script has to walk focus down to the primary
+button first. Real credentials are not an alternative — `auth_form_submit()`
+refuses until the server check succeeds, and there is no server.
 
 Two limits worth knowing on this hardware:
 
@@ -601,19 +754,39 @@ you were testing. The symptom is a capture full of `\e_G` chunks and not one
 
 With Sixel actually chosen, `TETRISU_RENDERER=stationary` exercises the real
 stationary path, and each frame arrives as `DCS … q … ST` preceded by a cursor
-move. Parse `\e[<row>;<col>H` to know where each bitmap lands, then either:
+move. Parse `\e[<row>;<col>H` to know where each bitmap lands.
 
-- **Decode the pixels.** Sixel is simple enough to decode in ~60 lines
-  (`#n;2;r;g;b` palette, `?`–`~` as six vertical pixels, `!n` run-length, `$`
-  carriage return, `-` next band). ImageMagick's reader drops the palette, so
-  write your own. Compositing the planes at their cursor positions reconstructs
-  the screen exactly as a real terminal would draw it.
-- **Or just read the plane list.** Often you do not need pixels at all. Each
-  sixel's raster header `"1;1;<w>;<h>` plus its cursor position tells you which
-  plane it is and how big — enough to answer *"did this action re-emit the
-  full-screen bitmap?"*, which is the question behind most of the bugs above.
+There are two different questions to ask of that capture, and they want two
+different amounts of work:
 
-That last check is the cheap one and catches the expensive bug:
+- ***"Did this action re-emit the full-screen bitmap?"*** — **read the plane
+  list.** Each sixel's raster header `"1;1;<w>;<h>` plus its cursor position
+  tells you which plane it is and how big. No pixels needed. This is the cheap
+  check and it catches the expensive bug.
+- ***"Is what it drew actually readable?"*** — **decode the pixels.** Sixel is
+  simple enough to decode in ~60 lines (`#n;2;r;g;b` palette, `?`–`~` as six
+  vertical pixels, `!n` run-length, `$` carriage return, `-` next band).
+  ImageMagick's reader drops the palette, so write your own. Composite the
+  planes at their cursor positions into one image and the result is the screen
+  as a real terminal would draw it.
+
+Do not skip the second one because the first passed. They fail independently:
+the multiplayer screens had a clean plane trace *and* a title row sitting
+unreadably on top of a skull frieze, and no amount of counting bitmaps would
+ever have said so. It is also the only way to catch a truncated caption, a
+mis-sized row of labels, or a colour branch taken wrongly — sampling a few
+pixels out of the composited image is a fast way to check the last of those
+without trusting your own eyes:
+
+```python
+# is the STATE column green for a joinable room and red for a full one?
+for label, y in (("duel-42 1/2", 216), ("duel-51 2/2", 308)):
+    ...  # most common bright pixel in that cell
+# duel-42 (112, 214, 173)   <- green, joinable
+# duel-51 (252, 112, 142)   <- red, full
+```
+
+For the plane-list check:
 
 ```
 # a purchase should touch only the regions that changed

@@ -372,8 +372,8 @@ static int	draw_room_table(struct ncplane *plane,
 	char								cell[APP_TEXT_MAX];
 	int									index;
 
-	index = 0;
-	while (index < APP_LOBBY_MAX_ROOMS && row < limit)
+	index = state->list_offset;
+	while (index < state->list_offset + LOBBY_VISIBLE_ROOMS && row < limit)
 	{
 		room = lobby_visible_room(lobby, state->filter, index);
 		if (room == NULL)
@@ -406,7 +406,7 @@ static int	draw_room_table(struct ncplane *plane,
 		row++;
 		index++;
 	}
-	if (index == 0 && row < limit)
+	if (index == state->list_offset && row < limit)
 	{
 		set_colour(plane, MP_DISABLED_R, MP_DISABLED_G, MP_DISABLED_B);
 		put_line(plane, row, 2 + MP_COL_ID, cols - 6,
@@ -476,7 +476,7 @@ static void	draw_create_room(struct ncplane *plane,
 	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 	put_centered(plane, rows - 2, cols,
-		"[UP/DOWN] MOVE  [ENTER] CREATE  [ESC] CANCEL", false);
+		"[1/2] SELECT  [ENTER] CREATE  [ESC] CANCEL", false);
 }
 
 /**
@@ -489,6 +489,9 @@ static void	draw_waiting_room(struct ncplane *plane,
 	const app_room_view_model_t	*room;
 	char						line[APP_TEXT_MAX * 3];
 	int							seats;
+	int							visible;
+	int							start;
+	int							slot;
 	int							index;
 	int							row;
 
@@ -503,28 +506,31 @@ static void	draw_waiting_room(struct ncplane *plane,
 		room->id[0] != '\0' ? room->id : "-");
 	put_centered(plane, 2, cols, line, false);
 	put_rule(plane, 3, cols);
-	seats = room->capacity > 0 ? room->capacity : room->player_count;
-	seats = min_int(seats, APP_ROOM_MAX_PLAYERS);
-	snprintf(line, sizeof(line), "SLOTS (%d/%d)", room->player_count, seats);
+	seats = waiting_room_slot_count(room);
+	visible = waiting_room_visible_slot_count(room);
+	start = state->roster_offset;
+	snprintf(line, sizeof(line), "SLOTS (%d/%d) - %d-%d", room->player_count,
+		seats, visible > 0 ? start + 1 : 0, start + visible);
 	set_colour(plane, MP_PINK_R, MP_PINK_G, MP_PINK_B);
 	put_line(plane, 4, 2, cols - 4, line);
 	row = 5;
 	index = 0;
-	while (index < seats && row < rows - 8)
+	while (index < visible && row < rows - 7)
 	{
-		if (index < room->player_count)
+		slot = start + index;
+		if (slot < room->player_count)
 			set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 		else
 			set_colour(plane, MP_DISABLED_R, MP_DISABLED_G, MP_DISABLED_B);
-		waiting_room_slot_label(room, index, line, sizeof(line));
+		waiting_room_slot_label(room, slot, line, sizeof(line));
 		put_line(plane, row, 3, 30, line);
-		if (index < room->player_count)
+		if (slot < room->player_count)
 		{
-			if (room->players[index].ready)
+			if (room->players[slot].ready)
 				set_colour(plane, MP_GREEN_R, MP_GREEN_G, MP_GREEN_B);
 			else
 				set_colour(plane, MP_AMBER_R, MP_AMBER_G, MP_AMBER_B);
-			put_line(plane, row, 35, 14, waiting_room_badge_text(room, index));
+			put_line(plane, row, 35, 14, waiting_room_badge_text(room, slot));
 		}
 		row++;
 		index++;
@@ -543,10 +549,10 @@ static void	draw_waiting_room(struct ncplane *plane,
 		set_colour(plane, MP_GOLD_R, MP_GOLD_G, MP_GOLD_B);
 		put_line(plane, row + 2, 2, cols - 4, line);
 	}
-	(void)draw_chat(plane, room, state, row + 4, cols, rows - 2);
+	(void)draw_chat(plane, room, state, row + 3, cols, rows - 2);
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 	put_centered(plane, rows - 2, cols,
-		"[R] READY  [S] START  [C] CHAT  [L] LEAVE", false);
+		"[UP/DN] LIST [R] READY [S] START [C] CHAT [L] LEAVE", false);
 }
 
 /**
@@ -613,7 +619,8 @@ static void	set_colour(struct ncplane *plane, int red, int green, int blue)
 static void	set_room_state_colour(struct ncplane *plane,
 	const app_room_summary_view_model_t *room)
 {
-	if (room->state == APP_ROOM_STATE_IN_GAME)
+	if (room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_FINISHED)
 		set_colour(plane, MP_DISABLED_R, MP_DISABLED_G, MP_DISABLED_B);
 	else if (room->capacity > 0 && room->players >= room->capacity)
 		set_colour(plane, MP_RED_R, MP_RED_G, MP_RED_B);

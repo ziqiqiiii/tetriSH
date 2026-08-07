@@ -161,12 +161,30 @@ const char	*mp_mode_card_players(int index)
 {
 	static const char	*players[MP_MODE_CARD_COUNT] = {
 		"2 players",
-		"4 - 8 players"
+		"4 - 99 players"
 	};
 
 	if (index < 0 || index >= MP_MODE_CARD_COUNT)
 		return ("");
 	return (players[index]);
+}
+
+/**
+ * @brief Validates the server-facing capacity contract for one game mode.
+ *
+ * Double always has exactly two slots. Battle Royale rooms may choose any
+ * capacity from the four-player start threshold through the protocol maximum.
+ * Keeping the rule here gives providers, lobby guards, and room policy one
+ * authoritative boundary.
+ */
+bool	multiplayer_room_capacity_valid(app_game_mode_t mode, int capacity)
+{
+	if (mode == APP_GAME_MODE_DOUBLE)
+		return (capacity == WAITING_ROOM_DOUBLE_PLAYERS);
+	if (mode == APP_GAME_MODE_BATTLE_ROYALE)
+		return (capacity >= WAITING_ROOM_ROYALE_MIN_PLAYERS
+			&& capacity <= APP_ROOM_MAX_PLAYERS);
+	return (false);
 }
 
 /**
@@ -245,7 +263,7 @@ create_room_action_t	create_room_handle_key(create_room_state_t *state,
 		state->feedback = MP_MODE_FEEDBACK_NONE;
 		state->mode = key == '1'
 			? APP_GAME_MODE_DOUBLE : APP_GAME_MODE_BATTLE_ROYALE;
-		return (CREATE_ROOM_ACTION_CREATE);
+		return (CREATE_ROOM_ACTION_NONE);
 	}
 	if (is_confirm_key(key))
 		return (CREATE_ROOM_ACTION_CREATE);

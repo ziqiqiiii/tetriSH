@@ -5,6 +5,7 @@ static lobby_action_t	handle_rooms_key(lobby_state_t *state, uint32_t key);
 static lobby_action_t	handle_join_key(lobby_state_t *state, uint32_t key);
 static void	move_selection(lobby_state_t *state, int delta);
 static void	clamp_selection(lobby_state_t *state);
+static void	sync_list_offset(lobby_state_t *state);
 static void	cycle_filter(lobby_state_t *state);
 static bool	append_room_id(lobby_state_t *state, uint32_t key);
 static bool	is_confirm_key(uint32_t key);
@@ -32,6 +33,7 @@ void	lobby_state_init(lobby_state_t *state, app_game_mode_t filter,
 	state->feedback = LOBBY_FEEDBACK_NONE;
 	state->filter = filter;
 	state->selected = 0;
+	state->list_offset = 0;
 	state->room_id[0] = '\0';
 	state->room_id_length = 0;
 	lobby_state_sync(state, lobby);
@@ -53,6 +55,7 @@ void	lobby_state_sync(lobby_state_t *state,
 		return ;
 	state->visible_count = lobby_visible_count(lobby, state->filter);
 	clamp_selection(state);
+	sync_list_offset(state);
 }
 
 /**
@@ -92,6 +95,7 @@ bool	lobby_state_view_changed(const lobby_state_t *before,
 		return (false);
 	return (before->section != after->section
 		|| before->selected != after->selected
+		|| before->list_offset != after->list_offset
 		|| before->visible_count != after->visible_count
 		|| before->filter != after->filter
 		|| before->feedback != after->feedback
@@ -254,8 +258,15 @@ lobby_feedback_t	lobby_join_blocker(
 {
 	if (room == NULL)
 		return (LOBBY_FEEDBACK_EMPTY_LIST);
+	if (!multiplayer_room_capacity_valid(room->mode, room->capacity)
+		|| room->players < 0 || room->players > room->capacity
+		|| room->state < APP_ROOM_STATE_WAITING
+		|| room->state > APP_ROOM_STATE_FINISHED)
+		return (LOBBY_FEEDBACK_INVALID_ROOM);
 	if (room->state == APP_ROOM_STATE_IN_GAME)
 		return (LOBBY_FEEDBACK_IN_GAME);
+	if (room->state == APP_ROOM_STATE_FINISHED)
+		return (LOBBY_FEEDBACK_FINISHED);
 	if (room->capacity > 0 && room->players >= room->capacity)
 		return (LOBBY_FEEDBACK_FULL);
 	return (LOBBY_FEEDBACK_NONE);
@@ -280,12 +291,16 @@ const char	*lobby_mode_tag(app_game_mode_t mode)
  * @brief Returns the state word used in the room table.
  *
  * @param state Room state to label.
- * @return "WAITING" or "IN-GAME".
+ * @return The stable room-state label used by both renderers.
  */
 const char	*lobby_state_tag(app_room_state_t state)
 {
 	if (state == APP_ROOM_STATE_IN_GAME)
 		return ("IN-GAME");
+	if (state == APP_ROOM_STATE_READY)
+		return ("READY");
+	if (state == APP_ROOM_STATE_FINISHED)
+		return ("FINISHED");
 	return ("WAITING");
 }
 
@@ -347,17 +362,19 @@ const char	*lobby_feedback_text(const lobby_state_t *state, char *out,
 		snprintf(out, size, "THAT ROOM IS FULL");
 	else if (state->feedback == LOBBY_FEEDBACK_IN_GAME)
 		snprintf(out, size, "THAT ROOM IS ALREADY IN GAME");
+	else if (state->feedback == LOBBY_FEEDBACK_FINISHED)
+		snprintf(out, size, "THAT ROOM HAS ALREADY FINISHED");
 	else if (state->feedback == LOBBY_FEEDBACK_EMPTY_LIST)
 		snprintf(out, size, "NO ROOMS HERE - PRESS C TO CREATE ONE");
 	else if (state->feedback == LOBBY_FEEDBACK_EMPTY_ID)
 		snprintf(out, size, "TYPE A ROOM ID FIRST");
 	else if (state->feedback == LOBBY_FEEDBACK_UNKNOWN_ID)
 		snprintf(out, size, "NO ROOM CALLED %s", state->room_id);
+	else if (state->feedback == LOBBY_FEEDBACK_INVALID_ROOM)
+		snprintf(out, size, "THAT ROOM HAS INVALID PLAYER DATA");
 	else if (state->feedback == LOBBY_FEEDBACK_FILTER)
 		snprintf(out, size, "SHOWING %s - %d ROOMS",
 			lobby_filter_name(state->filter), state->visible_count);
-	else if (state->feedback == LOBBY_FEEDBACK_VOLUME)
-		snprintf(out, size, "MUSIC VOLUME %d%%", state->feedback_value);
 	return (out);
 }
 
@@ -451,6 +468,30 @@ static void	move_selection(lobby_state_t *state, int delta)
 	}
 	state->selected += delta;
 	clamp_selection(state);
+	sync_list_offset(state);
+}
+
+/**
+ * @brief Keeps the selected room inside the shared six-row viewport.
+ */
+static void	sync_list_offset(lobby_state_t *state)
+{
+	int	maximum;
+
+	if (state->visible_count <= LOBBY_VISIBLE_ROOMS)
+	{
+		state->list_offset = 0;
+		return ;
+	}
+	if (state->selected < state->list_offset)
+		state->list_offset = state->selected;
+	else if (state->selected >= state->list_offset + LOBBY_VISIBLE_ROOMS)
+		state->list_offset = state->selected - LOBBY_VISIBLE_ROOMS + 1;
+	maximum = state->visible_count - LOBBY_VISIBLE_ROOMS;
+	if (state->list_offset > maximum)
+		state->list_offset = maximum;
+	if (state->list_offset < 0)
+		state->list_offset = 0;
 }
 
 static void	clamp_selection(lobby_state_t *state)
@@ -478,6 +519,7 @@ static void	cycle_filter(lobby_state_t *state)
 	else
 		state->filter = APP_GAME_MODE_DOUBLE;
 	state->selected = 0;
+	state->list_offset = 0;
 	state->feedback = LOBBY_FEEDBACK_FILTER;
 	state->feedback_value = 0;
 }

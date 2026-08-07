@@ -1,7 +1,10 @@
 #include "tetrisu.h"
 
 static void	test_double_needs_both_players_ready(void);
-static void	test_battle_royale_needs_four_and_a_majority(void);
+static void	test_battle_royale_needs_four_and_everyone_ready(void);
+static void	test_room_status_and_auto_start_policy(void);
+static void	test_battle_royale_capacity_and_roster_bounds(void);
+static void	test_roster_pagination(void);
 static void	test_start_blockers_explain_themselves(void);
 static void	test_countdown_runs_down_and_cancels(void);
 static void	test_chat_modes_read_input_differently(void);
@@ -15,7 +18,10 @@ static void	build_room(app_room_view_model_t *room, app_game_mode_t mode,
 int	main(void)
 {
 	test_double_needs_both_players_ready();
-	test_battle_royale_needs_four_and_a_majority();
+	test_battle_royale_needs_four_and_everyone_ready();
+	test_room_status_and_auto_start_policy();
+	test_battle_royale_capacity_and_roster_bounds();
+	test_roster_pagination();
 	test_start_blockers_explain_themselves();
 	test_countdown_runs_down_and_cancels();
 	test_chat_modes_read_input_differently();
@@ -27,7 +33,7 @@ int	main(void)
 }
 
 /**
- * @brief Builds a room whose local player owns seat zero and is never ready.
+ * @brief Builds a room owned from seat zero with a chosen ready-seat prefix.
  */
 static void	build_room(app_room_view_model_t *room, app_game_mode_t mode,
 	int players, int ready)
@@ -78,26 +84,116 @@ static void	test_double_needs_both_players_ready(void)
 }
 
 /**
- * @brief Battle Royale needs four seats filled and a strict majority ready.
+ * @brief Battle Royale needs four seats and every occupied player ready.
  */
-static void	test_battle_royale_needs_four_and_a_majority(void)
+static void	test_battle_royale_needs_four_and_everyone_ready(void)
 {
 	app_room_view_model_t	room;
 
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 3, 3);
 	assert(!waiting_room_can_start(&room));
-	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 2);
-	assert(waiting_room_required_ready(&room) == 3);
-	assert(!waiting_room_can_start(&room));
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 3);
-	assert(waiting_room_can_start(&room));
-	/* Eight players start on five, not on eight. */
-	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 8, 5);
-	assert(waiting_room_required_ready(&room) == 5);
-	assert(waiting_room_can_start(&room));
-	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 8, 4);
+	assert(waiting_room_required_ready(&room) == 4);
 	assert(!waiting_room_can_start(&room));
-	printf("PASS test_battle_royale_needs_four_and_a_majority\n");
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	assert(waiting_room_can_start(&room));
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 99, 98);
+	assert(waiting_room_required_ready(&room) == 99);
+	assert(!waiting_room_can_start(&room));
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 99, 99);
+	assert(waiting_room_can_start(&room));
+	printf("PASS test_battle_royale_needs_four_and_everyone_ready\n");
+}
+
+/**
+ * @brief Only a ready Double auto-starts; room statuses remain reconciled.
+ */
+static void	test_room_status_and_auto_start_policy(void)
+{
+	app_room_view_model_t	room;
+
+	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 2);
+	assert(waiting_room_auto_start_allowed(&room));
+	assert(waiting_room_sync_state(&room));
+	assert(room.state == APP_ROOM_STATE_READY);
+	assert(waiting_room_auto_start_allowed(&room));
+	room.players[1].ready = false;
+	assert(waiting_room_sync_state(&room));
+	assert(room.state == APP_ROOM_STATE_WAITING);
+	assert(!waiting_room_auto_start_allowed(&room));
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	assert(waiting_room_sync_state(&room));
+	assert(room.state == APP_ROOM_STATE_READY);
+	assert(waiting_room_can_start(&room));
+	assert(!waiting_room_auto_start_allowed(&room));
+	room.state = APP_ROOM_STATE_IN_GAME;
+	assert(!waiting_room_can_start(&room));
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_UNAVAILABLE);
+	room.state = APP_ROOM_STATE_FINISHED;
+	assert(!waiting_room_can_start(&room));
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_UNAVAILABLE);
+	printf("PASS test_room_status_and_auto_start_policy\n");
+}
+
+/**
+ * @brief Invalid capacities never start and the fixed roster stays in bounds.
+ */
+static void	test_battle_royale_capacity_and_roster_bounds(void)
+{
+	app_room_view_model_t	room;
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	assert(waiting_room_slot_count(&room) == 99);
+	assert(waiting_room_visible_slot_count(&room)
+		== WAITING_ROOM_VISIBLE_PLAYERS);
+	room.capacity = 3;
+	assert(!waiting_room_can_start(&room));
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_INVALID_ROOM);
+	room.capacity = 100;
+	assert(waiting_room_slot_count(&room) == APP_ROOM_MAX_PLAYERS);
+	assert(!waiting_room_can_start(&room));
+	room.capacity = APP_ROOM_MAX_PLAYERS;
+	room.player_count = APP_ROOM_MAX_PLAYERS + 1;
+	assert(!waiting_room_can_start(&room));
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_INVALID_ROOM);
+	printf("PASS test_battle_royale_capacity_and_roster_bounds\n");
+}
+
+/**
+ * @brief The eight-row window can reach every seat in a 99-player room.
+ */
+static void	test_roster_pagination(void)
+{
+	app_room_view_model_t	room;
+	waiting_room_state_t	state;
+	waiting_room_state_t	before;
+	int					step;
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 99, 50);
+	waiting_room_state_init(&state);
+	before = state;
+	assert(waiting_room_handle_key(&state, &room, NCKEY_DOWN)
+		== ROOM_ACTION_NONE);
+	assert(state.roster_offset == 1);
+	assert(waiting_room_state_view_changed(&before, &state));
+	(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
+	assert(state.roster_offset == 9);
+	step = 0;
+	while (step++ < 20)
+		(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
+	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
+		- WAITING_ROOM_VISIBLE_PLAYERS);
+	(void)waiting_room_handle_key(&state, &room, NCKEY_UP);
+	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
+		- WAITING_ROOM_VISIBLE_PLAYERS - 1);
+	(void)waiting_room_handle_key(&state, &room, NCKEY_PGUP);
+	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
+		- WAITING_ROOM_VISIBLE_PLAYERS * 2 - 1);
+	(void)waiting_room_handle_key(&state, &room, 'c');
+	before = state;
+	(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
+	assert(state.roster_offset == before.roster_offset);
+	printf("PASS test_roster_pagination\n");
 }
 
 /**
@@ -171,22 +267,23 @@ static void	test_chat_modes_read_input_differently(void)
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 1);
 	waiting_room_state_init(&state);
-	assert(waiting_room_handle_key(&state, 'r')
+	assert(waiting_room_handle_key(&state, &room, 'r')
 		== ROOM_ACTION_TOGGLE_READY);
-	assert(waiting_room_handle_key(&state, 's') == ROOM_ACTION_START);
-	assert(waiting_room_handle_key(&state, 'l') == ROOM_ACTION_LEAVE);
-	assert(waiting_room_handle_key(&state, NCKEY_ESC) == ROOM_ACTION_LEAVE);
-	assert(waiting_room_handle_key(&state, 'q') == ROOM_ACTION_QUIT);
-	assert(waiting_room_handle_key(&state, 'c') == ROOM_ACTION_NONE);
+	assert(waiting_room_handle_key(&state, &room, 's') == ROOM_ACTION_START);
+	assert(waiting_room_handle_key(&state, &room, 'l') == ROOM_ACTION_LEAVE);
+	assert(waiting_room_handle_key(&state, &room, NCKEY_ESC)
+		== ROOM_ACTION_LEAVE);
+	assert(waiting_room_handle_key(&state, &room, 'q') == ROOM_ACTION_QUIT);
+	assert(waiting_room_handle_key(&state, &room, 'c') == ROOM_ACTION_NONE);
 	assert(state.chatting);
 	/* Inside the composer the same letters are text, so "s" cannot start. */
-	assert(waiting_room_handle_key(&state, 's') == ROOM_ACTION_NONE);
-	assert(waiting_room_handle_key(&state, 'l') == ROOM_ACTION_NONE);
+	assert(waiting_room_handle_key(&state, &room, 's') == ROOM_ACTION_NONE);
+	assert(waiting_room_handle_key(&state, &room, 'l') == ROOM_ACTION_NONE);
 	assert(strcmp(state.compose, "sl") == 0);
-	assert(waiting_room_handle_key(&state, NCKEY_BACKSPACE)
+	assert(waiting_room_handle_key(&state, &room, NCKEY_BACKSPACE)
 		== ROOM_ACTION_NONE);
 	assert(strcmp(state.compose, "s") == 0);
-	assert(waiting_room_handle_key(&state, NCKEY_ENTER)
+	assert(waiting_room_handle_key(&state, &room, NCKEY_ENTER)
 		== ROOM_ACTION_SEND_CHAT);
 	assert(waiting_room_send_chat(&room, &state));
 	assert(state.compose_length == 0);
@@ -199,13 +296,14 @@ static void	test_chat_modes_read_input_differently(void)
 	step = 0;
 	while (step < APP_ROOM_CHAT_TEXT_MAX * 2)
 	{
-		(void)waiting_room_handle_key(&state, 'x');
+		(void)waiting_room_handle_key(&state, &room, 'x');
 		step++;
 	}
 	assert(state.compose_length == APP_ROOM_CHAT_TEXT_MAX - 1);
-	(void)waiting_room_handle_key(&state, 21);
+	(void)waiting_room_handle_key(&state, &room, 21);
 	assert(state.compose_length == 0);
-	assert(waiting_room_handle_key(&state, NCKEY_ESC) == ROOM_ACTION_NONE);
+	assert(waiting_room_handle_key(&state, &room, NCKEY_ESC)
+		== ROOM_ACTION_NONE);
 	assert(!state.chatting);
 	printf("PASS test_chat_modes_read_input_differently\n");
 }
@@ -253,6 +351,9 @@ static void	test_slot_labels_and_badges(void)
 	assert(strstr(waiting_room_slot_label(&room, 1, line, sizeof(line)),
 			"(empty)") != NULL);
 	assert(waiting_room_slot_label(&room, 99, line, sizeof(line))[0] == '\0');
+	assert(waiting_room_slot_count(&room) == WAITING_ROOM_DOUBLE_PLAYERS);
+	assert(waiting_room_visible_slot_count(&room)
+		== WAITING_ROOM_DOUBLE_PLAYERS);
 	assert(strcmp(waiting_room_badge_text(&room, 0), "ready") == 0);
 	assert(waiting_room_badge_text(&room, 1)[0] == '\0');
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 1);
@@ -285,6 +386,13 @@ static void	test_status_and_feedback_copy(void)
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 2);
 	assert(strcmp(waiting_room_status_text(&room, &state, line, sizeof(line)),
 			"Ready to start") == 0);
+	room.state = APP_ROOM_STATE_IN_GAME;
+	assert(strcmp(waiting_room_status_text(&room, &state, line, sizeof(line)),
+			"Game in progress") == 0);
+	room.state = APP_ROOM_STATE_FINISHED;
+	assert(strstr(waiting_room_status_text(&room, &state, line, sizeof(line)),
+			"Game over") != NULL);
+	room.state = APP_ROOM_STATE_READY;
 	(void)waiting_room_begin_countdown(&state);
 	assert(strstr(waiting_room_status_text(&room, &state, line, sizeof(line)),
 			"Starting in") != NULL);

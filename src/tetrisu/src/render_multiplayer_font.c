@@ -81,8 +81,9 @@ static bool	compose_options(render_ctx_t *ctx,
 				const create_room_state_t *state, const mp_layout_t *layout,
 				struct ncvisual *font);
 static bool	compose_slots(render_ctx_t *ctx,
-				const app_room_view_model_t *room, const mp_layout_t *layout,
-				struct ncvisual *font);
+					const app_room_view_model_t *room,
+					const waiting_room_state_t *state,
+					const mp_layout_t *layout, struct ncvisual *font);
 static bool	compose_room_status(render_ctx_t *ctx,
 				const app_room_view_model_t *room,
 				const waiting_room_state_t *state, const mp_layout_t *layout,
@@ -589,19 +590,6 @@ static void	draw_lobby_chrome(uint32_t *pixels, int width, int height,
 		font);
 	draw_rule(pixels, width, height, layout, LOBBY_REF_CONTENT_X,
 		LOBBY_REF_DIVIDER_Y, LOBBY_REF_CONTENT_WIDTH, g_mp_lavender);
-	draw_plate(pixels, width, height, layout, &layout->rooms_plate, g_mp_gold);
-	draw_plate(pixels, width, height, layout, &layout->join_plate, g_mp_gold);
-	draw_text_ref(pixels, width, height, layout, font, "JOIN BY ROOM ID",
-		LOBBY_REF_JOIN_X + 16, LOBBY_REF_JOIN_TITLE_Y,
-		LOBBY_REF_JOIN_WIDTH - 32, LOBBY_REF_HEADING_GLYPH, g_mp_pink, false);
-	draw_text_ref(pixels, width, height, layout, font,
-		"Ask a friend for their room", LOBBY_REF_JOIN_X + 16,
-		LOBBY_REF_JOIN_HINT_Y, LOBBY_REF_JOIN_WIDTH - 32, 11, g_mp_lavender,
-		false);
-	draw_text_ref(pixels, width, height, layout, font,
-		"id to join it directly.", LOBBY_REF_JOIN_X + 16,
-		LOBBY_REF_JOIN_HINT_Y + 30, LOBBY_REF_JOIN_WIDTH - 32, 11,
-		g_mp_lavender, false);
 	draw_text_ref(pixels, width, height, layout, font,
 		"D - DOUBLE     BR - BATTLE ROYALE", LOBBY_REF_CONTENT_X,
 		LOBBY_REF_LEGEND_Y, LOBBY_REF_CONTENT_WIDTH, 12, g_mp_lavender, false);
@@ -638,7 +626,7 @@ static void	draw_create_chrome(uint32_t *pixels, int width, int height,
 	draw_rule(pixels, width, height, layout, CREATE_REF_PANEL_X + 40,
 		CREATE_REF_DIVIDER_Y, CREATE_REF_PANEL_WIDTH - 80, g_mp_lavender);
 	draw_text_ref(pixels, width, height, layout, font,
-		"[UP/DOWN] MOVE     [ENTER] CREATE     [ESC] CANCEL",
+		"[1/2] SELECT     [ENTER] CREATE     [ESC] CANCEL",
 		CREATE_REF_PANEL_X + 40, CREATE_REF_CONTROLS_Y,
 		CREATE_REF_PANEL_WIDTH - 80, 13, g_mp_cream, true);
 }
@@ -671,17 +659,11 @@ static void	draw_room_chrome(uint32_t *pixels, int width, int height,
 	draw_rule(pixels, width, height, layout, ROOM_REF_CONTENT_X,
 		ROOM_REF_DIVIDER_Y, MULTIPLAYER_REFERENCE_WIDTH
 		- 2 * ROOM_REF_CONTENT_X, g_mp_lavender);
-	draw_plate(pixels, width, height, layout, &layout->slots_plate, g_mp_gold);
-	draw_plate(pixels, width, height, layout, &layout->chat_plate, g_mp_gold);
-	draw_text_ref(pixels, width, height, layout, font, "ROOM CHAT",
-		ROOM_REF_CHAT_PLATE_X + 16, ROOM_REF_CHAT_TITLE_Y,
-		ROOM_REF_CHAT_PLATE_WIDTH - 32, ROOM_REF_HEADING_GLYPH, g_mp_pink,
-		false);
 	draw_rule(pixels, width, height, layout, ROOM_REF_CONTENT_X,
 		ROOM_REF_CONTROLS_Y - 16, MULTIPLAYER_REFERENCE_WIDTH
 		- 2 * ROOM_REF_CONTENT_X, g_mp_lavender);
 	draw_text_ref(pixels, width, height, layout, font,
-		"[R] READY   [S] START   [C] CHAT   [L] LEAVE",
+		"[UP/DOWN] ROSTER   [R] READY   [S] START   [C] CHAT   [L] LEAVE",
 		ROOM_REF_CONTENT_X, ROOM_REF_CONTROLS_Y,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * ROOM_REF_CONTENT_X, 13, g_mp_cream,
 		true);
@@ -751,6 +733,8 @@ static int	compose_lobby_regions(render_ctx_t *ctx,
 	base = model_signature(view, ctx->mp_static_signature);
 	changed = 0;
 	signature = mp_hash(&state->selected, sizeof(state->selected), base);
+	signature = mp_hash(&state->list_offset, sizeof(state->list_offset),
+			signature);
 	signature = mp_hash(&state->section, sizeof(state->section), signature);
 	signature = mp_hash(&state->filter, sizeof(state->filter), signature);
 	signature = mp_hash(&state->visible_count, sizeof(state->visible_count),
@@ -840,12 +824,14 @@ static int	compose_room_regions(render_ctx_t *ctx,
 	 * seat list and every ready flag would repaint the transcript.
 	 */
 	base = room_players_signature(room, ctx->mp_static_signature);
+	signature = mp_hash(&state->roster_offset, sizeof(state->roster_offset),
+			base);
 	changed = 0;
-	if (ctx->mp_slots_plane == NULL || base != ctx->mp_slots_signature)
+	if (ctx->mp_slots_plane == NULL || signature != ctx->mp_slots_signature)
 	{
-		if (!compose_slots(ctx, room, layout, font))
+		if (!compose_slots(ctx, room, state, layout, font))
 			return (mp_region_failed("room slots"));
-		ctx->mp_slots_signature = base;
+		ctx->mp_slots_signature = signature;
 		changed = 1;
 	}
 	signature = mp_hash(&state->counting_down, sizeof(state->counting_down),
@@ -967,6 +953,8 @@ static bool	compose_list(render_ctx_t *ctx,
 	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
+	draw_plate(pixels, layout->pixel_width, layout->pixel_height, layout,
+		&layout->rooms_plate, g_mp_gold);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, lobby_filter_name(state->filter), LOBBY_REF_LIST_X,
 		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_TITLE_Y, LOBBY_REF_LIST_WIDTH,
@@ -992,14 +980,15 @@ static bool	compose_list(render_ctx_t *ctx,
 		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 110, 11, g_mp_lavender,
 		false);
 	row = 0;
-	while (row < APP_LOBBY_MAX_ROOMS)
+	while (row < LOBBY_VISIBLE_ROOMS)
 	{
-		room = lobby_visible_room(lobby, state->filter, row);
+		room = lobby_visible_room(lobby, state->filter,
+			state->list_offset + row);
 		if (room == NULL)
 			break ;
 		draw_list_row(pixels, layout->pixel_width, layout->pixel_height, layout,
 			font, room, row, state->section == LOBBY_SECTION_ROOMS
-			&& state->selected == row);
+			&& state->selected == state->list_offset + row);
 		row++;
 	}
 	if (row == 0)
@@ -1076,6 +1065,20 @@ static bool	compose_field(render_ctx_t *ctx, const lobby_state_t *state,
 	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
+	draw_plate(pixels, layout->pixel_width, layout->pixel_height, layout,
+		&layout->join_plate, g_mp_gold);
+	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
+		font, "JOIN BY ROOM ID", LOBBY_REF_JOIN_X + 16,
+		LOBBY_REF_JOIN_TITLE_Y, LOBBY_REF_JOIN_WIDTH - 32,
+		LOBBY_REF_HEADING_GLYPH, g_mp_pink, false);
+	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
+		font, "Ask a friend for their room", LOBBY_REF_JOIN_X + 16,
+		LOBBY_REF_JOIN_HINT_Y, LOBBY_REF_JOIN_WIDTH - 32, 11, g_mp_lavender,
+		false);
+	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
+		font, "id to join it directly.", LOBBY_REF_JOIN_X + 16,
+		LOBBY_REF_JOIN_HINT_Y + 30, LOBBY_REF_JOIN_WIDTH - 32, 11,
+		g_mp_lavender, false);
 	focused = state->section == LOBBY_SECTION_JOIN;
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "Enter room id", LOBBY_REF_FIELD_X, LOBBY_REF_FIELD_Y,
@@ -1210,47 +1213,55 @@ static bool	compose_options(render_ctx_t *ctx, const create_room_state_t *state,
  * @brief Repaints the seat list and its ready badges.
  */
 static bool	compose_slots(render_ctx_t *ctx, const app_room_view_model_t *room,
-	const mp_layout_t *layout, struct ncvisual *font)
+	const waiting_room_state_t *state, const mp_layout_t *layout,
+	struct ncvisual *font)
 {
 	mp_rect_t	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX * 2];
 	const char	*badge;
 	int			seats;
+	int			visible;
+	int			start;
+	int			slot;
 	int			index;
 	int			y;
 
 	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
-	seats = room->capacity > 0 ? room->capacity : room->player_count;
-	if (seats > APP_ROOM_MAX_PLAYERS)
-		seats = APP_ROOM_MAX_PLAYERS;
-	snprintf(line, sizeof(line), "SLOTS (%d/%d)", room->player_count, seats);
+	draw_plate(pixels, layout->pixel_width, layout->pixel_height, layout,
+		&layout->slots_plate, g_mp_gold);
+	seats = waiting_room_slot_count(room);
+	visible = waiting_room_visible_slot_count(room);
+	start = state->roster_offset;
+	snprintf(line, sizeof(line), "SLOTS (%d/%d) - %d-%d", room->player_count,
+		seats, visible > 0 ? start + 1 : 0, start + visible);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, line, ROOM_REF_SLOTS_X, ROOM_REF_SLOTS_Y
 		+ ROOM_REF_SLOTS_HEADING_Y, ROOM_REF_SLOTS_WIDTH,
 		ROOM_REF_HEADING_GLYPH, g_mp_pink, false);
 	index = 0;
-	while (index < seats)
+	while (index < visible)
 	{
+		slot = start + index;
 		y = ROOM_REF_SLOTS_Y + ROOM_REF_SLOT_FIRST_Y
 			+ index * ROOM_REF_SLOT_STEP_Y;
-		if (index == room->local_slot && index < room->player_count)
+		if (slot == room->local_slot && slot < room->player_count)
 			fill_ref_rect(pixels, layout->pixel_width, layout->pixel_height,
 				layout, ROOM_REF_SLOTS_X - 8, y - 8, ROOM_REF_SLOTS_WIDTH,
 				ROOM_REF_SLOT_HEIGHT, g_mp_focus_plate, 220u);
-		waiting_room_slot_label(room, index, line, sizeof(line));
+		waiting_room_slot_label(room, slot, line, sizeof(line));
 		draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 			font, line, ROOM_REF_SLOTS_X + 12, y, ROOM_REF_SLOT_BADGE_X - 24,
-			ROOM_REF_ROW_GLYPH, index < room->player_count
+			ROOM_REF_ROW_GLYPH, slot < room->player_count
 			? g_mp_cream : g_mp_disabled, false);
-		badge = waiting_room_badge_text(room, index);
+		badge = waiting_room_badge_text(room, slot);
 		if (badge[0] != '\0')
 			draw_text_ref(pixels, layout->pixel_width, layout->pixel_height,
 				layout, font, badge, ROOM_REF_SLOTS_X + ROOM_REF_SLOT_BADGE_X,
 				y, ROOM_REF_SLOTS_WIDTH - ROOM_REF_SLOT_BADGE_X - 12,
-				ROOM_REF_ROW_GLYPH, room->players[index].ready
+				ROOM_REF_ROW_GLYPH, room->players[slot].ready
 				? g_mp_green : g_mp_amber, false);
 		index++;
 	}
@@ -1333,6 +1344,12 @@ static bool	compose_chat(render_ctx_t *ctx, const app_room_view_model_t *room,
 	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
 		return (false);
+	draw_plate(pixels, layout->pixel_width, layout->pixel_height, layout,
+		&layout->chat_plate, g_mp_gold);
+	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
+		font, "ROOM CHAT", ROOM_REF_CHAT_PLATE_X + 16,
+		ROOM_REF_CHAT_TITLE_Y, ROOM_REF_CHAT_PLATE_WIDTH - 32,
+		ROOM_REF_HEADING_GLYPH, g_mp_pink, false);
 	body_height = ROOM_REF_CHAT_HEIGHT - ROOM_REF_CHAT_COMPOSE_HEIGHT;
 	visible = body_height / ROOM_REF_CHAT_LINE_STEP;
 	first = room->chat_count > visible ? room->chat_count - visible : 0;
@@ -1875,7 +1892,8 @@ static const char	*nonempty(const char *text)
 
 static color_t	room_state_colour(const app_room_summary_view_model_t *room)
 {
-	if (room->state == APP_ROOM_STATE_IN_GAME)
+	if (room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_FINISHED)
 		return (g_mp_disabled);
 	if (room->capacity > 0 && room->players >= room->capacity)
 		return (g_mp_red);

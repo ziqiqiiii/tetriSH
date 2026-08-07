@@ -122,8 +122,11 @@
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
 # define LEADERBOARD_PIXEL_BUTTON_COUNT	2
+# define LEADERBOARD_PANEL_MIN_COLS	44
+# define LEADERBOARD_PANEL_MIN_ROWS	20
 # define APP_LOBBY_MAX_ROOMS	8
-# define APP_ROOM_MAX_PLAYERS	8
+# define LOBBY_VISIBLE_ROOMS	6
+# define APP_ROOM_MAX_PLAYERS	99
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
@@ -609,6 +612,8 @@
 # define WAITING_ROOM_COUNTDOWN_STEP_MS	1000
 # define WAITING_ROOM_DOUBLE_PLAYERS	2
 # define WAITING_ROOM_ROYALE_MIN_PLAYERS	4
+/* The authored waiting-room roster has room for eight legible rows. */
+# define WAITING_ROOM_VISIBLE_PLAYERS	8
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
@@ -1122,7 +1127,9 @@ typedef struct s_marketplace_layout
 typedef enum e_app_room_state
 {
 	APP_ROOM_STATE_WAITING,
-	APP_ROOM_STATE_IN_GAME
+	APP_ROOM_STATE_READY,
+	APP_ROOM_STATE_IN_GAME,
+	APP_ROOM_STATE_FINISHED
 }	app_room_state_t;
 
 typedef struct s_app_room_summary_view_model
@@ -1265,11 +1272,12 @@ typedef enum e_lobby_feedback
 	LOBBY_FEEDBACK_REFRESHED,
 	LOBBY_FEEDBACK_FULL,
 	LOBBY_FEEDBACK_IN_GAME,
+	LOBBY_FEEDBACK_FINISHED,
 	LOBBY_FEEDBACK_EMPTY_LIST,
 	LOBBY_FEEDBACK_EMPTY_ID,
 	LOBBY_FEEDBACK_UNKNOWN_ID,
-	LOBBY_FEEDBACK_FILTER,
-	LOBBY_FEEDBACK_VOLUME
+	LOBBY_FEEDBACK_INVALID_ROOM,
+	LOBBY_FEEDBACK_FILTER
 }	lobby_feedback_t;
 
 typedef enum e_lobby_action
@@ -1291,6 +1299,7 @@ typedef struct s_lobby_state
 	lobby_feedback_t	feedback;
 	int					feedback_value;
 	int					selected;
+	int					list_offset;
 	int					visible_count;
 	app_game_mode_t		filter;
 	char				room_id[LOBBY_ROOM_ID_MAX];
@@ -1305,6 +1314,8 @@ typedef enum e_room_feedback
 	ROOM_FEEDBACK_NEED_PLAYERS,
 	ROOM_FEEDBACK_NEED_READY,
 	ROOM_FEEDBACK_NOT_OWNER,
+	ROOM_FEEDBACK_INVALID_ROOM,
+	ROOM_FEEDBACK_UNAVAILABLE,
 	ROOM_FEEDBACK_CANCELLED,
 	ROOM_FEEDBACK_CHAT_SENT,
 	ROOM_FEEDBACK_CHAT_EMPTY,
@@ -1335,6 +1346,7 @@ typedef struct s_waiting_room_state
 	bool			chatting;
 	bool			counting_down;
 	int				countdown;
+	int				roster_offset;
 	room_feedback_t	feedback;
 	int				feedback_value;
 	char			compose[APP_ROOM_CHAT_TEXT_MAX];
@@ -2057,6 +2069,47 @@ typedef enum e_sign_in_result
 	SIGN_IN_RESULT_LOGIN
 }	sign_in_result_t;
 
+/* CONFIRMATION.C / RENDER_CONFIRMATION.C */
+# define CONFIRMATION_MODAL_COLS	58
+# define CONFIRMATION_MODAL_ROWS	12
+
+typedef enum e_confirmation_kind
+{
+	CONFIRM_QUIT_APP,
+	CONFIRM_LEAVE_ROOM,
+	CONFIRM_LEAVE_MATCH
+}	confirmation_kind_t;
+
+typedef enum e_confirmation_focus
+{
+	CONFIRM_FOCUS_NO,
+	CONFIRM_FOCUS_YES
+}	confirmation_focus_t;
+
+typedef enum e_confirmation_result
+{
+	CONFIRM_RESULT_NONE,
+	CONFIRM_RESULT_NO,
+	CONFIRM_RESULT_YES
+}	confirmation_result_t;
+
+typedef struct s_confirmation_dialog
+{
+	bool				visible;
+	confirmation_kind_t	kind;
+	confirmation_focus_t	focus;
+	struct ncplane			*plane;
+}	confirmation_dialog_t;
+
+void			confirmation_dialog_init(confirmation_dialog_t *dialog,
+					confirmation_kind_t kind);
+confirmation_result_t	confirmation_dialog_handle_key(
+					confirmation_dialog_t *dialog, uint32_t key);
+const char		*confirmation_title(confirmation_kind_t kind);
+const char		*confirmation_body(confirmation_kind_t kind);
+bool			confirmation_prompt_run(render_ctx_t *ctx,
+					audio_ctx_t *audio, confirmation_kind_t kind);
+
 void			sign_in_modal_init(sign_in_modal_t *modal);
 sign_in_result_t	sign_in_modal_handle_key(sign_in_modal_t *modal,
 						uint32_t key);
@@ -2218,6 +2271,7 @@ void			render_screen_destroy(render_ctx_t *ctx);
 void			leaderboard_state_init(leaderboard_state_t *state);
 bool			leaderboard_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
+bool			leaderboard_action_leaves_screen(leaderboard_action_t action);
 leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
 					uint32_t key);
 void			leaderboard_set_focus(leaderboard_state_t *state,
@@ -2337,6 +2391,8 @@ app_game_mode_t	mp_mode_focused_mode(const mp_mode_state_t *state);
 const char		*mp_mode_card_name(int index);
 const char		*mp_mode_card_players(int index);
 const char		*mp_mode_card_line(int index, int line);
+bool			multiplayer_room_capacity_valid(app_game_mode_t mode,
+					int capacity);
 void			create_room_state_init(create_room_state_t *state,
 					app_game_mode_t mode);
 create_room_action_t	create_room_handle_key(create_room_state_t *state,
@@ -2383,7 +2439,7 @@ const char		*lobby_feedback_text(const lobby_state_t *state, char *out,
 /* WAITING_ROOM_SCREEN.C */
 void			waiting_room_state_init(waiting_room_state_t *state);
 room_action_t	waiting_room_handle_key(waiting_room_state_t *state,
-					uint32_t key);
+					const app_room_view_model_t *room, uint32_t key);
 bool			waiting_room_state_view_changed(
 					const waiting_room_state_t *before,
 					const waiting_room_state_t *after);
@@ -2392,7 +2448,13 @@ bool			waiting_room_navigation_keys_coalesce(uint32_t active_key,
 bool			waiting_room_action_leaves_screen(room_action_t action);
 int				waiting_room_ready_count(const app_room_view_model_t *room);
 int				waiting_room_required_ready(const app_room_view_model_t *room);
+int				waiting_room_slot_count(const app_room_view_model_t *room);
+int				waiting_room_visible_slot_count(
+					const app_room_view_model_t *room);
 bool			waiting_room_can_start(const app_room_view_model_t *room);
+bool			waiting_room_auto_start_allowed(
+					const app_room_view_model_t *room);
+bool			waiting_room_sync_state(app_room_view_model_t *room);
 bool			waiting_room_local_is_owner(const app_room_view_model_t *room);
 bool			waiting_room_local_ready(const app_room_view_model_t *room);
 bool			waiting_room_toggle_ready(app_room_view_model_t *room);
@@ -2499,6 +2561,7 @@ void			audio_load_game_sfx(audio_ctx_t *audio);
 void			audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx);
 void			audio_play_menu_move(audio_ctx_t *audio);
 void			audio_play_menu_select(audio_ctx_t *audio);
+void			audio_play_room_entry(audio_ctx_t *audio);
 void			audio_set_music_volume(audio_ctx_t *audio, int volume);
 void			audio_apply_effect_volume(audio_ctx_t *audio);
 void			audio_volume_up(audio_ctx_t *audio);

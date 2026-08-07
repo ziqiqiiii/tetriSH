@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/sanjan/.config/**)",
+      "Read(//home/sanjan/.config/clangd/**)",
+      "Bash(clangd --version)"
+    ]
+  }
+}

@@ -5,6 +5,7 @@ static void	test_layout_contract(void);
 static void	test_unused_rectangles_stay_zero(void);
 static void	test_mode_picker_focus_and_actions(void);
 static void	test_mode_picker_copy_is_bounded(void);
+static void	test_multiplayer_capacity_boundaries(void);
 static void	test_create_room_focus_and_actions(void);
 static void	test_mode_input_batch_boundaries(void);
 static void	region_list(const mp_layout_t *layout, app_screen_t screen,
@@ -17,6 +18,7 @@ int	main(void)
 	test_unused_rectangles_stay_zero();
 	test_mode_picker_focus_and_actions();
 	test_mode_picker_copy_is_bounded();
+	test_multiplayer_capacity_boundaries();
 	test_create_room_focus_and_actions();
 	test_mode_input_batch_boundaries();
 	return (0);
@@ -169,11 +171,19 @@ static void	test_layout_contract(void)
 	assert(layout.list.y + layout.list.height < layout.status.y);
 	assert(layout.list.x >= layout.rooms_plate.x);
 	assert(layout.field.x >= layout.join_plate.x);
+	assert(memcmp(&layout.list, &layout.rooms_plate,
+			sizeof(layout.list)) == 0);
+	assert(memcmp(&layout.field, &layout.join_plate,
+			sizeof(layout.field)) == 0);
 	mp_layout_build(APP_SCREEN_WAITING_ROOM, 0, 0, 54, 144, 16, 8, &layout);
 	assert(layout.slots.y + layout.slots.height < layout.status.y);
 	assert(layout.slots.x + layout.slots.width < layout.chat.x);
 	assert(layout.status.x + layout.status.width < layout.chat.x);
 	assert(layout.chat.y >= layout.chat_plate.y);
+	assert(memcmp(&layout.slots, &layout.slots_plate,
+			sizeof(layout.slots)) == 0);
+	assert(memcmp(&layout.chat, &layout.chat_plate,
+			sizeof(layout.chat)) == 0);
 	printf("PASS test_layout_contract\n");
 }
 
@@ -266,6 +276,24 @@ static void	test_mode_picker_copy_is_bounded(void)
 }
 
 /**
+ * @brief Double is fixed at two slots and Battle Royale accepts exactly 4-99.
+ */
+static void	test_multiplayer_capacity_boundaries(void)
+{
+	assert(APP_ROOM_MAX_PLAYERS == 99);
+	assert(multiplayer_room_capacity_valid(APP_GAME_MODE_DOUBLE, 2));
+	assert(!multiplayer_room_capacity_valid(APP_GAME_MODE_DOUBLE, 1));
+	assert(!multiplayer_room_capacity_valid(APP_GAME_MODE_DOUBLE, 3));
+	assert(multiplayer_room_capacity_valid(APP_GAME_MODE_BATTLE_ROYALE, 4));
+	assert(multiplayer_room_capacity_valid(APP_GAME_MODE_BATTLE_ROYALE, 99));
+	assert(!multiplayer_room_capacity_valid(APP_GAME_MODE_BATTLE_ROYALE, 3));
+	assert(!multiplayer_room_capacity_valid(APP_GAME_MODE_BATTLE_ROYALE, 100));
+	assert(!multiplayer_room_capacity_valid(APP_GAME_MODE_NONE, 4));
+	assert(strcmp(mp_mode_card_players(1), "4 - 99 players") == 0);
+	printf("PASS test_multiplayer_capacity_boundaries\n");
+}
+
+/**
  * @brief The create-room panel carries the lobby's mode in and reports it out.
  */
 static void	test_create_room_focus_and_actions(void)
@@ -285,8 +313,11 @@ static void	test_create_room_focus_and_actions(void)
 	assert(create_room_handle_key(&state, NCKEY_UP)
 		== CREATE_ROOM_ACTION_NONE);
 	assert(state.mode == APP_GAME_MODE_DOUBLE);
-	assert(create_room_handle_key(&state, '2') == CREATE_ROOM_ACTION_CREATE);
+	assert(create_room_handle_key(&state, '2') == CREATE_ROOM_ACTION_NONE);
 	assert(state.mode == APP_GAME_MODE_BATTLE_ROYALE);
+	assert(create_room_handle_key(&state, '1') == CREATE_ROOM_ACTION_NONE);
+	assert(state.mode == APP_GAME_MODE_DOUBLE);
+	assert(create_room_handle_key(&state, '2') == CREATE_ROOM_ACTION_NONE);
 	assert(create_room_handle_key(&state, NCKEY_ENTER)
 		== CREATE_ROOM_ACTION_CREATE);
 	assert(create_room_handle_key(&state, NCKEY_ESC)

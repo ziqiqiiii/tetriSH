@@ -45,15 +45,18 @@ static void	test_fixture_provider_contract(void)
 			== APP_PROVIDER_OK);
 		assert(room.mode == APP_GAME_MODE_BATTLE_ROYALE);
 		assert(room.required_players == WAITING_ROOM_ROYALE_MIN_PLAYERS);
+		assert(room.capacity == APP_ROOM_MAX_PLAYERS);
 		/* A joined room seats the players the lobby advertised. */
 		assert(room.player_count == WAITING_ROOM_ROYALE_MIN_PLAYERS);
+		assert(room.state == APP_ROOM_STATE_READY);
+		assert(room.players[room.local_slot].ready);
 		assert(room.chat_count > 0);
 		/* A created room seats its owner alone, whatever the mode. */
 		assert(provider.create_room(provider.userdata, APP_GAME_MODE_DOUBLE,
 				&room) == APP_PROVIDER_OK);
 		assert(room.mode == APP_GAME_MODE_DOUBLE);
 		assert(room.player_count == 1);
-		assert(room.players[0].owner && !room.players[0].ready);
+		assert(room.players[0].owner && room.players[0].ready);
 		assert(provider.create_room(provider.userdata, APP_GAME_MODE_NONE,
 				&room) == APP_PROVIDER_INVALID);
 	}
@@ -107,6 +110,7 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	/* The lobby header carries the identity strip alongside the room list. */
 	assert(view.data.lobby.profile.username[0] != '\0');
 	assert(view.data.lobby.rooms[3].mode == APP_GAME_MODE_BATTLE_ROYALE);
+	assert(view.data.lobby.rooms[3].capacity == APP_ROOM_MAX_PLAYERS);
 	assert(view.data.lobby.rooms[1].state == APP_ROOM_STATE_IN_GAME);
 	assert(app_screen_view_load(&provider, APP_SCREEN_WAITING_ROOM, &view)
 		== APP_PROVIDER_OK);
@@ -118,6 +122,7 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	assert(app_screen_view_load(&provider, APP_SCREEN_BATTLE_ROYALE, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.match.mode == APP_GAME_MODE_BATTLE_ROYALE);
+	assert(view.data.match.player_count == WAITING_ROOM_ROYALE_MIN_PLAYERS);
 	printf("PASS test_fixture_models_are_marked_and_populated\n");
 }
 

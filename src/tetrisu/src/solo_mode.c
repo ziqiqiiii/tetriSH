@@ -397,8 +397,15 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
 	}
 	if (input->evtype == NCTYPE_RELEASE)
 		return (false);
-	if (key == NCKEY_ESC || key == NCKEY_EOF || key == 'q' || key == 'Q')
+	if (key == NCKEY_EOF)
 		return (true);
+	if (key == NCKEY_ESC || key == 'q' || key == 'Q')
+	{
+		if (confirmation_prompt_run(ctx, audio, CONFIRM_LEAVE_MATCH))
+			return (true);
+		*state_changed = true;
+		return (false);
+	}
 	if (key == NCKEY_RESIZE || key == 12u)
 	{
 		*resize_pending = true;

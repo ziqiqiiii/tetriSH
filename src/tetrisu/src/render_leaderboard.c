@@ -33,6 +33,7 @@
 
 static bool	create_panel(render_ctx_t *ctx, bool compatibility,
 				bool *compact);
+static bool	show_too_small(render_ctx_t *ctx);
 static void	draw_leaderboard(render_ctx_t *ctx,
 				const app_screen_view_model_t *view,
 				const leaderboard_state_t *state, bool compatibility,
@@ -102,7 +103,7 @@ bool	render_leaderboard_show(render_ctx_t *ctx,
 	render_backdrop_forget(ctx);
 	compatibility = true;
 	if (!create_panel(ctx, compatibility, &compact))
-		return (false);
+		return (show_too_small(ctx));
 	draw_leaderboard(ctx, view, state, compatibility, compact);
 	ncplane_move_top(ctx->screen_plane);
 	render_compatibility_badge_refresh(ctx);
@@ -189,6 +190,48 @@ static bool	create_panel(render_ctx_t *ctx, bool compatibility, bool *compact)
 	(void)ncplane_set_base(ctx->screen_plane, " ", 0, channels);
 	ncplane_erase(ctx->screen_plane);
 	return (true);
+}
+
+/**
+ * @brief Keeps the leaderboard navigable below its authored minimum size.
+ *
+ * A resize notice replaces the panel so opening this screen can never quit the
+ * application merely because the terminal is temporarily too small.
+ */
+static bool	show_too_small(render_ctx_t *ctx)
+{
+	ncplane_options	options;
+	uint64_t		channels;
+	unsigned		std_rows;
+	unsigned		std_cols;
+	char			notice[64];
+
+	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
+	if (std_rows == 0 || std_cols == 0)
+		return (false);
+	memset(&options, 0, sizeof(options));
+	options.rows = (int)std_rows;
+	options.cols = (int)std_cols;
+	ctx->screen_plane = ncplane_create(ctx->std, &options);
+	if (ctx->screen_plane == NULL)
+		return (false);
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, LB_CREAM_R, LB_CREAM_G,
+		LB_CREAM_B);
+	(void)ncchannels_set_bg_rgb8(&channels, LB_BG_R, LB_BG_G, LB_BG_B);
+	(void)ncplane_set_base(ctx->screen_plane, " ", 0, channels);
+	ncplane_erase(ctx->screen_plane);
+	snprintf(notice, sizeof(notice), "LEADERBOARD NEEDS %dx%d",
+		LEADERBOARD_PANEL_MIN_COLS, LEADERBOARD_PANEL_MIN_ROWS);
+	(void)ncplane_set_fg_rgb8(ctx->screen_plane, LB_GOLD_R, LB_GOLD_G,
+		LB_GOLD_B);
+	put_centered(ctx->screen_plane, 0, notice, (int)std_cols, true);
+	(void)ncplane_set_fg_rgb8(ctx->screen_plane, LB_LAVENDER_R,
+		LB_LAVENDER_G, LB_LAVENDER_B);
+	put_centered(ctx->screen_plane, 1, "RESIZE OR ESC", (int)std_cols, false);
+	ncplane_move_top(ctx->screen_plane);
+	render_notification_raise(ctx);
+	return (notcurses_render(ctx->nc) == 0);
 }
 
 static void	draw_leaderboard(render_ctx_t *ctx,

@@ -473,20 +473,23 @@ static app_provider_result_t	fixture_load_lobby(void *userdata,
 	set_room_summary(&view->rooms[2], "duel-51", "StackWitch",
 		APP_GAME_MODE_DOUBLE, APP_ROOM_STATE_WAITING, 2, 2);
 	set_room_summary(&view->rooms[3], "arena-88", "Naf",
-		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 4, 8);
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 4,
+		APP_ROOM_MAX_PLAYERS);
 	set_room_summary(&view->rooms[4], "arena-89", "Coke Zero",
-		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_IN_GAME, 8, 8);
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_IN_GAME,
+		APP_ROOM_MAX_PLAYERS, APP_ROOM_MAX_PLAYERS);
 	set_room_summary(&view->rooms[5], "arena-93", "NeonMino",
-		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 6, 8);
+		APP_GAME_MODE_BATTLE_ROYALE, APP_ROOM_STATE_WAITING, 6,
+		APP_ROOM_MAX_PLAYERS);
 	return (APP_PROVIDER_OK);
 }
 
 /**
  * @brief Supplies a waiting-room snapshot for a room that already has players.
  *
- * Joining an existing room lands in the wireframe's second state: the seats the
- * lobby advertised are occupied and their occupants are ready, so the only
- * thing between the player and the countdown is their own ready flag.
+ * Joining an existing room lands in the wireframe's second state with every
+ * occupied slot ready. Double may auto-start immediately; Battle Royale stays
+ * ready until its owner sends Start.
  */
 static app_provider_result_t	fixture_load_room(void *userdata,
 	const char *room_id, app_room_view_model_t *view)
@@ -505,7 +508,7 @@ static app_provider_result_t	fixture_load_room(void *userdata,
 		room_id == NULL || room_id[0] == '\0' ? "duel-42" : room_id);
 	view->mode = strncmp(view->id, "arena", 5) == 0
 		? APP_GAME_MODE_BATTLE_ROYALE : APP_GAME_MODE_DOUBLE;
-	view->state = APP_ROOM_STATE_WAITING;
+	view->state = APP_ROOM_STATE_READY;
 	view->capacity = view->mode == APP_GAME_MODE_DOUBLE
 		? WAITING_ROOM_DOUBLE_PLAYERS : APP_ROOM_MAX_PLAYERS;
 	view->required_players = view->mode == APP_GAME_MODE_DOUBLE
@@ -519,10 +522,10 @@ static app_provider_result_t	fixture_load_room(void *userdata,
 		set_room_player(&view->players[index], names[index], false, true);
 		index++;
 	}
-	/* The local player is the seat that joined last and is never ready yet. */
+	/* Joining completes the documented JOINING -> READY slot transition. */
 	view->local_slot = view->player_count - 1;
 	set_room_player(&view->players[view->local_slot], "PreviewPlayer",
-		false, false);
+		false, true);
 	seed_room_chat(view);
 	return (APP_PROVIDER_OK);
 }
@@ -551,7 +554,7 @@ static app_provider_result_t	fixture_create_room(void *userdata,
 		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
 	view->player_count = 1;
 	view->local_slot = 0;
-	set_room_player(&view->players[0], "PreviewPlayer", true, false);
+	set_room_player(&view->players[0], "PreviewPlayer", true, true);
 	seed_room_chat(view);
 	return (APP_PROVIDER_OK);
 }
@@ -771,10 +774,11 @@ static app_provider_result_t	load_provider_screen(
 		set_screen_copy(view, "Server-authoritative match snapshot");
 		snprintf(view->data.match.room_id,
 			sizeof(view->data.match.room_id), "%s",
-			screen == APP_SCREEN_DOUBLE ? "ROOM-042" : "BR-008");
+			screen == APP_SCREEN_DOUBLE ? "ROOM-042" : "BR-004");
 		view->data.match.mode = screen == APP_SCREEN_DOUBLE
 			? APP_GAME_MODE_DOUBLE : APP_GAME_MODE_BATTLE_ROYALE;
-		view->data.match.player_count = screen == APP_SCREEN_DOUBLE ? 2 : 8;
+		view->data.match.player_count = screen == APP_SCREEN_DOUBLE
+			? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
 		snprintf(view->data.match.status,
 			sizeof(view->data.match.status), "Waiting for server state");
 	}

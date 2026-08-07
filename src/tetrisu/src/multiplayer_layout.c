@@ -97,24 +97,20 @@ static void	build_mode(mp_layout_t *layout)
 /**
  * @brief Lays out the lobby: room table, join field, and a status line.
  *
- * The two plates are static; the list rows, the typed field and the result line
- * are the three regions. They clear each other by 88 horizontal units and 80
- * vertical, both comfortably past the one-cell rounding floor.
+ * Each dynamic panel owns its complete plate. Bitmap region crops expand to
+ * terminal-cell boundaries, so keeping a border on a separate plane lets the
+ * crop overwrite it at coarse cell sizes. Full-panel ownership prevents that.
  */
 static void	build_lobby(mp_layout_t *layout)
 {
 	layout->rooms_plate = map_rect(LOBBY_REF_ROOMS_X, LOBBY_REF_ROOMS_Y,
 			LOBBY_REF_ROOMS_WIDTH, LOBBY_REF_ROOMS_HEIGHT,
 			layout->pixel_width, layout->pixel_height);
-	layout->list = map_rect(LOBBY_REF_LIST_X, LOBBY_REF_LIST_Y,
-			LOBBY_REF_LIST_WIDTH, LOBBY_REF_LIST_HEIGHT,
-			layout->pixel_width, layout->pixel_height);
+	layout->list = layout->rooms_plate;
 	layout->join_plate = map_rect(LOBBY_REF_JOIN_X, LOBBY_REF_JOIN_Y,
 			LOBBY_REF_JOIN_WIDTH, LOBBY_REF_JOIN_HEIGHT,
 			layout->pixel_width, layout->pixel_height);
-	layout->field = map_rect(LOBBY_REF_FIELD_X, LOBBY_REF_FIELD_Y,
-			LOBBY_REF_FIELD_WIDTH, LOBBY_REF_FIELD_HEIGHT,
-			layout->pixel_width, layout->pixel_height);
+	layout->field = layout->join_plate;
 	layout->status = map_rect(LOBBY_REF_STATUS_X, LOBBY_REF_STATUS_Y,
 			LOBBY_REF_STATUS_WIDTH, LOBBY_REF_STATUS_HEIGHT,
 			layout->pixel_width, layout->pixel_height);
@@ -142,8 +138,8 @@ static void	build_create_room(mp_layout_t *layout)
 /**
  * @brief Lays out the waiting room: seats and status left, chat column right.
  *
- * Three regions. The chat column clears the seats by 84 horizontal units and
- * the status line by 70; the seats clear the status by 74 vertical units.
+ * Three regions. Seats and chat own their complete plates so cell-expanded
+ * bitmap crops cannot erase the frame drawn by a different plane.
  */
 static void	build_waiting_room(mp_layout_t *layout)
 {
@@ -151,18 +147,14 @@ static void	build_waiting_room(mp_layout_t *layout)
 			ROOM_REF_SLOTS_PLATE_Y, ROOM_REF_SLOTS_PLATE_WIDTH,
 			ROOM_REF_SLOTS_PLATE_HEIGHT, layout->pixel_width,
 			layout->pixel_height);
-	layout->slots = map_rect(ROOM_REF_SLOTS_X, ROOM_REF_SLOTS_Y,
-			ROOM_REF_SLOTS_WIDTH, ROOM_REF_SLOTS_HEIGHT,
-			layout->pixel_width, layout->pixel_height);
+	layout->slots = layout->slots_plate;
 	layout->status = map_rect(ROOM_REF_STATUS_X, ROOM_REF_STATUS_Y,
 			ROOM_REF_STATUS_WIDTH, ROOM_REF_STATUS_HEIGHT,
 			layout->pixel_width, layout->pixel_height);
 	layout->chat_plate = map_rect(ROOM_REF_CHAT_PLATE_X, ROOM_REF_CHAT_PLATE_Y,
 			ROOM_REF_CHAT_PLATE_WIDTH, ROOM_REF_CHAT_PLATE_HEIGHT,
 			layout->pixel_width, layout->pixel_height);
-	layout->chat = map_rect(ROOM_REF_CHAT_X, ROOM_REF_CHAT_Y,
-			ROOM_REF_CHAT_WIDTH, ROOM_REF_CHAT_HEIGHT,
-			layout->pixel_width, layout->pixel_height);
+	layout->chat = layout->chat_plate;
 	layout->controls = map_rect(ROOM_REF_CONTENT_X, ROOM_REF_CONTROLS_Y,
 			MULTIPLAYER_REFERENCE_WIDTH - 2 * ROOM_REF_CONTENT_X,
 			ROOM_REF_CONTROLS_HEIGHT, layout->pixel_width,
