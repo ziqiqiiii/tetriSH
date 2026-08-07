@@ -117,6 +117,14 @@
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
 # define AUTH_OVERLAY_PLANE_MAX	16
+/*
+ * Six covers Home, auth, Settings, Leaderboard, Marketplace and the duel hall
+ * - every backdrop reachable without passing through one that clears the cache
+ * - so the common navigation never evicts. Each retained entry costs its bitmap
+ * twice, once in this process and once in the terminal, which is what caps it.
+ */
+# define BACKDROP_CACHE_MAX		6
+# define BACKDROP_PATH_MAX		256
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
@@ -1627,6 +1635,25 @@ typedef struct s_pixel_asset
 	int			height;
 }	pixel_asset_t;
 
+/*
+ * One retained backdrop. Transferring a full-screen bitmap is the dominant
+ * cost of a screen change - tens of seconds through a macOS pty at a large
+ * window - so each backdrop's plane is kept and restacked on revisit. Entries
+ * are keyed by the artwork and the construction that produced it, and are only
+ * reused while the plane still occupies the geometry the caller wants.
+ */
+typedef struct s_backdrop_cache
+{
+	char				path[BACKDROP_PATH_MAX];
+	bool				exact;
+	bool				stretch;
+	struct ncplane		*plane;
+	uint32_t			*pixels;
+	int					pixels_width;
+	int					pixels_height;
+	uint64_t			used;
+}	backdrop_cache_t;
+
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
 // follow the art even when notcurses scales it to different terminals.
@@ -1636,15 +1663,13 @@ typedef struct
 	struct ncplane		*std;
 	struct ncplane		*bg_plane;
 	/*
-	 * The home backdrop outlives the screens drawn over it. A sprixel is bound
-	 * to its plane until that plane is re-blitted, resized or destroyed, so
-	 * destroying this one is what forces the whole bitmap back down the PTY;
-	 * keeping it lets a return to Home cost a restack instead of a retransfer.
+	 * Backdrops outlive the screens drawn over them. A sprixel is bound to its
+	 * plane until that plane is re-blitted, resized or destroyed, so destroying
+	 * one is what forces its whole bitmap back down the pty; keeping it lets a
+	 * revisit cost a restack instead of a retransfer.
 	 */
-	struct ncplane		*home_bg_plane;
-	uint32_t			*home_backdrop_pixels;
-	int					home_backdrop_width;
-	int					home_backdrop_height;
+	backdrop_cache_t	backdrops[BACKDROP_CACHE_MAX];
+	uint64_t			backdrop_tick;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
@@ -2215,9 +2240,6 @@ int				render_background_replace_exact(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
 int				render_background_replace_visual(render_ctx_t *ctx,
 					struct ncvisual *ncv, bool stretch);
-int				render_background_show_home(render_ctx_t *ctx,
-					const char *image_path);
-void				render_background_home_forget(render_ctx_t *ctx);
 void				render_background_destroy(render_ctx_t *ctx);
 void				render_backdrop_forget(render_ctx_t *ctx);
 const uint32_t		*render_backdrop_pixels(const render_ctx_t *ctx,

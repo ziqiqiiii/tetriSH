@@ -13,10 +13,21 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 				bool stretch, ncscale_e scaling, ncblitter_e blitter,
 				uint64_t flags);
 static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv);
-static int	rebuild_home_background(render_ctx_t *ctx,
-				const char *image_path);
-static void	remember_home_backdrop(render_ctx_t *ctx);
-static void	restore_home_backdrop(render_ctx_t *ctx);
+static void	backdrop_fit(render_ctx_t *ctx, bool stretch);
+static backdrop_cache_t	*backdrop_find(render_ctx_t *ctx, const char *path,
+				bool exact, bool stretch);
+static bool	backdrop_is_cached(const render_ctx_t *ctx,
+				const struct ncplane *plane);
+static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
+				bool exact, bool stretch);
+static void	backdrop_remember(render_ctx_t *ctx, const char *path,
+				bool exact, bool stretch);
+static backdrop_cache_t	*backdrop_evict(render_ctx_t *ctx);
+static void	backdrop_keep_snapshot(render_ctx_t *ctx,
+				backdrop_cache_t *entry);
+static void	backdrop_restore_snapshot(render_ctx_t *ctx,
+				const backdrop_cache_t *entry);
+static void	backdrop_cache_clear(render_ctx_t *ctx);
 static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
 				int width, int height);
 static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
@@ -58,13 +69,7 @@ render_ctx_t	render_init(const char *image_path)
 		fprintf(stderr, "tetrisu: could not read terminal geometry\n");
 		exit(1);
 	}
-	/*
-	 * The opening backdrop is the home backdrop, so it is adopted as the
-	 * cached one right here. Auth draws over it rather than replacing it, and
-	 * the first arrival at Home - which is what pressing P does - then costs a
-	 * restack instead of the full transfer this same artwork already paid for.
-	 */
-	if (render_background_show_home(&ctx, image_path) < 0)
+	if (render_background_replace(&ctx, image_path, false) < 0)
 	{
 		notcurses_stop(ctx.nc);
 		fprintf(stderr, "tetrisu: failed to load image %s\n", image_path);
@@ -295,16 +300,20 @@ bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
 }
 
 /**
- * @brief Destroys the currently owned background plane.
+ * @brief Destroys the current backdrop and every retained one.
+ *
+ * Callers reach for this when the backdrop must genuinely stop existing rather
+ * than be covered: the intro cannot cover a sprixel with cell-blitted video,
+ * and Solo owns the screen outright. Retained planes cannot survive that, so
+ * the cache is emptied with them and the next visit rebuilds honestly.
  *
  * @param ctx Context whose background pointer is cleared.
  */
 void	render_background_destroy(render_ctx_t *ctx)
 {
-	if (ctx->home_bg_plane != NULL && ctx->home_bg_plane != ctx->bg_plane)
-		ncplane_destroy(ctx->home_bg_plane);
-	ctx->home_bg_plane = NULL;
-	render_background_home_forget(ctx);
+	if (ctx == NULL)
+		return ;
+	backdrop_cache_clear(ctx);
 	if (ctx->bg_plane != NULL)
 	{
 		ncplane_destroy(ctx->bg_plane);
@@ -313,121 +322,222 @@ void	render_background_destroy(render_ctx_t *ctx)
 }
 
 /**
- * @brief Drops the cached home backdrop snapshot.
- */
-void	render_background_home_forget(render_ctx_t *ctx)
-{
-	if (ctx == NULL)
-		return ;
-	free(ctx->home_backdrop_pixels);
-	ctx->home_backdrop_pixels = NULL;
-	ctx->home_backdrop_width = 0;
-	ctx->home_backdrop_height = 0;
-}
-
-/**
- * @brief Restores the home backdrop, reusing its plane whenever it still fits.
+ * @brief Sets bg_row/col/rows/cols to the geometry a backdrop would occupy.
  *
- * Every return to Home used to rebuild this backdrop from the file, which
- * destroys the old sprixel plane and so hands the terminal the entire bitmap
- * again. That transfer is the screen's whole cost: sampled on macOS kitty it
- * sat 2.6s inside notcurses' blocking_write() at 110x40 and 12.8s at 271x71,
- * scaling with the pixel area, which reads as a hung client rather than a slow
- * one. A sprixel survives being moved, so when the fitted geometry is
- * unchanged the surviving plane is restacked and nothing is retransmitted.
- *
- * @param ctx Active render context.
- * @param image_path Home artwork, loaded only when the cache cannot serve.
- * @return 0 on success, -1 when a rebuild was needed and failed.
+ * The cache is consulted before any plane is built, so the wanted geometry has
+ * to be known first. replace_visual_scaled() derives the same values the same
+ * way; computing them twice is a few divisions against a transfer measured in
+ * seconds.
  */
-int	render_background_show_home(render_ctx_t *ctx, const char *image_path)
+static void	backdrop_fit(render_ctx_t *ctx, bool stretch)
 {
-	struct ncplane	*stale;
-	unsigned		std_rows;
-	unsigned		std_cols;
+	unsigned	std_rows;
+	unsigned	std_cols;
 
-	if (ctx == NULL || ctx->std == NULL)
-		return (-1);
 	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
 	refresh_cell_geometry(ctx);
-	fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
-	if (!render_plane_geometry_matches(ctx->home_bg_plane, ctx->bg_row,
-			ctx->bg_col, (unsigned)ctx->bg_rows, (unsigned)ctx->bg_cols))
-		return (rebuild_home_background(ctx, image_path));
-	stale = ctx->bg_plane;
-	(void)ncplane_move_above(ctx->home_bg_plane, ctx->std);
-	ctx->bg_plane = ctx->home_bg_plane;
-	set_opaque_backdrop(ctx->std);
-	restore_home_backdrop(ctx);
-	if (notcurses_render(ctx->nc) != 0)
-		return (-1);
-	if (stale != NULL && stale != ctx->home_bg_plane)
-		ncplane_destroy(stale);
-	return (0);
+	if (stretch)
+	{
+		ctx->bg_row = 0;
+		ctx->bg_col = 0;
+		ctx->bg_rows = (int)std_rows;
+		ctx->bg_cols = (int)std_cols;
+	}
+	else
+		fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
 }
 
 /**
- * @brief Loads the home backdrop afresh and adopts it as the cached one.
+ * @brief Finds the entry holding one artwork built the same way.
  */
-static int	rebuild_home_background(render_ctx_t *ctx, const char *image_path)
+static backdrop_cache_t	*backdrop_find(render_ctx_t *ctx, const char *path,
+	bool exact, bool stretch)
 {
-	if (ctx->home_bg_plane != NULL && ctx->home_bg_plane != ctx->bg_plane)
-		ncplane_destroy(ctx->home_bg_plane);
-	ctx->home_bg_plane = NULL;
-	render_background_home_forget(ctx);
-	if (render_background_replace(ctx, image_path, false) < 0)
-		return (-1);
-	ctx->home_bg_plane = ctx->bg_plane;
-	remember_home_backdrop(ctx);
-	return (0);
+	int	index;
+
+	index = 0;
+	while (index < BACKDROP_CACHE_MAX)
+	{
+		if (ctx->backdrops[index].plane != NULL
+			&& ctx->backdrops[index].exact == exact
+			&& ctx->backdrops[index].stretch == stretch
+			&& strcmp(ctx->backdrops[index].path, path) == 0)
+			return (&ctx->backdrops[index]);
+		index++;
+	}
+	return (NULL);
 }
 
 /**
- * @brief Keeps a private copy of the home overlay snapshot.
- *
- * Only the stationary tier fills backdrop_pixels, so this is a no-op on the
- * movable tier. Where it does apply, a later screen's backdrop replaces the
- * shared snapshot, and overlays composited on the way back to Home would read
- * that screen's art instead of the home art without this copy.
+ * @brief Reports whether a plane is retained, and so must not be destroyed.
  */
-static void	remember_home_backdrop(render_ctx_t *ctx)
+static bool	backdrop_is_cached(const render_ctx_t *ctx,
+	const struct ncplane *plane)
+{
+	int	index;
+
+	index = 0;
+	while (index < BACKDROP_CACHE_MAX)
+	{
+		if (plane != NULL && ctx->backdrops[index].plane == plane)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Brings a retained backdrop back to the front without retransferring.
+ *
+ * @return true when the screen now shows the wanted artwork.
+ */
+static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
+	bool exact, bool stretch)
+{
+	backdrop_cache_t	*entry;
+	struct ncplane		*stale;
+
+	entry = backdrop_find(ctx, path, exact, stretch);
+	if (entry == NULL || !render_plane_geometry_matches(entry->plane,
+			ctx->bg_row, ctx->bg_col, (unsigned)ctx->bg_rows,
+			(unsigned)ctx->bg_cols))
+		return (false);
+	entry->used = ++ctx->backdrop_tick;
+	if (entry->plane == ctx->bg_plane)
+		return (true);
+	stale = ctx->bg_plane;
+	(void)ncplane_move_above(entry->plane, ctx->std);
+	ctx->bg_plane = entry->plane;
+	set_opaque_backdrop(ctx->std);
+	backdrop_restore_snapshot(ctx, entry);
+	if (notcurses_render(ctx->nc) != 0)
+		return (false);
+	if (stale != NULL && !backdrop_is_cached(ctx, stale))
+		ncplane_destroy(stale);
+	return (true);
+}
+
+/**
+ * @brief Retains the freshly built backdrop under its artwork and construction.
+ */
+static void	backdrop_remember(render_ctx_t *ctx, const char *path,
+	bool exact, bool stretch)
+{
+	backdrop_cache_t	*entry;
+
+	if (ctx->bg_plane == NULL || strlen(path) >= BACKDROP_PATH_MAX)
+		return ;
+	entry = backdrop_find(ctx, path, exact, stretch);
+	if (entry == NULL)
+		entry = backdrop_evict(ctx);
+	if (entry == NULL)
+		return ;
+	if (entry->plane != NULL && entry->plane != ctx->bg_plane)
+		ncplane_destroy(entry->plane);
+	free(entry->pixels);
+	entry->pixels = NULL;
+	entry->pixels_width = 0;
+	entry->pixels_height = 0;
+	snprintf(entry->path, sizeof(entry->path), "%s", path);
+	entry->exact = exact;
+	entry->stretch = stretch;
+	entry->plane = ctx->bg_plane;
+	entry->used = ++ctx->backdrop_tick;
+	backdrop_keep_snapshot(ctx, entry);
+}
+
+/**
+ * @brief Returns a free slot, or frees the least recently shown one.
+ *
+ * The plane on screen is never evicted: it is the one thing that cannot be
+ * rebuilt without the screen going blank first.
+ */
+static backdrop_cache_t	*backdrop_evict(render_ctx_t *ctx)
+{
+	backdrop_cache_t	*oldest;
+	int					index;
+
+	oldest = NULL;
+	index = 0;
+	while (index < BACKDROP_CACHE_MAX)
+	{
+		if (ctx->backdrops[index].plane == NULL)
+			return (&ctx->backdrops[index]);
+		if (ctx->backdrops[index].plane != ctx->bg_plane
+			&& (oldest == NULL || ctx->backdrops[index].used < oldest->used))
+			oldest = &ctx->backdrops[index];
+		index++;
+	}
+	return (oldest);
+}
+
+/**
+ * @brief Copies the stationary tier's overlay snapshot into the entry.
+ *
+ * Only that tier fills backdrop_pixels, so this is a no-op elsewhere. Where it
+ * does apply, the shared snapshot belongs to whichever backdrop was built last,
+ * and a restacked screen would otherwise composite its overlays over another
+ * screen's art.
+ */
+static void	backdrop_keep_snapshot(render_ctx_t *ctx, backdrop_cache_t *entry)
 {
 	size_t	count;
 
-	render_background_home_forget(ctx);
 	if (ctx->backdrop_pixels == NULL || ctx->backdrop_width <= 0
 		|| ctx->backdrop_height <= 0)
 		return ;
 	count = (size_t)ctx->backdrop_width * (size_t)ctx->backdrop_height;
-	ctx->home_backdrop_pixels = malloc(count
-			* sizeof(*ctx->home_backdrop_pixels));
-	if (ctx->home_backdrop_pixels == NULL)
+	entry->pixels = malloc(count * sizeof(*entry->pixels));
+	if (entry->pixels == NULL)
 		return ;
-	memcpy(ctx->home_backdrop_pixels, ctx->backdrop_pixels,
-		count * sizeof(*ctx->home_backdrop_pixels));
-	ctx->home_backdrop_width = ctx->backdrop_width;
-	ctx->home_backdrop_height = ctx->backdrop_height;
+	memcpy(entry->pixels, ctx->backdrop_pixels,
+		count * sizeof(*entry->pixels));
+	entry->pixels_width = ctx->backdrop_width;
+	entry->pixels_height = ctx->backdrop_height;
 }
 
 /**
- * @brief Puts the home overlay snapshot back in front of the shared one.
+ * @brief Puts a retained overlay snapshot back in front of the shared one.
  */
-static void	restore_home_backdrop(render_ctx_t *ctx)
+static void	backdrop_restore_snapshot(render_ctx_t *ctx,
+	const backdrop_cache_t *entry)
 {
 	size_t	count;
 
-	if (ctx->home_backdrop_pixels == NULL)
-		return ;
-	count = (size_t)ctx->home_backdrop_width
-		* (size_t)ctx->home_backdrop_height;
 	render_backdrop_forget(ctx);
+	if (entry->pixels == NULL)
+		return ;
+	count = (size_t)entry->pixels_width * (size_t)entry->pixels_height;
 	ctx->backdrop_pixels = malloc(count * sizeof(*ctx->backdrop_pixels));
 	if (ctx->backdrop_pixels == NULL)
 		return ;
-	memcpy(ctx->backdrop_pixels, ctx->home_backdrop_pixels,
+	memcpy(ctx->backdrop_pixels, entry->pixels,
 		count * sizeof(*ctx->backdrop_pixels));
-	ctx->backdrop_width = ctx->home_backdrop_width;
-	ctx->backdrop_height = ctx->home_backdrop_height;
+	ctx->backdrop_width = entry->pixels_width;
+	ctx->backdrop_height = entry->pixels_height;
+}
+
+/**
+ * @brief Frees every retained backdrop, leaving the live one to the caller.
+ */
+static void	backdrop_cache_clear(render_ctx_t *ctx)
+{
+	int	index;
+
+	index = 0;
+	while (index < BACKDROP_CACHE_MAX)
+	{
+		if (ctx->backdrops[index].plane != NULL
+			&& ctx->backdrops[index].plane != ctx->bg_plane)
+			ncplane_destroy(ctx->backdrops[index].plane);
+		ctx->backdrops[index].plane = NULL;
+		free(ctx->backdrops[index].pixels);
+		ctx->backdrops[index].pixels = NULL;
+		ctx->backdrops[index].pixels_width = 0;
+		ctx->backdrops[index].pixels_height = 0;
+		ctx->backdrops[index].path[0] = '\0';
+		index++;
+	}
 }
 
 /**
@@ -447,6 +557,9 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	struct ncvisual			*ncv;
 	int						result;
 
+	backdrop_fit(ctx, stretch);
+	if (backdrop_restack(ctx, image_path, false, stretch))
+		return (0);
 	ncv = ncvisual_from_file(image_path);
 	if (ncv == NULL)
 		return (-1);
@@ -454,6 +567,8 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	/* This visual is ours to consume, so it can be reshaped for the cache. */
 	if (result == 0)
 		capture_backdrop(ctx, ncv);
+	if (result == 0)
+		backdrop_remember(ctx, image_path, false, stretch);
 	ncvisual_destroy(ncv);
 	return (result);
 }
@@ -605,20 +720,15 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 
 	if (ctx == NULL || image_path == NULL || !render_pixels_available(ctx))
 		return (-1);
+	backdrop_fit(ctx, stretch);
+	if (backdrop_restack(ctx, image_path, true, stretch))
+		return (0);
 	ncv = ncvisual_from_file(image_path);
 	if (ncv == NULL)
 		return (-1);
 	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
-	refresh_cell_geometry(ctx);
-	if (stretch)
-	{
-		ctx->bg_row = 0;
-		ctx->bg_col = 0;
-		ctx->bg_rows = (int)std_rows;
-		ctx->bg_cols = (int)std_cols;
-	}
-	else
-		fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
+	(void)std_rows;
+	(void)std_cols;
 	if (ctx->cell_px_y <= 0 || ctx->cell_px_x <= 0
 		|| ctx->bg_rows > INT_MAX / ctx->cell_px_y
 		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x)
@@ -637,6 +747,8 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 			NCBLIT_PIXEL, NCVISUAL_OPTION_NODEGRADE);
 	if (result == 0)
 		capture_backdrop(ctx, ncv);
+	if (result == 0)
+		backdrop_remember(ctx, image_path, true, stretch);
 	ncvisual_destroy(ncv);
 	return (result);
 }
@@ -717,12 +829,12 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 	}
 	ctx->bg_plane = new_plane;
 	/*
-	 * The home backdrop is deliberately outlived by the screen drawn over it.
-	 * Destroying it here would drop its sprixel and make the next return to
-	 * Home pay for the whole bitmap again, which is the cost this cache exists
-	 * to avoid; it stays parked below the new plane until Home reclaims it.
+	 * A retained backdrop is deliberately outlived by the screen drawn over it.
+	 * Destroying it here would drop its sprixel and make the next visit pay for
+	 * the whole bitmap again, which is the cost the cache exists to avoid; it
+	 * stays parked below the new plane until its screen reclaims it.
 	 */
-	if (old_plane != NULL && old_plane != ctx->home_bg_plane)
+	if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
 		ncplane_destroy(old_plane);
 	return (0);
 }
