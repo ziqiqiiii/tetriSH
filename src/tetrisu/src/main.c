@@ -1883,8 +1883,8 @@ static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu,
 	render_screen_destroy(ctx);
 	render_menu_destroy(ctx);
 	if ((refresh_geometry && render_geometry_refresh(ctx, true) < 0)
-		|| (replace_background && render_background_replace(ctx,
-				SPLASH_ASSET_PATH, false) < 0))
+		|| (replace_background && render_background_show_home(ctx,
+				SPLASH_ASSET_PATH) < 0))
 		return (-1);
 	render_menu_create(ctx);
 	render_menu_move_bunny(ctx, menu);

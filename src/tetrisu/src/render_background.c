@@ -13,6 +13,10 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 				bool stretch, ncscale_e scaling, ncblitter_e blitter,
 				uint64_t flags);
 static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv);
+static int	rebuild_home_background(render_ctx_t *ctx,
+				const char *image_path);
+static void	remember_home_backdrop(render_ctx_t *ctx);
+static void	restore_home_backdrop(render_ctx_t *ctx);
 static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
 				int width, int height);
 static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
@@ -54,7 +58,13 @@ render_ctx_t	render_init(const char *image_path)
 		fprintf(stderr, "tetrisu: could not read terminal geometry\n");
 		exit(1);
 	}
-	if (render_background_replace(&ctx, image_path, false) < 0)
+	/*
+	 * The opening backdrop is the home backdrop, so it is adopted as the
+	 * cached one right here. Auth draws over it rather than replacing it, and
+	 * the first arrival at Home - which is what pressing P does - then costs a
+	 * restack instead of the full transfer this same artwork already paid for.
+	 */
+	if (render_background_show_home(&ctx, image_path) < 0)
 	{
 		notcurses_stop(ctx.nc);
 		fprintf(stderr, "tetrisu: failed to load image %s\n", image_path);
@@ -291,11 +301,133 @@ bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
  */
 void	render_background_destroy(render_ctx_t *ctx)
 {
+	if (ctx->home_bg_plane != NULL && ctx->home_bg_plane != ctx->bg_plane)
+		ncplane_destroy(ctx->home_bg_plane);
+	ctx->home_bg_plane = NULL;
+	render_background_home_forget(ctx);
 	if (ctx->bg_plane != NULL)
 	{
 		ncplane_destroy(ctx->bg_plane);
 		ctx->bg_plane = NULL;
 	}
+}
+
+/**
+ * @brief Drops the cached home backdrop snapshot.
+ */
+void	render_background_home_forget(render_ctx_t *ctx)
+{
+	if (ctx == NULL)
+		return ;
+	free(ctx->home_backdrop_pixels);
+	ctx->home_backdrop_pixels = NULL;
+	ctx->home_backdrop_width = 0;
+	ctx->home_backdrop_height = 0;
+}
+
+/**
+ * @brief Restores the home backdrop, reusing its plane whenever it still fits.
+ *
+ * Every return to Home used to rebuild this backdrop from the file, which
+ * destroys the old sprixel plane and so hands the terminal the entire bitmap
+ * again. That transfer is the screen's whole cost: sampled on macOS kitty it
+ * sat 2.6s inside notcurses' blocking_write() at 110x40 and 12.8s at 271x71,
+ * scaling with the pixel area, which reads as a hung client rather than a slow
+ * one. A sprixel survives being moved, so when the fitted geometry is
+ * unchanged the surviving plane is restacked and nothing is retransmitted.
+ *
+ * @param ctx Active render context.
+ * @param image_path Home artwork, loaded only when the cache cannot serve.
+ * @return 0 on success, -1 when a rebuild was needed and failed.
+ */
+int	render_background_show_home(render_ctx_t *ctx, const char *image_path)
+{
+	struct ncplane	*stale;
+	unsigned		std_rows;
+	unsigned		std_cols;
+
+	if (ctx == NULL || ctx->std == NULL)
+		return (-1);
+	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
+	refresh_cell_geometry(ctx);
+	fit_background_to_terminal(ctx, (int)std_rows, (int)std_cols);
+	if (!render_plane_geometry_matches(ctx->home_bg_plane, ctx->bg_row,
+			ctx->bg_col, (unsigned)ctx->bg_rows, (unsigned)ctx->bg_cols))
+		return (rebuild_home_background(ctx, image_path));
+	stale = ctx->bg_plane;
+	(void)ncplane_move_above(ctx->home_bg_plane, ctx->std);
+	ctx->bg_plane = ctx->home_bg_plane;
+	set_opaque_backdrop(ctx->std);
+	restore_home_backdrop(ctx);
+	if (notcurses_render(ctx->nc) != 0)
+		return (-1);
+	if (stale != NULL && stale != ctx->home_bg_plane)
+		ncplane_destroy(stale);
+	return (0);
+}
+
+/**
+ * @brief Loads the home backdrop afresh and adopts it as the cached one.
+ */
+static int	rebuild_home_background(render_ctx_t *ctx, const char *image_path)
+{
+	if (ctx->home_bg_plane != NULL && ctx->home_bg_plane != ctx->bg_plane)
+		ncplane_destroy(ctx->home_bg_plane);
+	ctx->home_bg_plane = NULL;
+	render_background_home_forget(ctx);
+	if (render_background_replace(ctx, image_path, false) < 0)
+		return (-1);
+	ctx->home_bg_plane = ctx->bg_plane;
+	remember_home_backdrop(ctx);
+	return (0);
+}
+
+/**
+ * @brief Keeps a private copy of the home overlay snapshot.
+ *
+ * Only the stationary tier fills backdrop_pixels, so this is a no-op on the
+ * movable tier. Where it does apply, a later screen's backdrop replaces the
+ * shared snapshot, and overlays composited on the way back to Home would read
+ * that screen's art instead of the home art without this copy.
+ */
+static void	remember_home_backdrop(render_ctx_t *ctx)
+{
+	size_t	count;
+
+	render_background_home_forget(ctx);
+	if (ctx->backdrop_pixels == NULL || ctx->backdrop_width <= 0
+		|| ctx->backdrop_height <= 0)
+		return ;
+	count = (size_t)ctx->backdrop_width * (size_t)ctx->backdrop_height;
+	ctx->home_backdrop_pixels = malloc(count
+			* sizeof(*ctx->home_backdrop_pixels));
+	if (ctx->home_backdrop_pixels == NULL)
+		return ;
+	memcpy(ctx->home_backdrop_pixels, ctx->backdrop_pixels,
+		count * sizeof(*ctx->home_backdrop_pixels));
+	ctx->home_backdrop_width = ctx->backdrop_width;
+	ctx->home_backdrop_height = ctx->backdrop_height;
+}
+
+/**
+ * @brief Puts the home overlay snapshot back in front of the shared one.
+ */
+static void	restore_home_backdrop(render_ctx_t *ctx)
+{
+	size_t	count;
+
+	if (ctx->home_backdrop_pixels == NULL)
+		return ;
+	count = (size_t)ctx->home_backdrop_width
+		* (size_t)ctx->home_backdrop_height;
+	render_backdrop_forget(ctx);
+	ctx->backdrop_pixels = malloc(count * sizeof(*ctx->backdrop_pixels));
+	if (ctx->backdrop_pixels == NULL)
+		return ;
+	memcpy(ctx->backdrop_pixels, ctx->home_backdrop_pixels,
+		count * sizeof(*ctx->backdrop_pixels));
+	ctx->backdrop_width = ctx->home_backdrop_width;
+	ctx->backdrop_height = ctx->home_backdrop_height;
 }
 
 /**
@@ -584,7 +716,13 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 		return (-1);
 	}
 	ctx->bg_plane = new_plane;
-	if (old_plane != NULL)
+	/*
+	 * The home backdrop is deliberately outlived by the screen drawn over it.
+	 * Destroying it here would drop its sprixel and make the next return to
+	 * Home pay for the whole bitmap again, which is the cost this cache exists
+	 * to avoid; it stays parked below the new plane until Home reclaims it.
+	 */
+	if (old_plane != NULL && old_plane != ctx->home_bg_plane)
 		ncplane_destroy(old_plane);
 	return (0);
 }

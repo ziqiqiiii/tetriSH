@@ -1635,6 +1635,16 @@ typedef struct
 	struct notcurses	*nc;
 	struct ncplane		*std;
 	struct ncplane		*bg_plane;
+	/*
+	 * The home backdrop outlives the screens drawn over it. A sprixel is bound
+	 * to its plane until that plane is re-blitted, resized or destroyed, so
+	 * destroying this one is what forces the whole bitmap back down the PTY;
+	 * keeping it lets a return to Home cost a restack instead of a retransfer.
+	 */
+	struct ncplane		*home_bg_plane;
+	uint32_t			*home_backdrop_pixels;
+	int					home_backdrop_width;
+	int					home_backdrop_height;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
@@ -2205,6 +2215,9 @@ int				render_background_replace_exact(render_ctx_t *ctx,
 					const char *image_path, bool stretch);
 int				render_background_replace_visual(render_ctx_t *ctx,
 					struct ncvisual *ncv, bool stretch);
+int				render_background_show_home(render_ctx_t *ctx,
+					const char *image_path);
+void				render_background_home_forget(render_ctx_t *ctx);
 void				render_background_destroy(render_ctx_t *ctx);
 void				render_backdrop_forget(render_ctx_t *ctx);
 const uint32_t		*render_backdrop_pixels(const render_ctx_t *ctx,
