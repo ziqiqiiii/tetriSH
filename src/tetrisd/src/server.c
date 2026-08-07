@@ -2,9 +2,9 @@
 
 // Static Functions
 static void	*loop_main(void *arg);
-static void	accept_ready(t_server *srv);
 static int	bring_up(t_server *srv, const t_config *cfg);
-static void	stop_rooms(t_server *srv);
+static int	open_reactor(t_server *srv);
+static int	watch(t_server *srv, int fd, t_event_tag *tag);
 static void	destroy(t_server *srv);
 
 /**
@@ -51,17 +51,11 @@ int	server_start(const t_config *cfg, t_server **out)
 /**
  * @brief Shuts the server down cleanly and releases everything it owns.
  *
- * The order is what makes shutdown safe: stop accepting, shut every
- * connection down and wait for its thread to finish, and only then stop the
- * room tickers and close the store.
- *
- * Clients are drained before the rooms on purpose. A client thread can be
- * inside START - and therefore inside server_room_begin - at any moment, so
- * stopping the tickers while clients still exist would race one thread
- * creating a ticker against another joining it. Once the registry is empty no
- * such thread remains, which removes the race rather than synchronising it.
- * The tickers left running meanwhile cost nothing: they see running=false and
- * an emptying room, and exit within a tick.
+ * All this does is ask and wait. The reactor owns every client, every room and
+ * the handshake pool, so it is the thread that ends them - in the one order
+ * that is safe - on its way out of the loop. Joining it is therefore the whole
+ * of shutdown, and there is no window here in which two threads are taking the
+ * same server apart.
  *
  * @param srv Server to stop; NULL is ignored.
  */
@@ -71,14 +65,10 @@ void	server_stop(t_server *srv)
 		return ;
 	atomic_store(&srv->stopping, true);
 	atomic_store(&srv->running, false);
-	if (srv->wake[SELFPIPE_WRITE] >= 0)
-		selfpipe_notify(srv->wake[SELFPIPE_WRITE]);
+	server_wake(srv);
 	if (srv->loop_started)
 		pthread_join(srv->loop, NULL);
 	srv->loop_started = false;
-	registry_shutdown_all(&srv->reg);
-	registry_wait_empty(&srv->reg);
-	stop_rooms(srv);
 	logger_emit(&srv->log, COREIPC_LOG_INFO, "tetrisd stopped (%llu logs dropped)",
 		(unsigned long long)logger_dropped_count(&srv->log));
 	destroy(srv);
@@ -124,8 +114,24 @@ void	server_request_stop(t_server *srv)
 	if (srv == NULL)
 		return ;
 	atomic_store(&srv->running, false);
-	if (srv->wake[SELFPIPE_WRITE] >= 0)
-		selfpipe_notify(srv->wake[SELFPIPE_WRITE]);
+	server_wake(srv);
+}
+
+/**
+ * @brief Wakes the reactor from any thread.
+ *
+ * Every thread beside the reactor - a room ticker with a snapshot to push, a
+ * handshake worker with a finished session, a signal handler - reaches it the
+ * same way, and none of them may block doing so. The pipe is non-blocking, so
+ * a full one is not an error: it already means a wake-up is pending.
+ *
+ * @param srv Server to wake; NULL and an unopened pipe are both ignored.
+ */
+void	server_wake(t_server *srv)
+{
+	if (srv == NULL || srv->wake[SELFPIPE_WRITE] < 0)
+		return ;
+	selfpipe_notify(srv->wake[SELFPIPE_WRITE]);
 }
 
 /**
@@ -157,66 +163,20 @@ void	server_reload(t_server *srv)
 }
 
 /**
- * @brief Main loop: waits on the listener and the self-pipe, nothing else.
+ * @brief Thread entry point for the reactor.
  *
- * Accepting is the only thing this thread does, so a slow handshake or a
- * chatty client can never delay the next connection - that work belongs to
- * the per-client threads.
+ * server_start creates a thread rather than running the loop inline because
+ * every suite drives a real server in-process through that seam and then talks
+ * to it with the blocking wrappers. tetrisd is not single-threaded; it is
+ * single-owner, which is the property that matters.
  *
  * @param arg The server.
  * @return Always NULL.
  */
 static void	*loop_main(void *arg)
 {
-	struct pollfd	pfds[2];
-	t_server		*srv;
-
-	srv = arg;
-	while (atomic_load(&srv->running))
-	{
-		pfds[0].fd = srv->listen_fd;
-		pfds[0].events = POLLIN;
-		pfds[0].revents = 0;
-		pfds[1].fd = srv->wake[SELFPIPE_READ];
-		pfds[1].events = POLLIN;
-		pfds[1].revents = 0;
-		if (poll(pfds, 2, -1) < 0 && errno != EINTR)
-			break ;
-		if (pfds[1].revents & POLLIN)
-		{
-			selfpipe_drain(srv->wake[SELFPIPE_READ]);
-			if (signals_take_stop())
-				atomic_store(&srv->running, false);
-			if (signals_take_reload())
-				server_reload(srv);
-			if (signals_take_state_dump())
-				server_state_dump(srv);
-		}
-		if (pfds[0].revents & POLLIN)
-			accept_ready(srv);
-	}
+	reactor_run(arg);
 	return (NULL);
-}
-
-/**
- * @brief Accepts every connection currently pending on the listener.
- *
- * @param srv Server whose listener is ready.
- */
-static void	accept_ready(t_server *srv)
-{
-	int	fd;
-
-	fd = listener_accept(srv->listen_fd);
-	while (fd >= 0)
-	{
-		if (client_spawn(srv, fd) != 0)
-			logger_emit(&srv->log, COREIPC_LOG_WARNING,
-				"refused a connection: client limit reached");
-		if (!atomic_load(&srv->running))
-			return ;
-		fd = listener_accept(srv->listen_fd);
-	}
 }
 
 /**
@@ -230,8 +190,11 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 {
 	srv->cfg = *cfg;
 	srv->listen_fd = -1;
+	srv->epoll_fd = -1;
 	srv->wake[SELFPIPE_READ] = -1;
 	srv->wake[SELFPIPE_WRITE] = -1;
+	srv->listener_tag.source = EVENT_LISTENER;
+	srv->wake_tag.source = EVENT_WAKE;
 	atomic_store(&srv->tick_ms, cfg->tick_ms);
 	srv->started_ms = clock_now_ms();
 	logger_blank(&srv->log);
@@ -254,6 +217,10 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	}
 	if (registry_init(&srv->reg, (size_t)cfg->max_clients) != 0)
 		return (-1);
+	srv->scratch = malloc(TETRISSH_MAX_PLAINTEXT);
+	srv->sweep = calloc((size_t)cfg->max_clients, sizeof(*srv->sweep));
+	if (srv->scratch == NULL || srv->sweep == NULL)
+		return (-1);
 	if (selfpipe_open(srv->wake) != 0)
 		return (-1);
 	srv->listen_fd = listener_open(cfg->port, &srv->port);
@@ -263,24 +230,59 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 			cfg->port);
 		return (-1);
 	}
+	return (open_reactor(srv));
+}
+
+/**
+ * @brief Opens the epoll set, watches the listener and the wake pipe, and
+ *        starts the handshake pool.
+ *
+ * @param srv Server being brought up; its listener and pipe must be open.
+ * @return 0 on success, -1 when any of the three failed.
+ */
+static int	open_reactor(t_server *srv)
+{
+	srv->epoll_fd = epoll_create1(0);
+	if (srv->epoll_fd < 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open epoll: %s",
+			strerror(errno));
+		return (-1);
+	}
+	if (watch(srv, srv->listen_fd, &srv->listener_tag) != 0
+		|| watch(srv, srv->wake[SELFPIPE_READ], &srv->wake_tag) != 0)
+		return (-1);
+	if (handshake_pool_start(&srv->pool, srv) != 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR,
+			"cannot start the handshake pool");
+		return (-1);
+	}
 	return (0);
 }
 
 /**
- * @brief Stops every room ticker and waits for each to finish.
+ * @brief Adds one of the server's own descriptors to the epoll set.
  *
- * @param srv Server whose rooms are stopping.
+ * @param srv Server holding the epoll descriptor.
+ * @param fd Descriptor to watch for readability.
+ * @param tag What the reactor should read the event back as.
+ * @return 0 on success, -1 on failure.
  */
-static void	stop_rooms(t_server *srv)
+static int	watch(t_server *srv, int fd, t_event_tag *tag)
 {
-	int	i;
+	struct epoll_event	ev;
 
-	i = 0;
-	while (i < LOBBY_MAX_ROOMS)
+	memset(&ev, 0, sizeof(ev));
+	ev.events = EPOLLIN;
+	ev.data.ptr = tag;
+	if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0)
 	{
-		server_room_stop(&srv->rooms[i]);
-		i++;
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot watch fd %d: %s",
+			fd, strerror(errno));
+		return (-1);
 	}
+	return (0);
 }
 
 /**
@@ -295,12 +297,18 @@ static void	destroy(t_server *srv)
 {
 	int	i;
 
+	handshake_pool_destroy(&srv->pool);
+	client_reap(srv);
+	if (srv->epoll_fd >= 0)
+		close(srv->epoll_fd);
 	if (srv->listen_fd >= 0)
 		close(srv->listen_fd);
 	if (srv->wake[SELFPIPE_READ] >= 0)
 		close(srv->wake[SELFPIPE_READ]);
 	if (srv->wake[SELFPIPE_WRITE] >= 0)
 		close(srv->wake[SELFPIPE_WRITE]);
+	free(srv->scratch);
+	free(srv->sweep);
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
 	{

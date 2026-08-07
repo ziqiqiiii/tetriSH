@@ -24,7 +24,7 @@ The concurrent, server-authoritative game server for tetriSH. Owns accounts, the
 ## Features
 
 - Server-authoritative Single mode end to end: signup, login, lobby, room, live game
-- One reader and one writer thread per client; one ticker thread per in-game room
+- One reactor thread owns every established connection; a bounded pool runs the blocking handshake; one ticker thread per in-game room
 - Cert-authenticated encrypted sessions via `libtetrissh` — refuses to boot without a certificate
 - Server-pushed `STATE` snapshots on a fixed tick, coalesced through a one-slot mailbox
 - Per-connection input rate limiting (token bucket), answering `429` with `Retry-After`
@@ -91,7 +91,7 @@ The fork lives in `main.c` alone and never behind `server_start`, or the integra
 
 | Signal | Effect |
 |---|---|
-| `SIGTERM`, `SIGINT` | Stop accepting, shut every client down, join every thread, close the store |
+| `SIGTERM`, `SIGINT` | Leave the loop, stop the handshake pool, join every ticker, end every client, close the store |
 | `SIGHUP` | Re-read `.tetrishrc`; applies the log level and tick period |
 | `SIGUSR1` | Dump server state to the log: settings, connections, rooms, live games, log drop count |
 | `SIGPIPE` | Ignored — a vanished client kills its own connection, not the server |
@@ -119,6 +119,8 @@ Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETR
 | `TETRISD_BR_SLOTS` | `4` | Slots in a Battle Royale room (2–16) |
 | `TETRISD_INPUT_BURST` | `120` | Per-connection input tokens held at once |
 | `TETRISD_INPUT_RATE` | `60` | Input tokens refilled per second |
+| `TETRISD_HANDSHAKE_WORKERS` | `4` | Threads running the blocking handshake (1–64). Sized against the connection *arrival* rate, not the client count — a handshake is brief and one-off |
+| `TETRISD_HANDSHAKE_TIMEOUT_MS` | `5000` | Budget for one handshake, from the moment a worker starts it (100–60000). The other half of the guarantee above: the pool is what makes a slow peer everyone's problem, and this is what stops it |
 
 ---
 
@@ -170,16 +172,21 @@ A request carrying a body must declare `Content-Type: application/tetris-command
 ### Threading model
 
 ```text
-main loop      poll(listener, self-pipe) -> accept -> hand off, never blocks
-per client     reader thread   blocks in session_recv, parses, dispatches
-               writer thread   the only session_send caller for that connection
+reactor        epoll_wait(listener, wake pipe, every client)
+               reads, opens frames, dispatches, seals, writes - owns all of it
+handshake pool TETRISD_HANDSHAKE_WORKERS threads, each blocked in one handshake
 per room       ticker thread   gravity on a fixed tick, then STATE snapshots
 logging        shipper thread  drains the ring, datagrams records to tetrislogd
 ```
 
-Each client owns a bounded response FIFO plus a one-slot `STATE` mailbox. Overflowing the FIFO closes the connection — a client that cannot keep up must not grow the server's memory — while snapshots overwrite, so a stalled peer loses intermediate frames and never delays a room's ticker.
+One thread owns the lobby, every room, every game, the registry and every outbox. The seam is the handshake, the one call that genuinely blocks; why it sits exactly there is [ADR-0008](../../docs/adr/0008-tetrisd-is-event-driven.md). Two rules the code cannot state for itself:
 
-Gravity accumulates real elapsed time against each player's own `gravity_interval_ms(level)`, so a descheduled ticker catches up rather than slowing the game down. Inputs mark the game dirty under the room's mutex; the ticker alone encodes and pushes, so inputs and gravity produce one `STATE` stream instead of two racing ones.
+- **No client is freed inside the event loop.** `epoll_event.data.ptr` carries the `t_client *`, and a batch can hold several events for one client, so `client_kill` only unlinks and parks it on the zombie list; the drain after the batch is the sole `free()` site. Breaking this is a use-after-free no test would catch.
+- **A handshake has a total budget**, `TETRISD_HANDSHAKE_TIMEOUT_MS`, enforced by the reactor over and above the matching `SO_RCVTIMEO`/`SO_SNDTIMEO`. The socket option bounds one `recv`, and `libtetrissh` loops until it has its bytes — so a peer dribbling a byte per timeout would hold a pool worker forever, and enough of them stop every login server-wide. The clock starts when a worker picks the connection up, never at accept: charging queue time would make whoever queues behind an attacker inherit the attacker's leftovers.
+
+Each client owns a bounded response FIFO plus a one-slot `STATE` mailbox. Overflowing the FIFO closes the connection — a client that cannot keep up must not grow the server's memory — while snapshots overwrite, so a stalled peer loses intermediate frames and never delays a room's ticker. The reactor pops, seals, and writes; a short write leaves a cursor in the send buffer and arms `EPOLLOUT`, since `session_send`'s retry loop is not available to a thread that drives every other connection too.
+
+Gravity accumulates real elapsed time against each player's own `gravity_interval_ms(level)`, so a descheduled ticker catches up rather than slowing the game down. Inputs mark the game dirty under the room's mutex; the ticker alone encodes and pushes, so inputs and gravity produce one `STATE` stream instead of two racing ones. A ticker enqueues and pokes the wake pipe — it never touches a socket — so the reactor is what turns a snapshot into bytes.
 
 ### Lock order
 
@@ -187,20 +194,20 @@ Gravity accumulates real elapsed time against each player's own `gravity_interva
 lobby_mutex  >  room->mutex  >  registry rwlock  >  outbox mutex
 ```
 
-Strictly descending, never re-entered upward. No `db_*`, `session_*`, or IPC send happens under any lock — the outbox push is the sole exception, and it cannot block. Database writes (recording a finished game) happen after the room mutex is released.
+Strictly descending, never re-entered upward. No `db_*`, `session_*`, or IPC send happens under any lock — the outbox push is the sole exception, and it cannot block. Database writes happen after the room mutex is released.
 
-Two rules sit underneath the order and are easy to break without breaking it. A room is guarded by *its own* mutex everywhere, including while the lobby destroys it. And the registry's client count and its `empty_cond` are published under one hold of `empty_mutex`, so a waiter cannot destroy the condition variable while a departing thread is still about to signal it. Both were found by `-fsanitize=thread`, not by lock-order review.
+Every lock here exists only because room tickers are still threads. Step 4 of ADR-0008 replaces them with one `timerfd` and step 5 deletes the order entirely; until then it is load-bearing and is not to be relaxed a lock at a time. One rule sits underneath it and is easy to break without breaking the order: a room is guarded by *its own* mutex everywhere, including while the lobby destroys it. Found by `-fsanitize=thread`, not by lock-order review.
 
 ### Client lifetime
 
-The registry's rwlock is the lifetime guard. An enqueuer holds the read lock across its outbox push, so the client cannot be freed underneath it. Teardown, on the client's own reader thread, runs in one order:
+The registry's rwlock keeps a room ticker from enqueueing into a client that is going away: the ticker holds the read lock across its push, unlinking takes the write lock. It says nothing about memory, which the reactor alone owns. Teardown runs on the loop, in one order:
 
-1. forfeit — leaving, topping out, and a dropped connection are the same event
-2. take the write lock, unlink from the registry, release it
-3. `shutdown(fd)`, close the outbox, join the writer thread
-4. close the session and socket, free the client
+1. drop the descriptor from the epoll set
+2. forfeit — leaving, topping out, and a dropped connection are the same event
+3. take the write lock, unlink from the registry, release it
+4. `shutdown(fd)`, close the outbox, park the client on the zombie list — the drain after the batch closes the socket and frees it
 
-An empty room returns to the lobby. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older connection and waits for it to finish leaving before binding the new one.
+An empty room returns to the lobby. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older one — synchronously, in the handler, because the loop owns both. The old connection has forfeited its room and unlinked itself before the new one binds, so the wait once needed between two client threads is gone rather than ported.
 
 ### Logging
 
@@ -219,11 +226,15 @@ src/tetrisd/
 │   ├── logger.c          Ring buffer, shipper thread, stderr fallback
 │   ├── listener.c        Listening socket: open and accept
 │   ├── clock.c           Wall-clock and monotonic milliseconds
-│   ├── server.c          Bring-up, main loop, shutdown, SIGHUP reload
+│   ├── server.c          Bring-up, the reactor thread, shutdown, SIGHUP reload
+│   ├── reactor.c         The event loop: dispatch, accept, sweep, wind-down
 │   ├── signals.c         Handlers: a flag and one byte down the self-pipe
 │   ├── dump.c            SIGUSR1 state dump
 │   ├── registry.c        Client registry, the lifetime guard
-│   ├── client.c          Reader and writer threads, teardown
+│   ├── client.c          Client lifetime: spawn, adopt, kill, reap
+│   ├── clientio.c        Frame in, frame out: the reactor's data path
+│   ├── handshake_pool.c  Bounded worker pool for the blocking handshake
+│   ├── bytes.c           Growable byte buffer with a cursor
 │   ├── outbox.c          Bounded FIFO + latest-STATE mailbox
 │   ├── dispatch.c        Frame → route → response, status mapping
 │   ├── handlers_account.c  SIGNUP, LOGIN, password hashing
@@ -242,20 +253,20 @@ src/tetrisd/
 
 ## Testing
 
-Seven suites, each driving a real server in-process on port `0`:
+Eight suites, each driving a real server in-process on port `0`:
 
 ```bash
 make -C src/tetrisd test
 make -C src/tetrisd test FILTER=game    # only suites matching "game"
 ```
 
-Valgrind proves thread teardown:
+Valgrind proves teardown:
 
 ```bash
 valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_shutdown
 ```
 
-It says nothing about data races, so the suite is also rebuilt under ThreadSanitizer — a separate, non-negotiable check at this thread count:
+It says nothing about data races, so the suite is also rebuilt under ThreadSanitizer. Fewer threads remain than before, but the ones that do — the handshake pool and the room tickers — are exactly the ones that reach across into state the reactor owns, so this stays non-negotiable:
 
 ```bash
 make -C lib/<each> re FLAGS="<its flags minus -Werror> -fsanitize=thread -g -O1"

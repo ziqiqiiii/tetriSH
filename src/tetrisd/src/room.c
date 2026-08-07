@@ -176,6 +176,27 @@ void	server_room_stop(t_server_room *server_room)
 }
 
 /**
+ * @brief Stops every room's ticker, called by the reactor on its way out.
+ *
+ * Shutdown runs this before it ends any connection, so no ticker is left
+ * holding a client the reactor is about to free. It is safe here and nowhere
+ * else: only the reactor starts a ticker, so once it has stopped looping no
+ * thread can create one behind this.
+ *
+ * @param srv Server whose rooms are stopping.
+ */
+void	server_room_stop_all(t_server *srv)
+{
+	int	i;
+
+	if (srv == NULL)
+		return ;
+	i = 0;
+	while (i < LOBBY_MAX_ROOMS)
+		server_room_stop(&srv->rooms[i++]);
+}
+
+/**
  * @brief Removes a client from its room, forfeiting any game in progress.
  *
  * Leaving, topping out, and losing the connection are the same event
@@ -265,6 +286,11 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
  * snapshot that says "you topped out" is always sent before the room resets.
  * The tick period is re-read each round, so SIGHUP reaches running games.
  *
+ * A snapshot lands in an outbox, not on a socket - the reactor is the only
+ * thread allowed to write one - so the pipe is poked once per round to tell it
+ * there is something to send. Step 4 folds this thread into the reactor's own
+ * timer and the poke goes with it.
+ *
  * @param arg The room runtime.
  * @return Always NULL.
  */
@@ -292,6 +318,7 @@ static void	*ticker_main(void *arg)
 			n--;
 			server_room_push_state(server_room, name, pids[n], &snaps[n]);
 		}
+		server_wake(server_room->srv);
 		if (room_is_over(server_room))
 		{
 			n = tick_once(server_room, snaps, pids);
@@ -300,6 +327,7 @@ static void	*ticker_main(void *arg)
 				n--;
 				server_room_push_state(server_room, name, pids[n], &snaps[n]);
 			}
+			server_wake(server_room->srv);
 			break ;
 		}
 	}

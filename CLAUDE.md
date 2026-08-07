@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean). Its threading model is being replaced by an event loop (ADR-0008) and Double/Battle Royale are designed but unbuilt (ADR-0009) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (8 of 8 suites pass, valgrind-clean). ADR-0008 steps 1–3 are done; the room tickers (step 4) and the locks (step 5) remain, and Double/Battle Royale are designed but unbuilt (ADR-0009) |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -226,23 +226,29 @@ Config comes from `.tetrishrc` as `export TETRISD_*=...` lines (`argv[1]` →
 `$TETRISHRC` → `./.tetrishrc`, then environment), re-read on SIGHUP; missing
 certificates are a fatal boot error (`make certs` mints dev ones).
 
-Threads **as built today**: main loop `poll()`s listener + self-pipe; per client
-a reader thread (blocks in `session_recv`) and a writer thread (sole
-`session_send` caller); per in-game room a ticker thread; one log shipper
-thread. Lock order is `lobby_mutex > room->mutex > registry rwlock > outbox
-mutex`, and no `db_*`, `session_*`, or IPC send happens under any lock (the
-non-blocking outbox push is the sole exception). The registry rwlock is the
-client-lifetime guard.
+Threads **as built today**: one reactor thread in `epoll_wait` owns the
+listener, the wake pipe and every established connection — it reads, opens
+frames, dispatches, seals and writes, and it owns the lobby, the rooms, the
+games, the registry and every outbox. Beside it: a `TETRISD_HANDSHAKE_WORKERS`
+pool (default 4) running the blocking handshake under a per-handshake budget
+(`TETRISD_HANDSHAKE_TIMEOUT_MS`, default 5 s) that the reactor enforces,
+a ticker thread per in-game room, and one log shipper thread.
 
-**This model is being replaced** — see
-[ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md), accepted and not yet
-implemented. `tetrisd` becomes a reactor: one thread in `epoll_wait` owns the
-lobby, every room, every game, the registry and every outbox, beside a
-four-worker handshake pool that owns only its own descriptors until handoff.
-Every lock above is deleted, along with `registry_wait_absent` and
-`TD_DISPLACE_WAIT_MS`. The property that replaces the lock order is *one owner
-of all mutable game state*. The migration is seven staged steps, each ending
-green; until step 5 lands, the description above is the truth and the locks are
+The reactor's lifetime rule replaces the registry rwlock as the thing that
+keeps `epoll_event.data.ptr` valid: **no client is freed inside the event
+loop.** `client_kill` unlinks it and parks it on the zombie list, and
+`client_reap` — run once after every event in a batch — is the only `free()`
+site for a client.
+
+Lock order is still `lobby_mutex > room->mutex > registry rwlock > outbox
+mutex`, and no `db_*`, `session_*`, or IPC send happens under any lock (the
+non-blocking outbox push is the sole exception). Every one of those locks now
+exists **only** because room tickers are still threads.
+
+See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–3 are
+implemented. Step 4 replaces the tickers with one `timerfd`; step 5 then
+deletes all four locks together, and the property that replaces them is *one
+owner of all mutable game state*. Until step 5 lands the locks are
 load-bearing. Do not remove a lock ahead of its step.
 
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,

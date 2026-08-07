@@ -98,8 +98,8 @@ int	drop_handler(const t_htttp_message *msg, void *context)
  * empties it is not playing - it is hammering, and gets told to slow down
  * rather than being served.
  *
- * The bucket belongs to the connection and is only touched by that
- * connection's own reader thread, so it needs no lock.
+ * The bucket belongs to the connection and is only touched by the reactor, so
+ * it needs no lock.
  *
  * @param cli Client spending a token.
  * @return true when a token was available, false when the budget is empty.

@@ -38,6 +38,8 @@ void	config_defaults(t_config *cfg)
 	cfg->input_burst = TETRISD_DEFAULT_INPUT_BURST;
 	cfg->input_rate = TETRISD_DEFAULT_INPUT_RATE;
 	cfg->br_slots = TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS;
+	cfg->handshake_workers = TETRISD_DEFAULT_HANDSHAKE_WORKERS;
+	cfg->handshake_timeout_ms = TETRISD_DEFAULT_HANDSHAKE_TIMEOUT_MS;
 }
 
 /**
@@ -117,6 +119,12 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 				TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "BR_SLOTS") == 0)
 		return (set_int(&cfg->br_slots, value, 2, ROOM_MAX_SLOTS));
+	if (strcmp(key, "HANDSHAKE_WORKERS") == 0)
+		return (set_int(&cfg->handshake_workers, value, 1,
+				TETRISD_HANDSHAKE_WORKERS_MAX));
+	if (strcmp(key, "HANDSHAKE_TIMEOUT_MS") == 0)
+		return (set_int(&cfg->handshake_timeout_ms, value,
+				TETRISD_HANDSHAKE_TIMEOUT_MIN, TETRISD_HANDSHAKE_TIMEOUT_MAX));
 	return (-1);
 }
 
@@ -366,6 +374,8 @@ static int	apply_env(t_config *cfg)
 		"TETRISD_MAX_CLIENTS", 
 		"TETRISD_TICK_MS", 
 		"TETRISD_BR_SLOTS", 
+		"TETRISD_HANDSHAKE_WORKERS", 
+		"TETRISD_HANDSHAKE_TIMEOUT_MS", 
 		NULL
 	};
 	const char			*value;

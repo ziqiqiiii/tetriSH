@@ -69,6 +69,17 @@ export TETRISD_BR_SLOTS=4
 export TETRISD_INPUT_BURST=120
 export TETRISD_INPUT_RATE=60
 
+# Threads that run the secure handshake, the one blocking call left in tetrisd;
+# everything else happens on the single reactor thread. WORKERS sizes the
+# arrival rate of new connections, not how many are being served, because a
+# handshake is brief and happens once - so it is far smaller than MAX_CLIENTS
+# on purpose. TIMEOUT_MS is the budget for one handshake, counted from when a
+# worker starts it rather than from accept. The two are halves of one
+# guarantee: a bounded pool is what lets a slow peer become everyone's problem,
+# and the budget is what stops it.
+export TETRISD_HANDSHAKE_WORKERS=4
+export TETRISD_HANDSHAKE_TIMEOUT_MS=5000
+
 ################################################################################
 #                            tetrislogd settings                               #
 ################################################################################
