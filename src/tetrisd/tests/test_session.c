@@ -297,10 +297,8 @@ static void	test_a_body_without_a_content_type_is_refused(void)
 	assert(fx_start(&fx) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	htttp_message_init(&req);
-	assert(htttp_message_make_request(&req, "SIGNUP", TETRISD_ROUTE_ACCOUNT)
-		== HTTTP_OK);
-	assert(htttp_message_set_body(&req, "username amber\npassword hunter2\n",
-			31) == HTTTP_OK);
+	assert(htttp_message_make_request(&req, "SIGNUP", TETRISD_ROUTE_ACCOUNT) == HTTTP_OK);
+	assert(htttp_message_set_body(&req, "username amber\npassword hunter2\n", 31) == HTTTP_OK);
 	assert(htttp_serialize(&req, &bytes, &len) == HTTTP_OK);
 	assert(session_send(&hc.sess, bytes, len) >= 0);
 	free(bytes);

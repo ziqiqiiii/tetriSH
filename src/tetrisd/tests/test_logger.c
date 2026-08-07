@@ -34,8 +34,7 @@ static void	test_records_reach_the_logger(void)
 	assert(rx >= 0);
 	logger_cfg(&cfg, sock, COREIPC_LOG_DEBUG);
 	assert(logger_init(&lg, &cfg) == 0);
-	logger_emit(&lg, COREIPC_LOG_INFO, "player %llu joined %s",
-		(unsigned long long)7, "S-01");
+	logger_emit(&lg, COREIPC_LOG_INFO, "player %llu joined %s", (unsigned long long)7, "S-01");
 	assert(wait_record(rx, &rec, 2000) == 0);
 	assert(logrecord_validate(&rec, sizeof(rec)) == 0);
 	assert(rec.level == COREIPC_LOG_INFO);

@@ -4,9 +4,9 @@
 /*                                                                            */
 /*   The outbox is the seam that keeps one slow client from hurting anybody   */
 /*   else: responses queue in order and overflow closes the connection,       */
-/*   while STATE snapshots overwrite a single mailbox so a room's ticker      */
-/*   never waits. Popping never blocks - the reactor cannot wait on one       */
-/*   client - so an empty outbox answers the same way a closed one does.      */
+/*   while STATE snapshots overwrite a single mailbox so a slow client never  */
+/*   holds up the tick that produced them. Popping never blocks, so an empty  */
+/*   outbox answers exactly the way a closed one does.                        */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -60,7 +60,7 @@ static void	test_overflow_is_reported_not_grown(void)
 		i++;
 	}
 	assert(push_text(&ob, "one too many", false) == -1);
-	assert(atomic_load(&ob.overflowed) == true);
+	assert(ob.overflowed == true);
 	expect_text(&ob, "payload");
 	assert(push_text(&ob, "room again", false) == 0);
 	outbox_destroy(&ob);

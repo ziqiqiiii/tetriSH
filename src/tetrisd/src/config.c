@@ -112,19 +112,15 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 	if (strcmp(key, "TICK_MS") == 0)
 		return (set_int(&cfg->tick_ms, value, TETRISD_TICK_MS_MIN, TETRISD_TICK_MS_MAX));
 	if (strcmp(key, "INPUT_BURST") == 0)
-		return (set_int(&cfg->input_burst, value, TETRISD_INPUT_LIMIT_MIN,
-				TETRISD_INPUT_LIMIT_MAX));
+		return (set_int(&cfg->input_burst, value, TETRISD_INPUT_LIMIT_MIN, TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "INPUT_RATE") == 0)
-		return (set_int(&cfg->input_rate, value, TETRISD_INPUT_LIMIT_MIN,
-				TETRISD_INPUT_LIMIT_MAX));
+		return (set_int(&cfg->input_rate, value, TETRISD_INPUT_LIMIT_MIN, TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "BR_SLOTS") == 0)
 		return (set_int(&cfg->br_slots, value, 2, ROOM_MAX_SLOTS));
 	if (strcmp(key, "HANDSHAKE_WORKERS") == 0)
-		return (set_int(&cfg->handshake_workers, value, 1,
-				TETRISD_HANDSHAKE_WORKERS_MAX));
+		return (set_int(&cfg->handshake_workers, value, 1, TETRISD_HANDSHAKE_WORKERS_MAX));
 	if (strcmp(key, "HANDSHAKE_TIMEOUT_MS") == 0)
-		return (set_int(&cfg->handshake_timeout_ms, value,
-				TETRISD_HANDSHAKE_TIMEOUT_MIN, TETRISD_HANDSHAKE_TIMEOUT_MAX));
+		return (set_int(&cfg->handshake_timeout_ms, value, TETRISD_HANDSHAKE_TIMEOUT_MIN, TETRISD_HANDSHAKE_TIMEOUT_MAX));
 	return (-1);
 }
 

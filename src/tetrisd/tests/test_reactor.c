@@ -104,8 +104,7 @@ static void	test_a_request_split_across_segments_is_answered(void)
 	assert(player(&fx, &hc, "amber") == 0);
 	total = seal_request(&hc, "LIST", TETRISD_ROUTE_ROOMS, wire, sizeof(wire));
 	assert(total > TETRISD_LENGTH_PREFIX_BYTES + 1);
-	assert(write(hc.fd, wire, TETRISD_LENGTH_PREFIX_BYTES + 1)
-		== TETRISD_LENGTH_PREFIX_BYTES + 1);
+	assert(write(hc.fd, wire, TETRISD_LENGTH_PREFIX_BYTES + 1) == TETRISD_LENGTH_PREFIX_BYTES + 1);
 	usleep(50 * 1000);
 	assert(write(hc.fd, wire + TETRISD_LENGTH_PREFIX_BYTES + 1,
 			(size_t)total - TETRISD_LENGTH_PREFIX_BYTES - 1)

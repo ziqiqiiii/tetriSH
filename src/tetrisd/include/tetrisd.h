@@ -52,16 +52,27 @@
 ** pushes STATE for whatever came back dirty - so a late or coalesced tick
 ** stays correct rather than slowing the game down.
 **
-** The remaining lock order is:
-**     lobby_mutex > room->mutex > registry rwlock > outbox mutex
-** No db_*, session_*, or IPC send happens under any lock - the outbox push
-** is the sole exception, and it never blocks. Nothing off the loop takes any
-** of them any more; step 5 deletes all four together.
+** There is no lock order, because there are no locks over game state:
 **
-** The rule that makes epoll_event.data.ptr safe is stronger than any lock:
-** no client is ever freed inside the event loop. client_kill unlinks it and
-** parks it on srv->zombies; client_reap, called once after every event in a
-** batch has been processed, is the only free() site for a client.
+**     tetrisd has exactly one owner of all mutable game state.
+**
+** The lobby, every room, every game, the client registry and every outbox are
+** touched by the reactor and by nothing else. The four-level lock order this
+** replaces - lobby_mutex > room->mutex > registry rwlock > outbox mutex - was
+** a rule a person had to hold in their head; this is a property of the
+** program's shape, and the cheapest way to check an invariant is to make it
+** structural (docs/adr/0008, step 5).
+**
+** Two locks survive, and neither guards game state: the handshake pool's own
+** mutex, which hands connections between the reactor and its workers, and
+** whatever libmacminidb holds internally. If you ever find yourself wanting a
+** third, the thing to question is which thread you have put the work on.
+**
+** The rule that makes epoll_event.data.ptr safe is the one that replaced the
+** registry rwlock: no client is ever freed inside the event loop. client_kill
+** unlinks it and parks it on srv->zombies; client_reap, called once after
+** every event in a batch has been processed, is the only free() site for a
+** client.
 **
 ** It detaches itself and publishes a locked pidfile; tetrisctl starts,
 ** inspects and stops it through that file (docs/adr/0007). Both the fork and
@@ -237,7 +248,11 @@ typedef struct s_outbound_message
 ** A bounded FIFO of responses plus a one-slot mailbox holding the latest
 ** STATE. Responses that overflow the FIFO close the client (it cannot keep
 ** up); STATE snapshots overwrite instead, so a stalled client loses
-** intermediate frames but never stalls a room's ticker.
+** intermediate frames but never holds up the tick that produced them.
+**
+** That split is the load-bearing idea and has nothing to do with threading,
+** which is why it outlived the writer thread, the condition variable and the
+** mutex unchanged.
 */
 typedef struct s_outbox
 {
@@ -247,13 +262,12 @@ typedef struct s_outbox
 	t_outbound_message	state;
 	bool				state_pending;
 	bool				closed;
-	atomic_bool			overflowed;
-	pthread_mutex_t		mutex;
+	bool				overflowed;
 }	t_outbox;
 
 /*
 ** One player's game: the aggregate libtetrisbrain deliberately does not own.
-** tetrisd is its only writer, always under the owning room's mutex.
+** The reactor is its only writer, which is now the whole of the rule.
 */
 typedef struct s_game
 {
@@ -276,14 +290,23 @@ typedef struct s_game
 }	t_game;
 
 /*
-** A room's mutable runtime beside the pure t_room domain object: the mutex
-** that guards both and the per-slot games. `ticking` is the whole of what a
-** ticker thread used to be - the server's one timer walks every room and skips
-** the ones that are not playing.
+** A Room, as tetrisd knows one: the pure t_room the domain library owns, plus
+** the runtime beside it - the per-slot games, which of them changed, and
+** whether it is playing. `ticking` is the whole of what a ticker thread used
+** to be; the server's one timer walks every room and skips the ones that are
+** not.
+**
+** Both halves are room.c's, and only room.c's. The two objects share an index
+** and therefore share a lifetime, so exactly one module opens and closes them
+** together - a runtime that outlived its room once evicted the next player to
+** be handed that index (docs/bugs/room_runtime_outlived_its_room.md). Reaching
+** through `->room` from another file is what put those two halves out of step,
+** so nothing outside room.c does: the interface below answers every question
+** other files had been asking the domain object directly, and lobby_create_room
+** and lobby_destroy_room have no other caller.
 */
 typedef struct s_server_room
 {
-	pthread_mutex_t	mutex;
 	t_room			*room;
 	t_game			games[TD_MAX_GAMES];
 	bool			dirty[TD_MAX_GAMES];
@@ -291,6 +314,17 @@ typedef struct s_server_room
 	t_server		*srv;
 	int				index;
 }	t_server_room;
+
+/* everything a reader outside room.c may know about a room, in one read */
+typedef struct s_server_room_view
+{
+	const char		*name;
+	t_game_mode		mode;
+	t_room_status	status;
+	int				players;
+	int				slot_count;
+	bool			ticking;
+}	t_server_room_view;
 
 /* what one input request asks the game to do */
 typedef enum e_input_action
@@ -309,6 +343,25 @@ typedef enum e_client_state
 	CLI_CLOSING
 }	t_client_state;
 
+/*
+** The client's half of a Slot: which room it is sitting in and where. A Slot
+** is one fact held in two places, so this is written by room.c and by nothing
+** else - server_room_open and server_room_seat bind it, server_room_unbind is
+** the only way it is cleared, and server_room_resolve is how everyone else
+** asks what it currently means. Reading it is free; a reader that wants to
+** act on it resolves it first, because a finished game clears every slot and
+** the binding outlives the seat.
+**
+** `room_index` of -1 is "sitting in no room", which is what a fresh connection
+** and a forfeited one both are.
+*/
+typedef struct s_room_binding
+{
+	char			room_name[ROOM_NAME_MAX];
+	int				room_index;
+	int				slot_index;
+}	t_room_binding;
+
 struct s_client
 {
 	/* first member: this is what epoll_event.data.ptr is read back through */
@@ -323,9 +376,7 @@ struct s_client
 	t_client_state	state;
 	t_player_id		player_id;
 	char			username[DB_MAX_USERNAME];
-	char			room_name[ROOM_NAME_MAX];
-	int				room_index;
-	int				slot_index;
+	t_room_binding	binding;
 	/*
 	** Reactor bookkeeping. `watched` says the descriptor is in the epoll set,
 	** so the socket is established and non-blocking; `writable_armed` tracks
@@ -357,16 +408,15 @@ struct s_client
 };
 
 /*
-** The client registry is the lifetime guard: an enqueuer holds the read lock
-** across its outbox push, so a client can never be unlinked under it; the
-** reactor takes the write lock to unlink, and only then shuts the socket down.
+** Every live connection, addressable by player id. It was the client-lifetime
+** guard when several threads could reach a client; now it is a directory, and
+** the zombie list is what guards lifetime.
 */
 typedef struct s_registry
 {
 	t_client			**slots;
 	size_t				cap;
 	size_t				count;
-	pthread_rwlock_t	lock;
 }	t_registry;
 
 /*
@@ -418,7 +468,6 @@ struct s_server
 	t_tetrissh_credentials	*credentials;
 	t_registry		reg;
 	t_lobby			lobby;
-	pthread_mutex_t	lobby_mutex;
 	t_server_room		rooms[LOBBY_MAX_ROOMS];
 	int				listen_fd;
 	int				port;
@@ -573,15 +622,19 @@ bool			game_drop(t_game *g, bool hard);
 void			game_snapshot(const t_game *g, t_body_state *out);
 
 /* ROOM.C */
-void			server_room_init_all(t_server *srv);
+int				server_rooms_init(t_server *srv, int br_slots);
+void			server_rooms_tick(t_server *srv, int elapsed_ms);
 t_server_room	*server_room_at(t_server *srv, int index);
 t_server_room	*server_room_find(t_server *srv, const char *name);
-bool			server_room_probe(void *ctx, t_player_id pid);
-bool			server_room_seated(t_server *srv, t_client *cli);
-void			server_room_begin(t_server_room *rt, t_server *srv);
-void			server_room_tick_all(t_server *srv, int elapsed_ms);
+t_server_room	*server_room_resolve(t_server *srv, const t_client *cli, const char *name);
+void			server_room_unbind(t_client *cli);
+int				server_room_open(t_server *srv, t_client *cli, t_game_mode mode);
+t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli, int *slot);
+t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
+bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 void			server_room_forfeit(t_server *srv, t_client *cli);
-void			server_room_push_state(t_server_room *rt, const char *room_name, t_player_id pid, const t_body_state *snap);
+bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
+const t_game	*server_room_game_at(const t_server_room *server_room, int slot);
 
 /* SERVER.C */
 int				server_start(const t_config *cfg, t_server **out);

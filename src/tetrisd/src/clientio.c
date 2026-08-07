@@ -67,9 +67,9 @@ void	client_flush(t_client *cli)
 /**
  * @brief Serialises a message and queues it for this client.
  *
- * Handlers and room tickers never touch the socket: they hand bytes to the
- * outbox and move on, which is what keeps one slow peer from holding up a
- * room. The reactor seals and writes them.
+ * Handlers and the tick never touch the socket: they hand bytes to the outbox
+ * and move on, which is what keeps one slow peer from holding up a room. The
+ * reactor seals and writes them when it can.
  *
  * @param cli Client to send to.
  * @param msg Message to serialise; the caller still owns and frees it.
@@ -156,7 +156,7 @@ static bool	drain_frames(t_client *cli)
 		if (plain_len < 0)
 			return (client_kill(cli), false);
 		client_handle_frame(cli, cli->srv->scratch, (size_t)plain_len);
-		if (cli->dead || atomic_load(&cli->outbox.overflowed))
+		if (cli->dead || cli->outbox.overflowed)
 			return (client_kill(cli), false);
 	}
 	return (true);

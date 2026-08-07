@@ -1,151 +1,68 @@
 #include "tetrisd.h"
 
 // Static Functions
+static void		room_close(t_server_room *server_room);
+static void		room_blank(t_server_room *server_room);
+static void		bind_client(t_client *cli, t_server_room *server_room, int slot);
+static bool		room_probe(void *ctx, t_player_id pid);
+static int		deal_games(t_server_room *server_room);
 static void		tick_room(t_server_room *server_room, int elapsed_ms);
-static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
+static void		advance_and_push(t_server_room *server_room, int elapsed_ms);
 static void		push_all(t_server_room *server_room, int n, const t_body_state *snaps, const t_player_id *pids);
+static void		push_state(t_server_room *server_room, const char *room_name, t_player_id pid, const t_body_state *snap);
+static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
-static void		destroy_if_empty(t_server_room *server_room);
 static int64_t	coins_earned(const t_game *game);
 
+/*
+** The Room, both halves of it. The domain library owns the pure t_room; the
+** games, the dirty flags and `ticking` are tetrisd's, and this file is the
+** only one that holds either. Rooms are created here and destroyed here -
+** lobby_create_room and lobby_destroy_room have no other caller - because the
+** two objects share an index and a lifetime, and the one time a destroyed
+** room's runtime was left behind, the next player handed that index was
+** evicted by a tick belonging to a game that had already finished
+** (docs/bugs/room_runtime_outlived_its_room.md).
+**
+** Everything above this file therefore speaks in rooms rather than in the
+** domain object: a handler opens one, seats a client in one, starts one, or
+** feeds an input to one, and never reaches through to a t_room to do it.
+**
+** The client's half of a Slot - t_room_binding - is the same fact written
+** down twice, so it is owned here too. bind_client and server_room_unbind are
+** the only writers, and server_room_resolve is the only reader that decides
+** anything: it answers which room a binding names *now* and writes nothing,
+** so no caller has to sequence a validating call before an indexing one.
+*/
+
 /**
- * @brief Pairs every lobby room with the runtime state tetrisd keeps beside it.
+ * @brief Opens the lobby and pairs every room in it with its runtime.
  *
- * The domain library owns the pure room; the mutex and the per-slot games live
- * here, one runtime per room, addressed by the same index.
- *
- * @param srv Server whose room runtimes are being prepared.
+ * @param srv Server whose rooms are being prepared.
+ * @param br_slots Slots a Battle Royale room is created with.
+ * @return 0 on success, -1 when the lobby could not be initialised.
  */
-void	server_room_init_all(t_server *srv)
+int	server_rooms_init(t_server *srv, int br_slots)
 {
 	int	i;
 
+	if (srv == NULL)
+		return (-1);
+	if (lobby_init(&srv->lobby, LOBBY_MAX_ROOMS, br_slots) != 0)
+		return (-1);
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
 	{
 		memset(&srv->rooms[i], 0, sizeof(srv->rooms[i]));
-		pthread_mutex_init(&srv->rooms[i].mutex, NULL);
 		srv->rooms[i].room = &srv->lobby.rooms[i];
 		srv->rooms[i].srv = srv;
 		srv->rooms[i].index = i;
+		room_blank(&srv->rooms[i]);
 		i++;
 	}
-}
-
-/**
- * @brief Returns the runtime for a room index.
- *
- * @param srv Server holding the runtimes.
- * @param index Room index, as assigned by the lobby.
- * @return The runtime, or NULL when the index is out of range.
- */
-t_server_room	*server_room_at(t_server *srv, int index)
-{
-	if (srv == NULL || index < 0 || index >= LOBBY_MAX_ROOMS)
-		return (NULL);
-	return (&srv->rooms[index]);
-}
-
-/**
- * @brief Finds a room runtime by the room's display name.
- *
- * Rooms are addressed by name on the wire because ids run per mode, so only
- * the prefixed name (S-01, D-02) is unique lobby-wide.
- *
- * @param srv Server to search.
- * @param name Room display name.
- * @return The runtime, or NULL when no room carries that name.
- */
-t_server_room	*server_room_find(t_server *srv, const char *name)
-{
-	t_room	*room;
-
-	if (srv == NULL || name == NULL || name[0] == '\0')
-		return (NULL);
-	pthread_mutex_lock(&srv->lobby_mutex);
-	room = lobby_find_room(&srv->lobby, name);
-	pthread_mutex_unlock(&srv->lobby_mutex);
-	if (room == NULL)
-		return (NULL);
-	return (server_room_at(srv, (int)(room - srv->lobby.rooms)));
-}
-
-/**
- * @brief Answers the room domain's liveness question from the registry.
- *
- * libtetrisroom never touches a socket, so ownership succession and seating
- * ask the caller whether a player is still connected; this is that answer.
- *
- * @param ctx The server, passed through as the probe context.
- * @param pid Player being asked about.
- * @return true when that player still has a live connection.
- */
-bool	server_room_probe(void *ctx, t_player_id pid)
-{
-	t_server	*srv;
-
-	srv = ctx;
-	if (srv == NULL)
-		return (false);
-	return (registry_player_online(&srv->reg, pid));
-}
-
-/**
- * @brief Reports whether a client still holds the slot it thinks it holds.
- *
- * A finished game clears every slot, so a client's room binding outlives its
- * seat. Rather than leave the connection wedged - refused a new room because
- * it "is already in one" that no longer exists - a stale binding is cleared
- * here, on the client's own thread.
- *
- * @param srv Server holding the rooms.
- * @param cli Client whose binding is checked; cleared when stale.
- * @return true when the client is still seated where it thinks it is.
- */
-bool	server_room_seated(t_server *srv, t_client *cli)
-{
-	t_server_room	*server_room;
-	bool		seated;
-
-	if (srv == NULL || cli == NULL || cli->room_index < 0)
-		return (false);
-	server_room = server_room_at(srv, cli->room_index);
-	seated = false;
-	if (server_room != NULL)
-	{
-		pthread_mutex_lock(&server_room->mutex);
-		seated = strcmp(server_room->room->name, cli->room_name) == 0
-			&& room_find_member(server_room->room, cli->player_id) != NULL;
-		pthread_mutex_unlock(&server_room->mutex);
-	}
-	if (!seated)
-	{
-		cli->room_index = -1;
-		cli->slot_index = -1;
-		cli->room_name[0] = '\0';
-	}
-	return (seated);
-}
-
-/**
- * @brief Marks a room as playing, so the server's timer starts advancing it.
- *
- * Beginning a game used to mean creating a thread, which could fail and had to
- * be joined before the next game could start in the same room. It is now one
- * flag the one timer reads, so there is nothing left to fail and nothing left
- * to leak.
- *
- * @param server_room Room runtime to start; its room must already be IN_GAME.
- * @param srv Server the room belongs to.
- */
-void	server_room_begin(t_server_room *server_room, t_server *srv)
-{
-	if (server_room == NULL || srv == NULL)
-		return ;
-	server_room->srv = srv;
-	server_room->ticking = true;
+	return (0);
 }
 
 /**
@@ -163,7 +80,7 @@ void	server_room_begin(t_server_room *server_room, t_server *srv)
  * @param srv Server whose rooms are advanced.
  * @param elapsed_ms Milliseconds since the previous tick.
  */
-void	server_room_tick_all(t_server *srv, int elapsed_ms)
+void	server_rooms_tick(t_server *srv, int elapsed_ms)
 {
 	int	i;
 
@@ -179,6 +96,227 @@ void	server_room_tick_all(t_server *srv, int elapsed_ms)
 }
 
 /**
+ * @brief Returns the room at a lobby index.
+ *
+ * @param srv Server holding the rooms.
+ * @param index Room index, as assigned by the lobby.
+ * @return The room, or NULL when the index is out of range.
+ */
+t_server_room	*server_room_at(t_server *srv, int index)
+{
+	if (srv == NULL || index < 0 || index >= LOBBY_MAX_ROOMS)
+		return (NULL);
+	return (&srv->rooms[index]);
+}
+
+/**
+ * @brief Finds a room by its display name.
+ *
+ * Rooms are addressed by name on the wire because ids run per mode, so only
+ * the prefixed name (S-01, D-02) is unique lobby-wide.
+ *
+ * @param srv Server to search.
+ * @param name Room display name.
+ * @return The room, or NULL when no room carries that name.
+ */
+t_server_room	*server_room_find(t_server *srv, const char *name)
+{
+	t_room	*room;
+
+	if (srv == NULL || name == NULL || name[0] == '\0')
+		return (NULL);
+	room = lobby_find_room(&srv->lobby, name);
+	if (room == NULL)
+		return (NULL);
+	return (server_room_at(srv, (int)(room - srv->lobby.rooms)));
+}
+
+/**
+ * @brief Resolves a client's binding to the room it is actually sitting in.
+ *
+ * A Slot is one fact held in two places, and the client's copy can go out of
+ * date on its own: a finished game clears every slot, so the binding outlives
+ * the seat. This asks the rooms rather than trusting it - the index must still
+ * carry that name, and that player must still be a member - and it answers
+ * without writing anything, so a caller may resolve as often as it likes and
+ * in whatever order suits it.
+ *
+ * Repairing a binding that no longer holds is server_room_unbind's job, at a
+ * site that has decided to repair it.
+ *
+ * @param srv Server holding the rooms.
+ * @param cli Client whose binding is being read.
+ * @param name Room name the caller expects, or NULL to accept whichever room
+ *        the client is in.
+ * @return The room, or NULL when the binding no longer holds.
+ */
+t_server_room	*server_room_resolve(t_server *srv, const t_client *cli,
+			const char *name)
+{
+	t_server_room	*server_room;
+
+	if (srv == NULL || cli == NULL || cli->binding.room_index < 0)
+		return (NULL);
+	if (name != NULL && strcmp(name, cli->binding.room_name) != 0)
+		return (NULL);
+	server_room = server_room_at(srv, cli->binding.room_index);
+	if (server_room == NULL
+		|| strcmp(server_room->room->name, cli->binding.room_name) != 0
+		|| room_find_member(server_room->room, cli->player_id) == NULL)
+		return (NULL);
+	return (server_room);
+}
+
+/**
+ * @brief Clears a client's binding, so it is sitting in no room.
+ *
+ * The one place the client's half of a Slot is cleared: a fresh connection
+ * starts here, a forfeit ends here, and a caller that has resolved a binding
+ * to nothing repairs it here rather than blanking three fields of its own.
+ *
+ * @param cli Client to unbind.
+ */
+void	server_room_unbind(t_client *cli)
+{
+	if (cli == NULL)
+		return ;
+	cli->binding.room_index = -1;
+	cli->binding.slot_index = -1;
+	cli->binding.room_name[0] = '\0';
+}
+
+/**
+ * @brief Creates a room and seats the client that asked for it as its owner.
+ *
+ * Creating and seating are one operation because a room nobody sits in has no
+ * owner to name and nothing to end it: a room that could not seat its creator
+ * is closed again here rather than left in the lobby.
+ *
+ * @param srv Server whose lobby gains the room.
+ * @param cli Client creating it; bound to the room on success.
+ * @param mode Mode the room is created with.
+ * @return The 1-based slot the creator took, or -1 when the lobby is full or
+ *         the seat was refused.
+ */
+int	server_room_open(t_server *srv, t_client *cli, t_game_mode mode)
+{
+	t_server_room	*server_room;
+	t_room			*room;
+	int				slot;
+
+	if (srv == NULL || cli == NULL)
+		return (-1);
+	if (lobby_create_room(&srv->lobby, mode, &room) != 0)
+		return (-1);
+	server_room = server_room_at(srv, (int)(room - srv->lobby.rooms));
+	if (server_room == NULL)
+		return (-1);
+	room_blank(server_room);
+	slot = room_seat(room, cli->player_id, cli->username, room_probe, srv);
+	if (slot < 0)
+	{
+		room_close(server_room);
+		return (-1);
+	}
+	bind_client(cli, server_room, slot);
+	return (slot);
+}
+
+/**
+ * @brief Seats a client in a room that already exists.
+ *
+ * @param server_room Room being joined.
+ * @param cli Client joining; bound to the room when it takes a slot.
+ * @param slot Receives the 1-based slot taken, or -1 when none was.
+ * @return The room's verdict; JOIN_ACCEPTED with a slot of -1 means the room
+ *         agreed to accept the player but had no seat to give.
+ */
+t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
+			int *slot)
+{
+	t_join_verdict	verdict;
+
+	*slot = -1;
+	if (server_room == NULL || cli == NULL)
+		return (JOIN_FULL);
+	verdict = room_can_accept(server_room->room);
+	if (verdict != JOIN_ACCEPTED)
+		return (verdict);
+	*slot = room_seat(server_room->room, cli->player_id, cli->username,
+			room_probe, server_room->srv);
+	if (*slot >= 0)
+		bind_client(cli, server_room, *slot);
+	return (verdict);
+}
+
+/**
+ * @brief Starts the game in a room, on its owner's request.
+ *
+ * Beginning a game used to mean creating a thread, which could fail and had to
+ * be joined before the next game could start in the same room. It is now one
+ * flag the server's timer reads, so there is nothing left to fail and nothing
+ * left to leak - and dealing the boards happens here, with the flag, rather
+ * than a caller away from it.
+ *
+ * @param server_room Room whose game is starting.
+ * @param cli Client asking to start; the room decides whether it may.
+ * @return The room's verdict; the game runs only on START_ACCEPTED.
+ */
+t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
+{
+	t_start_verdict	verdict;
+
+	if (server_room == NULL || cli == NULL)
+		return (START_NOT_OWNER);
+	verdict = room_start(server_room->room, cli->player_id);
+	if (verdict != START_ACCEPTED)
+		return (verdict);
+	deal_games(server_room);
+	server_room->ticking = true;
+	return (verdict);
+}
+
+/**
+ * @brief Applies one input to the caller's own game.
+ *
+ * The move is marked dirty rather than pushed: the tick owns the outgoing
+ * snapshots, so inputs and gravity produce one STATE stream instead of two
+ * racing ones. They also run on the same thread, so they cannot interleave
+ * inside a move at all.
+ *
+ * @param server_room Room holding the game.
+ * @param cli Client whose own board is being driven.
+ * @param action Which input to apply.
+ * @param argument Direction for a move or rotation, hard flag for a drop.
+ * @return true when the input changed the board, false when it was refused.
+ */
+bool	server_room_input(t_server_room *server_room, t_client *cli,
+			t_input_action action, int argument)
+{
+	t_game	*game;
+	bool	ok;
+	int		index;
+
+	if (server_room == NULL || cli == NULL)
+		return (false);
+	index = cli->binding.slot_index - 1;
+	if (index < 0 || index >= TD_MAX_GAMES)
+		return (false);
+	game = &server_room->games[index];
+	if (game->player_id != cli->player_id || !game->active)
+		return (false);
+	if (action == INPUT_MOVE)
+		ok = game_move(game, argument);
+	else if (action == INPUT_ROTATE)
+		ok = game_rotate(game, argument);
+	else
+		ok = game_drop(game, argument != 0);
+	if (ok)
+		server_room->dirty[index] = true;
+	return (ok);
+}
+
+/**
  * @brief Removes a client from its room, forfeiting any game in progress.
  *
  * Leaving, topping out, and losing the connection are the same event
@@ -191,33 +329,239 @@ void	server_room_tick_all(t_server *srv, int elapsed_ms)
 void	server_room_forfeit(t_server *srv, t_client *cli)
 {
 	t_release_result	res;
-	t_server_room			*server_room;
+	t_server_room		*server_room;
 	t_game				finished;
 
-	if (srv == NULL || cli == NULL || cli->room_index < 0)
+	if (srv == NULL || cli == NULL)
 		return ;
-	server_room = server_room_at(srv, cli->room_index);
+	server_room = server_room_resolve(srv, cli, NULL);
 	game_reset(&finished);
 	if (server_room != NULL)
 	{
-		pthread_mutex_lock(&server_room->mutex);
-		if (strcmp(server_room->room->name, cli->room_name) == 0
-			&& room_find_member(server_room->room, cli->player_id) != NULL)
-		{
-			forfeit_slot(server_room, cli->slot_index, &finished);
-			memset(&res, 0, sizeof(res));
-			room_release(server_room->room, cli->player_id, server_room_probe, srv, &res);
-		}
-		pthread_mutex_unlock(&server_room->mutex);
+		forfeit_slot(server_room, cli->binding.slot_index, &finished);
+		memset(&res, 0, sizeof(res));
+		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 	}
 	if (finished.player_id != 0)
 		db_record_game(srv->db, finished.player_id,
 			(int64_t)finished.score.total, coins_earned(&finished), false);
 	if (server_room != NULL)
-		destroy_if_empty(server_room);
-	cli->room_index = -1;
-	cli->slot_index = -1;
-	cli->room_name[0] = '\0';
+		room_close(server_room);
+	server_room_unbind(cli);
+}
+
+/**
+ * @brief Describes a room to a caller that does not hold one.
+ *
+ * Everything an outside reader is entitled to know, read once under this
+ * file's ownership rather than field by field through the domain object.
+ *
+ * @param server_room Room to describe.
+ * @param out Receives the description; untouched when there is nothing to say.
+ * @return true when the room exists and somebody is sitting in it.
+ */
+bool	server_room_describe(const t_server_room *server_room,
+			t_server_room_view *out)
+{
+	if (server_room == NULL || out == NULL
+		|| server_room->room->number_of_players == 0)
+		return (false);
+	out->name = server_room->room->name;
+	out->mode = server_room->room->mode;
+	out->status = server_room->room->status;
+	out->players = server_room->room->number_of_players;
+	out->slot_count = server_room->room->slot_count;
+	out->ticking = server_room->ticking;
+	return (true);
+}
+
+/**
+ * @brief Borrows the game being played in one slot, for reading only.
+ *
+ * @param server_room Room holding the slot.
+ * @param slot 0-based slot index.
+ * @return The game, or NULL when the slot is out of range or holds nobody.
+ */
+const t_game	*server_room_game_at(const t_server_room *server_room, int slot)
+{
+	if (server_room == NULL || slot < 0 || slot >= TD_MAX_GAMES
+		|| slot >= server_room->room->slot_count)
+		return (NULL);
+	if (server_room->games[slot].player_id == 0)
+		return (NULL);
+	return (&server_room->games[slot]);
+}
+
+/**
+ * @brief Returns an emptied room to the lobby, and blanks it with the same
+ *        call.
+ *
+ * Rooms outlive their games, but not their players: a room nobody is sitting
+ * in is removed, which is what keeps a long-running server from filling its
+ * lobby with the ghosts of finished games. The lobby hands that index straight
+ * back out, so the runtime beside it has to go at the same moment - this is
+ * the one place a room dies, precisely so there is no second place to forget.
+ *
+ * @param server_room Room to close; kept when a player is still sitting in it.
+ */
+static void	room_close(t_server_room *server_room)
+{
+	char	name[ROOM_NAME_MAX];
+
+	if (server_room->room->number_of_players != 0)
+		return ;
+	snprintf(name, sizeof(name), "%s", server_room->room->name);
+	lobby_destroy_room(&server_room->srv->lobby, name);
+	room_blank(server_room);
+}
+
+/**
+ * @brief Blanks a room's runtime so nothing of the last game is readable.
+ *
+ * Leaving `ticking` set is the sharp edge: the timer would advance a room the
+ * lobby had already handed to somebody else, find no active games, and end a
+ * game that had just been created - evicting whoever created it. Stale boards
+ * were harmless on their own; the flag that decides whether anything reads
+ * them was not.
+ *
+ * @param server_room Room whose runtime is cleared.
+ */
+static void	room_blank(t_server_room *server_room)
+{
+	int	slot;
+
+	server_room->ticking = false;
+	slot = 0;
+	while (slot < TD_MAX_GAMES)
+	{
+		game_reset(&server_room->games[slot]);
+		server_room->dirty[slot] = false;
+		slot++;
+	}
+}
+
+/**
+ * @brief Records which room and slot a connection now occupies.
+ *
+ * @param cli Client that was seated.
+ * @param server_room Room it was seated in.
+ * @param slot The 1-based slot index.
+ */
+static void	bind_client(t_client *cli, t_server_room *server_room, int slot)
+{
+	cli->binding.room_index = server_room->index;
+	cli->binding.slot_index = slot;
+	snprintf(cli->binding.room_name, sizeof(cli->binding.room_name), "%s",
+		server_room->room->name);
+}
+
+/**
+ * @brief Answers the room domain's liveness question from the registry.
+ *
+ * libtetrisroom never touches a socket, so ownership succession and seating
+ * ask the caller whether a player is still connected; this is that answer.
+ *
+ * @param ctx The server, passed through as the probe context.
+ * @param pid Player being asked about.
+ * @return true when that player still has a live connection.
+ */
+static bool	room_probe(void *ctx, t_player_id pid)
+{
+	t_server	*srv;
+
+	srv = ctx;
+	if (srv == NULL)
+		return (false);
+	return (registry_player_online(&srv->reg, pid));
+}
+
+/**
+ * @brief Deals every seated player a board.
+ *
+ * @param server_room Room whose game is starting.
+ * @return The number of games started.
+ */
+static int	deal_games(t_server_room *server_room)
+{
+	t_slot		*slots;
+	uint32_t	seed;
+	int			started;
+	int			i;
+
+	slots = server_room->room->slots;
+	started = 0;
+	i = 0;
+	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
+	{
+		if (slots[i].occupied)
+		{
+			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
+					+ slots[i].membership.player_id);
+			game_start(&server_room->games[i], slots[i].membership.player_id,
+				seed);
+			server_room->dirty[i] = true;
+			started++;
+		}
+		i++;
+	}
+	return (started);
+}
+
+/**
+ * @brief Advances one playing room and pushes whatever changed.
+ *
+ * @param server_room Room to advance.
+ * @param elapsed_ms Milliseconds since the previous tick.
+ */
+static void	tick_room(t_server_room *server_room, int elapsed_ms)
+{
+	advance_and_push(server_room, elapsed_ms);
+	if (!room_is_over(server_room))
+		return ;
+	advance_and_push(server_room, 0);
+	server_room->ticking = false;
+	record_and_reset(server_room);
+	room_close(server_room);
+}
+
+/**
+ * @brief Advances one room by an elapsed and pushes whatever changed.
+ *
+ * The final pass a finished room gets is advanced by zero: every game is
+ * already inactive, so there is no gravity left to apply and the pass exists
+ * only to carry out the snapshot that says so.
+ *
+ * @param server_room Room to advance.
+ * @param elapsed_ms Milliseconds to advance by.
+ */
+static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
+{
+	t_body_state	snaps[TD_MAX_GAMES];
+	t_player_id		pids[TD_MAX_GAMES];
+
+	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
+		snaps, pids);
+}
+
+/**
+ * @brief Pushes a tick's snapshots to the players they belong to.
+ *
+ * @param server_room Room the snapshots came from.
+ * @param n Number of snapshots collected.
+ * @param snaps The snapshots.
+ * @param pids The matching subject player ids.
+ */
+static void	push_all(t_server_room *server_room, int n,
+				const t_body_state *snaps, const t_player_id *pids)
+{
+	char	name[ROOM_NAME_MAX];
+
+	snprintf(name, sizeof(name), "%s", server_room->room->name);
+	while (n > 0)
+	{
+		n--;
+		push_state(server_room, name, pids[n], &snaps[n]);
+	}
 }
 
 /**
@@ -226,13 +570,13 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
  * The subject rides in the request path (ADR-0003), so the body stays a pure
  * projection of one game and says nothing about whose it is.
  *
- * @param server_room Room runtime the snapshot came from (unused beyond context).
+ * @param server_room Room the snapshot came from.
  * @param room_name Room the subject is playing in.
  * @param pid The subject player.
  * @param snap Snapshot to encode and push.
  */
-void	server_room_push_state(t_server_room *server_room, const char *room_name,
-		t_player_id pid, const t_body_state *snap)
+static void	push_state(t_server_room *server_room, const char *room_name,
+				t_player_id pid, const t_body_state *snap)
 {
 	t_htttp_message	msg;
 	unsigned char	*bytes;
@@ -242,7 +586,7 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
 	int				body_len;
 
 	body_len = body_state_encode(snap, body, sizeof(body));
-	if (server_room == NULL || body_len <= 0)
+	if (body_len <= 0)
 		return ;
 	snprintf(path, sizeof(path), "/room/%s/player/%llu", room_name,
 		(unsigned long long)pid);
@@ -260,54 +604,9 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
 }
 
 /**
- * @brief Advances one playing room and pushes whatever changed.
- *
- * @param server_room Room runtime to advance.
- * @param elapsed_ms Milliseconds since the previous tick.
- */
-static void	tick_room(t_server_room *server_room, int elapsed_ms)
-{
-	t_body_state	snaps[TD_MAX_GAMES];
-	t_player_id		pids[TD_MAX_GAMES];
-
-	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
-		snaps, pids);
-	if (!room_is_over(server_room))
-		return ;
-	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
-		snaps, pids);
-	server_room->ticking = false;
-	record_and_reset(server_room);
-	destroy_if_empty(server_room);
-}
-
-/**
- * @brief Pushes a tick's snapshots to the players they belong to.
- *
- * @param server_room Room runtime the snapshots came from.
- * @param n Number of snapshots collected.
- * @param snaps The snapshots.
- * @param pids The matching subject player ids.
- */
-static void	push_all(t_server_room *server_room, int n,
-			const t_body_state *snaps, const t_player_id *pids)
-{
-	char	name[ROOM_NAME_MAX];
-
-	pthread_mutex_lock(&server_room->mutex);
-	snprintf(name, sizeof(name), "%s", server_room->room->name);
-	pthread_mutex_unlock(&server_room->mutex);
-	while (n > 0)
-	{
-		n--;
-		server_room_push_state(server_room, name, pids[n], &snaps[n]);
-	}
-}
-
-/**
  * @brief Advances every live game in the room and collects what changed.
  *
- * @param server_room Room runtime to advance.
+ * @param server_room Room to advance.
  * @param elapsed_ms Milliseconds since the previous tick.
  * @param snaps Receives one snapshot per changed game.
  * @param pids Receives the matching subject player ids.
@@ -320,7 +619,6 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 	int	n;
 
 	n = 0;
-	pthread_mutex_lock(&server_room->mutex);
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -338,14 +636,13 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 		}
 		slot++;
 	}
-	pthread_mutex_unlock(&server_room->mutex);
 	return (n);
 }
 
 /**
  * @brief Reports whether the room has nothing left to tick.
  *
- * @param server_room Room runtime to check.
+ * @param server_room Room to check.
  * @return true when every game has ended or every player has left.
  */
 static bool	room_is_over(t_server_room *server_room)
@@ -354,12 +651,8 @@ static bool	room_is_over(t_server_room *server_room)
 	int		slot;
 
 	over = true;
-	pthread_mutex_lock(&server_room->mutex);
 	if (server_room->room->number_of_players == 0)
-	{
-		pthread_mutex_unlock(&server_room->mutex);
 		return (true);
-	}
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -367,19 +660,17 @@ static bool	room_is_over(t_server_room *server_room)
 			over = false;
 		slot++;
 	}
-	pthread_mutex_unlock(&server_room->mutex);
 	return (over);
 }
 
 /**
  * @brief Records every finished game and empties the room.
  *
- * Results are written to the store outside the room's mutex - no database
- * call ever happens under a lock. Finishing a game clears every slot (the
- * room domain's rule), so the room ends empty and is handed back to the
- * lobby; players who want another game join a fresh one.
+ * Finishing a game clears every slot (the room domain's rule), so the room
+ * ends empty and is handed back to the lobby; players who want another game
+ * join a fresh one.
  *
- * @param server_room Room runtime whose game has ended.
+ * @param server_room Room whose game has ended.
  */
 static void	record_and_reset(t_server_room *server_room)
 {
@@ -388,7 +679,6 @@ static void	record_and_reset(t_server_room *server_room)
 	int		slot;
 
 	n = 0;
-	pthread_mutex_lock(&server_room->mutex);
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -402,7 +692,6 @@ static void	record_and_reset(t_server_room *server_room)
 		slot++;
 	}
 	room_finish(server_room->room);
-	pthread_mutex_unlock(&server_room->mutex);
 	while (n > 0)
 	{
 		n--;
@@ -415,7 +704,7 @@ static void	record_and_reset(t_server_room *server_room)
 /**
  * @brief Ends one slot's game so the leaver's result can be recorded.
  *
- * @param server_room Room runtime, with its mutex already held.
+ * @param server_room Room holding the slot.
  * @param slot 1-based slot index the player occupied.
  * @param out Receives the finished game, or a blank game when there was none.
  */
@@ -433,36 +722,6 @@ static void	forfeit_slot(t_server_room *server_room, int slot, t_game *out)
 	*out = server_room->games[index];
 	game_reset(&server_room->games[index]);
 	server_room->dirty[index] = false;
-}
-
-/**
- * @brief Returns an emptied room to the lobby so its slot can be reused.
- *
- * Rooms outlive their games, but not their players: a room nobody is sitting
- * in is removed, which is what keeps a long-running server from filling its
- * lobby with the ghosts of finished games.
- *
- * The room's mutex is held across the destroy, not just across the test.
- * Destroying a room rewrites the very fields a tick reads under that mutex, so
- * releasing it first would leave the same room guarded by two different locks
- * depending on who was asking. Taking the lobby first keeps the documented
- * order intact.
- *
- * @param server_room Room runtime to check; its mutex must not be held.
- */
-static void	destroy_if_empty(t_server_room *server_room)
-{
-	char	name[ROOM_NAME_MAX];
-	bool	empty;
-
-	pthread_mutex_lock(&server_room->srv->lobby_mutex);
-	pthread_mutex_lock(&server_room->mutex);
-	empty = server_room->room->number_of_players == 0;
-	snprintf(name, sizeof(name), "%s", server_room->room->name);
-	if (empty)
-		lobby_destroy_room(&server_room->srv->lobby, name);
-	pthread_mutex_unlock(&server_room->mutex);
-	pthread_mutex_unlock(&server_room->srv->lobby_mutex);
 }
 
 /**

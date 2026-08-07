@@ -14,15 +14,13 @@ static const char	*status_name(t_room_status status);
 ** without restarting anything. Every line goes through logger_emit like any
 ** other record, so the dump lands wherever the logs land.
 **
-** Records are emitted while the locks are held. logger_emit is a non-blocking
-** ring push - not a database call, a session write, or an IPC send - and the
-** ring is a leaf that never reaches back for one of these locks, so this does
-** not break the rule about what may happen under a lock. Copying the whole
-** server into local buffers first would need an unbounded stack instead.
+** It runs on the reactor, which owns everything it prints, so the picture it
+** writes is consistent without any snapshot being coordinated - the one thing
+** this was hardest to guarantee when several threads owned pieces of it.
 */
 
 /**
- * @brief Writes the whole server state to the log, in lock order.
+ * @brief Writes the whole server state to the log.
  *
  * @param srv Server to describe.
  */
@@ -57,7 +55,7 @@ static void	dump_header(t_server *srv)
 }
 
 /**
- * @brief Emits one line per connection, under the registry read lock.
+ * @brief Emits one line per connection.
  *
  * @param srv Server whose clients are listed.
  */
@@ -66,7 +64,6 @@ static void	dump_clients(t_server *srv)
 	t_client	*cli;
 	size_t		i;
 
-	pthread_rwlock_rdlock(&srv->reg.lock);
 	logger_emit(&srv->log, COREIPC_LOG_INFO, "state dump: clients %zu of %zu",
 		srv->reg.count, srv->reg.cap);
 	i = 0;
@@ -79,15 +76,15 @@ static void	dump_clients(t_server *srv)
 				cli->fd, state_name(cli->state),
 				(unsigned long long)cli->player_id,
 				cli->username[0] != '\0' ? cli->username : "-",
-				cli->room_name[0] != '\0' ? cli->room_name : "-",
-				cli->slot_index);
+				cli->binding.room_name[0] != '\0'
+				? cli->binding.room_name : "-",
+				cli->binding.slot_index);
 		i++;
 	}
-	pthread_rwlock_unlock(&srv->reg.lock);
 }
 
 /**
- * @brief Emits every occupied room, taking the lobby before each room.
+ * @brief Emits every occupied room.
  *
  * @param srv Server whose lobby is listed.
  */
@@ -95,52 +92,47 @@ static void	dump_rooms(t_server *srv)
 {
 	int	i;
 
-	pthread_mutex_lock(&srv->lobby_mutex);
 	logger_emit(&srv->log, COREIPC_LOG_INFO, "state dump: rooms %zu of %d",
 		lobby_room_count(&srv->lobby), LOBBY_MAX_ROOMS);
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
 	{
-		dump_room(srv, &srv->rooms[i]);
+		dump_room(srv, server_room_at(srv, i));
 		i++;
 	}
-	pthread_mutex_unlock(&srv->lobby_mutex);
 }
 
 /**
  * @brief Emits one room and each game being played in it.
  *
  * @param srv Server holding the logger.
- * @param server_room Room runtime to describe.
+ * @param server_room Room to describe; skipped when nobody is sitting in it.
  */
 static void	dump_room(t_server *srv, t_server_room *server_room)
 {
-	int	slot;
+	t_server_room_view	view;
+	const t_game		*game;
+	int					slot;
 
-	pthread_mutex_lock(&server_room->mutex);
-	if (server_room->room->number_of_players > 0)
+	if (!server_room_describe(server_room, &view))
+		return ;
+	logger_emit(&srv->log, COREIPC_LOG_INFO,
+		"state dump:   room %s mode %s status %s players %d/%d ticking %s",
+		view.name, mode_name(view.mode), status_name(view.status),
+		view.players, view.slot_count, view.ticking ? "yes" : "no");
+	slot = 0;
+	while (slot < view.slot_count)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_INFO,
-			"state dump:   room %s mode %s status %s players %d/%d ticking %s",
-			server_room->room->name, mode_name(server_room->room->mode),
-			status_name(server_room->room->status), server_room->room->number_of_players,
-			server_room->room->slot_count,
-			server_room->ticking ? "yes" : "no");
-		slot = 0;
-		while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
-		{
-			if (server_room->games[slot].player_id != 0)
-				logger_emit(&srv->log, COREIPC_LOG_INFO,
-					"state dump:     slot %d player %llu score %d lines %d "
-					"level %d %s", slot + 1,
-					(unsigned long long)server_room->games[slot].player_id,
-					server_room->games[slot].score.total, server_room->games[slot].lines,
-					server_room->games[slot].level,
-					server_room->games[slot].active ? "playing" : "ended");
-			slot++;
-		}
+		game = server_room_game_at(server_room, slot);
+		if (game != NULL)
+			logger_emit(&srv->log, COREIPC_LOG_INFO,
+				"state dump:     slot %d player %llu score %d lines %d "
+				"level %d %s", slot + 1,
+				(unsigned long long)game->player_id,
+				game->score.total, game->lines, game->level,
+				game->active ? "playing" : "ended");
+		slot++;
 	}
-	pthread_mutex_unlock(&server_room->mutex);
 }
 
 /**

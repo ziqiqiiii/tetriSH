@@ -6,9 +6,7 @@ static int			read_mode(t_request_context *ctx, t_game_mode *out);
 static int			create_room(t_request_context *ctx, t_game_mode mode);
 static const char	*room_name_from_path(const t_request_context *ctx);
 static int			join_room(t_request_context *ctx, const char *name);
-static void			bind_room(t_client *cli, t_server_room *server_room, int slot);
-static const char	*seated_room_name(t_request_context *ctx);
-static int			start_games(t_server_room *server_room);
+static t_server_room	*addressed_room(t_request_context *ctx, const char **name);
 static int			start_status(t_request_context *ctx, t_start_verdict verdict);
 
 /**
@@ -77,6 +75,11 @@ int	list_handler(const t_htttp_message *msg, void *context)
  * clients - the lobby assigns S-01, D-02, BR-03 - so creation has no name to
  * address and uses the collection instead.
  *
+ * This is where a binding that no longer holds is thrown away, and the only
+ * place: a player whose last game ended is asking for another room, so the
+ * repair belongs to the request that wants it rather than to whichever
+ * predicate happened to notice.
+ *
  * @param msg The request (unused).
  * @param context The request context.
  * @return 201 on create, 200 on join, 4xx with the verdict otherwise.
@@ -91,12 +94,13 @@ int	join_handler(const t_htttp_message *msg, void *context)
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
-	if (server_room_seated(ctx->srv, ctx->cli))
+	if (server_room_resolve(ctx->srv, ctx->cli, NULL) != NULL)
 	{
 		request_body_printf(ctx, "reason already-in-room\nroom %s\n",
-			ctx->cli->room_name);
+			ctx->cli->binding.room_name);
 		return (409);
 	}
+	server_room_unbind(ctx->cli);
 	if (strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) == 0)
 	{
 		if (read_mode(ctx, &mode) != 0)
@@ -125,8 +129,7 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
-	name = seated_room_name(ctx);
-	if (name == NULL)
+	if (addressed_room(ctx, &name) == NULL)
 		return (404);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s left %s",
 		ctx->cli->username, name);
@@ -139,7 +142,7 @@ int	leave_handler(const t_htttp_message *msg, void *context)
  * @brief START /room/<name> - the owner begins the game.
  *
  * The room decides the verdict; this handler only turns it into a status and,
- * when accepted, deals every seated player a board and starts the ticker.
+ * when accepted, deals every seated player a board and marks the room playing.
  *
  * @param msg The request (unused).
  * @param context The request context.
@@ -147,29 +150,21 @@ int	leave_handler(const t_htttp_message *msg, void *context)
  */
 int	start_handler(const t_htttp_message *msg, void *context)
 {
-	t_request_context		*ctx;
+	t_request_context	*ctx;
 	t_server_room		*server_room;
-	const char		*name;
-	t_start_verdict	verdict;
+	const char			*name;
+	t_start_verdict		verdict;
 
 	(void)msg;
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
-	name = seated_room_name(ctx);
-	if (name == NULL)
-		return (404);
-	server_room = server_room_at(ctx->srv, ctx->cli->room_index);
+	server_room = addressed_room(ctx, &name);
 	if (server_room == NULL)
-		return (409);
-	pthread_mutex_lock(&server_room->mutex);
-	verdict = room_start(server_room->room, ctx->cli->player_id);
-	if (verdict == START_ACCEPTED)
-		start_games(server_room);
-	pthread_mutex_unlock(&server_room->mutex);
+		return (404);
+	verdict = server_room_start(server_room, ctx->cli);
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
-	server_room_begin(server_room, ctx->srv);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
 	request_body_printf(ctx, "room %s\nstatus in-game\n", name);
 	return (200);
@@ -184,28 +179,14 @@ int	start_handler(const t_htttp_message *msg, void *context)
  */
 static int	create_room(t_request_context *ctx, t_game_mode mode)
 {
-	t_server_room	*server_room;
-	t_room		*room;
-	int			slot;
+	int	slot;
 
-	slot = -1;
-	server_room = NULL;
-	pthread_mutex_lock(&ctx->srv->lobby_mutex);
-	if (lobby_create_room(&ctx->srv->lobby, mode, &room) == 0)
-	{
-		server_room = server_room_at(ctx->srv, (int)(room - ctx->srv->lobby.rooms));
-		pthread_mutex_lock(&server_room->mutex);
-		slot = room_seat(room, ctx->cli->player_id, ctx->cli->username,
-				server_room_probe, ctx->srv);
-		pthread_mutex_unlock(&server_room->mutex);
-	}
-	pthread_mutex_unlock(&ctx->srv->lobby_mutex);
-	if (server_room == NULL || slot < 0)
+	slot = server_room_open(ctx->srv, ctx->cli, mode);
+	if (slot < 0)
 		return (request_refuse(ctx, "lobby-full"));
-	bind_room(ctx->cli, server_room, slot);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s created room %s",
-		ctx->cli->username, server_room->room->name);
-	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->room_name, slot);
+		ctx->cli->username, ctx->cli->binding.room_name);
+	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->binding.room_name, slot);
 	return (201);
 }
 
@@ -218,30 +199,23 @@ static int	create_room(t_request_context *ctx, t_game_mode mode)
  */
 static int	join_room(t_request_context *ctx, const char *name)
 {
-	t_server_room		*server_room;
+	t_server_room	*server_room;
 	t_join_verdict	verdict;
 	int				slot;
 
 	server_room = server_room_find(ctx->srv, name);
 	if (server_room == NULL)
 		return (404);
-	slot = -1;
-	pthread_mutex_lock(&server_room->mutex);
-	verdict = room_can_accept(server_room->room);
-	if (verdict == JOIN_ACCEPTED)
-		slot = room_seat(server_room->room, ctx->cli->player_id, ctx->cli->username,
-				server_room_probe, ctx->srv);
-	pthread_mutex_unlock(&server_room->mutex);
+	verdict = server_room_seat(server_room, ctx->cli, &slot);
 	if (verdict == JOIN_FULL)
 		return (request_refuse(ctx, "full"));
 	if (verdict == JOIN_IN_GAME)
 		return (request_refuse(ctx, "in-game"));
 	if (slot < 0)
 		return (request_refuse(ctx, "seat-refused"));
-	bind_room(ctx->cli, server_room, slot);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s joined %s",
 		ctx->cli->username, name);
-	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->room_name,
+	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->binding.room_name,
 		slot);
 	return (200);
 }
@@ -296,50 +270,6 @@ static int	read_mode(t_request_context *ctx, t_game_mode *out)
 }
 
 /**
- * @brief Records which room and slot a connection now occupies.
- *
- * @param cli Client that was seated.
- * @param server_room Room runtime it was seated in.
- * @param slot The 1-based slot index.
- */
-static void	bind_room(t_client *cli, t_server_room *server_room, int slot)
-{
-	cli->room_index = server_room->index;
-	cli->slot_index = slot;
-	snprintf(cli->room_name, sizeof(cli->room_name), "%s", server_room->room->name);
-}
-
-/**
- * @brief Deals every seated player a board, under the room's mutex.
- *
- * @param server_room Room runtime whose game is starting.
- * @return The number of games started.
- */
-static int	start_games(t_server_room *server_room)
-{
-	uint32_t	seed;
-	int			started;
-	int			i;
-
-	started = 0;
-	i = 0;
-	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
-	{
-		if (server_room->room->slots[i].occupied)
-		{
-			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
-					+ server_room->room->slots[i].membership.player_id);
-			game_start(&server_room->games[i], server_room->room->slots[i].membership.player_id,
-				seed);
-			server_room->dirty[i] = true;
-			started++;
-		}
-		i++;
-	}
-	return (started);
-}
-
-/**
  * @brief Turns a start verdict into a status and a reason the player can read.
  *
  * A bare refusal tells a player nothing: the room domain already knows *why*
@@ -363,23 +293,26 @@ static int	start_status(t_request_context *ctx, t_start_verdict verdict)
 }
 
 /**
- * @brief Names the room this connection is actually seated in.
+ * @brief Resolves the room a request addresses to the one the caller sits in.
  *
- * The path must name the room the player holds a slot in - a binding left
- * over from a finished game is cleared rather than trusted.
+ * The path must name the room the player holds a slot in, so this is one
+ * question rather than two: a binding left over from a finished game names a
+ * room the player is no longer a member of, and resolves to nothing. Nothing
+ * is repaired here - LEAVE and START have nothing to gain from clearing a
+ * binding they have just refused to act on.
  *
  * @param ctx Request context holding the path.
- * @return The room name, or NULL when the caller is not seated there.
+ * @param name Receives the room name from the path, for the answer body.
+ * @return The room, or NULL when the caller is not seated in the room the
+ *         path names.
  */
-static const char	*seated_room_name(t_request_context *ctx)
+static t_server_room	*addressed_room(t_request_context *ctx,
+			const char **name)
 {
-	const char	*name;
-
-	name = room_name_from_path(ctx);
-	if (name == NULL || !server_room_seated(ctx->srv, ctx->cli)
-		|| strcmp(name, ctx->cli->room_name) != 0)
+	*name = room_name_from_path(ctx);
+	if (*name == NULL)
 		return (NULL);
-	return (name);
+	return (server_room_resolve(ctx->srv, ctx->cli, *name));
 }
 
 /**
@@ -399,9 +332,7 @@ static size_t	list_rooms(t_server *srv, t_body_room_row *rows)
 	size_t			written;
 	size_t			i;
 
-	pthread_mutex_lock(&srv->lobby_mutex);
 	count = lobby_list_all(&srv->lobby, snaps, LOBBY_MAX_ROOMS);
-	pthread_mutex_unlock(&srv->lobby_mutex);
 	i = 0;
 	written = 0;
 	while (i < count)

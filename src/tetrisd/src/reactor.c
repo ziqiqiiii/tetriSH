@@ -13,14 +13,14 @@ static void	wind_down(t_server *srv);
  * @brief The event loop, and the single owner of every established connection.
  *
  * One pass is: wait, handle every descriptor the kernel reported, write out
- * whatever a room ticker enqueued while we were waiting, then free the clients
- * this pass ended. That last step is the ordering rule the whole design rests
- * on - a batch may carry several events for the same client, so nothing may be
- * released until every event in it has been looked at (docs/adr/0008).
+ * the snapshots a tick produced, then free the clients this pass ended. That
+ * last step is the ordering rule the whole design rests on - a batch may carry
+ * several events for the same client, so nothing may be released until every
+ * event in it has been looked at (docs/adr/0008).
  *
  * The wait is unbounded unless a handshake is in flight, in which case it ends
- * at that handshake's deadline. Gravity is not what wakes this loop yet; the
- * room tickers are still threads and poke the pipe (step 4 changes that).
+ * at that handshake's deadline. Gravity does not need it bounded: the tick
+ * timer is a descriptor in the same set.
  *
  * It returns only once it has torn the server down, because it is the thread
  * that owns what has to be torn down.
@@ -35,14 +35,12 @@ void	reactor_run(t_server *srv)
 
 	while (atomic_load(&srv->running))
 	{
-		ready = epoll_wait(srv->epoll_fd, events, TETRISD_EPOLL_BATCH,
-				handshake_pool_expire(&srv->pool));
+		ready = epoll_wait(srv->epoll_fd, events, TETRISD_EPOLL_BATCH, handshake_pool_expire(&srv->pool));
 		if (ready < 0 && errno == EINTR)
 			continue ;
 		if (ready < 0)
 		{
-			logger_emit(&srv->log, COREIPC_LOG_ERROR, "epoll_wait failed: %s",
-				strerror(errno));
+			logger_emit(&srv->log, COREIPC_LOG_ERROR, "epoll_wait failed: %s", strerror(errno));
 			break ;
 		}
 		i = 0;
@@ -60,7 +58,8 @@ void	reactor_run(t_server *srv)
  *
  * Called at boot and again on SIGHUP. Retiming is a call on the thread that
  * owns the timer rather than a store ninety-nine tickers had to read, which is
- * the whole of what step 4 bought.
+ * the whole of what step 4 bought. It deliberately leaves last_tick alone, so
+ * a reload does not throw away the gravity accumulated since the last tick.
  *
  * @param srv Server whose timer is armed.
  * @return 0 on success, -1 when the timer could not be set.
@@ -81,7 +80,6 @@ int	reactor_arm_timer(t_server *srv)
 			strerror(errno));
 		return (-1);
 	}
-	clock_gettime(CLOCK_MONOTONIC, &srv->last_tick);
 	return (0);
 }
 
@@ -130,8 +128,7 @@ static void	accept_ready(t_server *srv)
 	while (fd >= 0)
 	{
 		if (client_spawn(srv, fd) != 0)
-			logger_emit(&srv->log, COREIPC_LOG_WARNING,
-				"refused a connection: client limit reached");
+			logger_emit(&srv->log, COREIPC_LOG_WARNING, "refused a connection: client limit reached");
 		if (!atomic_load(&srv->running))
 			return ;
 		fd = listener_accept(srv->listen_fd);
@@ -141,11 +138,8 @@ static void	accept_ready(t_server *srv)
 /**
  * @brief Handles everything that reaches the loop through the wake pipe.
  *
- * Signals, finished handshakes and enqueued STATE pushes share it because all
- * three are "something happened off this thread"; one drain covers however
- * many of them arrived. It is also the only way bytes reach an outbox without
- * this thread putting them there, which is why it, and nothing else, arms the
- * sweep.
+ * Signals and finished handshakes share it because both are "something
+ * happened off this thread"; one drain covers however many of them arrived.
  *
  * @param srv Server that was woken.
  */
@@ -181,7 +175,7 @@ static void	timer_ready(t_server *srv)
 		!= (ssize_t)sizeof(expirations))
 		return ;
 	elapsed = clock_elapsed_ms(&srv->last_tick);
-	server_room_tick_all(srv, elapsed);
+	server_rooms_tick(srv, elapsed);
 	srv->sweep_due = true;
 }
 
@@ -206,15 +200,19 @@ static void	take_handshakes(t_server *srv)
 /**
  * @brief Writes out whatever was enqueued from off the loop, and ends overflows.
  *
- * Room tickers still run on their own threads until step 4, so bytes can
- * appear in an outbox without any descriptor becoming ready. The ticker pokes
- * the wake pipe and this sweep is what turns that into a write. A client whose
- * response queue overflowed is ended here rather than left to be noticed later
- * - it cannot keep up, and buffering more would let it exhaust the server.
+ * A tick fills outboxes without any descriptor becoming ready, so this is what
+ * turns a STATE snapshot into bytes. A client whose response queue overflowed
+ * is ended here rather than left to be noticed later - it cannot keep up, and
+ * buffering more would let it exhaust the server.
  *
- * It runs only after a wake, never after ordinary client traffic: a reply this
- * thread produced was already written by client_readable, so sweeping every
- * batch would walk the whole registry for nothing.
+ * Clients still being handshaken are skipped, and that skip is load-bearing
+ * rather than an optimisation: a pool worker owns that connection until it
+ * hands it back, and `watched` is what client_adopt sets on the far side of
+ * the handoff. Dropping the check would have two threads on one socket.
+ *
+ * It runs only when something armed it, never after ordinary client traffic: a
+ * reply this thread produced was already written by client_readable, so
+ * sweeping every batch would walk the whole registry for nothing.
  *
  * @param srv Server whose clients are swept.
  */
@@ -233,7 +231,7 @@ static void	sweep(t_server *srv)
 		cli = srv->sweep[i++];
 		if (cli->dead || !cli->watched)
 			continue ;
-		if (atomic_load(&cli->outbox.overflowed))
+		if (cli->outbox.overflowed)
 			client_kill(cli);
 		else if (!outbox_idle(&cli->outbox))
 			client_flush(cli);

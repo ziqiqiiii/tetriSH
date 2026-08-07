@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (9 of 9 suites pass, valgrind-clean). ADR-0008 steps 1–4 are done; the locks (step 5) remain, and Double/Battle Royale are designed but unbuilt (ADR-0009) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (9 of 9 suites pass, valgrind-clean). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009) |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -241,15 +241,18 @@ loop.** `client_kill` unlinks it and parks it on the zombie list, and
 `client_reap` — run once after every event in a batch — is the only `free()`
 site for a client.
 
-Lock order is still `lobby_mutex > room->mutex > registry rwlock > outbox
-mutex`, and no `db_*`, `session_*`, or IPC send happens under any lock (the
-non-blocking outbox push is the sole exception). Every one of those locks now
-exists **only** because room tickers are still threads.
+There is no lock order, because there are no locks over game state:
 
-See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–4 are
-implemented. Nothing off the loop takes any of these locks any more; step 5
-deletes all four together, and the property that replaces them is *one owner of
-all mutable game state*.
+> `tetrisd` has exactly one owner of all mutable game state.
+
+The four-level order this replaced (`lobby_mutex > room->mutex > registry
+rwlock > outbox mutex`) is gone with the locks in it. Two locks survive and
+neither guards game state: the handshake pool's own mutex, and whatever
+`libmacminidb` holds internally. Wanting a third is a sign the work is on the
+wrong thread.
+
+See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–5 are
+implemented. Steps 6 and 7 are Double mode and Battle Royale (ADR-0009).
 
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
 `/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`, plus pushed
@@ -257,6 +260,24 @@ M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
 first (ADR-0004). Inputs are rate limited per connection, answering `429` with
 `Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
 own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
+
+A Room is two objects sharing a lobby index — the domain `t_room` and the
+runtime beside it (games, dirty flags, `ticking`) — and `room.c` is the only
+module that holds either. `server_room_open` and the static `room_close` are
+the only callers of `lobby_create_room` / `lobby_destroy_room`, closing a room
+blanks its runtime in the same call, and nothing outside `room.c` reaches
+through `->room`. Handlers ask the Room (`server_room_seat`,
+`server_room_start`, `server_room_input`, `server_room_describe`) rather than
+the domain object; the two halves drifting apart is what evicted a player from
+a room seconds after they created it
+(`docs/bugs/room_runtime_outlived_its_room.md`).
+
+The client's half of a Slot is `t_room_binding` on `t_client`, and `room.c`
+owns that too: seating writes it, `server_room_unbind` is the only clear, and
+`server_room_resolve(srv, cli, name)` is how anyone asks which room it names
+now — it returns the room or `NULL` and writes nothing, so no caller has to
+validate before it indexes. A stale binding is thrown away at one deliberate
+site, `JOIN`; every other route refuses and leaves it.
 
 ## Key Design Constraints
 
@@ -268,7 +289,7 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `unixsock_dgram_bind`, which unlinks its socket path unconditionally.
 - A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
 - `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
-- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint is being retired rather than satisfied — ADR-0008 removes the shared state instead of ordering access to it — but it still binds every lock that exists until the step that deletes it.
+- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint has been retired rather than satisfied — ADR-0008 removed the shared state instead of ordering access to it — but it still binds every lock elsewhere in the project.
 - Cross-player effects (garbage, offensive abilities) are queued against a **Target** and applied at that player's next piece lock, never on arrival (ADR-0009). A player's own inputs still apply immediately. Injecting garbage under an active piece can produce a board `piece_is_valid` would reject, so the safe point is a game rule, not an optimisation. Battle Royale is one Room of 4–99 slots; garbage never crosses rooms.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 - All components compile clean under `-Wall -Wextra -Werror`; test binaries are expected to pass `valgrind --leak-check=full --error-exitcode=1`.

@@ -30,9 +30,8 @@ int	client_spawn(t_server *srv, int fd)
 	cli->fd = fd;
 	cli->srv = srv;
 	cli->index = -1;
-	cli->room_index = -1;
-	cli->slot_index = -1;
 	cli->state = CLI_HANDSHAKE;
+	server_room_unbind(cli);
 	if (outbox_init(&cli->outbox) != 0 || registry_add(&srv->reg, cli) != 0)
 	{
 		outbox_destroy(&cli->outbox);
@@ -66,11 +65,9 @@ void	client_adopt(t_client *cli)
 	memset(&ev, 0, sizeof(ev));
 	ev.events = EPOLLIN;
 	ev.data.ptr = cli;
-	if (unixsock_set_nonblock(cli->fd) != 0
-		|| epoll_ctl(cli->srv->epoll_fd, EPOLL_CTL_ADD, cli->fd, &ev) != 0)
+	if (unixsock_set_nonblock(cli->fd) != 0 || epoll_ctl(cli->srv->epoll_fd, EPOLL_CTL_ADD, cli->fd, &ev) != 0)
 	{
-		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING,
-			"cannot watch fd %d: %s", cli->fd, strerror(errno));
+		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING, "cannot watch fd %d: %s", cli->fd, strerror(errno));
 		client_kill(cli);
 		return ;
 	}
@@ -83,8 +80,8 @@ void	client_adopt(t_client *cli)
  *
  * The order is the lifetime rule: the player leaves the room first (a
  * disconnect mid-game is a forfeit, ADR-0002), then the client is unlinked
- * from the registry so no room ticker can enqueue into it, and only then is
- * the socket shut down.
+ * from the registry so nothing can address it as that player again, and only
+ * then is the socket shut down.
  *
  * Nothing is freed here. A batch of epoll events may hold several pointers to
  * this client, so it goes on the zombie list and client_reap releases it once
@@ -154,8 +151,7 @@ static void	unwatch(t_client *cli)
  */
 static void	release(t_client *cli)
 {
-	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "client %s disconnected",
-		cli->username[0] != '\0' ? cli->username : "(anonymous)");
+	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "client %s disconnected", cli->username[0] != '\0' ? cli->username : "(anonymous)");
 	session_close(&cli->sess);
 	close(cli->fd);
 	outbox_destroy(&cli->outbox);

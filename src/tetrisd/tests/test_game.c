@@ -48,7 +48,7 @@ int	main(void)
 /*
 ** A player cannot send inputs faster than a person can press keys, and a
 ** client that tries is told to slow down rather than being allowed to spend
-** the room's ticker on it. The bucket is configured tiny here so the refusal
+** the tick on it. The bucket is configured tiny here so the refusal
 ** is deterministic; the shipped defaults sit far above human play.
 */
 static void	test_an_input_flood_is_rate_limited(void)
@@ -199,11 +199,9 @@ static void	test_inputs_for_another_player_are_refused(void)
 	assert(player(&fx, &hc, "amber") == 0);
 	assert(start_single(&fx, &hc, play, sizeof(play)) == 0);
 	snprintf(room, sizeof(room), "S-01");
-	snprintf(forged, sizeof(forged), "/room/%s/player/%llu", room,
-		(unsigned long long)(hc.player_id + 1));
+	snprintf(forged, sizeof(forged), "/room/%s/player/%llu", room, (unsigned long long)(hc.player_id + 1));
 	assert(simple(&hc, "MOVE", forged, "LEFT") == 403);
-	snprintf(forged, sizeof(forged), "/room/S-42/player/%llu",
-		(unsigned long long)hc.player_id);
+	snprintf(forged, sizeof(forged), "/room/S-42/player/%llu", (unsigned long long)hc.player_id);
 	assert(simple(&hc, "MOVE", forged, "LEFT") == 409);
 	hc_close(&hc);
 	fx_stop(&fx);

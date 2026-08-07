@@ -58,7 +58,7 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
  * @brief Applies however much real time has passed to the falling piece.
  *
  * Elapsed time is accumulated against this player's own level interval rather
- * than assuming one tick equals one row, so a descheduled ticker catches up
+ * than assuming one tick equals one row, so a late tick catches up
  * instead of slowing the game down.
  *
  * @param g Game to advance.
@@ -289,7 +289,7 @@ static t_body_clear_label	clear_label(int lines, bool perfect)
 /**
  * @brief The current gravity step for this player, never zero.
  *
- * The brain reports 0 ms at 20G; a zero step would spin the ticker, so one
+ * The brain reports 0 ms at 20G; a zero step would spin the tick, so one
  * millisecond is the floor.
  *
  * @param g Game whose level sets the interval.

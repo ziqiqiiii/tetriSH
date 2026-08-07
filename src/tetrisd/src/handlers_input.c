@@ -93,10 +93,10 @@ int	drop_handler(const t_htttp_message *msg, void *context)
  * @brief Spends one token from this connection's input budget.
  *
  * Inputs are the one route a client can send without being asked to, and a
- * flood of them costs the room's ticker real work under its mutex. The bucket
- * is sized from .tetrishrc far above what a person can press, so a client that
- * empties it is not playing - it is hammering, and gets told to slow down
- * rather than being served.
+ * flood of them costs the reactor real work it owes every other room. The
+ * bucket is sized from .tetrishrc far above what a person can press, so a
+ * client that empties it is not playing - it is hammering, and gets told to
+ * slow down rather than being served.
  *
  * The bucket belongs to the connection and is only touched by the reactor, so
  * it needs no lock.
@@ -168,9 +168,7 @@ static int	input_target(t_request_context *ctx, t_server_room **out)
 	name[len] = '\0';
 	if (strtoull(sep + strlen("/player/"), NULL, 10) != ctx->cli->player_id)
 		return (403);
-	if (ctx->cli->room_index < 0 || strcmp(name, ctx->cli->room_name) != 0)
-		return (409);
-	*out = server_room_at(ctx->srv, ctx->cli->room_index);
+	*out = server_room_resolve(ctx->srv, ctx->cli, name);
 	if (*out == NULL)
 		return (409);
 	return (0);
@@ -209,14 +207,13 @@ static int	body_token(t_request_context *ctx, char *out, size_t cap)
 }
 
 /**
- * @brief Applies one input to the caller's own game, under the room's mutex.
+ * @brief Asks the room to apply one input to the caller's own game.
  *
- * The move is marked dirty rather than pushed here: the room's ticker owns
- * the outgoing snapshots, so inputs and gravity produce one STATE stream
- * instead of two racing ones.
+ * The room owns the board and decides whether the move stands; this only turns
+ * its answer into a status a client can read.
  *
  * @param ctx Request context.
- * @param server_room Room runtime holding the game.
+ * @param server_room Room holding the game.
  * @param action Which input to apply.
  * @param argument Direction for a move or rotation, hard flag for a drop.
  * @return 200 when the input was applied, 409 when it was refused.
@@ -224,29 +221,7 @@ static int	body_token(t_request_context *ctx, char *out, size_t cap)
 static int	apply_input(t_request_context *ctx, t_server_room *server_room, t_input_action action,
 			int argument)
 {
-	t_game	*game;
-	bool	ok;
-	int		index;
-
-	index = ctx->cli->slot_index - 1;
-	if (index < 0 || index >= TD_MAX_GAMES)
-		return (409);
-	ok = false;
-	pthread_mutex_lock(&server_room->mutex);
-	game = &server_room->games[index];
-	if (game->player_id == ctx->cli->player_id && game->active)
-	{
-		if (action == INPUT_MOVE)
-			ok = game_move(game, argument);
-		else if (action == INPUT_ROTATE)
-			ok = game_rotate(game, argument);
-		else
-			ok = game_drop(game, argument != 0);
-		if (ok)
-			server_room->dirty[index] = true;
-	}
-	pthread_mutex_unlock(&server_room->mutex);
-	if (!ok)
+	if (!server_room_input(server_room, ctx->cli, action, argument))
 		return (request_refuse(ctx, "input-blocked"));
 	return (200);
 }

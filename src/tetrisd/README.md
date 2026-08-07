@@ -1,6 +1,6 @@
 # tetrisd
 
-The concurrent, server-authoritative game server for tetriSH. Owns accounts, the lobby, and every live game, and is the only process that decides what happened.
+The server-authoritative game daemon for tetriSH. Accepts encrypted client sessions over TCP, owns the lobby, the rooms and every game board, and pushes each player their own `STATE` on a gravity tick. It detaches itself and publishes a locked pidfile; `tetrisctl` starts, inspects and stops it through that file.
 
 ---
 
@@ -10,10 +10,9 @@ The concurrent, server-authoritative game server for tetriSH. Owns accounts, the
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Run](#run)
+- [Protocol](#protocol)
 - [Signals](#signals)
 - [Configuration](#configuration)
-- [Routes](#routes)
-- [Bodies](#bodies)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -23,25 +22,28 @@ The concurrent, server-authoritative game server for tetriSH. Owns accounts, the
 
 ## Features
 
-- Server-authoritative Single mode end to end: signup, login, lobby, room, live game
-- One reactor thread owns every established connection; a bounded pool runs the blocking handshake; one ticker thread per in-game room
-- Cert-authenticated encrypted sessions via `libtetrissh` — refuses to boot without a certificate
-- Server-pushed `STATE` snapshots on a fixed tick, coalesced through a one-slot mailbox
-- Per-connection input rate limiting (token bucket), answering `429` with `Retry-After`
-- Non-blocking log shipping to `tetrislogd`; records are dropped and counted, never waited on
+- One reactor thread in `epoll_wait` owns every connection, the lobby, the rooms, the games and every outbox — no locks over game state; beside it, a bounded pool runs the one genuinely blocking call under a deadline the reactor enforces
+- One gravity `timerfd` for the whole server, not a ticker thread per room; elapsed comes from the clock, so a late or coalesced tick catches games up rather than running them slow
+- Server-authoritative: the client sends inputs, never board state, and the subject of every input rides in the request path
+- A player holds at most one connection — a second `LOGIN` displaces the first; disconnecting forfeits the game in progress, so an abandoned game is still recorded
+- Inputs are rate limited per connection with a token bucket, answering `429` with `Retry-After`; passwords are salted and SHA-256 hashed here, so the plaintext never reaches the store
+- Detaches itself, holds a locked pidfile, and reports its boot over a readiness pipe
+
+Single mode is served end to end. Double and Battle Royale are designed but unbuilt.
 
 ---
 
 ## Prerequisites
 
-Install the shared build dependencies and mint a development certificate from the repository root:
+Install the shared build dependencies from the repository root:
 
 ```bash
 make -C ../.. deps
-make -C ../.. certs
 ```
 
-`make certs` is once per clone — it produces the dev CA and server certificate that `TETRISD_CERT_PATH` and `TETRISD_KEY_PATH` point at.
+`tetrisd` links eight CoreStack archives — `libcoreipc`, `libcoredaemon`, `libhtttp`, `libtetrisbrain`, `libmacminidb`, `libtetrissh`, `libtetrisroom`, `libstatusbody` — plus OpenSSL (`-lssl -lcrypto`), `-lpthread` and `-lrt`.
+
+Certificates are a boot requirement, not an option; `make certs` from the root mints development ones.
 
 ---
 
@@ -51,39 +53,62 @@ make -C ../.. certs
 make -C src/tetrisd
 ```
 
-This builds the seven CoreStack archives in place and links them with OpenSSL, pthreads, and librt into `src/tetrisd/tetrisd`.
+This builds every archive under `LIB_NAMES` in place and links `src/tetrisd/tetrisd`.
 
-| Command | Description |
+| Target | Description |
 |---|---|
 | `make -C src/tetrisd` | Build the daemon (`make all`) |
-| `make -C src/tetrisd libs` | Build the library archives only |
-| `make -C src/tetrisd run` | Build, `cd` to the project root, and launch |
+| `make -C src/tetrisd libs` | Build the CoreStack archives only |
+| `make -C src/tetrisd run` | Build and launch from the project root |
 | `make -C src/tetrisd test` | Build and run every suite |
-| `make -C src/tetrisd clean` | Remove object files |
-| `make -C src/tetrisd fclean` | Remove object files and binaries |
+| `make -C src/tetrisd clean` | Remove object files and test binaries |
+| `make -C src/tetrisd fclean` | Remove object files and the binary |
 | `make -C src/tetrisd re` | Full rebuild (`fclean` + `all`) |
+
+Cleanup never recurses into `lib/` — the archives are shared with the other daemons and owned by their own directories.
 
 ---
 
 ## Run
 
-**Run it from the project root.** Paths in `.tetrishrc` are root-relative — not relative to the rc file or the binary — so launching from elsewhere fails the certificate check. `$TETRISHRC` changes only which file is *read*, never what its paths mean.
+**Run it from the project root.** Paths in `.tetrishrc` are root-relative — not relative to the rc file or the binary. `make -C src/tetrisd run` does this; the way `.tetrishrc` does it is through the lifecycle manager:
 
 ```bash
-make -C src/tetrisd run
-```
-
-Or, the way `.tetrishrc` does it, through the lifecycle manager:
-
-```bash
+tetrisctl start tetrislogd
 tetrisctl start tetrisd
 tetrisctl status
 tetrisctl stop tetrisd
 ```
 
-`tetrisd` daemonises itself: `main.c` double-forks, claims the pidfile named by `TETRISD_PID_PATH`, and reports itself ready only once the listener is up. Running the binary by name therefore returns to the prompt when the server is actually serving — and exits non-zero, with the reason printed, when it is not. It refuses to boot when `cert_path` or `key_path` cannot be read *or parsed* — both are loaded once at boot and held for the server's lifetime — so it can never silently serve players unauthenticated, and no connection waits on the disk to be authenticated. A `SIGHUP` does not reload them; the listener they authenticate is already open.
+The binary daemonises itself, so running it by name returns to the prompt once the server is actually listening. It exits `0` only after the port is bound and the store is open, and non-zero — with the reason printed — if it did not.
 
-The fork lives in `main.c` alone and never behind `server_start`, or the integration suite — which runs a real server in-process on port 0 — would begin forking.
+**Start `tetrislogd` first**, and stop it last: it binds the socket `tetrisd` ships records to, and stopping it first would push `tetrisd`'s whole shutdown into its error file. `TETRISCTL_DAEMONS` in `.tetrishrc` is the only place that order is written down.
+
+---
+
+## Protocol
+
+HTTTP over an authenticated, encrypted session. `Player-Id` is required on every authenticated request and is checked against the player bound to the connection at `LOGIN` — a forged header buys nothing.
+
+| Method | Path | Effect |
+|---|---|---|
+| `SIGNUP` | `/account` | Register a player; `201` with its id, `409` when the name is taken |
+| `LOGIN` | `/session` | Bind the connection to a player, displacing any older one |
+| `LIST` | `/rooms` | Every occupied room, in-game ones included |
+| `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
+| `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
+| `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
+| `START` | `/room/<name>` | Owner begins the game; `403` for a non-owner |
+| `MOVE` | `/room/<name>/player/<pid>` | Body `LEFT` or `RIGHT` |
+| `ROTATE` | `/room/<name>/player/<pid>` | Body `CW` or `CCW` |
+| `DROP` | `/room/<name>/player/<pid>` | Body `SOFT` or `HARD` |
+| `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick |
+
+Rooms are named by the lobby (`S-01`, `D-02`, `BR-03`), never by clients, which is why creation addresses the collection rather than a name. Request and response bodies are the same `key value` line format the status bodies use, one key per line.
+
+Statuses in use: `200`, `201`, `400`, `401`, `403`, `404`, `409`, `413`, `429`, `500`, `501`.
+
+A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`. A bare status would leave a player unable to tell a full room from one already playing.
 
 ---
 
@@ -91,127 +116,95 @@ The fork lives in `main.c` alone and never behind `server_start`, or the integra
 
 | Signal | Effect |
 |---|---|
-| `SIGTERM`, `SIGINT` | Leave the loop, stop the handshake pool, end every client, close the store |
-| `SIGHUP` | Re-read `.tetrishrc`; applies the log level and tick period |
-| `SIGUSR1` | Dump server state to the log: settings, connections, rooms, live games, log drop count |
-| `SIGPIPE` | Ignored — a vanished client kills its own connection, not the server |
+| `SIGTERM`, `SIGINT` | Stop the loop, forfeit and close every connection, release the pidfile |
+| `SIGHUP` | Re-read `.tetrishrc` — only `TETRISD_LOG_LEVEL` and `TETRISD_TICK_MS` can change |
+| `SIGUSR1` | Dump port, uptime, clients, rooms and slots to the log — the stand-in for a control channel |
+| `SIGPIPE` | Ignored — a client vanishing mid-send must kill its own connection, not the server |
+
+Handlers set a flag and write one byte down the self-pipe; the reactor asks the `signals_take_*` calls once per wake-up, so repeated signals between iterations coalesce.
+
+A reload cannot move the port, the certificates or the data directory: those name resources that are already open. Retiming gravity is a `timerfd_settime` call on the thread that owns the timer, and it leaves `last_tick` alone so the reload does not discard accumulated gravity.
 
 ---
 
 ## Configuration
 
-Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variables. Each is an ordinary `export` line, so the shell exports it into the daemon's environment *and* `tetrisd` parses the same file itself. `tetrisctl` hands the file it resolved on as `argv[1]`, so both ends always read the same one.
+Every setting comes from `.tetrishrc` as `export TETRISD_*=<value>` lines, resolved as `argv[1]` → `$TETRISHRC` → `./.tetrishrc`, then overlaid with any matching environment variable. **The keys are documented inline in `.tetrishrc`**, which is their home; what follows is only what that file does not state.
 
-| Key | Default | Meaning |
-|---|---|---|
-| `TETRISD_PORT` | `4242` | TCP port; `0` lets the kernel choose (tests) |
-| `TETRISD_DATA_DIR` | `tmp/tetrisd` | Where the player store keeps its append-only log |
-| `TETRISD_CONFIG_DIR` | `lib/libmacminidb/config` | Read-only character and theme catalogues |
-| `TETRISD_CERT_PATH` | `certs/server.crt` | Server certificate (required) |
-| `TETRISD_KEY_PATH` | `certs/server.key` | Server private key (required) |
-| `TETRISD_CA_PATH` | `certs/ca.crt` | CA clients verify the server against |
-| `TETRISD_LOG_IPC` | `tmp/tetrisd/tetrislogd.sock` | Datagram socket `tetrislogd` binds |
-| `TETRISD_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
-| `TETRISD_PID_PATH` | `tmp/tetrisd/tetrisd.pid` | Pidfile claimed and `flock`ed for the process's lifetime; the single-instance guard, and what `tetrisctl` signals |
-| `TETRISD_ERR_PATH` | `tmp/tetrisd/tetrisd.err` | Where stderr goes once boot has succeeded — the last-resort copy of records the logger could not take |
-| `TETRISD_MAX_CLIENTS` | `64` | Simultaneous connections; beyond it, accepts are refused |
-| `TETRISD_TICK_MS` | `12` | Gravity timer period, server-wide |
-| `TETRISD_BR_SLOTS` | `4` | Slots in a Battle Royale room (2–16) |
-| `TETRISD_INPUT_BURST` | `120` | Per-connection input tokens held at once |
-| `TETRISD_INPUT_RATE` | `60` | Input tokens refilled per second |
-| `TETRISD_HANDSHAKE_WORKERS` | `4` | Threads running the blocking handshake (1–64). Sized against the connection *arrival* rate, not the client count — a handshake is brief and one-off |
-| `TETRISD_HANDSHAKE_TIMEOUT_MS` | `5000` | Budget for one handshake, from the moment a worker starts it (100–60000). The other half of the guarantee above: the pool is what makes a slow peer everyone's problem, and this is what stops it |
-
----
-
-## Routes
-
-For now, the server serves Single mode. Every route below `LOGIN` requires a `Player-Id` header matching the player bound to the connection; a mismatch is `401`, never a guess.
-
-| Method | Path | Success | Refusals |
-|---|---|---|---|
-| `SIGNUP` | `/account` | `201` | • `409` name taken <br>• `400` bad body |
-| `LOGIN` | `/session` | `200` + `Player-Id` | •  `401` bad credentials <br>• `409` connection already bound <br>• `503` previous connection would not release the player |
-| `LIST` | `/rooms` | `200` room rows | •  `401` |
-| `JOIN` | `/rooms` | `201` room created <br>• caller is owner |  • `400` unknown mode <br>• `409` `lobby-full` / `already-in-room` |
-| `JOIN` | `/room/<name>` | `200` seated |  • `404` no such room <br>• `409` `full` / `in-game` |
-| `LEAVE` | `/room/<name>` | `200` |  • `404` not in that room |
-| `START` | `/room/<name>` | `200` |  • `403` `not-owner` <br>• `409` `too-few-players` / `already-started` |
-| `MOVE` | `/room/<name>/player/<pid>` | `200` |  • `409` `input-blocked` <br>• `403` not your board <br>• `400` bad body <br>• `429` too fast |
-| `ROTATE` | `/room/<name>/player/<pid>` | `200` | as `MOVE` |
-| `DROP` | `/room/<name>/player/<pid>` | `200` | as `MOVE` |
-| `STATE` | `/room/<name>/player/<pid>` | **server-pushed** | — |
-
-Rooms are never named by clients: the lobby assigns `S-01`, `D-02`, `BR-03`, so creation addresses the collection (`JOIN /rooms`) and every later call addresses the room by its assigned name. Finishing a game clears every slot, so the room empties and returns to the lobby — the next game means a fresh room, not a seat kept.
-
-A refusal carries its verdict as a `reason <verdict>` body line: a player who cannot tell a full room from one already in game cannot act on the answer. A malformed message is `400`, an unknown method `501`. `413` answers a message that parses as oversized; a *frame* beyond the 64 KiB session cap cannot be decrypted at all, so `libtetrissh` drops that connection before HTTTP sees it.
-
----
-
-## Bodies
-
-Requests and responses use the same plaintext `key value` lines the status bodies use; input commands are a single upper-case word.
+An unknown `TETRISD_*` key or an out-of-range value fails the boot rather than being ignored, so a setting documented but never wired up cannot silently do nothing. A missing rc file *is* fine — the defaults are a working setup — but missing certificates are fatal.
 
 ```text
-SIGNUP /account          username amber\npassword hunter2\n
-LOGIN /session           username amber\npassword hunter2\n
-JOIN /rooms              mode single|double|br\n
-MOVE .../player/<pid>    LEFT | RIGHT
-ROTATE .../player/<pid>  CW | CCW
-DROP .../player/<pid>    SOFT | HARD
+TETRISD_PORT                  0-65535 (0 binds a kernel-assigned port)
+TETRISD_TICK_MS               1-1000            # re-read on SIGHUP
+TETRISD_LOG_LEVEL             debug|info|warning|error  # re-read on SIGHUP
+TETRISD_MAX_CLIENTS           up to 4096
+TETRISD_INPUT_BURST/RATE      1-10000
+TETRISD_HANDSHAKE_WORKERS     up to 64
+TETRISD_HANDSHAKE_TIMEOUT_MS  100-60000
 ```
 
-A request carrying a body must declare `Content-Type: application/tetris-command` or it is `400`. Responses are `application/tetris-status` and `STATE` pushes `application/tetris-state` — kept distinct so a message's direction is legible from its type alone.
-
-`LIST` answers with a `libstatusbody` room-row body; `STATE` carries a `libstatusbody` snapshot. Passwords are salted and SHA-256 hashed here — the store never sees one.
+`TETRISD_LOG_IPC` must equal `TETRISLOGD_SOCKET_PATH` — one socket, named twice.
 
 ---
 
 ## Architecture
 
-### Threading model
+### One owner
+
+> `tetrisd` has exactly one owner of all mutable game state.
+
+The reactor thread reads the socket, opens the frame, dispatches the request, seals the answer and writes it — and it alone touches the lobby, every room, every game, the registry and every outbox. There is no lock order because there are no locks over game state; the four-level order this replaced (`lobby_mutex > room->mutex > registry rwlock > outbox mutex`) is gone with the locks in it. Two locks survive and neither guards game state: the handshake pool's own mutex, and whatever `libmacminidb` holds internally. Wanting a third is a sign the work is on the wrong thread.
+
+`tetrisd` is not single-threaded; it is single-owner. Two other kinds of thread exist and neither may touch game state: the handshake workers, each owning one un-established connection until it hands it back, and the log shipper draining the ring buffer to `tetrislogd`.
+
+### The loop
 
 ```text
-reactor        epoll_wait(listener, wake pipe, tick timer, every client)
-               reads, opens frames, dispatches, seals, writes - owns all of it
-               and drives gravity for every room off one timerfd
-handshake pool TETRISD_HANDSHAKE_WORKERS threads, each blocked in one handshake
-logging        shipper thread  drains the ring, datagrams records to tetrislogd
+epoll_wait(listener, wake pipe, timer, every client)
+     │
+     ├── listener      accept until EAGAIN, spawn a client, submit it to the pool
+     ├── wake pipe     drain, then: signals (STOP, HUP, USR1), finished handshakes
+     ├── timer         read the clock once, tick every playing room, arm the sweep
+     └── client        EPOLLOUT → flush; EPOLLIN/HUP/ERR → read, dispatch, reply
+     │
+     ▼
+   sweep              write out what the tick queued; kill clients that overflowed
+     │
+     ▼
+   client_reap        the only free() site for a client
 ```
 
-One thread owns the lobby, every room, every game, the registry and every outbox. The seam is the handshake, the one call that genuinely blocks; why it sits exactly there is [ADR-0008](../../docs/adr/0008-tetrisd-is-event-driven.md). Two rules the code cannot state for itself:
-
-- **No client is freed inside the event loop.** `epoll_event.data.ptr` carries the `t_client *`, and a batch can hold several events for one client, so `client_kill` only unlinks and parks it on the zombie list; the drain after the batch is the sole `free()` site. Breaking this is a use-after-free no test would catch.
-- **A handshake has a total budget**, `TETRISD_HANDSHAKE_TIMEOUT_MS`, enforced by the reactor over and above the matching `SO_RCVTIMEO`/`SO_SNDTIMEO`. The socket option bounds one `recv`, and `libtetrissh` loops until it has its bytes — so a peer dribbling a byte per timeout would hold a pool worker forever, and enough of them stop every login server-wide. The clock starts when a worker picks the connection up, never at accept: charging queue time would make whoever queues behind an attacker inherit the attacker's leftovers.
-
-Each client owns a bounded response FIFO plus a one-slot `STATE` mailbox. Overflowing the FIFO closes the connection — a client that cannot keep up must not grow the server's memory — while snapshots overwrite, so a stalled peer loses intermediate frames and never delays a room's ticker. The reactor pops, seals, and writes; a short write leaves a cursor in the send buffer and arms `EPOLLOUT`, since `session_send`'s retry loop is not available to a thread that drives every other connection too.
-
-Gravity is **one** `timerfd` armed at `TETRISD_TICK_MS`, not a thread per room. On expiry the loop reads the monotonic clock once and advances every playing room by that same elapsed; `t_game` accumulates it against each player's own `gravity_interval_ms(level)`, so a uniform coarse tick still produces per-player speeds and a late or coalesced tick catches the games up rather than slowing them down. Inputs and gravity therefore produce one `STATE` stream instead of two racing ones, and `SIGHUP` retiming is a `timerfd_settime` on the thread that owns the timer.
-
-### Lock order
-
-```text
-lobby_mutex  >  room->mutex  >  registry rwlock  >  outbox mutex
-```
-
-Strictly descending, never re-entered upward. No `db_*`, `session_*`, or IPC send happens under any lock — the outbox push is the sole exception, and it cannot block. Database writes happen after the room mutex is released.
-
-Every lock here exists only because room tickers are still threads. Step 4 of ADR-0008 replaces them with one `timerfd` and step 5 deletes the order entirely; until then it is load-bearing and is not to be relaxed a lock at a time. One rule sits underneath it and is easy to break without breaking the order: a room is guarded by *its own* mutex everywhere, including while the lobby destroys it. Found by `-fsanitize=thread`, not by lock-order review.
+The wait is unbounded unless a handshake is in flight, in which case it ends at that handshake's deadline. Gravity needs no timeout: the tick timer is a descriptor in the same set. `epoll_event.data.ptr` carries three kinds of object, so every watched object begins with a `t_event_tag` the reactor reads before using the pointer as anything — which recovers a client from the kernel without an fd-to-client map to keep in step.
 
 ### Client lifetime
 
-The registry's rwlock keeps a room ticker from enqueueing into a client that is going away: the ticker holds the read lock across its push, unlinking takes the write lock. It says nothing about memory, which the reactor alone owns. Teardown runs on the loop, in one order:
+The rule that makes `data.ptr` safe replaced the registry rwlock: **no client is freed inside the event loop.** A batch can carry several events for the same client, so `client_kill` only unlinks it and parks it on the zombie list, every later event in the batch skips a client marked `dead`, and `client_reap` is the only `free()` site. The registry is now a directory rather than a lifetime guard — every live connection addressable by player id, which is how a tick reaches the right outbox and how `LOGIN` finds the connection it displaces.
 
-1. drop the descriptor from the epoll set
-2. forfeit — leaving, topping out, and a dropped connection are the same event
-3. take the write lock, unlink from the registry, release it
-4. `shutdown(fd)`, close the outbox, park the client on the zombie list — the drain after the batch closes the socket and frees it
+### Handshake pool
 
-An empty room returns to the lobby. A player holds at most one connection, so a `LOGIN` for an already-connected player closes the older one — synchronously, in the handler, because the loop owns both. The old connection has forfeited its room and unlinked itself before the new one binds, so the wait once needed between two client threads is gone rather than ported.
+`session_handshake_server` is the one genuinely blocking call left, so it runs off the loop. A worker owns its client outright until it hands the established session back; `client_adopt` sets `watched` on the far side of that handoff, and the sweep skips anything not yet `watched` — dropping that check would put two threads on one socket.
 
-### Logging
+`TETRISD_HANDSHAKE_TIMEOUT_MS` is a budget for the whole handshake, not for one read: `SO_RCVTIMEO` bounds a single `recv` and `libtetrissh` loops until it has the bytes it asked for, so a peer dribbling one byte per timeout would otherwise hold a worker indefinitely.
 
-Every significant event becomes a `libcoreipc` log record pushed into a ring buffer. The shipper thread drains it and datagrams each record to `tetrislogd`, falling back to stderr and retrying while the logger is unreachable. Under pressure records are **dropped and counted**, never waited on — `ring_dropped_count()` is the number `tetrisctl dropped-logs` reports.
+### Outbox
+
+A bounded FIFO of responses plus a one-slot mailbox holding the latest `STATE`. Responses that overflow the FIFO close the client — it cannot keep up, and buffering more would let it exhaust the server. `STATE` snapshots overwrite instead, so a stalled client loses intermediate frames but never holds up the tick that produced them. That split has nothing to do with threading, which is why it outlived the writer thread, the condition variable and the mutex unchanged.
+
+### A Room is two objects
+
+The domain `t_room` that `libtetrisroom` owns, and the runtime beside it — the per-slot games, which are dirty, and whether it is `ticking`. They share a lobby index and therefore a lifetime, so `room.c` alone opens and closes them together, and nothing outside it reaches through `->room`: handlers ask `server_room_seat` / `_start` / `_input` / `_describe` rather than the domain object. The two halves drifting apart once evicted a player from a room seconds after they created it ([post-mortem](../../docs/bugs/room_runtime_outlived_its_room.md)).
+
+### A Slot is written down twice
+
+The room holds the seat; the client holds a `t_room_binding` — room name, room index, slot — saying which seat it is. That copy goes stale on its own, because a finished game clears every slot, so `room.c` owns it too: seating writes it, `server_room_unbind` is the only clear, and everyone else asks `server_room_resolve(srv, cli, name)`, which answers which room the binding names *now* — the index still carries that name, the player is still a member — or `NULL`, and **writes nothing**.
+
+A predicate that repairs what it was asked about makes call order load-bearing: validate before you index, or you index on a binding nobody checked. A resolve that hands back the room you were going to look up next cannot be called in the wrong order. Staleness is repaired at one deliberate site — `JOIN`, the request that wants a clean binding; `LEAVE`, `START` and the input routes refuse and leave it alone.
+
+### Boot order
+
+`main.c` detaches *before* claiming the pidfile — the pid written has to be the detached process's — and both the fork and the claim live there alone; behind `server_start` they would make every in-process suite fork.
+
+Boot owns the terminal: everything up to `daemon_ready` reports on stderr and exits non-zero, so the operator who typed the command sees the failure. stderr moves to `TETRISD_ERR_PATH` only once nothing is left to fail — redirecting earlier would hide boot failures.
 
 ---
 
@@ -219,62 +212,44 @@ Every significant event becomes a `libcoreipc` log record pushed into a ring buf
 
 ```text
 src/tetrisd/
-├── include/tetrisd.h     Every type and prototype; src/*.c include only this
+├── include/tetrisd.h      Every type and prototype; src/*.c include only this
 ├── src/
-│   ├── main.c            Thin shim over server_start / server_stop
-│   ├── config.c          .tetrishrc parsing and validation
-│   ├── logger.c          Ring buffer, shipper thread, stderr fallback
-│   ├── listener.c        Listening socket: open and accept
-│   ├── clock.c           Wall-clock and monotonic milliseconds
-│   ├── server.c          Bring-up, the reactor thread, shutdown, SIGHUP reload
-│   ├── reactor.c         The event loop: dispatch, accept, sweep, wind-down
-│   ├── signals.c         Handlers: a flag and one byte down the self-pipe
-│   ├── dump.c            SIGUSR1 state dump
-│   ├── registry.c        Client registry, the lifetime guard
-│   ├── client.c          Client lifetime: spawn, adopt, kill, reap
-│   ├── clientio.c        Frame in, frame out: the reactor's data path
-│   ├── handshake_pool.c  Bounded worker pool for the blocking handshake
-│   ├── bytes.c           Growable byte buffer with a cursor
-│   ├── outbox.c          Bounded FIFO + latest-STATE mailbox
-│   ├── dispatch.c        Frame → route → response, status mapping
-│   ├── handlers_account.c  SIGNUP, LOGIN, password hashing
-│   ├── handlers_lobby.c    LIST, JOIN, LEAVE, START
-│   ├── handlers_input.c    MOVE, ROTATE, DROP
-│   ├── game.c            The per-player game aggregate over libtetrisbrain
-│   └── room.c            Room runtime, ticker, STATE push, forfeit
-├── tests/                harness.c is the headless client; test_*.c the suites
+│   ├── main.c             Detach, claim the pidfile, start, wait, stop
+│   ├── server.c           server_start / server_stop, bring-up, SIGHUP reload
+│   ├── reactor.c          The event loop, sweep, teardown
+│   ├── client.c           Spawn, adopt, kill, reap — the client lifetime rules
+│   ├── clientio.c         Socket reads, frame boundaries, sealed writes
+│   ├── outbox.c           Bounded response FIFO + one-slot STATE mailbox
+│   ├── registry.c         Live connections, addressable by player id
+│   ├── handshake_pool.c   Bounded workers for the one blocking call
+│   ├── dispatch.c         Frame → route → status; body field helpers
+│   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input
+│   ├── room.c             Both halves of a Room; ticking and STATE push
+│   ├── game.c             t_game — the aggregate libtetrisbrain does not own
+│   └── …                  config, logger, listener, buffer, clock, signals, dump
+├── tests/                 harness.c drives a real server over a real session
 ├── scripts/run_tests.sh
-└── Makefile              → src/tetrisd/tetrisd
+└── Makefile               → src/tetrisd/tetrisd
 ```
-
-`t_game` is the aggregate `libtetrisbrain` deliberately does not own — board, piece, bag, score, charge, and effects, with the ordering rules between them enforced in one place.
 
 ---
 
 ## Testing
 
-Eight suites, each driving a real server in-process on port `0`:
+Nine suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
 
 ```bash
 make -C src/tetrisd test
 make -C src/tetrisd test FILTER=game    # only suites matching "game"
 ```
 
-Valgrind proves teardown:
+`main.o` is excluded from the test link so each suite provides its own `main()` — which is also why the double-fork may never move behind `server_start`.
+
+Valgrind is expected to be clean:
 
 ```bash
-valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_shutdown
+valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_game
 ```
-
-It says nothing about data races, so the suite is also rebuilt under ThreadSanitizer. Fewer threads remain than before, but the ones that do — the handshake pool and the room tickers — are exactly the ones that reach across into state the reactor owns, so this stays non-negotiable:
-
-```bash
-make -C lib/<each> re FLAGS="<its flags minus -Werror> -fsanitize=thread -g -O1"
-make -C src/tetrisd test FLAGS="-Wall -Wextra -fsanitize=thread -g -O1" \
-     LDLIBS="-lssl -lcrypto -lpthread -lrt -fsanitize=thread"
-```
-
-Both are expected to be clean.
 
 ---
 

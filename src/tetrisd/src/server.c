@@ -43,8 +43,7 @@ int	server_start(const t_config *cfg, t_server **out)
 		return (-1);
 	}
 	srv->loop_started = true;
-	logger_emit(&srv->log, COREIPC_LOG_INFO, "tetrisd listening on port %d",
-		srv->port);
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "tetrisd listening on port %d", srv->port);
 	*out = srv;
 	return (0);
 }
@@ -121,10 +120,10 @@ void	server_request_stop(t_server *srv)
 /**
  * @brief Wakes the reactor from any thread.
  *
- * Every thread beside the reactor - a room ticker with a snapshot to push, a
- * handshake worker with a finished session, a signal handler - reaches it the
- * same way, and none of them may block doing so. The pipe is non-blocking, so
- * a full one is not an error: it already means a wake-up is pending.
+ * Every thread beside the reactor - a handshake worker with a finished
+ * session, a signal handler - reaches it the same way, and none of them may
+ * block doing so. The pipe is non-blocking, so a full one is not an error: it
+ * already means a wake-up is pending.
  *
  * @param srv Server to wake; NULL and an unopened pipe are both ignored.
  */
@@ -152,15 +151,18 @@ void	server_reload(t_server *srv)
 		return ;
 	if (config_load(&fresh, srv->cfg.rc_path) != 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_WARNING,
-			"reload failed: %s has an invalid setting", srv->cfg.rc_path);
+		logger_emit(&srv->log, COREIPC_LOG_WARNING, "reload failed: %s has an invalid setting", srv->cfg.rc_path);
 		return ;
 	}
 	srv->cfg.log_level = fresh.log_level;
 	atomic_store(&srv->log.level, fresh.log_level);
 	srv->cfg.tick_ms = fresh.tick_ms;
 	srv->tick_ms = fresh.tick_ms;
-	reactor_arm_timer(srv);
+	if (reactor_arm_timer(srv) != 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "gravity has stopped: the tick timer could not be retimed");
+		return ;
+	}
 	logger_emit(&srv->log, COREIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
 }
 
@@ -202,9 +204,8 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	srv->tick_ms = cfg->tick_ms;
 	srv->started_ms = clock_now_ms();
 	logger_blank(&srv->log);
-	pthread_mutex_init(&srv->lobby_mutex, NULL);
-	lobby_init(&srv->lobby, LOBBY_MAX_ROOMS, cfg->br_slots);
-	server_room_init_all(srv);
+	if (server_rooms_init(srv, cfg->br_slots) != 0)
+		return (-1);
 	if (daemon_mkdir_p(cfg->data_dir) != 0)
 		return (-1);
 	if (logger_init(&srv->log, &srv->cfg) != 0)
@@ -230,8 +231,7 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	srv->listen_fd = listener_open(cfg->port, &srv->port);
 	if (srv->listen_fd < 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot listen on port %d",
-			cfg->port);
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot listen on port %d", cfg->port);
 		return (-1);
 	}
 	return (open_reactor(srv));
@@ -249,8 +249,7 @@ static int	open_reactor(t_server *srv)
 	srv->epoll_fd = epoll_create1(0);
 	if (srv->epoll_fd < 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open epoll: %s",
-			strerror(errno));
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open epoll: %s", strerror(errno));
 		return (-1);
 	}
 	if (watch(srv, srv->listen_fd, &srv->listener_tag) != 0
@@ -259,8 +258,7 @@ static int	open_reactor(t_server *srv)
 		return (-1);
 	if (handshake_pool_start(&srv->pool, srv) != 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_ERROR,
-			"cannot start the handshake pool");
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot start the handshake pool");
 		return (-1);
 	}
 	return (0);
@@ -281,12 +279,12 @@ static int	open_timer(t_server *srv)
 	srv->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 	if (srv->timer_fd < 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the tick timer: %s",
-			strerror(errno));
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the tick timer: %s", strerror(errno));
 		return (-1);
 	}
 	if (watch(srv, srv->timer_fd, &srv->timer_tag) != 0)
 		return (-1);
+	clock_gettime(CLOCK_MONOTONIC, &srv->last_tick);
 	return (reactor_arm_timer(srv));
 }
 
@@ -307,8 +305,7 @@ static int	watch(t_server *srv, int fd, t_event_tag *tag)
 	ev.data.ptr = tag;
 	if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0)
 	{
-		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot watch fd %d: %s",
-			fd, strerror(errno));
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot watch fd %d: %s", fd, strerror(errno));
 		return (-1);
 	}
 	return (0);
@@ -324,8 +321,6 @@ static int	watch(t_server *srv, int fd, t_event_tag *tag)
  */
 static void	destroy(t_server *srv)
 {
-	int	i;
-
 	handshake_pool_destroy(&srv->pool);
 	client_reap(srv);
 	if (srv->timer_fd >= 0)
@@ -340,13 +335,6 @@ static void	destroy(t_server *srv)
 		close(srv->wake[SELFPIPE_WRITE]);
 	free(srv->scratch);
 	free(srv->sweep);
-	i = 0;
-	while (i < LOBBY_MAX_ROOMS)
-	{
-		pthread_mutex_destroy(&srv->rooms[i].mutex);
-		i++;
-	}
-	pthread_mutex_destroy(&srv->lobby_mutex);
 	registry_destroy(&srv->reg);
 	session_credentials_free(srv->credentials);
 	if (srv->db != NULL)

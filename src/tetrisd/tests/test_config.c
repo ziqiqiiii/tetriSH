@@ -151,8 +151,7 @@ static void	test_load_reads_rc_file(void)
 
 	make_tmp_dir(dir, sizeof(dir));
 	snprintf(rc, sizeof(rc), "%s/rc", dir);
-	write_file(rc, "# tetrisd\nexport TETRISD_PORT=6001\n"
-		"export TETRISD_DATA_DIR=/tmp/dd\ndspawn tetrisd\n");
+	write_file(rc, "# tetrisd\nexport TETRISD_PORT=6001\n" "export TETRISD_DATA_DIR=/tmp/dd\ndspawn tetrisd\n");
 	unsetenv("TETRISD_PORT");
 	assert(config_load(&cfg, rc) == 0);
 	assert(cfg.port == 6001);
