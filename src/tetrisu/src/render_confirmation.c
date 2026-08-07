@@ -13,6 +13,7 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 static void	put_centered(struct ncplane *plane, int row, int cols,
 				const char *text);
 static bool	show_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog);
+static void	paint_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog);
 static void	destroy_dialog(render_ctx_t *ctx,
 				confirmation_dialog_t *dialog);
 
@@ -63,7 +64,7 @@ bool	confirmation_prompt_run(render_ctx_t *ctx, audio_ctx_t *audio,
 		if (dialog.focus != previous_focus)
 		{
 			audio_play_menu_move(audio);
-			draw_dialog(&dialog);
+			paint_dialog(ctx, &dialog);
 			ncplane_move_top(dialog.plane);
 			(void)notcurses_render(ctx->nc);
 		}
@@ -81,11 +82,26 @@ static bool	show_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog)
 	destroy_dialog(ctx, dialog);
 	if (!create_dialog_plane(ctx, dialog))
 		return (false);
-	draw_dialog(dialog);
+	paint_dialog(ctx, dialog);
 	render_notification_raise(ctx);
 	ncplane_move_top(dialog->plane);
 	dialog->visible = true;
 	return (notcurses_render(ctx->nc) == 0);
+}
+
+/**
+ * @brief Draws the dialog as a bitmap where one is available, else as cells.
+ *
+ * A cell plane cannot occlude a sprixel however high it sits in the pile, so
+ * over a bitmap screen such as Solo the cell dialog is drawn through by the
+ * planes it is supposed to cover. Where bitmaps exist the dialog becomes one
+ * itself; the cell drawing stays for terminals that have no other option.
+ */
+static void	paint_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog)
+{
+	if (render_confirmation_pixel_show(ctx, dialog))
+		return ;
+	draw_dialog(dialog);
 }
 
 static bool	create_dialog_plane(render_ctx_t *ctx,

@@ -1738,6 +1738,7 @@ typedef struct
 	uint64_t			leaderboard_static_signature;
 	uint64_t			leaderboard_controls_signature;
 	pixel_asset_t		notification_font;
+	pixel_asset_t		confirmation_font;
 	ui_notification_stack_t	notifications;
 	int					bg_row;
 	int					bg_col;
@@ -2143,6 +2144,9 @@ const char		*confirmation_title(confirmation_kind_t kind);
 const char		*confirmation_body(confirmation_kind_t kind);
 bool			confirmation_prompt_run(render_ctx_t *ctx,
 					audio_ctx_t *audio, confirmation_kind_t kind);
+bool			render_confirmation_pixel_show(render_ctx_t *ctx,
+					confirmation_dialog_t *dialog);
+void			render_confirmation_font_release(render_ctx_t *ctx);
 
 void			sign_in_modal_init(sign_in_modal_t *modal);
 sign_in_result_t	sign_in_modal_handle_key(sign_in_modal_t *modal,
