@@ -163,7 +163,7 @@ bool	auth_form_begin_server_check(auth_form_t *form)
 	if (!domain_is_valid(form->domain))
 	{
 		set_status(form, AUTH_FEEDBACK_ERROR,
-			"ENTER A DOMAIN WITHOUT SPACES");
+			"DOMAIN WITHOUT SPACES");
 		return (false);
 	}
 	form->server_state = AUTH_SERVER_CHECKING;
@@ -187,7 +187,7 @@ void	auth_form_finish_server_check(auth_form_t *form, bool online)
 	{
 		form->server_state = AUTH_SERVER_OFFLINE;
 		set_status(form, AUTH_FEEDBACK_ERROR,
-			"SERVER OFFLINE - PLAY OFFLINE");
+			"OFFLINE - USE PLAY OFFLINE");
 	}
 }
 
@@ -208,20 +208,29 @@ bool	auth_form_validate(auth_form_t *form)
 		return (false);
 	if (!auth_form_online_enabled(form))
 	{
-		restore_server_status(form);
+		/*
+		 * Repeating the unchanged server status here would leave the screen
+		 * identical to the one that refused the key, which reads as a frozen
+		 * client. Name the blocker and the door that is actually open instead.
+		 */
+		if (form->server_state == AUTH_SERVER_OFFLINE)
+			set_status(form, AUTH_FEEDBACK_ERROR,
+				"OFFLINE - USE PLAY OFFLINE");
+		else
+			set_status(form, AUTH_FEEDBACK_ERROR, "CHECK SERVER ID FIRST");
 		return (false);
 	}
 	if (form->username[0] == '\0')
 		set_status(form, AUTH_FEEDBACK_ERROR, "USERNAME IS REQUIRED");
 	else if (codepoint_count(form->password) < AUTH_PASSWORD_MIN)
 		set_status(form, AUTH_FEEDBACK_ERROR,
-			"PASSWORD NEEDS AT LEAST 4 CHARACTERS");
+			"PASSWORD NEEDS 4+ CHARS");
 	else if (form->mode == AUTH_FORM_SIGN_UP
 		&& strcmp(form->password, form->confirm) != 0)
 		set_status(form, AUTH_FEEDBACK_ERROR, "PASSWORDS DO NOT MATCH");
 	else if (!domain_is_valid(form->domain))
 		set_status(form, AUTH_FEEDBACK_ERROR,
-			"ENTER A DOMAIN WITHOUT SPACES");
+			"DOMAIN WITHOUT SPACES");
 	else
 	{
 		set_status(form, AUTH_FEEDBACK_LOADING,
@@ -262,7 +271,7 @@ app_provider_result_t	auth_form_submit(auth_form_t *form,
 	if (result == APP_PROVIDER_OK)
 		set_status(form, AUTH_FEEDBACK_SUCCESS,
 			form->mode == AUTH_FORM_SIGN_UP
-			? "ACCOUNT CREATED - PLEASE SIGN IN" : "WELCOME TO TETRISU!");
+			? "ACCOUNT CREATED - SIGN IN" : "WELCOME TO TETRISU!");
 	else if (result == APP_PROVIDER_UNAVAILABLE)
 		set_status(form, AUTH_FEEDBACK_ERROR, "SERVER IS UNAVAILABLE");
 	else if (result == APP_PROVIDER_INVALID)
@@ -497,7 +506,7 @@ static void	restore_server_status(auth_form_t *form)
 		set_status(form, AUTH_FEEDBACK_SUCCESS, "SERVER ONLINE - READY");
 	else if (form->server_state == AUTH_SERVER_OFFLINE)
 		set_status(form, AUTH_FEEDBACK_ERROR,
-			"SERVER OFFLINE - PLAY OFFLINE");
+			"OFFLINE - USE PLAY OFFLINE");
 	else
 		set_status(form, AUTH_FEEDBACK_IDLE, "ENTER SERVER ID TO CHECK");
 }

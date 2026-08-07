@@ -429,7 +429,7 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 		auth_form_set_mode(form, AUTH_FORM_LOGIN);
 		form->feedback = AUTH_FEEDBACK_SUCCESS;
 		snprintf(form->status, sizeof(form->status),
-			"ACCOUNT CREATED - PLEASE SIGN IN");
+			"ACCOUNT CREATED - SIGN IN");
 		return (true);
 	}
 	if (action == AUTH_ACTION_PREVIEW_LOGIN)
@@ -441,7 +441,7 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 		{
 			form->feedback = AUTH_FEEDBACK_ERROR;
 			snprintf(form->status, sizeof(form->status),
-				"PREVIEW GATE UNAVAILABLE - SET TETRISU_UI_PREVIEW=1");
+				"SET TETRISU_UI_PREVIEW=1");
 			return (true);
 		}
 		form->feedback = AUTH_FEEDBACK_SUCCESS;

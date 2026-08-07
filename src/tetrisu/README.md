@@ -276,6 +276,12 @@ Leaderboard, Settings, and Settings → Marketplace are reachable. Without
 `TETRISU_UI_PREVIEW=1`, the preview action is not rendered or accepted; real
 server sign-in and Play Offline retain their existing behavior.
 
+`LOGIN` and `SIGN UP` need a verified server, and the network adapter is not
+connected yet, so the server check always reports offline and both buttons stay
+refused. Until `tetrisd` lands, the two ways into Home are `PLAY OFFLINE` and
+the preview gate above. A refused button says which of the two applies on the
+status line rather than doing nothing.
+
 Or build and run in one step:
 
 ```bash

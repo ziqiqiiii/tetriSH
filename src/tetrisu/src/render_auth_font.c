@@ -28,6 +28,8 @@ static bool				add_value_sprite(render_ctx_t *ctx,
 static bool				add_status_sprite(render_ctx_t *ctx,
 							const auth_form_t *form, int row, int center_x,
 							int width);
+static void				fit_status_text(char *output, size_t capacity,
+							const char *text, int plane_width);
 static bool				add_empty_slot(render_ctx_t *ctx);
 static bool				add_focus_sprites(render_ctx_t *ctx,
 							int row, int x, int width, bool focused,
@@ -137,7 +139,12 @@ bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
 				value_x, value_width, form->domain, false))
 			return (false);
 	}
-	status_width = (field_width * 62) / 100;
+	/*
+	 * The status band is its own full-width box in the artwork, so sizing its
+	 * sprite to a fraction of the field only bought silent truncation: the
+	 * reader saw "OFFLINE - USE PLAY" and no way to guess the rest.
+	 */
+	status_width = field_width - 2;
 	if (!add_status_sprite(ctx, form,
 			ctx->bg_row + (ctx->bg_rows
 				* (form->mode == AUTH_FORM_SIGN_UP ? 73 : 52)) / 100,
@@ -174,7 +181,7 @@ bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
 	if (app_ui_preview_enabled() && form->mode == AUTH_FORM_LOGIN
 		&& !add_text_sprite(ctx, "P  PREVIEW SIGN-IN",
 			ctx->bg_row + (ctx->bg_rows * 76) / 100,
-			center - field_width / 4, field_width / 2,
+			center - field_width / 2, field_width,
 			form->focus == AUTH_FOCUS_PREVIEW
 			? g_auth_gold : g_auth_value, true))
 		return (false);
@@ -293,6 +300,7 @@ static bool	add_value_sprite(render_ctx_t *ctx, const auth_form_t *form,
 static bool	add_status_sprite(render_ctx_t *ctx, const auth_form_t *form,
 	int row, int center_x, int width)
 {
+	char	fitted[AUTH_STATUS_MAX];
 	color_t	tint;
 	int		length;
 	int		x;
@@ -307,7 +315,42 @@ static bool	add_status_sprite(render_ctx_t *ctx, const auth_form_t *form,
 		tint = g_auth_lavender;
 	length = width;
 	x = center_x - length / 2;
-	return (add_text_sprite(ctx, form->status, row, x, width, tint, true));
+	fit_status_text(fitted, sizeof(fitted), form->status, width);
+	return (add_text_sprite(ctx, fitted, row, x, width, tint, true));
+}
+
+/**
+ * @brief Copies status text into the sprite's glyph budget, marking any cut.
+ *
+ * A status line is a sentence the reader is meant to act on, so a silent cut
+ * is worse than a short one: "OFFLINE - USE PLAY" looks like the whole
+ * message. The ellipsis says out loud that there is more.
+ */
+static void	fit_status_text(char *output, size_t capacity, const char *text,
+	int plane_width)
+{
+	int	max_chars;
+
+	max_chars = (plane_width * AUTH_TEXT_ADVANCE_DEN)
+		/ AUTH_TEXT_ADVANCE_NUM;
+	if (max_chars > (int)capacity - 1)
+		max_chars = (int)capacity - 1;
+	if (max_chars <= 0)
+	{
+		output[0] = '\0';
+		return ;
+	}
+	if ((int)strlen(text) <= max_chars)
+	{
+		snprintf(output, capacity, "%s", text);
+		return ;
+	}
+	if (max_chars <= 3)
+	{
+		snprintf(output, capacity, "%.*s", max_chars, text);
+		return ;
+	}
+	snprintf(output, capacity, "%.*s...", max_chars - 3, text);
 }
 
 static bool	add_empty_slot(render_ctx_t *ctx)

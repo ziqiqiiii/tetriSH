@@ -4,6 +4,7 @@ static void	test_login_focus_order(void);
 static void	test_sign_up_focus_order(void);
 static void	test_utf8_editing_and_masking(void);
 static void	test_server_check_state(void);
+static void	test_refused_primary_explains_itself(void);
 static void	test_validation_and_submission(void);
 static void	test_secondary_actions(void);
 
@@ -14,6 +15,7 @@ int	main(void)
 	test_sign_up_focus_order();
 	test_utf8_editing_and_masking();
 	test_server_check_state();
+	test_refused_primary_explains_itself();
 	test_validation_and_submission();
 	test_secondary_actions();
 	return (0);
@@ -105,6 +107,36 @@ static void	test_server_check_state(void)
 	assert(auth_form_online_enabled(&form));
 	assert(strstr(form.status, "READY") != NULL);
 	printf("PASS test_server_check_state\n");
+}
+
+/*
+ * A refused LOGIN used to repaint the status it already showed, so pressing
+ * Enter on a screen that cannot sign in looked like a hung client. Each
+ * refusal must name its own blocker.
+ */
+static void	test_refused_primary_explains_itself(void)
+{
+	auth_form_t	form;
+
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	snprintf(form.username, sizeof(form.username), "PixelPlayer");
+	snprintf(form.password, sizeof(form.password), "cute-pass");
+	form.focus = AUTH_FOCUS_PRIMARY;
+	assert(auth_form_handle_key(&form, NCKEY_ENTER) == AUTH_ACTION_NONE);
+	assert(form.feedback == AUTH_FEEDBACK_ERROR);
+	assert(strstr(form.status, "CHECK SERVER") != NULL);
+	form.focus = AUTH_FOCUS_DOMAIN;
+	snprintf(form.domain, sizeof(form.domain), "play.example.com");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, false);
+	form.focus = AUTH_FOCUS_PRIMARY;
+	assert(auth_form_handle_key(&form, NCKEY_ENTER) == AUTH_ACTION_NONE);
+	assert(form.feedback == AUTH_FEEDBACK_ERROR);
+	assert(strstr(form.status, "PLAY OFFLINE") != NULL);
+	form.focus = AUTH_FOCUS_OFFLINE;
+	assert(auth_form_handle_key(&form, NCKEY_ENTER)
+		== AUTH_ACTION_PLAY_OFFLINE);
+	printf("PASS test_refused_primary_explains_itself\n");
 }
 
 static void	test_validation_and_submission(void)
