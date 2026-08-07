@@ -93,6 +93,27 @@ Battle while the authoritative `tetrisd` game loop is being built.
   notification directing the user to the Marketplace. Every bitmap renderer,
   including foot/Sixel, uses dedicated Mirurun marketplace art; true cell mode
   uses an alpha-safe framed terminal presentation.
+- Dedicated Marketplace screen over its own haunted shop-interior backdrop.
+  The art is a scene rather than an authored frame, so every plate, border and
+  button on the screen is drawn by the renderer against the quiet dark centre
+  of the shop and nothing paints over the shelves at its edges.
+- The Marketplace shows the wallet, best score and rank above two shelf panels
+  - four characters and seven themes - a detail card for whatever the cursor
+  last touched, and a Back / Buy / Volume control row. It navigates exactly
+  like Settings: arrows step the grids, `↑` enters the shelves from the
+  controls, `Tab` walks everything in one order.
+- Every shelf tile states what it would cost: `FREE`, a price, `OWNED`, or
+  `EQUIPPED`. Prices the wallet cannot cover are drawn in red and the tile
+  caption is dimmed. The detail card spells the arithmetic out in full -
+  price, current balance, and either the balance after the purchase or how
+  much is still missing.
+- `Enter` on a shelf tile buys a locked item and equips an owned one, which is
+  what its caption and the Buy button's second line both promise. A purchase
+  debits the wallet exactly once and never changes the equipped loadout;
+  equipping stays a separate, deliberate step. Both outcomes, along with an
+  insufficient balance, are reported on the shared notification card.
+- Locked artwork is desaturated on the shelf and in the detail card, so the
+  panels read as stock rather than as inventory.
 - Notification cards are sized from the artwork's own aspect rather than a
   fixed column count, and their lettering comes from the shared glyph atlas
   fitted to the plaque interior measured from the art. On the stationary tier
@@ -296,6 +317,12 @@ and graphics-protocol support at startup. It exits with
 | `M` in signed-in Settings | Open Marketplace; `Enter` on the visible button does the same |
 | `[` / `]` (or `,` / `.`) in signed-in Settings | Select the previous / next owned character |
 | `I` in signed-in Settings | Toggle the selected character's four-power info card |
+| `←` / `→` in the Marketplace control row | Cycle Back, Buy, Volume -, Volume + (the Marketplace takes no mouse input) |
+| `↑` from the Marketplace control row | Focus the character shelf |
+| `Enter` on a Marketplace shelf tile | Buy it when locked, equip it when already owned |
+| `B` in the Marketplace | Buy the item the detail card is describing |
+| `E` in the Marketplace | Equip the item the detail card is describing |
+| `Tab` in the Marketplace | Step through every shelf tile and control in one order |
 | `P` on Login with `TETRISU_UI_PREVIEW=1` | Sign into the clearly marked local UI fixture |
 | `Enter` on Single Player | Start local Endless Solo |
 | `←` / `→` | Move the active piece |
@@ -329,7 +356,7 @@ and both Back and Refresh support mouse hover/click.
 |---|---|
 | `Single Player` | Playable local Endless mode; can remain as offline play |
 | `Multiplayer` | Navigable lobby/create/waiting/match scaffolds |
-| `Marketplace` | Typed fixture-backed scaffold |
+| `Marketplace` | Dedicated shop screen: browse both catalogues, buy with wallet points, equip what is owned |
 | `Leaderboard` | Complete top-three podium and positions 4–10, with refresh/error states |
 | `Settings` | Dedicated live Profile/Settings screen; offline mode shows local controls only |
 
@@ -361,6 +388,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH` | `settings_previews/theme_al_merqaedes.png` (192 x 192 Al Merqaedes F1 Team thumbnail) |
 | `SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH` | `settings_previews/theme_nuclear_ghandi.png` (192 x 192 Nuclear Ghandi thumbnail) |
 | `SETTINGS_THEME_CLAUDING_PREVIEW_PATH` | `settings_previews/theme_clauding.png` (192 x 192 Clauding thumbnail) |
+| `MARKETPLACE_BACKGROUND_PATH` | `marketplace_background.png` (1448 x 1086 haunted shop interior; quiet dark centre, detail at the edges) |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
 | `OWNERSHIP_NOTIFICATION_PATH` | Mirurun marketplace-stall pixel-art ownership-error card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
@@ -501,6 +529,23 @@ key, press `I`, confirm the mouse does nothing there, resize the terminal, and
 open Marketplace before pressing Back. For offline separation, omit the
 environment variable, choose Play Offline, open Settings, and confirm that
 only local status, renderer mode, and music volume appear.
+
+For the Marketplace, open it from Home or from Settings and confirm the shop
+backdrop appears with the wallet, both shelves, the detail card, and the
+control row drawn over its dark centre rather than over the shelf artwork.
+Step across both grids and confirm the detail card follows the cursor and
+keeps describing the same item after `↓` drops focus to the control row. Buy
+Princess, confirm the wallet drops by exactly 1400, the tile turns `OWNED`,
+and the equipped character does **not** change; press `E` to equip it. Then
+buy Wolf-man to empty the wallet and confirm a further purchase is refused
+with the `NOT ENOUGH` card and no balance change. Resize mid-screen, then
+repeat the whole pass under `TETRISU_RENDERER=cell`.
+
+The purchase repaint is worth one extra look on a real Sixel terminal such as
+foot: buying rebuilds the full-screen static layer underneath four region
+planes, which is the combination the fifth bug in `docs/adding-a-screen.md`
+describes. Confirm the shelves, the detail card, and the buttons are all still
+drawn immediately after a purchase rather than only after the next keystroke.
 
 The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
 strict component build without allowing dependency installation with:

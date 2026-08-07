@@ -49,6 +49,13 @@
 	ASSET_DIR "/settings_profile_background_v2.png"
 # define SETTINGS_BACKGROUND_LEGACY_PATH \
 	ASSET_DIR "/settings_profile_background_v1.png"
+/*
+ * The Marketplace backdrop is a scene rather than an authored frame: the
+ * renderer draws every plate and border itself, so a missing file degrades to
+ * the Settings artwork instead of failing the screen.
+ */
+# define MARKETPLACE_BACKGROUND_PATH \
+	ASSET_DIR "/marketplace_background.png"
 # define AUTH_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/auth_screen.png"
 # define AUTH_LOGIN_BACKGROUND_PATH \
@@ -168,6 +175,12 @@
 # define UI_NOTIFICATION_MESSAGE_MAX	31
 # define UI_NOTIFICATION_OWNERSHIP_TITLE	"ITEM NOT OWNED"
 # define UI_NOTIFICATION_OWNERSHIP_MESSAGE	"VISIT MARKETPLACE TO BUY"
+/* Titles stay inside UI_NOTIFICATION_TITLE_MAX so nothing is silently cut. */
+# define UI_NOTIFICATION_PURCHASE_TITLE	"PURCHASED"
+# define UI_NOTIFICATION_OWNED_TITLE	"ALREADY OWNED"
+# define UI_NOTIFICATION_FUNDS_TITLE	"NOT ENOUGH"
+# define UI_NOTIFICATION_FUNDS_MESSAGE	"WALLET POINTS TOO LOW"
+# define UI_NOTIFICATION_EQUIPPED_TITLE	"EQUIPPED"
 # define UI_NOTIFICATION_HOLD_MS	900
 # define UI_NOTIFICATION_FADE_MS	180
 # define UI_NOTIFICATION_FRAME_MS	33
@@ -279,6 +292,109 @@
 # define RENDER_RESIZE_POLL_MS	100
 # define COMPATIBILITY_BADGE_TEXT	":: COMPATIBILITY MODE ::"
 # define COMPATIBILITY_BADGE_SHORT	":: CELL MODE ::"
+
+/* MARKETPLACE_LAYOUT.C / RENDER_MARKETPLACE_FONT.C */
+/*
+ * The Marketplace shares the Settings reference contract: a 4:3 backdrop
+ * measured in 1448x1086 units, mapped into fitted pixels once per geometry.
+ * Its own art carries no authored frames, so every plate and border below is
+ * drawn by the renderer and the numbers here are the single source of truth
+ * for the bitmap compositor, the hit tests, and the layout tests.
+ */
+# define MARKETPLACE_REFERENCE_WIDTH	1448
+# define MARKETPLACE_REFERENCE_HEIGHT	1086
+# define MARKETPLACE_BUTTON_COUNT	4
+# define MARKETPLACE_INVENTORY_COLUMNS	4
+# define MARKETPLACE_CHARACTER_SLOTS	4
+# define MARKETPLACE_THEME_SLOTS	7
+/*
+ * The backdrop is a shop interior whose shelves, lanterns and pumpkins crowd
+ * the left and right edges. Every drawn panel is opaque, so the content band
+ * is inset to the quiet dark wall between them - x 262..1186 - and nothing the
+ * renderer paints ever cuts through the artwork.
+ */
+# define MARKETPLACE_REF_CONTENT_X	262
+# define MARKETPLACE_REF_CONTENT_WIDTH	924
+# define MARKETPLACE_REF_TITLE_Y	28
+# define MARKETPLACE_REF_TITLE_HEIGHT	58
+# define MARKETPLACE_REF_STAT_Y	104
+# define MARKETPLACE_REF_STAT_WIDTH	300
+# define MARKETPLACE_REF_STAT_HEIGHT	74
+# define MARKETPLACE_REF_STAT_STEP_X	312
+/*
+ * Region rectangles. Bitmap planes must never overlap on a stationary
+ * protocol, and every plane is expanded out to whole cells before it is
+ * created, so the bands below are separated by 75 reference units vertically
+ * and 96 horizontally. test_region_planes_never_overlap sweeps the supported
+ * geometries and asserts that those gaps survive coarse cell sizes.
+ */
+# define MARKETPLACE_REF_CHARACTERS_X	262
+# define MARKETPLACE_REF_CHARACTERS_Y	200
+# define MARKETPLACE_REF_CHARACTERS_WIDTH	414
+# define MARKETPLACE_REF_CHARACTERS_HEIGHT	270
+# define MARKETPLACE_REF_THEMES_X	772
+# define MARKETPLACE_REF_THEMES_Y	200
+# define MARKETPLACE_REF_THEMES_WIDTH	414
+# define MARKETPLACE_REF_THEMES_HEIGHT	270
+# define MARKETPLACE_REF_DETAIL_X	262
+# define MARKETPLACE_REF_DETAIL_Y	545
+# define MARKETPLACE_REF_DETAIL_WIDTH	924
+# define MARKETPLACE_REF_DETAIL_HEIGHT	270
+# define MARKETPLACE_REF_CONTROLS_X	262
+# define MARKETPLACE_REF_CONTROLS_Y	890
+# define MARKETPLACE_REF_CONTROLS_WIDTH	924
+# define MARKETPLACE_REF_CONTROLS_HEIGHT	172
+# define MARKETPLACE_REF_BUTTON_FIRST_X	262
+# define MARKETPLACE_REF_BUTTON_STEP_X	238
+# define MARKETPLACE_REF_BUTTON_Y	900
+# define MARKETPLACE_REF_BUTTON_WIDTH	210
+# define MARKETPLACE_REF_BUTTON_HEIGHT	92
+# define MARKETPLACE_REF_HINT_Y	1018
+/* Inventory slot geometry, shared by the bitmap and cell inventory drawing. */
+# define MARKETPLACE_REF_PANEL_TITLE_Y	10
+# define MARKETPLACE_REF_PANEL_TITLE_GLYPH	20
+# define MARKETPLACE_REF_SLOT_INSET	10
+# define MARKETPLACE_REF_SLOT_FIRST_Y	48
+# define MARKETPLACE_REF_SLOT_PAD_X	3
+# define MARKETPLACE_REF_SLOT_PAD_Y	4
+# define MARKETPLACE_REF_SLOT_NAME_GLYPH	10
+# define MARKETPLACE_REF_SLOT_PRICE_GLYPH	10
+# define MARKETPLACE_REF_CHARACTER_STEP_Y	200
+# define MARKETPLACE_REF_CHARACTER_THUMB_INSET	24
+# define MARKETPLACE_REF_CHARACTER_THUMB_HEIGHT	118
+# define MARKETPLACE_REF_CHARACTER_NAME_Y	126
+# define MARKETPLACE_REF_CHARACTER_PRICE_Y	148
+# define MARKETPLACE_REF_THEME_STEP_Y	106
+# define MARKETPLACE_REF_THEME_THUMB_INSET	12
+# define MARKETPLACE_REF_THEME_THUMB_HEIGHT	46
+# define MARKETPLACE_REF_THEME_NAME_Y	52
+# define MARKETPLACE_REF_THEME_PRICE_Y	74
+/* Detail card interior, measured from the card origin. */
+# define MARKETPLACE_REF_DETAIL_PREVIEW_X	18
+# define MARKETPLACE_REF_DETAIL_PREVIEW_Y	22
+# define MARKETPLACE_REF_DETAIL_PREVIEW_SIZE	210
+# define MARKETPLACE_REF_DETAIL_TEXT_X	244
+# define MARKETPLACE_REF_DETAIL_TEXT_WIDTH	660
+# define MARKETPLACE_REF_DETAIL_NAME_Y	18
+# define MARKETPLACE_REF_DETAIL_STATUS_Y	58
+/*
+ * Four powers, each a name row plus two wrapped description lines, fit inside
+ * MARKETPLACE_REF_DETAIL_HEIGHT at this step, and the last line ends at 262 of
+ * the card's 270, clear of its three-pixel border.
+ *
+ * The row spacing is not the glyph height. The shared atlas draws its whole
+ * ink band, so a glyph reaches from a quarter of its size above the baseline
+ * to about 1.4 times its size below it - descenders on g, j, p, q, y and the
+ * comma live down there. Spacing rows by glyph height alone let a wrapped
+ * description overlap the next power's name; every step below clears the
+ * previous row's descenders instead.
+ */
+# define MARKETPLACE_REF_DETAIL_BODY_Y	82
+# define MARKETPLACE_REF_DETAIL_STEP_Y	46
+# define MARKETPLACE_REF_DETAIL_NAME_GLYPH	11
+# define MARKETPLACE_REF_DETAIL_DESC_Y	18
+# define MARKETPLACE_REF_DETAIL_DESC_GLYPH	8
+# define MARKETPLACE_REF_DETAIL_DESC_STEP	13
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
@@ -669,6 +785,100 @@ typedef struct s_settings_layout
 	settings_rect_t	volume_offline;
 } settings_layout_t;
 
+/*
+ * The Marketplace needs exactly what Settings needs: the profile the wallet
+ * balance comes from, both catalogues with prices and ownership, and the local
+ * controls. Aliasing the type keeps one provider path and one set of catalogue
+ * helpers instead of two that can drift apart.
+ */
+typedef app_settings_view_model_t	app_marketplace_view_model_t;
+
+/*
+ * The Marketplace is navigated as the same three stacked regions Settings uses
+ * - two inventory grids side by side above a control row - so Left and Right
+ * cross between the panels at their edges and Up/Down step between rows before
+ * falling through to the controls.
+ */
+typedef enum e_marketplace_section
+{
+	MARKETPLACE_SECTION_CHARACTERS,
+	MARKETPLACE_SECTION_THEMES,
+	MARKETPLACE_SECTION_CONTROLS
+}	marketplace_section_t;
+
+typedef enum e_marketplace_focus
+{
+	MARKETPLACE_FOCUS_BACK,
+	MARKETPLACE_FOCUS_BUY,
+	MARKETPLACE_FOCUS_VOLUME_DOWN,
+	MARKETPLACE_FOCUS_VOLUME_UP
+}	marketplace_focus_t;
+
+typedef enum e_marketplace_action
+{
+	MARKETPLACE_ACTION_NONE,
+	MARKETPLACE_ACTION_BACK,
+	MARKETPLACE_ACTION_BUY,
+	MARKETPLACE_ACTION_EQUIP,
+	MARKETPLACE_ACTION_VOLUME_DOWN,
+	MARKETPLACE_ACTION_VOLUME_UP,
+	MARKETPLACE_ACTION_QUIT
+}	marketplace_action_t;
+
+typedef enum e_marketplace_purchase_result
+{
+	MARKETPLACE_PURCHASE_INVALID,
+	MARKETPLACE_PURCHASE_OWNED,
+	MARKETPLACE_PURCHASE_INSUFFICIENT,
+	MARKETPLACE_PURCHASE_BOUGHT
+}	marketplace_purchase_result_t;
+
+/*
+ * preview records the last inventory panel the cursor visited. The detail card
+ * keeps describing that item while focus sits in the control row, so stepping
+ * down to Buy never blanks the thing being bought.
+ */
+typedef struct s_marketplace_state
+{
+	marketplace_section_t	section;
+	marketplace_section_t	preview;
+	marketplace_focus_t		focus;
+	int						character_slot;
+	int						theme_slot;
+	int						character_slots;
+	int						theme_slots;
+	bool					signed_in;
+}	marketplace_state_t;
+
+typedef struct s_marketplace_rect
+{
+	int	x;
+	int	y;
+	int	width;
+	int	height;
+}	marketplace_rect_t;
+
+/* Reference-coordinate geometry shared by bitmap composition and the tests. */
+typedef struct s_marketplace_layout
+{
+	int					origin_y;
+	int					origin_x;
+	int					rows;
+	int					cols;
+	int					pixel_width;
+	int					pixel_height;
+	int					cell_px_x;
+	int					cell_px_y;
+	bool				opaque_background;
+	marketplace_rect_t	title;
+	marketplace_rect_t	stats[3];
+	marketplace_rect_t	characters;
+	marketplace_rect_t	themes;
+	marketplace_rect_t	detail;
+	marketplace_rect_t	controls;
+	marketplace_rect_t	buttons[MARKETPLACE_BUTTON_COUNT];
+}	marketplace_layout_t;
+
 typedef struct s_app_room_summary_view_model
 {
 	char			id[APP_TEXT_MAX];
@@ -713,6 +923,7 @@ typedef union u_app_screen_data
 	app_auth_view_model_t			auth;
 	app_profile_view_model_t		profile;
 	app_settings_view_model_t	settings;
+	app_marketplace_view_model_t	marketplace;
 	app_catalogue_view_model_t		catalogue;
 	app_leaderboard_view_model_t	leaderboard;
 	app_lobby_view_model_t			lobby;
@@ -955,12 +1166,17 @@ typedef struct
 	struct ncplane		*settings_themes_plane;
 	struct ncplane		*settings_volume_plane;
 	struct ncplane		*settings_ability_plane;
+	struct ncplane		*marketplace_characters_plane;
+	struct ncplane		*marketplace_themes_plane;
+	struct ncplane		*marketplace_detail_plane;
+	struct ncplane		*marketplace_controls_plane;
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
 	struct ncvisual		*auth_background_visual;
 	struct ncvisual		*auth_font_visual;
 	struct ncvisual		*settings_font_visual;
+	struct ncvisual		*marketplace_font_visual;
 	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
@@ -971,6 +1187,16 @@ typedef struct
 	struct ncvisual		*settings_thumbnail_visuals[
 			APP_CATALOGUE_MAX_ITEMS * 2];
 	char				settings_thumbnail_sources[
+			APP_CATALOGUE_MAX_ITEMS * 2][APP_ASSET_PATH_MAX];
+	/*
+	 * The Marketplace keeps its own thumbnail cache: it draws the same artwork
+	 * at two sizes (slot tile and detail preview) and outlives no Settings
+	 * session, so sharing one cache would thrash whenever the two screens
+	 * alternate.
+	 */
+	struct ncvisual		*marketplace_thumbnail_visuals[
+			APP_CATALOGUE_MAX_ITEMS * 2];
+	char				marketplace_thumbnail_sources[
 			APP_CATALOGUE_MAX_ITEMS * 2][APP_ASSET_PATH_MAX];
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
@@ -1028,6 +1254,18 @@ typedef struct
 	uint64_t			settings_themes_signature;
 	uint64_t			settings_volume_signature;
 	uint64_t			settings_ability_signature;
+	uint32_t			*marketplace_background_pixels;
+	uint32_t			*marketplace_static_pixels;
+	int					marketplace_pixels_width;
+	int					marketplace_pixels_height;
+	bool				marketplace_background_ready;
+	int					marketplace_background_rows;
+	int					marketplace_background_cols;
+	uint64_t			marketplace_static_signature;
+	uint64_t			marketplace_characters_signature;
+	uint64_t			marketplace_themes_signature;
+	uint64_t			marketplace_detail_signature;
+	uint64_t			marketplace_controls_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	tetrisu_pixel_policy_t	pixels;
@@ -1379,6 +1617,8 @@ bool			ui_notification_show(ui_notification_stack_t *stack,
 					const char *title, int percent, uint64_t now_ms);
 bool			ui_notification_show_ownership(
 					ui_notification_stack_t *stack, uint64_t now_ms);
+bool			ui_notification_show_notice(ui_notification_stack_t *stack,
+					const char *title, const char *message, uint64_t now_ms);
 bool			ui_notification_update(ui_notification_stack_t *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const ui_notification_t *notification,
@@ -1422,6 +1662,8 @@ void				render_notification_show_volume(render_ctx_t *ctx,
 void				render_notification_queue_volume(render_ctx_t *ctx,
 					int volume);
 void				render_notification_queue_ownership(render_ctx_t *ctx);
+void				render_notification_queue_notice(render_ctx_t *ctx,
+					const char *title, const char *message);
 void				render_notification_tick(render_ctx_t *ctx);
 int					render_notification_next_wake_ms(
 					const render_ctx_t *ctx);
@@ -1517,6 +1759,57 @@ bool			settings_card_visible(const settings_state_t *state);
 void			settings_layout_build(int origin_y, int origin_x, int rows,
 					int cols, int cell_px_y, int cell_px_x,
 					settings_layout_t *layout);
+
+/* MARKETPLACE_SCREEN.C */
+void			marketplace_state_init(marketplace_state_t *state,
+					bool signed_in, int character_slots, int theme_slots);
+void			marketplace_state_focus_next(marketplace_state_t *state);
+void			marketplace_state_focus_previous(marketplace_state_t *state);
+marketplace_action_t	marketplace_handle_key(marketplace_state_t *state,
+					uint32_t key);
+bool			marketplace_state_view_changed(
+					const marketplace_state_t *before,
+					const marketplace_state_t *after);
+bool			marketplace_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
+bool			marketplace_action_leaves_screen(marketplace_action_t action);
+marketplace_section_t	marketplace_focused_section(
+					const marketplace_state_t *state);
+int				marketplace_focused_slot(const marketplace_state_t *state);
+const app_catalogue_view_model_t	*marketplace_focused_catalogue(
+					const app_marketplace_view_model_t *market,
+					const marketplace_state_t *state);
+const app_catalogue_item_view_model_t	*marketplace_focused_item(
+					const app_marketplace_view_model_t *market,
+					const marketplace_state_t *state);
+bool			marketplace_focused_is_character(
+					const marketplace_state_t *state);
+marketplace_purchase_result_t	marketplace_buy_focused(
+					app_marketplace_view_model_t *market,
+					const marketplace_state_t *state);
+settings_equip_result_t	marketplace_equip_focused(
+					app_marketplace_view_model_t *market,
+					const marketplace_state_t *state);
+bool			marketplace_can_afford(
+					const app_marketplace_view_model_t *market,
+					const app_catalogue_item_view_model_t *item);
+
+/* MARKETPLACE_LAYOUT.C */
+void			marketplace_layout_build(int origin_y, int origin_x, int rows,
+					int cols, int cell_px_y, int cell_px_x,
+					marketplace_layout_t *layout);
+
+/* RENDER_MARKETPLACE.C */
+bool			render_marketplace_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const marketplace_state_t *state, bool rebuild_background);
+void			render_marketplace_destroy(render_ctx_t *ctx);
+
+/* RENDER_MARKETPLACE_FONT.C */
+bool			render_marketplace_pixel_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const marketplace_state_t *state, bool rebuild_background);
+void			render_marketplace_pixel_destroy(render_ctx_t *ctx);
 
 /* RENDER_LEADERBOARD.C */
 bool			render_leaderboard_show(render_ctx_t *ctx,

@@ -54,6 +54,21 @@ bool	ui_notification_show_ownership(ui_notification_stack_t *stack,
 		0, now_ms));
 }
 
+/**
+ * @brief Adds or refreshes a titled card carrying caller-supplied copy.
+ *
+ * Marketplace outcomes - bought, already owned, wallet too low - all want the
+ * ownership card's authored artwork with different words on it, so the kind is
+ * shared and only the text varies. Titles are the stack's identity, so two
+ * outcomes with different titles stack rather than replacing one another.
+ */
+bool	ui_notification_show_notice(ui_notification_stack_t *stack,
+	const char *title, const char *message, uint64_t now_ms)
+{
+	return (show_notification(stack, UI_NOTIFICATION_OWNERSHIP, title,
+			message, 0, now_ms));
+}
+
 static bool	show_notification(ui_notification_stack_t *stack,
 	ui_notification_kind_t kind, const char *title, const char *message,
 	int percent, uint64_t now_ms)

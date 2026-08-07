@@ -538,11 +538,27 @@ static app_provider_result_t	load_provider_screen(
 		set_screen_copy(view, "Local endless Solo");
 	else if (screen == APP_SCREEN_MARKETPLACE)
 	{
-		set_screen_copy(view, "Character catalogue model");
-		if (provider == NULL || provider->load_catalogue == NULL)
+		/*
+		 * The Marketplace spends the wallet, so it needs the profile the
+		 * balance lives on alongside both catalogues. That is exactly the
+		 * Settings model, and loading it through the same provider call keeps
+		 * one path rather than two that can disagree about ownership.
+		 */
+		if (offline)
+		{
+			set_screen_copy(view, "Marketplace needs an account");
+			memset(&view->data.marketplace, 0, sizeof(view->data.marketplace));
+			view->data.marketplace.offline = true;
+			snprintf(view->data.marketplace.local_status,
+				sizeof(view->data.marketplace.local_status),
+				"OFFLINE - MARKETPLACE NEEDS AN ACCOUNT");
+			return (APP_PROVIDER_OK);
+		}
+		set_screen_copy(view, "Characters, themes, prices, and ownership");
+		if (provider == NULL || provider->load_settings == NULL)
 			return (APP_PROVIDER_UNAVAILABLE);
-		result = provider->load_catalogue(provider->userdata,
-				APP_CATALOGUE_CHARACTERS, &view->data.catalogue);
+		result = provider->load_settings(provider->userdata,
+				&view->data.marketplace);
 	}
 	else if (screen == APP_SCREEN_LEADERBOARD)
 	{

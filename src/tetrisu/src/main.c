@@ -2,6 +2,7 @@
 
 # define SETTINGS_INPUT_BATCH_MAX	64
 # define LEADERBOARD_INPUT_BATCH_MAX	64
+# define MARKETPLACE_INPUT_BATCH_MAX	64
 
 // Static Functions
 static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
@@ -30,6 +31,15 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
+static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+				const app_data_provider_t *provider,
+				app_navigation_t *navigation, const menu_selection_t *menu);
+static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
+				app_screen_view_model_t *view,
+				const marketplace_state_t *state);
+static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
+				app_screen_view_model_t *view,
+				const marketplace_state_t *state);
 static void	discard_queued_input(render_ctx_t *ctx);
 static void	leaderboard_loading_view(const app_data_provider_t *provider,
 				app_screen_view_model_t *view);
@@ -108,6 +118,13 @@ int	main(void)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
+		if (navigation.current == APP_SCREEN_MARKETPLACE)
+		{
+			if (run_marketplace_screen(&ctx, &audio, &provider,
+					&navigation, &menu) < 0)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
 		if (navigation.current != APP_SCREEN_HOME)
 		{
 			if (run_scaffold_step(&ctx, &audio, &provider,
@@ -176,6 +193,7 @@ int	main(void)
 	}
 	audio_teardown(&audio);
 	render_sign_in_destroy(&ctx, &sign_in);
+	render_marketplace_destroy(&ctx);
 	render_settings_destroy(&ctx);
 	render_screen_destroy(&ctx);
 	render_menu_destroy(&ctx);
@@ -802,6 +820,228 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		enable_home_mouse(ctx);
 	}
 	return (0);
+}
+
+/**
+ * @brief Runs the Marketplace: browse the shelves, spend points, equip stock.
+ */
+static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
+	const app_data_provider_t *provider, app_navigation_t *navigation,
+	const menu_selection_t *menu)
+{
+	app_screen_view_model_t	view;
+	marketplace_state_t		state;
+	marketplace_state_t		previous;
+	marketplace_action_t	action;
+	app_provider_result_t	result;
+	ncinput					input;
+	ncinput					queued_input;
+	ncinput					pending_input;
+	uint32_t				key;
+	uint32_t				queued_key;
+	uint32_t				pending_key;
+	int						drained;
+	bool					repaint;
+	bool					has_pending;
+
+	result = app_screen_view_load_for_session(provider, APP_SCREEN_MARKETPLACE,
+			navigation->offline, &view);
+	if (result == APP_PROVIDER_INVALID)
+		return (-1);
+	marketplace_state_init(&state, view.data.marketplace.signed_in
+		&& !view.data.marketplace.offline,
+		settings_catalogue_count(&view.data.marketplace.characters,
+			MARKETPLACE_CHARACTER_SLOTS),
+		settings_catalogue_count(&view.data.marketplace.themes,
+			MARKETPLACE_THEME_SLOTS));
+	/*
+	 * The Marketplace is keyboard-only for the same reason Settings is:
+	 * pointer reporting is switched off for the whole screen so no motion,
+	 * drag, or stray click can reach a control that spends points.
+	 */
+	(void)notcurses_mice_disable(ctx->nc);
+	if (!render_marketplace_show(ctx, &view, &state, true))
+		return (-1);
+	has_pending = false;
+	while (navigation->current == APP_SCREEN_MARKETPLACE)
+	{
+		if (has_pending)
+		{
+			input = pending_input;
+			key = pending_key;
+			has_pending = false;
+		}
+		else
+			key = render_wait_input(ctx, &input);
+		action = MARKETPLACE_ACTION_NONE;
+		previous = state;
+		repaint = false;
+		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
+			continue ;
+		if (key == (uint32_t)-1)
+			action = MARKETPLACE_ACTION_QUIT;
+		else if (key == NCKEY_RESIZE || key == 12u)
+		{
+			if (render_geometry_refresh(ctx, true) < 0
+				|| !render_marketplace_show(ctx, &view, &state, false))
+				return (-1);
+			continue ;
+		}
+		else
+			action = marketplace_handle_key(&state, key);
+		/* Coalesce one held navigation key, but preserve the first different
+		 * command for the next loop so its target state is painted first. */
+		drained = 0;
+		while (action == MARKETPLACE_ACTION_NONE
+			&& marketplace_navigation_keys_coalesce(key, key)
+			&& drained < MARKETPLACE_INPUT_BATCH_MAX)
+		{
+			memset(&queued_input, 0, sizeof(queued_input));
+			queued_key = notcurses_get_nblock(ctx->nc, &queued_input);
+			if (queued_key == 0)
+				break ;
+			drained++;
+			if (queued_input.evtype == NCTYPE_RELEASE
+				|| nckey_mouse_p(queued_key))
+				continue ;
+			if (!marketplace_navigation_keys_coalesce(key, queued_key))
+			{
+				pending_input = queued_input;
+				pending_key = queued_key;
+				has_pending = true;
+				break ;
+			}
+			(void)marketplace_handle_key(&state, queued_key);
+		}
+		if (marketplace_state_view_changed(&previous, &state))
+		{
+			audio_play_menu_move(audio);
+			repaint = true;
+		}
+		if (repaint && !render_marketplace_show(ctx, &view, &state, false))
+			return (-1);
+		if (marketplace_action_leaves_screen(action))
+			discard_queued_input(ctx);
+		if (action == MARKETPLACE_ACTION_VOLUME_UP)
+		{
+			audio_play_menu_select(audio);
+			audio_volume_up(audio);
+			view.data.marketplace.music_volume = audio->music_volume;
+			render_notification_queue_volume(ctx, audio->music_volume);
+			if (!render_marketplace_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == MARKETPLACE_ACTION_VOLUME_DOWN)
+		{
+			audio_play_menu_select(audio);
+			audio_volume_down(audio);
+			view.data.marketplace.music_volume = audio->music_volume;
+			render_notification_queue_volume(ctx, audio->music_volume);
+			if (!render_marketplace_show(ctx, &view, &state, false))
+				return (-1);
+		}
+		else if (action == MARKETPLACE_ACTION_BUY)
+		{
+			if (!apply_marketplace_purchase(ctx, audio, &view, &state))
+				return (-1);
+		}
+		else if (action == MARKETPLACE_ACTION_EQUIP)
+		{
+			if (!apply_marketplace_equip(ctx, audio, &view, &state))
+				return (-1);
+		}
+		else if (action == MARKETPLACE_ACTION_BACK)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else if (action == MARKETPLACE_ACTION_QUIT)
+			(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
+	render_marketplace_destroy(ctx);
+	if (navigation->current == APP_SCREEN_HOME)
+	{
+		if (reflow_home(ctx, menu) < 0)
+			return (-1);
+		enable_home_mouse(ctx);
+	}
+	return (0);
+}
+
+/**
+ * @brief Applies one purchase and reports its outcome on the notification card.
+ *
+ * Enter inside a grid means "act on this item", so an already-owned item is
+ * equipped rather than refused: that is what the shelf tile and the Buy button
+ * caption both promise.
+ */
+static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
+	app_screen_view_model_t *view, const marketplace_state_t *state)
+{
+	const app_catalogue_item_view_model_t	*item;
+	marketplace_purchase_result_t			result;
+	char									name[APP_TEXT_MAX];
+
+	item = marketplace_focused_item(&view->data.marketplace, state);
+	if (item == NULL)
+		return (true);
+	snprintf(name, sizeof(name), "%s", item->name);
+	if (item->owned)
+		return (apply_marketplace_equip(ctx, audio, view, state));
+	result = marketplace_buy_focused(&view->data.marketplace, state);
+	if (result == MARKETPLACE_PURCHASE_INVALID)
+		return (true);
+	audio_play_menu_select(audio);
+	/*
+	 * Repaint before announcing. A purchase moves the wallet, so it rebuilds
+	 * the static layer and every region above it; queueing the card first
+	 * would present one frame whose planes still hold the pre-purchase model,
+	 * and on a stationary protocol the rebuilt full-screen bitmap would then
+	 * be emitted over the card that had just been raised above it.
+	 */
+	if (!render_marketplace_show(ctx, view, state, false))
+		return (false);
+	if (result == MARKETPLACE_PURCHASE_BOUGHT)
+		render_notification_queue_notice(ctx, UI_NOTIFICATION_PURCHASE_TITLE,
+			name);
+	else if (result == MARKETPLACE_PURCHASE_INSUFFICIENT)
+		render_notification_queue_notice(ctx, UI_NOTIFICATION_FUNDS_TITLE,
+			UI_NOTIFICATION_FUNDS_MESSAGE);
+	else
+		render_notification_queue_notice(ctx, UI_NOTIFICATION_OWNED_TITLE,
+			name);
+	return (true);
+}
+
+/**
+ * @brief Equips the focused item when it is owned, or explains why it is not.
+ */
+static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
+	app_screen_view_model_t *view, const marketplace_state_t *state)
+{
+	const app_catalogue_item_view_model_t	*item;
+	settings_equip_result_t					result;
+	char									name[APP_TEXT_MAX];
+
+	item = marketplace_focused_item(&view->data.marketplace, state);
+	if (item == NULL)
+		return (true);
+	snprintf(name, sizeof(name), "%s", item->name);
+	result = marketplace_equip_focused(&view->data.marketplace, state);
+	if (result != SETTINGS_EQUIP_CHANGED && result != SETTINGS_EQUIP_LOCKED)
+		return (true);
+	audio_play_menu_select(audio);
+	/* Equipping rebuilds the static layer for the same reason a purchase
+	 * does, so the repaint has to land before the card is raised over it. */
+	if (!render_marketplace_show(ctx, view, state, false))
+		return (false);
+	if (result == SETTINGS_EQUIP_CHANGED)
+		render_notification_queue_notice(ctx, UI_NOTIFICATION_EQUIPPED_TITLE,
+			name);
+	else
+		render_notification_queue_notice(ctx, UI_NOTIFICATION_OWNERSHIP_TITLE,
+			"BUY IT FIRST");
+	return (true);
 }
 
 /**

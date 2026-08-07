@@ -81,13 +81,18 @@ notification planes    raised by render_notification_raise()
 
 Reference implementations:
 
-| Concern | Settings | Leaderboard |
-|---|---|---|
-| Layout | `src/settings_layout.c` | `src/leaderboard_presentation.c` |
-| Bitmap render | `src/render_settings_font.c` | `src/render_leaderboard_font.c` |
-| Cell fallback | `src/render_settings.c` | `src/render_leaderboard.c` |
-| Input state | `src/settings_screen.c` | `src/leaderboard_screen.c` |
-| Loop | `run_settings_screen()` in `src/main.c` | `run_leaderboard_screen()` |
+| Concern | Settings | Leaderboard | Marketplace |
+|---|---|---|---|
+| Layout | `src/settings_layout.c` | `src/leaderboard_presentation.c` | `src/marketplace_layout.c` |
+| Bitmap render | `src/render_settings_font.c` | `src/render_leaderboard_font.c` | `src/render_marketplace_font.c` |
+| Cell fallback | `src/render_settings.c` | `src/render_leaderboard.c` | `src/render_marketplace.c` |
+| Input state | `src/settings_screen.c` | `src/leaderboard_screen.c` | `src/marketplace_screen.c` |
+| Loop | `run_settings_screen()` in `src/main.c` | `run_leaderboard_screen()` | `run_marketplace_screen()` |
+
+The Marketplace is the one screen whose backdrop carries no authored frames:
+it draws every plate and border itself against the quiet centre of a shop
+scene. That makes its region rectangles free to be chosen rather than matched
+to artwork, which is the easier way round if you are authoring both.
 
 `src/render_solo.c` is the oldest example of the pattern and the one the other
 two were retrofitted from.
@@ -265,6 +270,15 @@ and to the terminal you developed in.
 | Buttons vanish after a data change | static rebuild re-emitted the bitmap under unchanged region planes | seed region signatures with the static one |
 | Regions blank each other when a card opens | two region planes overlapping on a stationary tier | make overlapping regions mutually exclusive |
 | Extra ~21 ms per keystroke | plane destroyed and recreated per frame | reuse the plane, blit in place |
+| Rows overlap the line below at some sizes | row pitch set from the glyph size | pitch rows from the ink band, not the cap height |
+
+That last one is easy to miss because it only bites text with descenders. The
+shared atlas draws its whole ink band, so a glyph reaches roughly a quarter of
+its size above the baseline and 1.4 times its size below it — the tails of
+`g j p q y` and the comma live down there. A column of rows spaced by glyph
+height alone looks correct until a wrapped line ends in a `y`, then collides
+with the heading beneath it. Space rows so each clears the previous row's
+descenders; `MARKETPLACE_REF_DETAIL_STEP_Y` is derived that way.
 
 ---
 
