@@ -10,6 +10,7 @@ static void	test_sixel_and_framebuffer_are_stationary(void);
 static void	test_only_no_bitmap_backend_uses_cells(void);
 static void	test_forced_modes_override_the_probe(void);
 static void	test_renderer_mode_value_parsing(void);
+static void	test_notification_art_and_reemit_policy(void);
 
 int	main(void)
 {
@@ -21,6 +22,7 @@ int	main(void)
 	test_only_no_bitmap_backend_uses_cells();
 	test_forced_modes_override_the_probe();
 	test_renderer_mode_value_parsing();
+	test_notification_art_and_reemit_policy();
 	return (0);
 }
 
@@ -155,4 +157,24 @@ static void	test_renderer_mode_value_parsing(void)
 	assert(tetrisu_renderer_mode_from_value("pixel")
 		== TETRISU_RENDERER_PIXEL);
 	printf("PASS test_renderer_mode_value_parsing\n");
+}
+
+/**
+ * @brief Bitmap tiers show authored art; only stationary tiers retransmit it.
+ */
+static void	test_notification_art_and_reemit_policy(void)
+{
+	assert(!tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_NONE));
+	assert(tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_STATIONARY));
+	assert(tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_MOVABLE));
+	assert(!tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_NONE));
+	assert(tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_STATIONARY));
+	assert(!tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_MOVABLE));
+	printf("PASS test_notification_art_and_reemit_policy\n");
 }

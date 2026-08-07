@@ -23,15 +23,17 @@ static void	test_show_clamps_and_replaces(void)
 	ui_notification_stack_t	stack;
 
 	ui_notification_stack_init(&stack);
-	ui_notification_show(&stack, "MUSIC", 140, 100);
+	assert(ui_notification_show(&stack, "MUSIC", 140, 100));
 	assert(stack.count == 1);
 	assert(stack.items[0].kind == UI_NOTIFICATION_VOLUME);
 	assert(strcmp(stack.items[0].title, "MUSIC") == 0);
 	assert(stack.items[0].percent == 100);
-	ui_notification_show(&stack, "MUSIC", -5, 250);
+	assert(ui_notification_show(&stack, "MUSIC", -5, 250));
 	assert(stack.count == 1);
 	assert(stack.items[0].percent == 0);
 	assert(stack.items[0].shown_at_ms == 250);
+	assert(!ui_notification_show(&stack, "MUSIC", -5, 400));
+	assert(stack.items[0].shown_at_ms == 400);
 	puts("PASS test_show_clamps_and_replaces");
 }
 
@@ -82,12 +84,20 @@ static void	test_next_wake_deadlines(void)
 	start = 1000;
 	ui_notification_stack_init(&stack);
 	assert(ui_notification_next_wake_ms(&stack, start) == -1);
+	assert(ui_notification_next_expiry_ms(&stack, start) == -1);
 	ui_notification_show(&stack, "MUSIC", 75, start);
 	assert(ui_notification_next_wake_ms(&stack, start)
 		== UI_NOTIFICATION_HOLD_MS);
 	assert(ui_notification_next_wake_ms(&stack,
 			start + UI_NOTIFICATION_HOLD_MS) == UI_NOTIFICATION_FRAME_MS);
 	assert(ui_notification_next_wake_ms(&stack,
+			start + UI_NOTIFICATION_HOLD_MS
+			+ UI_NOTIFICATION_FADE_MS - 10) == 10);
+	assert(ui_notification_next_expiry_ms(&stack, start)
+		== UI_NOTIFICATION_HOLD_MS + UI_NOTIFICATION_FADE_MS);
+	assert(ui_notification_next_expiry_ms(&stack,
+			start + UI_NOTIFICATION_HOLD_MS) == UI_NOTIFICATION_FADE_MS);
+	assert(ui_notification_next_expiry_ms(&stack,
 			start + UI_NOTIFICATION_HOLD_MS
 			+ UI_NOTIFICATION_FADE_MS - 10) == 10);
 	puts("PASS test_next_wake_deadlines");
@@ -108,7 +118,7 @@ static void	test_ownership_message(void)
 	ui_notification_stack_t	stack;
 
 	ui_notification_stack_init(&stack);
-	ui_notification_show_ownership(&stack, 700);
+	assert(ui_notification_show_ownership(&stack, 700));
 	assert(stack.count == 1);
 	assert(stack.items[0].kind == UI_NOTIFICATION_OWNERSHIP);
 	assert(strcmp(stack.items[0].title,
@@ -116,7 +126,7 @@ static void	test_ownership_message(void)
 	assert(strcmp(stack.items[0].message,
 			UI_NOTIFICATION_OWNERSHIP_MESSAGE) == 0);
 	assert(stack.items[0].shown_at_ms == 700);
-	ui_notification_show_ownership(&stack, 900);
+	assert(!ui_notification_show_ownership(&stack, 900));
 	assert(stack.count == 1);
 	assert(stack.items[0].shown_at_ms == 900);
 	puts("PASS test_ownership_message");

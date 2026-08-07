@@ -53,6 +53,39 @@ tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
 }
 
 /**
+ * @brief Reports whether authored notification bitmaps are available.
+ *
+ * Stationary protocols cannot move or alpha-blend a bitmap plane, but Sixel
+ * still preserves transparent pixels through DCS P2=1. Notifications account
+ * for the remaining lifecycle restrictions in their renderer; only a true
+ * cell-only tier needs the terminal-native card.
+ *
+ * @param policy Pixel capability tier selected for the session.
+ * @return true when the tier can display the authored notification bitmap.
+ */
+bool	tetrisu_pixel_policy_supports_notification_art(
+	tetrisu_pixel_policy_t policy)
+{
+	return (policy != TETRISU_PIXELS_NONE);
+}
+
+/**
+ * @brief Reports whether a screen redraw must retransmit notification art.
+ *
+ * Movable bitmap planes retain their z-order. Stationary protocols paint at
+ * the cursor, so a newly emitted full-screen bitmap overwrites a notification
+ * even when its logical plane remains above the screen plane.
+ *
+ * @param policy Pixel capability tier selected for the session.
+ * @return true when notification art must be rebuilt after screen redraws.
+ */
+bool	tetrisu_pixel_policy_notification_needs_reemit(
+	tetrisu_pixel_policy_t policy)
+{
+	return (policy == TETRISU_PIXELS_STATIONARY);
+}
+
+/**
  * @brief Grades a terminal that keeps an image registry by measured behaviour.
  *
  * Terminals observed to free a replaced image move bitmaps freely. Every other

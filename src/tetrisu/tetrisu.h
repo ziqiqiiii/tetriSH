@@ -43,6 +43,8 @@
 # endif
 
 # define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
+# define LEADERBOARD_BACKGROUND_PATH \
+	ASSET_DIR "/default_theme/leaderboard_background.png"
 # define SETTINGS_BACKGROUND_PATH \
 	ASSET_DIR "/settings_profile_background_v2.png"
 # define SETTINGS_BACKGROUND_LEGACY_PATH \
@@ -111,6 +113,7 @@
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
+# define LEADERBOARD_PIXEL_BUTTON_COUNT	2
 # define APP_LOBBY_MAX_ROOMS	8
 # define APP_ROOM_MAX_PLAYERS	8
 # define SOLO_NEXT_COUNT	3
@@ -334,8 +337,18 @@
 # define FONT_ROWS				6
 # define FONT_GLYPH_WIDTH		8
 # define FONT_GLYPH_HEIGHT		16
+/*
+ * The shared 8x16 atlas anchors every cap height at FONT_INK_Y and sizes
+ * glyphs from FONT_INK_HEIGHT, so those two drive layout. Ink itself runs
+ * wider than the cap band: dots on i and j sit at FONT_INK_TOP, and the
+ * tails of g j p q y and the comma reach FONT_INK_BOTTOM. Sampling only the
+ * cap band silently turns "player" into "olauer", so blitters draw the full
+ * ink band while keeping the cap row on the baseline the layout expects.
+ */
 # define FONT_INK_Y				4
 # define FONT_INK_HEIGHT			8
+# define FONT_INK_TOP			2
+# define FONT_INK_BOTTOM			15
 # define NUMBER_SLOT_WIDTH		10
 # define NUMBER_GLYPH_WIDTH		8
 # define NUMBER_GLYPH_HEIGHT		16
@@ -731,6 +744,44 @@ typedef enum e_tetrisu_pixel_policy
 	TETRISU_PIXELS_MOVABLE
 }	tetrisu_pixel_policy_t;
 
+typedef enum e_leaderboard_background_action
+{
+	LEADERBOARD_BACKGROUND_CELL,
+	LEADERBOARD_BACKGROUND_REUSE,
+	LEADERBOARD_BACKGROUND_REPLACE_EXACT
+}	leaderboard_background_action_t;
+
+typedef struct s_leaderboard_layout
+{
+	int		y;
+	int		x;
+	int		rows;
+	int		cols;
+	bool	compact;
+}	leaderboard_layout_t;
+
+typedef struct s_leaderboard_pixel_rect
+{
+	int	x;
+	int	y;
+	int	width;
+	int	height;
+}	leaderboard_pixel_rect_t;
+
+typedef struct s_leaderboard_pixel_layout
+{
+	int					origin_y;
+	int					origin_x;
+	int					rows;
+	int					cols;
+	int					pixel_width;
+	int					pixel_height;
+	int					cell_px_x;
+	int					cell_px_y;
+	leaderboard_pixel_rect_t	buttons[LEADERBOARD_PIXEL_BUTTON_COUNT];
+	leaderboard_pixel_rect_t	controls;
+}	leaderboard_pixel_layout_t;
+
 typedef struct
 {
 	int	selected;
@@ -856,6 +907,14 @@ typedef struct s_ui_notification_stack
 	int					count;
 }	ui_notification_stack_t;
 
+// One decoded RGBA surface held in memory: glyph sheets, card art, thumbnails.
+typedef struct s_pixel_asset
+{
+	uint32_t	*pixels;
+	int			width;
+	int			height;
+}	pixel_asset_t;
+
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
 // follow the art even when notcurses scales it to different terminals.
@@ -893,6 +952,15 @@ typedef struct
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
+	pixel_asset_t		leaderboard_font;
+	uint32_t			*leaderboard_pixels;
+	int					leaderboard_pixels_width;
+	int					leaderboard_pixels_height;
+	bool				leaderboard_pixel_active;
+	struct ncplane		*leaderboard_controls_plane;
+	uint64_t			leaderboard_static_signature;
+	uint64_t			leaderboard_controls_signature;
+	pixel_asset_t		notification_font;
 	ui_notification_stack_t	notifications;
 	int					bg_row;
 	int					bg_col;
@@ -916,6 +984,17 @@ typedef struct
 	 * every small region plane can be prefilled from it without redrawing or
 	 * reblitting the whole screen on a focus change.
 	 */
+	/*
+	 * Stationary bitmap protocols cannot compose one sprixel over another:
+	 * notcurses clears the cells an overlay covers, so a transparent overlay
+	 * pixel exposes the terminal background rather than the artwork beneath.
+	 * Global overlays therefore composite themselves against this snapshot of
+	 * the fitted backdrop before they are blitted. It is anchored at
+	 * bg_row/bg_col like every other backdrop-relative surface.
+	 */
+	uint32_t			*backdrop_pixels;
+	int				backdrop_width;
+	int				backdrop_height;
 	uint32_t			*settings_background_pixels;
 	uint32_t			*settings_static_pixels;
 	int				settings_pixels_width;
@@ -936,13 +1015,6 @@ typedef struct s_intro_stream
 	render_ctx_t	*ctx;
 	int				skipped;
 }	intro_stream_t;
-
-typedef struct s_pixel_asset
-{
-	uint32_t	*pixels;
-	int			width;
-	int			height;
-}	pixel_asset_t;
 
 typedef struct s_color
 {
@@ -1280,15 +1352,17 @@ bool			auth_form_mask_password(const char *password, char *masked,
 
 /* UI_NOTIFICATION.C */
 void			ui_notification_stack_init(ui_notification_stack_t *stack);
-void			ui_notification_show(ui_notification_stack_t *stack,
+bool			ui_notification_show(ui_notification_stack_t *stack,
 					const char *title, int percent, uint64_t now_ms);
-void			ui_notification_show_ownership(
+bool			ui_notification_show_ownership(
 					ui_notification_stack_t *stack, uint64_t now_ms);
 bool			ui_notification_update(ui_notification_stack_t *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const ui_notification_t *notification,
 					uint64_t now_ms);
 int				ui_notification_next_wake_ms(
+					const ui_notification_stack_t *stack, uint64_t now_ms);
+int				ui_notification_next_expiry_ms(
 					const ui_notification_stack_t *stack, uint64_t now_ms);
 int				ui_notification_volume_percent(int volume);
 uint64_t		ui_notification_now_ms(void);
@@ -1305,10 +1379,18 @@ int				render_background_replace_exact(render_ctx_t *ctx,
 int				render_background_replace_visual(render_ctx_t *ctx,
 					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(render_ctx_t *ctx);
+void				render_backdrop_forget(render_ctx_t *ctx);
+const uint32_t		*render_backdrop_pixels(const render_ctx_t *ctx,
+					int *width, int *height);
 int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
 bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
 bool				render_pixels_available(const render_ctx_t *ctx);
+bool				render_plane_geometry_matches(struct ncplane *plane, int y,
+					int x, unsigned rows, unsigned cols);
+bool				render_plane_blit_rgba(render_ctx_t *ctx,
+					struct ncplane *plane, const uint32_t *pixels, int width,
+					int height, int row_stride);
 bool				render_compatibility_mode(const render_ctx_t *ctx);
 void				render_compatibility_badge_refresh(render_ctx_t *ctx);
 void				render_compatibility_badge_hide(render_ctx_t *ctx);
@@ -1325,6 +1407,10 @@ void				render_notification_raise(render_ctx_t *ctx);
 void				render_notification_destroy(render_ctx_t *ctx);
 tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
 					const char *term, tetrisu_renderer_mode_t forced);
+bool				tetrisu_pixel_policy_supports_notification_art(
+					tetrisu_pixel_policy_t policy);
+bool				tetrisu_pixel_policy_notification_needs_reemit(
+					tetrisu_pixel_policy_t policy);
 
 /* RENDERER_POLICY.C */
 tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value);
@@ -1345,6 +1431,8 @@ void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
 void			render_menu_destroy(render_ctx_t *ctx);
 struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
 int				render_menu_label_y(const render_ctx_t *ctx, int index);
+bool			render_font_mask_load(pixel_asset_t *font);
+void			render_font_mask_free(pixel_asset_t *font);
 
 /* RENDER_SCREEN.C */
 bool			render_screen_show(render_ctx_t *ctx,
@@ -1353,10 +1441,28 @@ void			render_screen_destroy(render_ctx_t *ctx);
 
 /* LEADERBOARD_SCREEN.C */
 void			leaderboard_state_init(leaderboard_state_t *state);
+bool			leaderboard_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
 leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
 					uint32_t key);
 void			leaderboard_set_focus(leaderboard_state_t *state,
 					leaderboard_focus_t focus);
+
+/* LEADERBOARD_PRESENTATION.C */
+leaderboard_background_action_t	leaderboard_background_action_for(
+					tetrisu_pixel_policy_t pixels, bool rebuild_requested);
+bool			leaderboard_layout_resolve(int terminal_rows,
+					int terminal_cols, bool compatibility,
+					leaderboard_layout_t *layout);
+void			leaderboard_pixel_layout_build(int origin_y, int origin_x,
+					int rows, int cols, int cell_px_y, int cell_px_x,
+					leaderboard_pixel_layout_t *layout);
+bool			leaderboard_pixel_hit_test(
+					const leaderboard_pixel_layout_t *layout,
+					int input_y, int input_x, leaderboard_focus_t *focus);
+const app_leaderboard_entry_view_model_t	*leaderboard_entry_for_position(
+					const app_leaderboard_view_model_t *leaderboard,
+					int position);
 
 /* SETTINGS_SCREEN.C */
 void			settings_state_init(settings_state_t *state, bool signed_in,
@@ -1367,6 +1473,9 @@ settings_action_t	settings_handle_key(settings_state_t *state,
 					uint32_t key);
 bool			settings_state_view_changed(const settings_state_t *before,
 					const settings_state_t *after);
+bool			settings_navigation_keys_coalesce(uint32_t active_key,
+					uint32_t queued_key);
+bool			settings_action_leaves_screen(settings_action_t action);
 int				settings_owned_count(
 					const app_catalogue_view_model_t *catalogue, int limit);
 int				settings_catalogue_count(
@@ -1394,6 +1503,11 @@ bool			render_leaderboard_show(render_ctx_t *ctx,
 bool			render_leaderboard_hit_test(const render_ctx_t *ctx,
 					const ncinput *input, leaderboard_focus_t *focus);
 void			render_leaderboard_destroy(render_ctx_t *ctx);
+bool			render_leaderboard_pixel_show(render_ctx_t *ctx,
+					const app_screen_view_model_t *view,
+					const leaderboard_state_t *state,
+					bool rebuild_background);
+void			render_leaderboard_pixel_destroy(render_ctx_t *ctx);
 
 /* RENDER_SETTINGS.C */
 bool			render_settings_show(render_ctx_t *ctx,

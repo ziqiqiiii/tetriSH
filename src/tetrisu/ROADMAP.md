@@ -88,11 +88,13 @@ item 20 next.
   terminals. This avoids the incomplete rows and input lag caused by rebuilding
   a full-screen RGBA visual per key. Supported-mode fields show no placeholder
   copy and display only a fixed left-edge caret when empty and focused.
-- Item 18 adds the dedicated leaderboard. Bitmap-capable terminals reuse the
-  stationary homepage art beneath one opaque live-text panel; compatibility
-  mode removes the bitmap and uses a flatter full-grid layout. Both render all
-  ten fixture ranks, top-three emphasis, loading/empty/unavailable/error
-  states, refresh/back controls, mouse input, and resize-safe reflow.
+- Item 18 adds the dedicated leaderboard. Bitmap-capable terminals compose its
+  1448 x 1086 competition artwork, live data, podium cards, and controls into a
+  complete shared-font pixel surface; entry and resize rebuild the backdrop
+  while focus and data refreshes reuse it. Cell mode and failed artwork loads
+  use the themed, bitmap-free layout. Both render all ten fixture ranks,
+  top-three emphasis, loading/empty/unavailable/error states, mouse input,
+  and resize-safe reflow.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -301,13 +303,16 @@ item 20 next.
 
     - The top three use distinct gold, silver, and bronze podium cards while
       positions 4–10 remain a compact aligned table.
-    - Loading, empty, unavailable, and error models use readable live terminal
-      text rather than baking data into the background.
+    - Bitmap-capable renderers draw loading, empty, unavailable, and error
+      models with the shared pixel font on the live composed surface; cell mode
+      retains readable terminal text.
     - Refresh and Back support keyboard shortcuts, focus traversal, pointer
       hover/click, menu SFX, resize, and the global volume controls.
-    - Kitty reuses the authored homepage image as a stationary backdrop.
-      `TETRISU_RENDERER=cell` uses a lower-detail, bitmap-free 80 x 24 layout
-      with the visible compatibility badge.
+    - Kitty, Sixel, and other bitmap-capable renderers use one complete
+      exact-pixel leaderboard surface and rebuild it after terminal resize.
+      `TETRISU_RENDERER=cell`, or an artwork load failure, uses a themed,
+      bitmap-free 80 x 24 layout; forced cell mode includes the compatibility
+      badge.
 
 19. **Add the settings and profile screen** — complete
 

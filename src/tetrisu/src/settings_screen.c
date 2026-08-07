@@ -8,6 +8,7 @@ static void	enter_inventory(settings_state_t *state,
 static void	move_horizontal(settings_state_t *state, int step);
 static void	move_vertical(settings_state_t *state, int step);
 static void	move_control(settings_state_t *state, int step);
+static void	focus_control_column(settings_state_t *state, int column);
 static settings_action_t	activate_focus(const settings_state_t *state);
 static int	clamp_int(int value, int low, int high);
 static int	min_int(int left, int right);
@@ -56,6 +57,43 @@ bool	settings_state_view_changed(const settings_state_t *before,
 		|| before->character_slot != after->character_slot
 		|| before->theme_slot != after->theme_slot
 		|| before->ability_info_visible != after->ability_info_visible);
+}
+
+/**
+ * @brief Reports whether a queued key belongs to one navigation repeat batch.
+ *
+ * Only identical arrows or Tab repeats may be collapsed before repainting.
+ * A different navigation direction or any action key must remain queued until
+ * the focus produced by the current batch is visible.
+ *
+ * @param active_key Navigation key currently being applied.
+ * @param queued_key Next queued key.
+ * @return true only for another copy of the same navigation key.
+ */
+bool	settings_navigation_keys_coalesce(uint32_t active_key,
+	uint32_t queued_key)
+{
+	if (active_key != queued_key)
+		return (false);
+	return (active_key == NCKEY_LEFT || active_key == NCKEY_RIGHT
+		|| active_key == NCKEY_UP || active_key == NCKEY_DOWN
+		|| active_key == NCKEY_TAB);
+}
+
+/**
+ * @brief Reports whether an action crosses the Settings screen boundary.
+ *
+ * Queued terminal repeats are discarded at these boundaries so input produced
+ * for Settings cannot leak into Home, Marketplace, or shutdown handling.
+ *
+ * @param action Semantic Settings action.
+ * @return true when Settings will no longer own input after the action.
+ */
+bool	settings_action_leaves_screen(settings_action_t action)
+{
+	return (action == SETTINGS_ACTION_BACK
+		|| action == SETTINGS_ACTION_MARKETPLACE
+		|| action == SETTINGS_ACTION_QUIT);
 }
 
 /**
@@ -150,12 +188,18 @@ void	settings_state_focus_previous(settings_state_t *state)
 		return ;
 	if (state->section == SETTINGS_SECTION_CONTROLS)
 	{
+		/*
+		 * Stepping backwards out of the controls has to land on the very last
+		 * slot the panels draw, which is the rightmost slot of the last row.
+		 * Asking for row 0 stopped at slot 3, leaving every slot on a second
+		 * or later row unreachable by backwards tabbing.
+		 */
 		if (state->focus != SETTINGS_FOCUS_BACK)
 			move_control(state, -1);
 		else if (state->theme_slots > 0)
-			enter_inventory(state, SETTINGS_SECTION_THEMES, 0, true);
+			enter_inventory(state, SETTINGS_SECTION_THEMES, INT_MAX, true);
 		else if (state->character_slots > 0)
-			enter_inventory(state, SETTINGS_SECTION_CHARACTERS, 0, true);
+			enter_inventory(state, SETTINGS_SECTION_CHARACTERS, INT_MAX, true);
 		else
 			move_control(state, -1);
 		return ;
@@ -164,7 +208,7 @@ void	settings_state_focus_previous(settings_state_t *state)
 		state->theme_slot--;
 	else if (state->section == SETTINGS_SECTION_THEMES
 		&& state->character_slots > 0)
-		enter_inventory(state, SETTINGS_SECTION_CHARACTERS, 0, true);
+		enter_inventory(state, SETTINGS_SECTION_CHARACTERS, INT_MAX, true);
 	else if (state->section == SETTINGS_SECTION_CHARACTERS
 		&& state->character_slot > 0)
 		state->character_slot--;
@@ -313,6 +357,7 @@ static void	move_vertical(settings_state_t *state, int step)
 		if (next_first >= slots)
 		{
 			state->section = SETTINGS_SECTION_CONTROLS;
+			focus_control_column(state, column);
 			return ;
 		}
 		next_last = min_int(slots - 1, next_first
@@ -323,6 +368,23 @@ static void	move_vertical(settings_state_t *state, int step)
 	{
 		*slot -= SETTINGS_INVENTORY_COLUMNS;
 	}
+}
+
+/**
+ * @brief Focuses the control button sitting under the grid column just left.
+ *
+ * The grid and the control strip are both four wide, so dropping out of the
+ * grid can land on the button directly below rather than on whichever button
+ * happened to be focused before the panels were entered.
+ */
+static void	focus_control_column(settings_state_t *state, int column)
+{
+	int	focus;
+
+	focus = clamp_int(column, 0, SETTINGS_BUTTON_COUNT - 1);
+	if (focus == (int)SETTINGS_FOCUS_MARKETPLACE && !state->signed_in)
+		focus = (int)SETTINGS_FOCUS_BACK;
+	state->focus = (settings_focus_t)focus;
 }
 
 /**

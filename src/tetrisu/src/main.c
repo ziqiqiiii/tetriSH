@@ -1,5 +1,8 @@
 #include "tetrisu.h"
 
+# define SETTINGS_INPUT_BATCH_MAX	64
+# define LEADERBOARD_INPUT_BATCH_MAX	64
+
 // Static Functions
 static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu);
 static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
@@ -27,6 +30,7 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
+static void	discard_queued_input(render_ctx_t *ctx);
 static void	leaderboard_loading_view(const app_data_provider_t *provider,
 				app_screen_view_model_t *view);
 static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
@@ -472,19 +476,30 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	leaderboard_action_t	action;
 	app_provider_result_t	result;
 	ncinput					input;
+	ncinput					queued_input;
+	ncinput					pending_input;
 	uint32_t				key;
+	uint32_t				queued_key;
+	uint32_t				pending_key;
+	int						drained;
+	bool					has_pending;
 	bool					refresh;
+	bool					rebuild_background;
 
 	leaderboard_state_init(&state);
 	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
 	refresh = true;
+	rebuild_background = true;
+	has_pending = false;
 	while (navigation->current == APP_SCREEN_LEADERBOARD)
 	{
 		if (refresh)
 		{
 			leaderboard_loading_view(provider, &view);
-			if (!render_leaderboard_show(ctx, &view, &state, true))
+			if (!render_leaderboard_show(ctx, &view, &state,
+					rebuild_background))
 				return (-1);
+			rebuild_background = false;
 			result = app_screen_view_load(provider, APP_SCREEN_LEADERBOARD,
 					&view);
 			if (result == APP_PROVIDER_INVALID
@@ -492,7 +507,14 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				return (-1);
 			refresh = false;
 		}
-		key = render_wait_input(ctx, &input);
+		if (has_pending)
+		{
+			input = pending_input;
+			key = pending_key;
+			has_pending = false;
+		}
+		else
+			key = render_wait_input(ctx, &input);
 		action = LEADERBOARD_ACTION_NONE;
 		old_focus = state.focus;
 		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
@@ -502,8 +524,9 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		else if (key == NCKEY_RESIZE || key == 12u)
 		{
 			if (render_geometry_refresh(ctx, true) < 0
-				|| !render_leaderboard_show(ctx, &view, &state, false))
+				|| !render_leaderboard_show(ctx, &view, &state, true))
 				return (-1);
+			render_notification_reflow(ctx);
 			continue ;
 		}
 		else if (key == '+' || key == '=')
@@ -528,6 +551,31 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 		else if (!nckey_mouse_p(key))
 			action = leaderboard_handle_key(&state, key);
+		/* Collapse a held navigation key into one repaint, but keep the first
+		 * different command for the next loop so its target state is painted
+		 * before it is acted on. */
+		drained = 0;
+		while (action == LEADERBOARD_ACTION_NONE
+			&& leaderboard_navigation_keys_coalesce(key, key)
+			&& drained < LEADERBOARD_INPUT_BATCH_MAX)
+		{
+			memset(&queued_input, 0, sizeof(queued_input));
+			queued_key = notcurses_get_nblock(ctx->nc, &queued_input);
+			if (queued_key == 0)
+				break ;
+			drained++;
+			if (queued_input.evtype == NCTYPE_RELEASE
+				|| nckey_mouse_p(queued_key))
+				continue ;
+			if (!leaderboard_navigation_keys_coalesce(key, queued_key))
+			{
+				pending_input = queued_input;
+				pending_key = queued_key;
+				has_pending = true;
+				break ;
+			}
+			(void)leaderboard_handle_key(&state, queued_key);
+		}
 		if (state.focus != old_focus)
 		{
 			audio_play_menu_move(audio);
@@ -586,9 +634,15 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	settings_equip_result_t	equip_result;
 	app_provider_result_t	result;
 	ncinput				input;
+	ncinput				queued_input;
+	ncinput				pending_input;
 	uint32_t			key;
+	uint32_t			queued_key;
+	uint32_t			batch_key;
+	uint32_t			pending_key;
 	int					drained;
 	bool				repaint;
+	bool				has_pending;
 
 	result = app_screen_view_load_for_session(provider, APP_SCREEN_SETTINGS,
 		navigation->offline, &view);
@@ -609,9 +663,17 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 	(void)notcurses_mice_disable(ctx->nc);
 	if (!render_settings_show(ctx, &view, &state, true))
 		return (-1);
+	has_pending = false;
 	while (navigation->current == APP_SCREEN_SETTINGS)
 	{
-		key = render_wait_input(ctx, &input);
+		if (has_pending)
+		{
+			input = pending_input;
+			key = pending_key;
+			has_pending = false;
+		}
+		else
+			key = render_wait_input(ctx, &input);
 		action = SETTINGS_ACTION_NONE;
 		previous = state;
 		repaint = false;
@@ -633,35 +695,30 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 		else
 			action = settings_handle_key(&state, key);
-		/*
-		 * Held arrow keys arrive far faster than a bitmap repaint completes.
-		 * Collapsing every queued movement into the state before painting once
-		 * keeps focus level with the key that was actually pressed last, which
-		 * is what stops a burst of repeats from appearing to move backwards.
-		 */
+		/* Coalesce one held navigation key, but preserve the first different
+		 * command for the next loop so its target state is painted first. */
+		batch_key = key;
 		drained = 0;
-		while (action == SETTINGS_ACTION_NONE && drained < 64)
+		while (action == SETTINGS_ACTION_NONE
+			&& settings_navigation_keys_coalesce(batch_key, batch_key)
+			&& drained < SETTINGS_INPUT_BATCH_MAX)
 		{
-			memset(&input, 0, sizeof(input));
-			key = notcurses_get_nblock(ctx->nc, &input);
-			if (key == 0)
+			memset(&queued_input, 0, sizeof(queued_input));
+			queued_key = notcurses_get_nblock(ctx->nc, &queued_input);
+			if (queued_key == 0)
 				break ;
 			drained++;
-			if (key == (uint32_t)-1)
+			if (queued_input.evtype == NCTYPE_RELEASE
+				|| nckey_mouse_p(queued_key))
+				continue ;
+			if (!settings_navigation_keys_coalesce(batch_key, queued_key))
 			{
-				action = SETTINGS_ACTION_QUIT;
+				pending_input = queued_input;
+				pending_key = queued_key;
+				has_pending = true;
 				break ;
 			}
-			if (key == NCKEY_RESIZE || key == 12u)
-			{
-				if (render_geometry_refresh(ctx, true) < 0)
-					return (-1);
-				repaint = true;
-				continue ;
-			}
-			if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
-				continue ;
-			action = settings_handle_key(&state, key);
+			(void)settings_handle_key(&state, queued_key);
 		}
 		if (settings_state_view_changed(&previous, &state))
 		{
@@ -670,6 +727,8 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		}
 		if (repaint && !render_settings_show(ctx, &view, &state, false))
 			return (-1);
+		if (settings_action_leaves_screen(action))
+			discard_queued_input(ctx);
 		if (action == SETTINGS_ACTION_VOLUME_UP)
 		{
 			audio_play_menu_select(audio);
@@ -743,6 +802,23 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 		enable_home_mouse(ctx);
 	}
 	return (0);
+}
+
+/**
+ * @brief Drops Settings input already buffered across a screen transition.
+ */
+static void	discard_queued_input(render_ctx_t *ctx)
+{
+	ncinput		input;
+	uint32_t	key;
+
+	while (true)
+	{
+		memset(&input, 0, sizeof(input));
+		key = notcurses_get_nblock(ctx->nc, &input);
+		if (key == 0 || key == (uint32_t)-1)
+			return ;
+	}
 }
 
 /**

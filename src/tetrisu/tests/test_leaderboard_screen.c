@@ -3,13 +3,37 @@
 static void	test_initial_focus_and_navigation(void);
 static void	test_shortcuts_and_confirm(void);
 static void	test_pointer_focus_validation(void);
+static void	test_input_batch_boundaries(void);
 
 int	main(void)
 {
 	test_initial_focus_and_navigation();
 	test_shortcuts_and_confirm();
 	test_pointer_focus_validation();
+	test_input_batch_boundaries();
 	return (0);
+}
+
+/**
+ * @brief Only identical movement keys may be folded into one repaint.
+ *
+ * Coalescing a command key would act on it before its target state had been
+ * drawn; coalescing opposite arrows would swallow a real focus change.
+ */
+static void	test_input_batch_boundaries(void)
+{
+	assert(leaderboard_navigation_keys_coalesce(NCKEY_LEFT, NCKEY_LEFT));
+	assert(leaderboard_navigation_keys_coalesce(NCKEY_RIGHT, NCKEY_RIGHT));
+	assert(leaderboard_navigation_keys_coalesce(NCKEY_TAB, NCKEY_TAB));
+	assert(leaderboard_navigation_keys_coalesce('\t', '\t'));
+	assert(!leaderboard_navigation_keys_coalesce(NCKEY_LEFT, NCKEY_RIGHT));
+	assert(!leaderboard_navigation_keys_coalesce(NCKEY_RIGHT, NCKEY_LEFT));
+	assert(!leaderboard_navigation_keys_coalesce(NCKEY_ENTER, NCKEY_ENTER));
+	assert(!leaderboard_navigation_keys_coalesce(NCKEY_ESC, NCKEY_ESC));
+	assert(!leaderboard_navigation_keys_coalesce('r', 'r'));
+	assert(!leaderboard_navigation_keys_coalesce('q', 'q'));
+	assert(!leaderboard_navigation_keys_coalesce(NCKEY_UP, NCKEY_UP));
+	printf("PASS test_input_batch_boundaries\n");
 }
 
 static void	test_initial_focus_and_navigation(void)

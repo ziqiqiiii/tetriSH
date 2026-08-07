@@ -31,9 +31,14 @@ static bool	compose_inventory(render_ctx_t *ctx,
 		const app_settings_view_model_t *settings,
 		const settings_state_t *state, const settings_layout_t *layout,
 		struct ncvisual *font, bool characters);
-static bool	compose_stationary_frame(render_ctx_t *ctx,
+static int	update_static_layer(render_ctx_t *ctx,
 		const app_screen_view_model_t *view, const settings_state_t *state,
 		const settings_layout_t *layout, struct ncvisual *font);
+static int	update_region_layers(render_ctx_t *ctx,
+		const app_screen_view_model_t *view, const settings_state_t *state,
+		const settings_layout_t *layout, struct ncvisual *font);
+static void	restack_settings_planes(render_ctx_t *ctx);
+static int	settings_region_failed(const char *stage);
 static uint32_t	*region_canvas(render_ctx_t *ctx,
 		const settings_layout_t *layout);
 static bool	compose_volume(render_ctx_t *ctx,
@@ -101,6 +106,11 @@ static void	draw_text_run(uint32_t *pixels, int width, int height,
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 		struct ncvisual *font, int glyph, int x, int y, int glyph_size,
 		color_t tint, const settings_layout_t *layout);
+static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
+		struct ncvisual *font, int glyph, int source_x, int source_y,
+		int x, int y, int cell_width, int cell_height, color_t tint,
+		bool opaque);
+static int	ink_span(int units, int glyph_size);
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 		color_t tint, unsigned alpha, bool opaque);
 static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha);
@@ -119,8 +129,6 @@ static const char	*renderer_name(tetrisu_renderer_mode_t mode);
 static uint64_t	settings_hash(const void *data, size_t size, uint64_t hash);
 static uint64_t	static_signature(const app_screen_view_model_t *view,
 		const settings_layout_t *layout);
-static uint64_t	dynamic_signature(const settings_state_t *state,
-		uint64_t hash);
 static bool	settings_render_failed(const char *stage);
 
 /**
@@ -131,8 +139,9 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	bool rebuild_background)
 {
 	settings_layout_t	layout;
-	struct ncvisual	*font;
-	uint64_t		signature;
+	struct ncvisual		*font;
+	int					rebuilt;
+	int					changed;
 
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL
 		|| !render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc))
@@ -155,97 +164,153 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 	if (!load_font(ctx, &font))
 		return (settings_render_failed("font"));
 	/*
-	 * The stationary tier composes everything into one full-screen bitmap.
-	 * Small region planes are not an option there: a Sixel plane laid over
-	 * another is re-emitted whenever the plane below it is marked damaged, so
-	 * overlapping sprixels blank each other out unpredictably as focus moves.
-	 * What used to make that path slow was the work per compose, not the
-	 * compose itself, so the cost is attacked with the background and portrait
-	 * caches instead of by splitting the frame up.
+	 * Both bitmap tiers take the same route: one full-screen plane carrying the
+	 * static art, and small region planes above it for everything focus can
+	 * move through. The stationary tier used to flatten all of that into a
+	 * single frame because replacing a region plane damages the cells it held
+	 * and forces the bitmap underneath to be retransmitted. Region planes are
+	 * now written in place instead of replaced, so that no longer happens and a
+	 * keystroke costs one small region rather than the whole screen.
 	 */
-	if (layout.opaque_background)
+	rebuilt = update_static_layer(ctx, view, state, &layout, font);
+	if (rebuilt < 0)
+		return (false);
+	changed = update_region_layers(ctx, view, state, &layout, font);
+	if (changed < 0)
+		return (false);
+	changed |= rebuilt;
+	if (rebuilt > 0)
+		restack_settings_planes(ctx);
+	render_compatibility_badge_hide(ctx);
+	render_notification_raise(ctx);
+	if (changed == 0 && ctx->notifications.count == 0)
+		return (true);
+	if (notcurses_render(ctx->nc) != 0)
+		return (settings_render_failed("render"));
+	return (true);
+}
+
+/**
+ * @brief Recomposes the full-screen static layer when its inputs change.
+ *
+ * @return 1 when the layer was rebuilt, 0 when it was reused, -1 on failure.
+ */
+static int	update_static_layer(render_ctx_t *ctx,
+	const app_screen_view_model_t *view, const settings_state_t *state,
+	const settings_layout_t *layout, struct ncvisual *font)
+{
+	uint64_t	signature;
+
+	signature = static_signature(view, layout);
+	if (ctx->screen_plane != NULL && ctx->settings_static_pixels != NULL
+		&& signature == ctx->settings_static_signature)
+		return (0);
+	if (!compose_settings(ctx, view, state, layout, font))
 	{
-		signature = static_signature(view, &layout);
-		if ((ctx->settings_static_pixels == NULL
-				|| signature != ctx->settings_static_signature)
-			&& !compose_settings(ctx, view, state, &layout, font))
-			return (settings_render_failed("static layer"));
-		ctx->settings_static_signature = signature;
-		signature = dynamic_signature(state, signature);
-		signature = settings_hash(&view->data.settings.music_volume,
-			sizeof(view->data.settings.music_volume), signature);
-		if ((ctx->screen_plane == NULL
-				|| signature != ctx->settings_controls_signature)
-			&& !compose_stationary_frame(ctx, view, state, &layout, font))
-			return (settings_render_failed("stationary frame"));
-		ctx->settings_controls_signature = signature;
-		ncplane_move_top(ctx->screen_plane);
-		render_compatibility_badge_hide(ctx);
-		render_notification_raise(ctx);
-		return (notcurses_render(ctx->nc) == 0);
+		(void)settings_render_failed("static frame");
+		return (-1);
 	}
-	signature = static_signature(view, &layout);
-	if ((ctx->screen_plane == NULL || signature != ctx->settings_static_signature)
-		&& !compose_settings(ctx, view, state, &layout, font))
-		return (settings_render_failed("static frame"));
 	ctx->settings_static_signature = signature;
-	signature = settings_hash(&state->focus, sizeof(state->focus),
-		(uint64_t)layout.pixel_width << 32 | (unsigned)layout.pixel_height);
+	return (1);
+}
+
+/**
+ * @brief Refreshes every focus-sensitive region whose signature moved.
+ *
+ * @return 1 when at least one region was rewritten, 0 when none were, -1 on
+ * failure.
+ */
+static int	update_region_layers(render_ctx_t *ctx,
+	const app_screen_view_model_t *view, const settings_state_t *state,
+	const settings_layout_t *layout, struct ncvisual *font)
+{
+	uint64_t	geometry;
+	uint64_t	signature;
+	int			changed;
+
+	/*
+	 * Every region signature is seeded with the static one. Rewriting the
+	 * full-screen plane re-emits the bitmap under these planes, which on a
+	 * stationary protocol overwrites the cells they occupy; a region that did
+	 * not also recompose would stay blank until something else moved it.
+	 */
+	geometry = settings_hash(&layout->pixel_width, sizeof(layout->pixel_width),
+			ctx->settings_static_signature);
+	geometry = settings_hash(&layout->pixel_height,
+			sizeof(layout->pixel_height), geometry);
+	changed = 0;
+	signature = settings_hash(&state->focus, sizeof(state->focus), geometry);
 	signature = settings_hash(&state->section, sizeof(state->section),
-		signature);
+			signature);
 	signature = settings_hash(&view->data.settings.signed_in,
-		sizeof(view->data.settings.signed_in), signature);
+			sizeof(view->data.settings.signed_in), signature);
 	if (ctx->settings_controls_plane == NULL
 		|| signature != ctx->settings_controls_signature)
 	{
-		if (!compose_controls(ctx, &view->data.settings, state, &layout, font))
-			return (settings_render_failed("controls"));
+		if (!compose_controls(ctx, &view->data.settings, state, layout, font))
+			return (settings_region_failed("controls"));
 		ctx->settings_controls_signature = signature;
+		changed = 1;
 	}
 	signature = settings_hash(&state->character_slot,
-		sizeof(state->character_slot), ctx->settings_static_signature);
+			sizeof(state->character_slot), ctx->settings_static_signature);
 	signature = settings_hash(&state->section, sizeof(state->section),
-		signature);
+			signature);
 	if (signature != ctx->settings_characters_signature)
 	{
-		if (!compose_inventory(ctx, &view->data.settings, state, &layout,
-				font, true))
-			return (settings_render_failed("characters"));
+		if (!compose_inventory(ctx, &view->data.settings, state, layout, font,
+				true))
+			return (settings_region_failed("characters"));
 		ctx->settings_characters_signature = signature;
+		changed = 1;
 	}
 	signature = settings_hash(&state->theme_slot, sizeof(state->theme_slot),
-		ctx->settings_static_signature);
+			ctx->settings_static_signature);
 	signature = settings_hash(&state->section, sizeof(state->section),
-		signature);
+			signature);
 	if (signature != ctx->settings_themes_signature)
 	{
-		if (!compose_inventory(ctx, &view->data.settings, state, &layout,
-				font, false))
-			return (settings_render_failed("themes"));
+		if (!compose_inventory(ctx, &view->data.settings, state, layout, font,
+				false))
+			return (settings_region_failed("themes"));
 		ctx->settings_themes_signature = signature;
+		changed = 1;
 	}
 	signature = settings_hash(&view->data.settings.music_volume,
-		sizeof(view->data.settings.music_volume),
-		(uint64_t)layout.pixel_width << 32 | (unsigned)layout.pixel_height);
+			sizeof(view->data.settings.music_volume), geometry);
 	if (ctx->settings_volume_plane == NULL
 		|| signature != ctx->settings_volume_signature)
 	{
-		if (!compose_volume(ctx, &view->data.settings, &layout, font))
-			return (settings_render_failed("volume"));
+		if (!compose_volume(ctx, &view->data.settings, layout, font))
+			return (settings_region_failed("volume"));
 		ctx->settings_volume_signature = signature;
+		changed = 1;
 	}
 	signature = settings_hash(&state->ability_info_visible,
-		sizeof(state->ability_info_visible), ctx->settings_static_signature);
+			sizeof(state->ability_info_visible), ctx->settings_static_signature);
 	signature = settings_hash(&state->section, sizeof(state->section),
-		signature);
+			signature);
 	signature = settings_hash(&state->character_slot,
-		sizeof(state->character_slot), signature);
+			sizeof(state->character_slot), signature);
 	if (signature != ctx->settings_ability_signature)
 	{
-		if (!compose_ability(ctx, &view->data.settings, state, &layout, font))
-			return (settings_render_failed("ability"));
+		if (!compose_ability(ctx, &view->data.settings, state, layout, font))
+			return (settings_region_failed("ability"));
 		ctx->settings_ability_signature = signature;
+		changed = 1;
 	}
+	return (changed);
+}
+
+/**
+ * @brief Restores region planes above a freshly created static plane.
+ *
+ * Only called when the static layer was replaced. Restacking damages every
+ * plane it touches, so a frame that merely rewrote a region leaves the order
+ * alone: creation order already puts the regions on top.
+ */
+static void	restack_settings_planes(render_ctx_t *ctx)
+{
 	ncplane_move_top(ctx->screen_plane);
 	if (ctx->settings_controls_plane != NULL)
 		ncplane_move_top(ctx->settings_controls_plane);
@@ -257,11 +322,6 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
 		ncplane_move_top(ctx->settings_volume_plane);
 	if (ctx->settings_ability_plane != NULL)
 		ncplane_move_top(ctx->settings_ability_plane);
-	render_compatibility_badge_hide(ctx);
-	render_notification_raise(ctx);
-	if (notcurses_render(ctx->nc) != 0)
-		return (settings_render_failed("render"));
-	return (true);
 }
 
 /**
@@ -497,59 +557,7 @@ static bool	compose_settings(render_ctx_t *ctx,
 	ctx->settings_static_pixels = pixels;
 	ctx->settings_pixels_width = width;
 	ctx->settings_pixels_height = height;
-	if (layout->opaque_background)
-		return (true);
-	if (ctx->screen_plane != NULL)
-		ncplane_destroy(ctx->screen_plane);
-	ctx->screen_plane = NULL;
 	return (create_settings_plane(ctx, pixels, width, height));
-}
-
-/**
- * @brief Stamps one complete stationary frame from the cached static layer.
- *
- * Only the focus-sensitive elements are redrawn here; everything above them in
- * the frame comes from the cached copy, so a keystroke costs a memcpy plus a
- * few hundred glyphs rather than a full recomposition.
- */
-static bool	compose_stationary_frame(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
-{
-	uint32_t	*pixels;
-	int			width;
-	int			height;
-
-	width = layout->pixel_width;
-	height = layout->pixel_height;
-	pixels = region_canvas(ctx, layout);
-	if (pixels == NULL)
-		return (false);
-	if (view->status == APP_DATA_READY && view->data.settings.signed_in
-		&& !view->data.settings.offline)
-	{
-		draw_inventory(pixels, width, height, &view->data.settings.characters,
-			state, layout, font, true, ctx);
-		draw_inventory(pixels, width, height, &view->data.settings.themes,
-			state, layout, font, false, ctx);
-	}
-	draw_volume_value(pixels, width, height, &view->data.settings, layout,
-		font);
-	draw_buttons(pixels, width, height, &view->data.settings, state, layout,
-		font);
-	if (settings_card_visible(state))
-		draw_ability_card(pixels, width, height, layout, font,
-			settings_card_character(&view->data.settings, state));
-	if (ctx->screen_plane != NULL)
-		ncplane_destroy(ctx->screen_plane);
-	ctx->screen_plane = NULL;
-	if (!create_settings_plane(ctx, pixels, width, height))
-	{
-		free(pixels);
-		return (false);
-	}
-	free(pixels);
-	return (true);
 }
 
 /**
@@ -748,11 +756,14 @@ static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
 static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
 	int width, int height)
 {
-	ncplane_options			options;
-	struct ncvisual		*ncv;
-	struct ncvisual_options	vopts;
+	ncplane_options		options;
 	struct ncplane		*plane;
+	nccell				base;
 
+	if (render_plane_geometry_matches(ctx->screen_plane, ctx->bg_row, ctx->bg_col,
+			(unsigned)ctx->bg_rows, (unsigned)ctx->bg_cols))
+		return (render_plane_blit_rgba(ctx, ctx->screen_plane, pixels, width, height,
+				width));
 	memset(&options, 0, sizeof(options));
 	options.y = ctx->bg_row;
 	options.x = ctx->bg_col;
@@ -761,7 +772,6 @@ static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
 	plane = ncplane_create(ctx->std, &options);
 	if (plane == NULL)
 		return (false);
-	nccell	base;
 	nccell_init(&base);
 	if (nccell_load(plane, &base, " ") >= 0)
 	{
@@ -771,78 +781,49 @@ static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
 		nccell_release(plane, &base);
 	}
 	ncplane_erase(plane);
-	ncv = ncvisual_from_rgba(pixels, height, width * (int)sizeof(*pixels),
-		width);
-	if (ncv == NULL)
+	if (!render_plane_blit_rgba(ctx, plane, pixels, width, height, width))
 	{
 		ncplane_destroy(plane);
 		return (false);
 	}
-	memset(&vopts, 0, sizeof(vopts));
-	vopts.n = plane;
-	vopts.scaling = NCSCALE_NONE;
-	vopts.blitter = NCBLIT_PIXEL;
-	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
-	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
-	{
-		ncvisual_destroy(ncv);
-		ncplane_destroy(plane);
-		return (false);
-	}
-	ncvisual_destroy(ncv);
+	if (ctx->screen_plane != NULL)
+		ncplane_destroy(ctx->screen_plane);
 	ctx->screen_plane = plane;
 	return (true);
 }
 
+/**
+ * @brief Refreshes one region plane from a window of the composed canvas.
+ *
+ * The window is expanded to cell boundaries so the plane covers whole cells,
+ * and is blitted straight out of the canvas using its row stride rather than
+ * being copied into a compact buffer first. An existing plane at the same
+ * geometry is written in place; only a geometry change replaces it, because
+ * destroying a sprixel plane forces the bitmap beneath it to be retransmitted.
+ */
 static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
 	int width, int height, const settings_rect_t *region,
 	struct ncplane **slot)
 {
 	ncplane_options		options;
-	struct ncvisual		*ncv;
-	struct ncvisual_options	vopts;
-	struct ncplane			*plane;
-	uint32_t				*cropped;
+	struct ncplane		*plane;
+	const uint32_t		*origin;
 	int					crop_x;
 	int					crop_y;
-	int					crop_right;
-	int					crop_bottom;
 	int					crop_width;
 	int					crop_height;
-	int					y;
 
 	if (ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
 		|| region->x < 0 || region->y < 0 || region->width <= 0
 		|| region->height <= 0 || region->x + region->width > width
 		|| region->y + region->height > height)
 		return (false);
-	/*
-	 * Pixel offsets combined with source cropping are unreliable on some
-	 * Kitty/Notcurses combinations.  Expand the dirty rectangle to cell
-	 * boundaries and blit a compact, zero-offset visual instead.
-	 */
 	crop_x = region->x / ctx->cell_px_x * ctx->cell_px_x;
 	crop_y = region->y / ctx->cell_px_y * ctx->cell_px_y;
-	crop_right = ((region->x + region->width + ctx->cell_px_x - 1)
-		/ ctx->cell_px_x) * ctx->cell_px_x;
-	crop_bottom = ((region->y + region->height + ctx->cell_px_y - 1)
-		/ ctx->cell_px_y) * ctx->cell_px_y;
-	crop_right = min_int(crop_right, width);
-	crop_bottom = min_int(crop_bottom, height);
-	crop_width = crop_right - crop_x;
-	crop_height = crop_bottom - crop_y;
-	cropped = malloc((size_t)crop_width * (size_t)crop_height
-		* sizeof(*cropped));
-	if (cropped == NULL)
-		return (false);
-	y = 0;
-	while (y < crop_height)
-	{
-		memcpy(cropped + (size_t)y * crop_width,
-			pixels + (size_t)(crop_y + y) * width + crop_x,
-			(size_t)crop_width * sizeof(*cropped));
-		y++;
-	}
+	crop_width = min_int(((region->x + region->width + ctx->cell_px_x - 1)
+				/ ctx->cell_px_x) * ctx->cell_px_x, width) - crop_x;
+	crop_height = min_int(((region->y + region->height + ctx->cell_px_y - 1)
+				/ ctx->cell_px_y) * ctx->cell_px_y, height) - crop_y;
 	memset(&options, 0, sizeof(options));
 	options.y = ctx->bg_row + crop_y / ctx->cell_px_y;
 	options.x = ctx->bg_col + crop_x / ctx->cell_px_x;
@@ -850,34 +831,19 @@ static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
 		/ (unsigned)ctx->cell_px_y;
 	options.cols = (unsigned)(crop_width + ctx->cell_px_x - 1)
 		/ (unsigned)ctx->cell_px_x;
+	origin = pixels + (size_t)crop_y * width + crop_x;
+	if (render_plane_geometry_matches(*slot, options.y, options.x, options.rows,
+			options.cols))
+		return (render_plane_blit_rgba(ctx, *slot, origin, crop_width, crop_height,
+				width));
 	plane = ncplane_create(ctx->std, &options);
 	if (plane == NULL)
-	{
-		free(cropped);
 		return (false);
-	}
-	ncv = ncvisual_from_rgba(cropped, crop_height,
-		crop_width * (int)sizeof(*cropped), crop_width);
-	if (ncv == NULL)
+	if (!render_plane_blit_rgba(ctx, plane, origin, crop_width, crop_height, width))
 	{
 		ncplane_destroy(plane);
-		free(cropped);
 		return (false);
 	}
-	memset(&vopts, 0, sizeof(vopts));
-	vopts.n = plane;
-	vopts.scaling = NCSCALE_NONE;
-	vopts.blitter = NCBLIT_PIXEL;
-	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
-	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
-	{
-		ncvisual_destroy(ncv);
-		ncplane_destroy(plane);
-		free(cropped);
-		return (false);
-	}
-	ncvisual_destroy(ncv);
-	free(cropped);
 	if (*slot != NULL)
 		ncplane_destroy(*slot);
 	*slot = plane;
@@ -1065,9 +1031,14 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
 			ref_slot_y + 1, min_int(ref_slot_thumb_width,
 				ref_slot_width - 28), ref_slot_thumb_height,
 			catalogue->items[index].owned);
+		/*
+		 * The badge belongs inside the thumbnail frame, which starts at
+		 * ref_slot_x + 14. Drawing it left of that hung half the marker off
+		 * the tile, where it read as a stray blob rather than as "equipped".
+		 */
 		if (catalogue->items[index].equipped)
 			draw_text_ref(pixels, width, height, layout, font, "*",
-				ref_slot_x + 8, ref_slot_y + 2, 16, 16,
+				ref_slot_x + 17, ref_slot_y + 5, 16, 16,
 				focused ? g_settings_gold : g_settings_green, false);
 		draw_text_ref(pixels, width, height, layout, font,
 			inventory_slot_label(&catalogue->items[index], characters),
@@ -1722,38 +1693,85 @@ static void	draw_text_run(uint32_t *pixels, int width, int height,
 	}
 }
 
+/**
+ * @brief Scales a signed offset in atlas rows into destination pixels.
+ *
+ * Rows above the cap band are negative, and C division truncates towards zero,
+ * which would sample the wrong source row for them. Flooring keeps the two
+ * halves of a glyph on the same grid.
+ */
+static int	ink_span(int units, int glyph_size)
+{
+	if (units >= 0)
+		return (units * glyph_size / FONT_INK_HEIGHT);
+	return (-((-units * glyph_size + FONT_INK_HEIGHT - 1) / FONT_INK_HEIGHT));
+}
+
+/**
+ * @brief Draws one atlas glyph with its ascender dots and descender tails.
+ *
+ * Iteration runs over source rows rather than destination rows so the whole
+ * ink band maps onto the same scale as the cap band. The cap row still lands
+ * on y, so extending the band moves no existing text.
+ */
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int x, int y, int glyph_size,
 	color_t tint, const settings_layout_t *layout)
 {
+	int	source_y;
+	int	source_x;
+
+	source_y = FONT_INK_TOP;
+	while (source_y < FONT_INK_BOTTOM)
+	{
+		source_x = 0;
+		while (source_x < SETTINGS_FONT_WIDTH)
+		{
+			draw_glyph_cell(pixels, width, height, font, glyph,
+				source_x, source_y, x + source_x * glyph_size
+				/ SETTINGS_FONT_WIDTH,
+				y + ink_span(source_y - SETTINGS_FONT_INK_Y, glyph_size),
+				(source_x + 1) * glyph_size / SETTINGS_FONT_WIDTH
+				- source_x * glyph_size / SETTINGS_FONT_WIDTH,
+				ink_span(source_y + 1 - SETTINGS_FONT_INK_Y, glyph_size)
+				- ink_span(source_y - SETTINGS_FONT_INK_Y, glyph_size),
+				tint, layout->opaque_background);
+			source_x++;
+		}
+		source_y++;
+	}
+}
+
+/**
+ * @brief Expands one atlas texel into its destination rectangle.
+ */
+static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
+	struct ncvisual *font, int glyph, int source_x, int source_y,
+	int x, int y, int cell_width, int cell_height, color_t tint, bool opaque)
+{
 	uint32_t	source;
 	unsigned	alpha;
-	int		source_x;
-	int		source_y;
-	int		dest_x;
-	int		dest_y;
+	int			dest_y;
+	int			dest_x;
 
+	if (cell_width <= 0 || cell_height <= 0)
+		return ;
+	if (ncvisual_at_yx(font, (unsigned)((glyph / SETTINGS_FONT_COLUMNS)
+				* SETTINGS_FONT_HEIGHT + source_y),
+			(unsigned)((glyph % SETTINGS_FONT_COLUMNS)
+				* SETTINGS_FONT_WIDTH + source_x), &source) < 0)
+		return ;
+	alpha = ncpixel_a(source);
+	if (alpha == 0)
+		return ;
 	dest_y = 0;
-	while (dest_y < glyph_size)
+	while (dest_y < cell_height)
 	{
 		dest_x = 0;
-		while (dest_x < glyph_size)
+		while (dest_x < cell_width)
 		{
-			source_x = (glyph % SETTINGS_FONT_COLUMNS)
-				* SETTINGS_FONT_WIDTH
-				+ dest_x * SETTINGS_FONT_WIDTH / glyph_size;
-			source_y = (glyph / SETTINGS_FONT_COLUMNS)
-				* SETTINGS_FONT_HEIGHT + SETTINGS_FONT_INK_Y
-				+ dest_y * SETTINGS_FONT_INK_HEIGHT / glyph_size;
-			if (ncvisual_at_yx(font, (unsigned)source_y, (unsigned)source_x,
-					&source) >= 0)
-			{
-				alpha = ncpixel_a(source);
-				if (alpha != 0)
-					put_pixel(pixels, width, height, x + dest_x, y + dest_y,
-						tint, alpha,
-						layout->opaque_background);
-			}
+			put_pixel(pixels, width, height, x + dest_x, y + dest_y,
+				tint, alpha, opaque);
 			dest_x++;
 		}
 		dest_y++;
@@ -1911,27 +1929,17 @@ static uint64_t	static_signature(const app_screen_view_model_t *view,
 	return (hash);
 }
 
-/**
- * @brief Folds the focus-visible state into a hash, field by field.
- *
- * Hashing the state struct wholesale would fold in its padding bytes, which
- * are never written and would make the signature unstable enough to recompose
- * the frame on keystrokes that changed nothing.
- */
-static uint64_t	dynamic_signature(const settings_state_t *state, uint64_t hash)
-{
-	hash = settings_hash(&state->section, sizeof(state->section), hash);
-	hash = settings_hash(&state->focus, sizeof(state->focus), hash);
-	hash = settings_hash(&state->character_slot,
-			sizeof(state->character_slot), hash);
-	hash = settings_hash(&state->theme_slot, sizeof(state->theme_slot), hash);
-	hash = settings_hash(&state->ability_info_visible,
-			sizeof(state->ability_info_visible), hash);
-	return (hash);
-}
-
 static bool	settings_render_failed(const char *stage)
 {
 	fprintf(stderr, "tetrisu: Settings renderer failed at %s\n", stage);
 	return (false);
+}
+
+/**
+ * @brief Reports a failed region refresh in the tri-state form regions use.
+ */
+static int	settings_region_failed(const char *stage)
+{
+	(void)settings_render_failed(stage);
+	return (-1);
 }

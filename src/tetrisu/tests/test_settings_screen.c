@@ -9,6 +9,9 @@ static void	test_character_selection(void);
 static void	test_inventory_grid_navigation(void);
 static void	test_slot_equipping(void);
 static void	test_powers_card_follows_focus(void);
+static void	test_settings_input_batch_boundaries(void);
+static void	test_backwards_focus_reaches_the_last_slot(void);
+static void	test_leaving_a_grid_focuses_the_button_below(void);
 
 int	main(void)
 {
@@ -21,7 +24,70 @@ int	main(void)
 	test_inventory_grid_navigation();
 	test_slot_equipping();
 	test_powers_card_follows_focus();
+	test_settings_input_batch_boundaries();
+	test_backwards_focus_reaches_the_last_slot();
+	test_leaving_a_grid_focuses_the_button_below();
 	return (0);
+}
+
+/**
+ * @brief Backwards focus must land on the final drawn slot, not the first row.
+ *
+ * Themes fill two rows, so entering at row zero left every slot on the second
+ * row unreachable by backwards tabbing.
+ */
+static void	test_backwards_focus_reaches_the_last_slot(void)
+{
+	settings_state_t	state;
+
+	settings_state_init(&state, true, 4, 7);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
+	assert(state.focus == SETTINGS_FOCUS_BACK);
+	settings_state_focus_previous(&state);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(state.theme_slot == 6);
+	/* Walking back off theme slot zero enters characters at its last slot. */
+	while (state.theme_slot > 0)
+		settings_state_focus_previous(&state);
+	settings_state_focus_previous(&state);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(state.character_slot == 3);
+	/* A themes-only panel still reaches its final slot. */
+	settings_state_init(&state, true, 0, 7);
+	settings_state_focus_previous(&state);
+	assert(state.section == SETTINGS_SECTION_THEMES);
+	assert(state.theme_slot == 6);
+	printf("PASS test_backwards_focus_reaches_the_last_slot\n");
+}
+
+/**
+ * @brief Dropping out of a grid focuses the button under the column left.
+ *
+ * The grid and the control strip are both four wide, so the landing button is
+ * a property of where the cursor was, not of what was focused beforehand.
+ */
+static void	test_leaving_a_grid_focuses_the_button_below(void)
+{
+	settings_state_t	state;
+
+	settings_state_init(&state, true, 4, 7);
+	(void)settings_handle_key(&state, NCKEY_UP);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	(void)settings_handle_key(&state, NCKEY_RIGHT);
+	assert(state.section == SETTINGS_SECTION_CHARACTERS);
+	assert(state.character_slot == 2);
+	(void)settings_handle_key(&state, NCKEY_DOWN);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
+	assert(state.focus == SETTINGS_FOCUS_VOLUME_DOWN);
+	/* Column one is the Marketplace button, which signed-out users skip. */
+	settings_state_init(&state, false, 4, 7);
+	state.character_slots = 4;
+	state.section = SETTINGS_SECTION_CHARACTERS;
+	state.character_slot = 1;
+	(void)settings_handle_key(&state, NCKEY_DOWN);
+	assert(state.section == SETTINGS_SECTION_CONTROLS);
+	assert(state.focus == SETTINGS_FOCUS_BACK);
+	printf("PASS test_leaving_a_grid_focuses_the_button_below\n");
 }
 
 static void	test_fixture_settings_model(void)
@@ -424,4 +490,26 @@ static void	test_powers_card_follows_focus(void)
 	card = settings_card_character(&view.data.settings, &state);
 	assert(card != NULL && strcmp(card->name, "Mirurun") == 0);
 	printf("PASS test_powers_card_follows_focus\n");
+}
+
+/**
+ * @brief Held navigation repeats never absorb a different queued command.
+ */
+static void	test_settings_input_batch_boundaries(void)
+{
+	assert(settings_navigation_keys_coalesce(NCKEY_UP, NCKEY_UP));
+	assert(settings_navigation_keys_coalesce(NCKEY_DOWN, NCKEY_DOWN));
+	assert(settings_navigation_keys_coalesce(NCKEY_LEFT, NCKEY_LEFT));
+	assert(settings_navigation_keys_coalesce(NCKEY_RIGHT, NCKEY_RIGHT));
+	assert(settings_navigation_keys_coalesce(NCKEY_TAB, NCKEY_TAB));
+	assert(!settings_navigation_keys_coalesce(NCKEY_UP, NCKEY_DOWN));
+	assert(!settings_navigation_keys_coalesce(NCKEY_UP, NCKEY_ENTER));
+	assert(!settings_navigation_keys_coalesce('+', '+'));
+	assert(settings_action_leaves_screen(SETTINGS_ACTION_BACK));
+	assert(settings_action_leaves_screen(SETTINGS_ACTION_MARKETPLACE));
+	assert(settings_action_leaves_screen(SETTINGS_ACTION_QUIT));
+	assert(!settings_action_leaves_screen(SETTINGS_ACTION_NONE));
+	assert(!settings_action_leaves_screen(SETTINGS_ACTION_VOLUME_UP));
+	assert(!settings_action_leaves_screen(SETTINGS_ACTION_EQUIP_CHARACTER));
+	printf("PASS test_settings_input_batch_boundaries\n");
 }

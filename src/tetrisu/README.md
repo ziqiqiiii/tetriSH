@@ -33,9 +33,10 @@ Battle while the authoritative `tetrisd` game loop is being built.
   arrow-key selection wraps around
 - Optional background music and menu SFX via SDL2_mixer, with runtime volume control
 - Cutesy Mirurun-and-speaker pixel-art volume feedback on Home and Solo:
-  `MUSIC`, a rounded percentage, and a 16-step crystal bar; compatibility mode
-  recreates the same artwork with dense terminal cells, and silent-audio
-  builds retain the visual feedback
+  `MUSIC`, a rounded percentage, and a 16-step crystal bar. Movable and
+  stationary bitmap renderers use the authored artwork, true cell mode uses an
+  alpha-safe framed terminal presentation, and silent-audio builds retain the
+  visual feedback
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
 - Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,
@@ -88,8 +89,16 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - The preview fixture intentionally locks Princess, Wolf-man, Haaland, and
   Clauding. Locked thumbnails are desaturated but remain focusable for visual
   inspection; `Enter` refuses to equip them and raises an `ITEM NOT OWNED`
-  notification directing the user to the Marketplace. The same notification
-  has authored pixel art and a compatibility-mode presentation.
+  notification directing the user to the Marketplace. Every bitmap renderer,
+  including foot/Sixel, uses dedicated Mirurun marketplace art; true cell mode
+  uses an alpha-safe framed terminal presentation.
+- Notification cards are sized from the artwork's own aspect rather than a
+  fixed column count, and their lettering comes from the shared glyph atlas
+  fitted to the plaque interior measured from the art. On the stationary tier
+  the card is composited over a snapshot of the backdrop before it is blitted:
+  Sixel cannot draw one bitmap through another, so a card with transparent
+  margins would otherwise punch its whole plane out to the terminal
+  background.
 - Moving the focus onto a character opens its powers card automatically, the
   way the Solo ability meters describe themselves. `I` still pins the card for
   the equipped character from anywhere. The four canonical crystal powers are
@@ -333,6 +342,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | Macro | Role |
 |---|---|
 | `SPLASH_ASSET_PATH` | Clean home-screen artwork; five exact labels are rasterized from the shared pixel font at runtime |
+| `LEADERBOARD_BACKGROUND_PATH` | Dedicated 1448 x 1086 leaderboard backdrop; live data and controls are composited over it with the shared pixel font |
 | `BUNNY_ASSET_PATH` | Bunny selector sprite (PNG with alpha) |
 | `INTRO_VIDEO_PATH` | MP4 splash intro streamed over the background |
 | `INTRO_AUDIO_PATH` | MP3 played once alongside the intro |
@@ -351,15 +361,16 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH` | `settings_previews/theme_nuclear_ghandi.png` (192 x 192 Nuclear Ghandi thumbnail) |
 | `SETTINGS_THEME_CLAUDING_PREVIEW_PATH` | `settings_previews/theme_clauding.png` (192 x 192 Clauding thumbnail) |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
-| `OWNERSHIP_NOTIFICATION_PATH` | Mirurun, lock, and shop-bag ownership-error card |
+| `OWNERSHIP_NOTIFICATION_PATH` | Mirurun marketplace-stall pixel-art ownership-error card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |
 | `SHARED_NUMBERS_MASK_PATH` | White alpha mask for digits and `+`/`-` |
 | `MENU_MOVE_SFX_PATH` | Sound on up/down selection movement |
 | `MENU_SELECT_SFX_PATH` | Sound on selection confirmation |
 
-Missing assets are non-fatal: a missing bunny sprite falls back to a text marker,
-and missing audio files are silently skipped. The exact authored-HUD geometry,
-including the board-border export contract, is documented in
+Missing assets are non-fatal: missing leaderboard art falls back to its
+self-contained cell presentation, a missing bunny sprite falls back to a text
+marker, and missing audio files are silently skipped. The exact authored-HUD
+geometry, including the board-border export contract, is documented in
 [`assets/solo_hud_art_template.md`](assets/solo_hud_art_template.md).
 
 ---
@@ -404,6 +415,7 @@ Modules (each a `.c` under `src/`):
 | `render_settings.c` | Live profile/inventory/settings panel; chooses the pixel renderer or self-contained cell fallback |
 | `render_settings_font.c` | Composes the cached v2 Settings frame, catalogue thumbnails, and focus/equipped overlays |
 | `leaderboard_screen.c` | Pure leaderboard focus and action handling |
+| `leaderboard_presentation.c` | Pure leaderboard background policy, reference-space geometry, and pointer hit testing |
 | `auth_form.c` | UTF-8 auth input, masking, focus, validation, and provider submission |
 | `render_background.c` | notcurses init, background blit, `render_wait_key`, teardown |
 | `renderer_policy.c` | renderer environment parsing and forced compatibility policy |
@@ -411,7 +423,8 @@ Modules (each a `.c` under `src/`):
 | `render_menu.c` | Bunny selector plane and on-screen messages |
 | `render_auth.c` | Pixel-art login/sign-up frame and terminal-only fallback |
 | `render_screen.c` | Shared native-terminal shell and plane cleanup |
-| `render_leaderboard.c` | Homepage-backed podium/table and cell compatibility renderer |
+| `render_leaderboard.c` | Selects the high-fidelity pixel presentation or the themed cell-only fallback |
+| `render_leaderboard_font.c` | Composes the shared-font title, podium cards, ranked rows, statuses, and controls into the leaderboard bitmap |
 | `audio.c` | Optional SDL2_mixer music and SFX; no-ops when audio is compiled out |
 | `solo_game.c` | Pure local session state/timing; temporary authority boundary |
 | `solo_abilities.c` | Mirurun metadata, charge spending, board transform, and mouse geometry |
@@ -434,6 +447,7 @@ tetrisu/
 │   ├── app_state.c            Pure validated screen graph → logic.a
 │   ├── app_provider.c         Typed models + local fixture provider
 │   ├── leaderboard_screen.c   Pure leaderboard focus/actions → logic.a
+│   ├── leaderboard_presentation.c  Pure bitmap geometry/hit-test policy → logic.a
 │   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
 │   ├── renderer_policy.c      Renderer environment and compatibility policy
@@ -442,7 +456,8 @@ tetrisu/
 │   ├── render_auth.c          Auth artwork overlay + cell fallback
 │   ├── render_screen.c        Native-terminal screen scaffold
 │   ├── render_settings.c      Profile/settings screen + controls
-│   ├── render_leaderboard.c   Dedicated podium/table + compatibility view
+│   ├── render_leaderboard.c   Pixel/cell leaderboard renderer selection
+│   ├── render_leaderboard_font.c  Full shared-font leaderboard compositor
 │   ├── render_solo.c          Solo planes, layout, and dirty-region updates
 │   ├── render_solo_canvas.c   Asset loading + pixel-canvas composition
 │   ├── solo_mode.c            Poll-driven local Solo loop

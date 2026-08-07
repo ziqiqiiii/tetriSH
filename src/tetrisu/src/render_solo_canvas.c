@@ -1385,11 +1385,18 @@ static void	draw_text(uint32_t *canvas, const solo_render_t *solo,
 		if (codepoint < 32 || codepoint >= 32 + FONT_COLUMNS * FONT_ROWS)
 			codepoint = '?';
 		glyph = (int)codepoint - 32;
+		/*
+		 * The source band covers the atlas ink, not just the cap band, so
+		 * descenders survive. Shifting the destination up by the rows added
+		 * above the cap row keeps the baseline where the layout put it.
+		 */
 		draw_mask(canvas, solo->font_pixels, solo->font_width,
 			(glyph % FONT_COLUMNS) * FONT_GLYPH_WIDTH,
-			(glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_Y,
-			FONT_GLYPH_WIDTH, FONT_INK_HEIGHT, draw_x, y,
-			glyph_width, glyph_height, tint, opacity);
+			(glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_TOP,
+			FONT_GLYPH_WIDTH, FONT_INK_BOTTOM - FONT_INK_TOP, draw_x,
+			y - (FONT_INK_Y - FONT_INK_TOP) * glyph_height / FONT_INK_HEIGHT,
+			glyph_width, (FONT_INK_BOTTOM - FONT_INK_TOP) * glyph_height
+			/ FONT_INK_HEIGHT, tint, opacity);
 		draw_x += glyph_width + spacing;
 		text++;
 	}

@@ -1,9 +1,5 @@
 #include "tetrisu.h"
 
-# define LB_PANEL_MAX_COLS	100
-# define LB_PANEL_MAX_ROWS	34
-# define LB_PANEL_MIN_COLS	44
-# define LB_PANEL_MIN_ROWS	20
 # define LB_BACK_TEXT		"  BACK  "
 # define LB_REFRESH_TEXT	" REFRESH "
 # define LB_HINT_TEXT		"ESC BACK  |  R REFRESH  |  LEFT/RIGHT SELECT"
@@ -35,19 +31,22 @@
 # define LB_BRONZE_G			145
 # define LB_BRONZE_B			91
 
-static bool	create_panel(render_ctx_t *ctx);
+static bool	create_panel(render_ctx_t *ctx, bool compatibility,
+				bool *compact);
 static void	draw_leaderboard(render_ctx_t *ctx,
 				const app_screen_view_model_t *view,
-				const leaderboard_state_t *state);
+				const leaderboard_state_t *state, bool compatibility,
+				bool compact);
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 				bool compatibility);
+static void	draw_cell_backdrop(struct ncplane *plane, int rows, int cols);
 static void	draw_header(struct ncplane *plane,
 				const app_screen_view_model_t *view, int cols);
 static void	draw_status(struct ncplane *plane,
 				const app_screen_view_model_t *view, int rows, int cols);
 static void	draw_rankings(struct ncplane *plane,
 				const app_leaderboard_view_model_t *leaderboard,
-				int rows, int cols, bool compatibility);
+				int rows, int cols, bool compact);
 static void	draw_podium(struct ncplane *plane,
 				const app_leaderboard_view_model_t *leaderboard, int cols);
 static void	draw_podium_entry(struct ncplane *plane,
@@ -67,9 +66,6 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 				const char *text, bool focused);
 static void	button_geometry(const struct ncplane *plane, int *row,
 				int *back_x, int *refresh_x);
-static const app_leaderboard_entry_view_model_t	*entry_for_position(
-				const app_leaderboard_view_model_t *leaderboard,
-				int position);
 static void	put_centered(struct ncplane *plane, int row, const char *text,
 				int cols, bool bold);
 static void	put_centered_range(struct ncplane *plane, int row,
@@ -79,28 +75,35 @@ static bool	button_hit(const ncinput *input, int row, int x, int width,
 static int	min_int(int first, int second);
 
 /**
- * @brief Draws the dedicated leaderboard over the authored home backdrop.
+ * @brief Draws the dedicated leaderboard over its authored competition art.
  *
- * Bitmap-capable terminals retain the stationary homepage art below a compact
- * live-text panel. Compatibility mode removes that bitmap and draws a flatter
- * full-grid variant with the same data and controls.
+ * Bitmap-capable terminals compose the backdrop, live data, and controls into
+ * one shared-font pixel surface. Cell sessions, or bitmap sessions where that
+ * presentation cannot load, draw a self-contained generic fallback with the
+ * same data and controls.
  */
 bool	render_leaderboard_show(render_ctx_t *ctx,
 	const app_screen_view_model_t *view, const leaderboard_state_t *state,
 	bool rebuild_background)
 {
+	bool							compact;
+	bool							compatibility;
+
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
 		return (false);
 	render_menu_destroy(ctx);
+	if (!render_compatibility_mode(ctx)
+		&& render_leaderboard_pixel_show(ctx, view, state,
+			rebuild_background))
+		return (true);
 	render_screen_destroy(ctx);
-	if (render_compatibility_mode(ctx))
-		render_background_destroy(ctx);
-	else if (rebuild_background && ctx->bg_plane == NULL
-		&& render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+	render_leaderboard_pixel_destroy(ctx);
+	render_background_destroy(ctx);
+	render_backdrop_forget(ctx);
+	compatibility = true;
+	if (!create_panel(ctx, compatibility, &compact))
 		return (false);
-	if (!create_panel(ctx))
-		return (false);
-	draw_leaderboard(ctx, view, state);
+	draw_leaderboard(ctx, view, state, compatibility, compact);
 	ncplane_move_top(ctx->screen_plane);
 	render_compatibility_badge_refresh(ctx);
 	render_notification_raise(ctx);
@@ -122,6 +125,16 @@ bool	render_leaderboard_hit_test(const render_ctx_t *ctx,
 	if (ctx == NULL || ctx->screen_plane == NULL || input == NULL
 		|| focus == NULL)
 		return (false);
+	if (ctx->leaderboard_pixel_active)
+	{
+		leaderboard_pixel_layout_t	layout;
+
+		leaderboard_pixel_layout_build(ctx->bg_row, ctx->bg_col,
+			ctx->bg_rows, ctx->bg_cols, ctx->cell_px_y, ctx->cell_px_x,
+			&layout);
+		return (leaderboard_pixel_hit_test(&layout, input->y, input->x,
+				focus));
+	}
 	ncplane_yx(ctx->screen_plane, &plane_y, &plane_x);
 	button_geometry(ctx->screen_plane, &row, &back_x, &refresh_x);
 	if (button_hit(input, row, back_x, (int)strlen(LB_BACK_TEXT),
@@ -145,40 +158,30 @@ bool	render_leaderboard_hit_test(const render_ctx_t *ctx,
 void	render_leaderboard_destroy(render_ctx_t *ctx)
 {
 	render_screen_destroy(ctx);
+	render_leaderboard_pixel_destroy(ctx);
 }
 
-static bool	create_panel(render_ctx_t *ctx)
+static bool	create_panel(render_ctx_t *ctx, bool compatibility, bool *compact)
 {
 	ncplane_options	options;
+	leaderboard_layout_t	layout;
 	uint64_t		channels;
 	unsigned		std_rows;
 	unsigned		std_cols;
-	int				rows;
-	int				cols;
 
 	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
-	if (std_rows < LB_PANEL_MIN_ROWS || std_cols < LB_PANEL_MIN_COLS)
+	if (!leaderboard_layout_resolve((int)std_rows, (int)std_cols,
+			compatibility, &layout))
 		return (false);
 	memset(&options, 0, sizeof(options));
-	if (render_compatibility_mode(ctx))
-	{
-		options.y = std_rows > LB_PANEL_MIN_ROWS ? 1 : 0;
-		options.x = 0;
-		options.rows = (int)std_rows - options.y;
-		options.cols = (int)std_cols;
-	}
-	else
-	{
-		rows = min_int((int)std_rows - 4, LB_PANEL_MAX_ROWS);
-		cols = min_int((int)std_cols - 4, LB_PANEL_MAX_COLS);
-		options.rows = rows;
-		options.cols = cols;
-		options.y = (int)std_rows - rows - 2;
-		options.x = ((int)std_cols - cols) / 2;
-	}
+	options.y = layout.y;
+	options.x = layout.x;
+	options.rows = layout.rows;
+	options.cols = layout.cols;
 	ctx->screen_plane = ncplane_create(ctx->std, &options);
 	if (ctx->screen_plane == NULL)
 		return (false);
+	*compact = layout.compact;
 	channels = 0;
 	(void)ncchannels_set_fg_rgb8(&channels, LB_CREAM_R, LB_CREAM_G,
 		LB_CREAM_B);
@@ -189,22 +192,20 @@ static bool	create_panel(render_ctx_t *ctx)
 }
 
 static void	draw_leaderboard(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const leaderboard_state_t *state)
+	const app_screen_view_model_t *view, const leaderboard_state_t *state,
+	bool compatibility, bool compact)
 {
 	struct ncplane	*plane;
 	int				rows;
 	int				cols;
-	bool			compatibility;
 
 	plane = ctx->screen_plane;
 	rows = (int)ncplane_dim_y(plane);
 	cols = (int)ncplane_dim_x(plane);
-	compatibility = render_compatibility_mode(ctx);
 	draw_frame(plane, rows, cols, compatibility);
 	draw_header(plane, view, cols);
 	if (view->status == APP_DATA_READY && view->data.leaderboard.count > 0)
-		draw_rankings(plane, &view->data.leaderboard, rows, cols,
-			compatibility);
+		draw_rankings(plane, &view->data.leaderboard, rows, cols, compact);
 	else
 		draw_status(plane, view, rows, cols);
 	draw_controls(plane, state, rows, cols);
@@ -233,15 +234,33 @@ static void	draw_frame(struct ncplane *plane, int rows, int cols,
 		(void)ncplane_putchar_yx(plane, y, cols - 1, '|');
 		y++;
 	}
-	if (compatibility && cols >= 28 && rows >= 8)
+	if (compatibility)
+		draw_cell_backdrop(plane, rows, cols);
+}
+
+/**
+ * @brief Adds a restrained, bitmap-free competition motif to cell mode.
+ */
+static void	draw_cell_backdrop(struct ncplane *plane, int rows, int cols)
+{
+	int	x;
+
+	(void)ncplane_set_fg_rgb8(plane, LB_LAVENDER_R, LB_LAVENDER_G,
+		LB_LAVENDER_B);
+	x = 2;
+	while (x < cols - 2)
 	{
-		(void)ncplane_set_fg_rgb8(plane, LB_LAVENDER_R, LB_LAVENDER_G,
-			LB_LAVENDER_B);
-		(void)ncplane_putstr_yx(plane, 2, 3, "[] []");
-		(void)ncplane_putstr_yx(plane, 3, cols - 8, "[][]");
-		(void)ncplane_putstr_yx(plane, rows - 4, 4, "[][]");
-		(void)ncplane_putstr_yx(plane, rows - 5, cols - 9, "[] []");
+		(void)ncplane_putchar_yx(plane, 3, x, x % 4 == 0 ? '+' : '.');
+		x++;
 	}
+	(void)ncplane_set_fg_rgb8(plane, LB_PINK_R, LB_PINK_G, LB_PINK_B);
+	(void)ncplane_putstr_yx(plane, 5, 2, "[]");
+	(void)ncplane_putstr_yx(plane, 8, cols - 6, "[][]");
+	(void)ncplane_putstr_yx(plane, rows - 7, 2, "[][]");
+	(void)ncplane_putstr_yx(plane, rows - 9, cols - 5, "[]");
+	(void)ncplane_set_fg_rgb8(plane, LB_GOLD_R, LB_GOLD_G, LB_GOLD_B);
+	(void)ncplane_putchar_yx(plane, 3, cols / 2, '*');
+	(void)ncplane_putchar_yx(plane, rows - 3, cols / 2, '*');
 }
 
 static void	draw_header(struct ncplane *plane,
@@ -296,9 +315,9 @@ static void	draw_status(struct ncplane *plane,
 
 static void	draw_rankings(struct ncplane *plane,
 	const app_leaderboard_view_model_t *leaderboard, int rows, int cols,
-	bool compatibility)
+	bool compact)
 {
-	if (!compatibility && rows >= 27 && cols >= 66)
+	if (!compact)
 	{
 		draw_podium(plane, leaderboard, cols);
 		draw_rank_list(plane, leaderboard, 12, rows - 6, cols);
@@ -313,11 +332,11 @@ static void	draw_podium(struct ncplane *plane,
 	int	width;
 
 	width = min_int(24, cols / 3 - 2);
-	draw_podium_entry(plane, entry_for_position(leaderboard, 2),
+	draw_podium_entry(plane, leaderboard_entry_for_position(leaderboard, 2),
 		cols / 4, width, 2);
-	draw_podium_entry(plane, entry_for_position(leaderboard, 1),
+	draw_podium_entry(plane, leaderboard_entry_for_position(leaderboard, 1),
 		cols / 2, width, 1);
-	draw_podium_entry(plane, entry_for_position(leaderboard, 3),
+	draw_podium_entry(plane, leaderboard_entry_for_position(leaderboard, 3),
 		cols * 3 / 4, width, 3);
 }
 
@@ -404,7 +423,7 @@ static void	draw_rank_list(struct ncplane *plane,
 	row = first_row + 1;
 	while (position <= APP_LEADERBOARD_MAX_ENTRIES && row <= last_row)
 	{
-		entry = entry_for_position(leaderboard, position);
+		entry = leaderboard_entry_for_position(leaderboard, position);
 		if (entry != NULL)
 		{
 			snprintf(line, sizeof(line), "%2d         %-18.18s %12" PRIu64,
@@ -423,39 +442,41 @@ static void	draw_rank_list(struct ncplane *plane,
 static void	draw_compact_list(struct ncplane *plane,
 	const app_leaderboard_view_model_t *leaderboard, int rows, int cols)
 {
-	char	line[APP_TEXT_MAX + 40];
-	int		index;
-	int		row;
-	int		last_row;
+	const app_leaderboard_entry_view_model_t	*entry;
+	char										line[APP_TEXT_MAX + 40];
+	int											position;
+	int											row;
+	int											last_row;
 
 	(void)ncplane_set_fg_rgb8(plane, LB_PINK_R, LB_PINK_G, LB_PINK_B);
 	put_centered(plane, 4, "RANK   PLAYER                 SCORE",
 		cols, true);
-	index = 0;
+	position = 1;
 	row = 5;
 	last_row = rows - 5;
-	while (index < leaderboard->count && index < APP_LEADERBOARD_MAX_ENTRIES
-		&& row <= last_row)
+	while (position <= APP_LEADERBOARD_MAX_ENTRIES && row <= last_row)
 	{
-		snprintf(line, sizeof(line), "%2d     %-18.18s %12" PRIu64,
-			leaderboard->entries[index].position,
-			leaderboard->entries[index].username,
-			leaderboard->entries[index].score);
-		if (index < 3)
-			(void)ncplane_set_fg_rgb8(plane, index == 0 ? LB_GOLD_R
-				: (index == 1 ? LB_SILVER_R : LB_BRONZE_R),
-				index == 0 ? LB_GOLD_G : (index == 1 ? LB_SILVER_G
+		entry = leaderboard_entry_for_position(leaderboard, position);
+		if (entry != NULL)
+		{
+			snprintf(line, sizeof(line), "%2d     %-18.18s %12" PRIu64,
+				entry->position, entry->username, entry->score);
+			if (position <= 3)
+				(void)ncplane_set_fg_rgb8(plane, position == 1 ? LB_GOLD_R
+					: (position == 2 ? LB_SILVER_R : LB_BRONZE_R),
+					position == 1 ? LB_GOLD_G : (position == 2 ? LB_SILVER_G
 					: LB_BRONZE_G),
-				index == 0 ? LB_GOLD_B : (index == 1 ? LB_SILVER_B
+					position == 1 ? LB_GOLD_B : (position == 2 ? LB_SILVER_B
 					: LB_BRONZE_B));
-		else
-			(void)ncplane_set_fg_rgb8(plane, index % 2 == 0
-				? LB_CREAM_R : LB_LAVENDER_R, index % 2 == 0
-				? LB_CREAM_G : LB_LAVENDER_G, index % 2 == 0
-				? LB_CREAM_B : LB_LAVENDER_B);
-		put_centered(plane, row, line, cols, index < 3);
-		index++;
-		row++;
+			else
+				(void)ncplane_set_fg_rgb8(plane, position % 2 == 0
+					? LB_CREAM_R : LB_LAVENDER_R, position % 2 == 0
+					? LB_CREAM_G : LB_LAVENDER_G, position % 2 == 0
+					? LB_CREAM_B : LB_LAVENDER_B);
+			put_centered(plane, row, line, cols, position <= 3);
+			row++;
+		}
+		position++;
 	}
 }
 
@@ -511,22 +532,6 @@ static void	button_geometry(const struct ncplane *plane, int *row,
 	*back_x = (cols - (int)strlen(LB_BACK_TEXT)
 			- (int)strlen(LB_REFRESH_TEXT) - gap) / 2;
 	*refresh_x = *back_x + (int)strlen(LB_BACK_TEXT) + gap;
-}
-
-static const app_leaderboard_entry_view_model_t	*entry_for_position(
-	const app_leaderboard_view_model_t *leaderboard, int position)
-{
-	int	index;
-
-	index = 0;
-	while (leaderboard != NULL && index < leaderboard->count
-		&& index < APP_LEADERBOARD_MAX_ENTRIES)
-	{
-		if (leaderboard->entries[index].position == position)
-			return (&leaderboard->entries[index]);
-		index++;
-	}
-	return (NULL);
 }
 
 static void	put_centered(struct ncplane *plane, int row, const char *text,

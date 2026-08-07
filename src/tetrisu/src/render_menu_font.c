@@ -15,8 +15,6 @@ static const color_t	g_menu_colors[MENU_ITEM_COUNT] =
 };
 static const color_t	g_menu_shadow = {18, 5, 24};
 
-static bool	load_font_mask(pixel_asset_t *font);
-static void	font_mask_destroy(pixel_asset_t *font);
 static bool	compose_menu_pixels(const pixel_asset_t *font,
 					int width, int height,
 					uint32_t **pixels);
@@ -28,6 +26,12 @@ static void	draw_menu_glyph(uint32_t *pixels, int canvas_width,
 					int canvas_height, const pixel_asset_t *font, int glyph,
 					int dest_x, int dest_y, int glyph_size,
 					color_t tint, unsigned opacity);
+static void	draw_menu_texel(uint32_t *pixels, int canvas_width,
+					int canvas_height, const pixel_asset_t *font,
+					int source_y, int source_x, int dest_x, int dest_y,
+					int cell_width, int cell_height, color_t tint,
+					unsigned opacity);
+static int	menu_ink_span(int units, int glyph_size);
 static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
 					int canvas_height, int x, int y,
 					color_t tint, unsigned alpha);
@@ -57,10 +61,10 @@ struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
 	struct ncplane	*plane;
 
 	if (!render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc)
-		|| !load_font_mask(&font))
+		|| !render_font_mask_load(&font))
 		return (create_text_fallback(ctx));
 	plane = blit_menu_pixels(ctx, &font);
-	font_mask_destroy(&font);
+	render_font_mask_free(&font);
 	if (plane == NULL)
 		plane = create_text_fallback(ctx);
 	if (plane != NULL && ctx->bg_plane != NULL)
@@ -98,8 +102,14 @@ int	render_menu_label_y(const render_ctx_t *ctx, int index)
 
 /**
  * @brief Decodes and validates the shared 16-by-6 ASCII glyph sheet.
+ *
+ * Public so every surface drawing atlas lettering — menus, notifications —
+ * shares one loader and one validation of the sheet's geometry.
+ *
+ * @param font Receives the decoded RGBA mask; zeroed on failure.
+ * @return true when the sheet decoded at its expected size.
  */
-static bool	load_font_mask(pixel_asset_t *font)
+bool	render_font_mask_load(pixel_asset_t *font)
 {
 	struct ncvisual	*ncv;
 	ncvgeom			geom;
@@ -137,7 +147,7 @@ static bool	load_font_mask(pixel_asset_t *font)
 			if (ncvisual_at_yx(ncv, (unsigned)y, (unsigned)x,
 					&font->pixels[(size_t)y * font->width + x]) < 0)
 			{
-				font_mask_destroy(font);
+				render_font_mask_free(font);
 				ncvisual_destroy(ncv);
 				return (false);
 			}
@@ -149,8 +159,15 @@ static bool	load_font_mask(pixel_asset_t *font)
 	return (true);
 }
 
-static void	font_mask_destroy(pixel_asset_t *font)
+/**
+ * @brief Releases a glyph sheet decoded by render_font_mask_load().
+ *
+ * @param font Mask to release; safe to call on an already-empty mask.
+ */
+void	render_font_mask_free(pixel_asset_t *font)
 {
+	if (font == NULL)
+		return ;
 	free(font->pixels);
 	memset(font, 0, sizeof(*font));
 }
@@ -236,33 +253,81 @@ static void	draw_menu_text(uint32_t *pixels, int canvas_width,
 	}
 }
 
+/**
+ * @brief Scales a signed offset in atlas rows into destination pixels.
+ *
+ * Rows above the cap band are negative, and C division truncates towards zero,
+ * which would sample the wrong source row for them.
+ */
+static int	menu_ink_span(int units, int glyph_size)
+{
+	if (units >= 0)
+		return (units * glyph_size / FONT_INK_HEIGHT);
+	return (-((-units * glyph_size + FONT_INK_HEIGHT - 1) / FONT_INK_HEIGHT));
+}
+
+/**
+ * @brief Draws one atlas glyph with its ascender dots and descender tails.
+ *
+ * Walking source rows keeps the whole ink band on the cap band's scale while
+ * leaving the cap row itself at dest_y, so no existing label shifts.
+ */
 static void	draw_menu_glyph(uint32_t *pixels, int canvas_width,
 	int canvas_height, const pixel_asset_t *font, int glyph,
 	int dest_x, int dest_y, int glyph_size,
 	color_t tint, unsigned opacity)
 {
-	int			source_x;
-	int			source_y;
+	int	source_y;
+	int	source_x;
+
+	source_y = FONT_INK_TOP;
+	while (source_y < FONT_INK_BOTTOM)
+	{
+		source_x = 0;
+		while (source_x < FONT_GLYPH_WIDTH)
+		{
+			draw_menu_texel(pixels, canvas_width, canvas_height, font,
+				(glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + source_y,
+				(glyph % FONT_COLUMNS) * FONT_GLYPH_WIDTH + source_x,
+				dest_x + source_x * glyph_size / FONT_GLYPH_WIDTH,
+				dest_y + menu_ink_span(source_y - FONT_INK_Y, glyph_size),
+				(source_x + 1) * glyph_size / FONT_GLYPH_WIDTH
+				- source_x * glyph_size / FONT_GLYPH_WIDTH,
+				menu_ink_span(source_y + 1 - FONT_INK_Y, glyph_size)
+				- menu_ink_span(source_y - FONT_INK_Y, glyph_size),
+				tint, opacity);
+			source_x++;
+		}
+		source_y++;
+	}
+}
+
+/**
+ * @brief Expands one atlas texel into its destination rectangle.
+ */
+static void	draw_menu_texel(uint32_t *pixels, int canvas_width,
+	int canvas_height, const pixel_asset_t *font, int source_y, int source_x,
+	int dest_x, int dest_y, int cell_width, int cell_height,
+	color_t tint, unsigned opacity)
+{
 	unsigned	alpha;
 	int			y;
 	int			x;
 
+	if (cell_width <= 0 || cell_height <= 0)
+		return ;
+	alpha = ncpixel_a(font->pixels[(size_t)source_y * font->width + source_x]);
+	alpha = (alpha * opacity + 127u) / 255u;
+	if (alpha == 0)
+		return ;
 	y = 0;
-	while (y < glyph_size)
+	while (y < cell_height)
 	{
-		source_y = (glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_Y
-			+ y * FONT_INK_HEIGHT / glyph_size;
 		x = 0;
-		while (x < glyph_size)
+		while (x < cell_width)
 		{
-			source_x = (glyph % FONT_COLUMNS) * FONT_GLYPH_WIDTH
-				+ x * FONT_GLYPH_WIDTH / glyph_size;
-			alpha = ncpixel_a(font->pixels[(size_t)source_y
-					* font->width + source_x]);
-			alpha = (alpha * opacity + 127u) / 255u;
-			if (alpha != 0)
-				put_menu_pixel(pixels, canvas_width, canvas_height,
-					dest_x + x, dest_y + y, tint, alpha);
+			put_menu_pixel(pixels, canvas_width, canvas_height,
+				dest_x + x, dest_y + y, tint, alpha);
 			x++;
 		}
 		y++;

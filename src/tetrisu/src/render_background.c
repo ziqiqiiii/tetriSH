@@ -12,6 +12,12 @@ static void	set_opaque_backdrop(struct ncplane *plane);
 static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 				bool stretch, ncscale_e scaling, ncblitter_e blitter,
 				uint64_t flags);
+static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv);
+static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
+				int width, int height);
+static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
+				uint32_t *key);
+static int	next_input_wait_ms(const render_ctx_t *ctx);
 
 /**
  * @brief Starts notcurses and renders the initial background image.
@@ -80,6 +86,73 @@ bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
 bool	render_pixels_available(const render_ctx_t *ctx)
 {
 	return (ctx != NULL && ctx->pixels != TETRISU_PIXELS_NONE);
+}
+
+/**
+ * @brief Reports whether a live plane already occupies the wanted geometry.
+ *
+ * Reusing a plane instead of replacing it is what keeps the stationary tier
+ * cheap: destroying a sprixel plane damages every cell it covered, so the
+ * bitmap underneath has to be retransmitted. Writing into a plane that is
+ * already the right size and place touches only that plane.
+ *
+ * @param plane Candidate plane, which may be NULL.
+ * @param y Wanted top row, in terminal cells.
+ * @param x Wanted left column, in terminal cells.
+ * @param rows Wanted height in cells.
+ * @param cols Wanted width in cells.
+ * @return true when @p plane can be written in place.
+ */
+bool	render_plane_geometry_matches(struct ncplane *plane, int y, int x,
+	unsigned rows, unsigned cols)
+{
+	int			plane_y;
+	int			plane_x;
+	unsigned	plane_rows;
+	unsigned	plane_cols;
+
+	if (plane == NULL)
+		return (false);
+	ncplane_yx(plane, &plane_y, &plane_x);
+	ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+	return (plane_y == y && plane_x == x && plane_rows == rows
+		&& plane_cols == cols);
+}
+
+/**
+ * @brief Blits an RGBA surface into an existing plane at zero offset.
+ *
+ * @param ctx Active render context.
+ * @param plane Destination plane.
+ * @param pixels First pixel of the surface.
+ * @param width Surface width in pixels.
+ * @param height Surface height in pixels.
+ * @param row_stride Source row width in pixels, which differs from @p width
+ * whenever the surface is a window cut from a larger canvas.
+ * @return true when the surface reached the plane.
+ */
+bool	render_plane_blit_rgba(render_ctx_t *ctx, struct ncplane *plane,
+	const uint32_t *pixels, int width, int height, int row_stride)
+{
+	struct ncvisual			*ncv;
+	struct ncvisual_options	vopts;
+
+	ncv = ncvisual_from_rgba(pixels, height,
+			row_stride * (int)sizeof(*pixels), width);
+	if (ncv == NULL)
+		return (false);
+	memset(&vopts, 0, sizeof(vopts));
+	vopts.n = plane;
+	vopts.scaling = NCSCALE_NONE;
+	vopts.blitter = NCBLIT_PIXEL;
+	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE | NCVISUAL_OPTION_NODEGRADE;
+	if (ncvisual_blit(ctx->nc, ncv, &vopts) == NULL)
+	{
+		ncvisual_destroy(ncv);
+		return (false);
+	}
+	ncvisual_destroy(ncv);
+	return (true);
 }
 
 /**
@@ -245,16 +318,140 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
 	if (ncv == NULL)
 		return (-1);
 	result = render_background_replace_visual(ctx, ncv, stretch);
+	/* This visual is ours to consume, so it can be reshaped for the cache. */
+	if (result == 0)
+		capture_backdrop(ctx, ncv);
 	ncvisual_destroy(ncv);
 	return (result);
 }
 
 /**
+ * @brief Drops the cached backdrop snapshot.
+ *
+ * Callers that replace the backdrop through a visual they still own cannot
+ * hand it over for caching, so they invalidate instead of caching stale art.
+ *
+ * @param ctx Active render context.
+ */
+void	render_backdrop_forget(render_ctx_t *ctx)
+{
+	if (ctx == NULL)
+		return ;
+	free(ctx->backdrop_pixels);
+	ctx->backdrop_pixels = NULL;
+	ctx->backdrop_width = 0;
+	ctx->backdrop_height = 0;
+}
+
+/**
+ * @brief Returns the backdrop pixels a stationary overlay must composite over.
+ *
+ * Active screen compositors keep richer caches than the plain backdrop — each
+ * includes the live content an overlay may cross — so the active leaderboard
+ * and then Settings win when their geometry still matches. Every candidate is
+ * anchored at bg_row/bg_col.
+ *
+ * @param ctx Active render context.
+ * @param width Receives the snapshot width in pixels.
+ * @param height Receives the snapshot height in pixels.
+ * @return Borrowed pixels, or NULL when no snapshot matches the geometry.
+ */
+const uint32_t	*render_backdrop_pixels(const render_ctx_t *ctx,
+	int *width, int *height)
+{
+	if (ctx == NULL || ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
+		|| ctx->bg_rows <= 0 || ctx->bg_cols <= 0)
+		return (NULL);
+	*width = ctx->bg_cols * ctx->cell_px_x;
+	*height = ctx->bg_rows * ctx->cell_px_y;
+	if (ctx->leaderboard_pixel_active && ctx->leaderboard_pixels != NULL
+		&& ctx->leaderboard_pixels_width == *width
+		&& ctx->leaderboard_pixels_height == *height)
+		return (ctx->leaderboard_pixels);
+	if (ctx->settings_static_pixels != NULL
+		&& ctx->settings_pixels_width == *width
+		&& ctx->settings_pixels_height == *height)
+		return (ctx->settings_static_pixels);
+	if (ctx->settings_background_pixels != NULL
+		&& ctx->settings_background_rows == ctx->bg_rows
+		&& ctx->settings_background_cols == ctx->bg_cols)
+		return (ctx->settings_background_pixels);
+	if (ctx->backdrop_pixels != NULL && ctx->backdrop_width == *width
+		&& ctx->backdrop_height == *height)
+		return (ctx->backdrop_pixels);
+	return (NULL);
+}
+
+/**
+ * @brief Flattens the fitted backdrop into the reusable overlay snapshot.
+ *
+ * Only the stationary tier needs it, and only that tier pays for it: the walk
+ * is one ncvisual_at_yx() per pixel, which is why it runs on backdrop changes
+ * rather than per frame. The visual is resized in place, so callers must own
+ * it and must not reuse it afterwards.
+ *
+ * @param ctx Active render context.
+ * @param ncv Disposable visual holding the new backdrop.
+ */
+static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv)
+{
+	int	width;
+	int	height;
+
+	render_backdrop_forget(ctx);
+	if (ctx->pixels != TETRISU_PIXELS_STATIONARY || ctx->cell_px_x <= 0
+		|| ctx->cell_px_y <= 0 || ctx->bg_rows <= 0 || ctx->bg_cols <= 0
+		|| ctx->bg_rows > INT_MAX / ctx->cell_px_y
+		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x)
+		return ;
+	width = ctx->bg_cols * ctx->cell_px_x;
+	height = ctx->bg_rows * ctx->cell_px_y;
+	if ((size_t)width > SIZE_MAX / (size_t)height / sizeof(uint32_t))
+		return ;
+	if (ncvisual_resize(ncv, height, width) != 0)
+		return ;
+	ctx->backdrop_pixels = malloc((size_t)width * (size_t)height
+			* sizeof(*ctx->backdrop_pixels));
+	if (ctx->backdrop_pixels == NULL)
+		return ;
+	read_backdrop_pixels(ctx, ncv, width, height);
+	ctx->backdrop_width = width;
+	ctx->backdrop_height = height;
+}
+
+/**
+ * @brief Copies a fitted visual into the snapshot buffer as opaque pixels.
+ */
+static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
+	int width, int height)
+{
+	uint32_t	pixel;
+	int			y;
+	int			x;
+
+	y = 0;
+	while (y < height)
+	{
+		x = 0;
+		while (x < width)
+		{
+			if (ncvisual_at_yx(ncv, (unsigned)y, (unsigned)x, &pixel) < 0)
+				pixel = ncpixel(8, 8, 31);
+			ncpixel_set_a(&pixel, 255u);
+			ctx->backdrop_pixels[(size_t)y * width + x] = pixel;
+			x++;
+		}
+		y++;
+	}
+}
+
+/**
  * @brief Replaces the background through an exact-size bitmap plane.
  *
- * Auth screens contain small static lettering that cannot survive conversion
- * to a 4x2 terminal-cell mosaic. The visual is resized once to the physical
- * pixel geometry of its fitted plane, then transferred without another scale.
+ * Auth, Settings, and Leaderboard artwork contains authored detail that cannot
+ * survive conversion to a 4x2 terminal-cell mosaic. The visual is resized once
+ * to the physical pixel geometry of its fitted plane, then transferred without
+ * another scale.
  * NODEGRADE keeps this path honest: unsupported terminals fall back through
  * the caller's native renderer instead of quietly degrading the artwork.
  *
@@ -305,6 +502,8 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 	}
 	result = replace_visual_scaled(ctx, ncv, stretch, NCSCALE_NONE,
 			NCBLIT_PIXEL, NCVISUAL_OPTION_NODEGRADE);
+	if (result == 0)
+		capture_backdrop(ctx, ncv);
 	ncvisual_destroy(ncv);
 	return (result);
 }
@@ -319,6 +518,12 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 int	render_background_replace_visual(render_ctx_t *ctx,
 	struct ncvisual *ncv, bool stretch)
 {
+	/*
+	 * The caller keeps ncv, so it cannot be reshaped into a snapshot here.
+	 * Dropping the old one is the honest outcome: overlays fall back to
+	 * plain transparency rather than compositing over a stale backdrop.
+	 */
+	render_backdrop_forget(ctx);
 	return (replace_visual_scaled(ctx, ncv, stretch, NCSCALE_STRETCH,
 			preferred_blitter(ctx, 0, 0), NCVISUAL_OPTION_NOINTERPOLATE));
 }
@@ -384,6 +589,61 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 }
 
 /**
+ * @brief Consumes one already-parsed event from the Notcurses input queue.
+ *
+ * Notcurses parses a whole terminal read burst into its own queue but signals
+ * the input-ready descriptor only while that queue is non-empty at poll time.
+ * A loop that sleeps on the descriptor after taking a single event therefore
+ * strands the rest of a burst until the *next* keystroke wakes the descriptor,
+ * which delivers every press one keystroke late. The queue must be exhausted
+ * before poll() is allowed to sleep again.
+ *
+ * @param ctx Pointer to the render context.
+ * @param event Destination for the complete Notcurses input event.
+ * @param key Receives the key id when an event is taken.
+ * @return true when @p key holds an event the caller must handle.
+ */
+static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event, uint32_t *key)
+{
+	while (1)
+	{
+		memset(event, 0, sizeof(*event));
+		errno = 0;
+		*key = notcurses_get_nblock(ctx->nc, event);
+		if (*key == 0)
+			return (false);
+		if (*key == (uint32_t)-1)
+		{
+			if (errno == EINTR)
+				continue ;
+			return (true);
+		}
+		/* Ignore keyboard key-up events so one arrow tap moves once. Mouse
+		 * motion can legitimately arrive with release/no-button state and
+		 * must still reach the menu for hover selection. */
+		if (event->evtype != NCTYPE_RELEASE || nckey_mouse_p(*key))
+			return (true);
+	}
+}
+
+/**
+ * @brief Computes the poll timeout honouring the notification wake deadline.
+ *
+ * @param ctx Pointer to the render context.
+ * @return Milliseconds to wait before the next timer-driven repaint.
+ */
+static int	next_input_wait_ms(const render_ctx_t *ctx)
+{
+	int	notification_wait_ms;
+
+	notification_wait_ms = render_notification_next_wake_ms(ctx);
+	if (notification_wait_ms >= 0
+		&& notification_wait_ms < RENDER_RESIZE_POLL_MS)
+		return (notification_wait_ms);
+	return (RENDER_RESIZE_POLL_MS);
+}
+
+/**
  * @brief Blocks until one input event is available, returning its key id.
  *
  * @param ctx Pointer to the render context.
@@ -413,8 +673,6 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 	ncinput		*event;
 	struct pollfd	input_fd;
 	int			poll_result;
-	int			wait_ms;
-	int			notification_wait_ms;
 	uint32_t	key;
 
 	event = input;
@@ -425,12 +683,11 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 	input_fd.events = POLLIN;
 	while (1)
 	{
-		memset(event, 0, sizeof(*event));
-		wait_ms = RENDER_RESIZE_POLL_MS;
-		notification_wait_ms = render_notification_next_wake_ms(ctx);
-		if (notification_wait_ms >= 0 && notification_wait_ms < wait_ms)
-			wait_ms = notification_wait_ms;
-		poll_result = poll(&input_fd, 1, wait_ms);
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
+		if (take_parsed_event(ctx, event, &key))
+			return (key);
+		poll_result = poll(&input_fd, 1, next_input_wait_ms(ctx));
 		if (poll_result < 0)
 		{
 			if (errno == EINTR)
@@ -447,21 +704,6 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
 		}
 		if ((input_fd.revents & POLLIN) == 0)
 			return ((uint32_t)-1);
-		errno = 0;
-		key = notcurses_get_nblock(ctx->nc, event);
-		if (key == 0)
-			continue ;
-		if (key == (uint32_t)-1)
-		{
-			if (errno == EINTR)
-				continue ;
-			return (key);
-		}
-		/* Ignore keyboard key-up events so one arrow tap moves once. Mouse
-		 * motion can legitimately arrive with release/no-button state and
-		 * must still reach the menu for hover selection. */
-		if (event->evtype != NCTYPE_RELEASE || nckey_mouse_p(key))
-			return (key);
 	}
 }
 
@@ -475,9 +717,11 @@ void	render_teardown(render_ctx_t *ctx)
 	if (ctx->nc != NULL)
 	{
 		render_notification_destroy(ctx);
+		render_backdrop_forget(ctx);
 		render_compatibility_badge_hide(ctx);
 		render_auth_pixel_overlay_destroy(ctx);
 		render_auth_pixel_background_reset(ctx);
+		render_leaderboard_pixel_destroy(ctx);
 		render_settings_pixel_destroy(ctx);
 		if (ctx->auth_font_visual != NULL)
 		{
