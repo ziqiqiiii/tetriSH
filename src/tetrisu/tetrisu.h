@@ -175,12 +175,6 @@
 # define UI_NOTIFICATION_MESSAGE_MAX	31
 # define UI_NOTIFICATION_OWNERSHIP_TITLE	"ITEM NOT OWNED"
 # define UI_NOTIFICATION_OWNERSHIP_MESSAGE	"VISIT MARKETPLACE TO BUY"
-/* Titles stay inside UI_NOTIFICATION_TITLE_MAX so nothing is silently cut. */
-# define UI_NOTIFICATION_PURCHASE_TITLE	"PURCHASED"
-# define UI_NOTIFICATION_OWNED_TITLE	"ALREADY OWNED"
-# define UI_NOTIFICATION_FUNDS_TITLE	"NOT ENOUGH"
-# define UI_NOTIFICATION_FUNDS_MESSAGE	"WALLET POINTS TOO LOW"
-# define UI_NOTIFICATION_EQUIPPED_TITLE	"EQUIPPED"
 # define UI_NOTIFICATION_HOLD_MS	900
 # define UI_NOTIFICATION_FADE_MS	180
 # define UI_NOTIFICATION_FRAME_MS	33
@@ -315,66 +309,96 @@
  */
 # define MARKETPLACE_REF_CONTENT_X	262
 # define MARKETPLACE_REF_CONTENT_WIDTH	924
-# define MARKETPLACE_REF_TITLE_Y	28
-# define MARKETPLACE_REF_TITLE_HEIGHT	58
-# define MARKETPLACE_REF_STAT_Y	104
-# define MARKETPLACE_REF_STAT_WIDTH	300
-# define MARKETPLACE_REF_STAT_HEIGHT	74
-# define MARKETPLACE_REF_STAT_STEP_X	312
+# define MARKETPLACE_REF_TITLE_Y	22
+# define MARKETPLACE_REF_TITLE_HEIGHT	54
 /*
  * Region rectangles. Bitmap planes must never overlap on a stationary
  * protocol, and every plane is expanded out to whole cells before it is
- * created, so the bands below are separated by 75 reference units vertically
+ * created, so the bands below are separated by 60 reference units vertically
  * and 96 horizontally. test_region_planes_never_overlap sweeps the supported
  * geometries and asserts that those gaps survive coarse cell sizes.
+ *
+ * The wallet card is a region rather than part of the static frame because a
+ * purchase changes it. Anything a purchase can change has to live above the
+ * full-screen plane: rebuilding that plane re-emits a full-screen bitmap, and
+ * on a stationary protocol it lands over every region plane and blanks the
+ * screen until the next keystroke. With the wallet up here nothing the user
+ * can do inside the Marketplace moves the static signature at all.
+ *
+ * Only the leftmost card is a region, and that is deliberate. Notification
+ * cards are planes too, and they are raised into the top right corner, so a
+ * region reaching that far along the top row would overlap one - which is the
+ * same forbidden overlap, and it was what re-emitted the full-screen bitmap
+ * and blanked the screen after a purchase. Best score and rank cannot change
+ * inside the Marketplace, so they stay in the static frame and the region
+ * stops well left of anything a notification can reach.
  */
+# define MARKETPLACE_REF_STATS_X	262
+# define MARKETPLACE_REF_STATS_Y	88
+# define MARKETPLACE_REF_STATS_HEIGHT	72
+# define MARKETPLACE_REF_STAT_WIDTH	300
+# define MARKETPLACE_REF_STAT_STEP_X	312
 # define MARKETPLACE_REF_CHARACTERS_X	262
-# define MARKETPLACE_REF_CHARACTERS_Y	200
+# define MARKETPLACE_REF_CHARACTERS_Y	220
 # define MARKETPLACE_REF_CHARACTERS_WIDTH	414
-# define MARKETPLACE_REF_CHARACTERS_HEIGHT	270
+# define MARKETPLACE_REF_CHARACTERS_HEIGHT	230
 # define MARKETPLACE_REF_THEMES_X	772
-# define MARKETPLACE_REF_THEMES_Y	200
+# define MARKETPLACE_REF_THEMES_Y	220
 # define MARKETPLACE_REF_THEMES_WIDTH	414
-# define MARKETPLACE_REF_THEMES_HEIGHT	270
+# define MARKETPLACE_REF_THEMES_HEIGHT	230
 # define MARKETPLACE_REF_DETAIL_X	262
-# define MARKETPLACE_REF_DETAIL_Y	545
+# define MARKETPLACE_REF_DETAIL_Y	510
 # define MARKETPLACE_REF_DETAIL_WIDTH	924
-# define MARKETPLACE_REF_DETAIL_HEIGHT	270
+# define MARKETPLACE_REF_DETAIL_HEIGHT	300
 # define MARKETPLACE_REF_CONTROLS_X	262
-# define MARKETPLACE_REF_CONTROLS_Y	890
+# define MARKETPLACE_REF_CONTROLS_Y	870
 # define MARKETPLACE_REF_CONTROLS_WIDTH	924
-# define MARKETPLACE_REF_CONTROLS_HEIGHT	172
+# define MARKETPLACE_REF_CONTROLS_HEIGHT	180
 # define MARKETPLACE_REF_BUTTON_FIRST_X	262
 # define MARKETPLACE_REF_BUTTON_STEP_X	238
-# define MARKETPLACE_REF_BUTTON_Y	900
+# define MARKETPLACE_REF_BUTTON_Y	884
 # define MARKETPLACE_REF_BUTTON_WIDTH	210
 # define MARKETPLACE_REF_BUTTON_HEIGHT	92
-# define MARKETPLACE_REF_HINT_Y	1018
-/* Inventory slot geometry, shared by the bitmap and cell inventory drawing. */
-# define MARKETPLACE_REF_PANEL_TITLE_Y	10
+# define MARKETPLACE_REF_FEEDBACK_Y	984
+# define MARKETPLACE_REF_HINT_Y	1016
+/*
+ * Inventory slot geometry. Each panel is sized so its rows fill it: the
+ * characters panel draws one row of four and the themes panel two, so they
+ * start at different heights and step differently inside the same box.
+ */
+# define MARKETPLACE_REF_PANEL_TITLE_Y	8
 # define MARKETPLACE_REF_PANEL_TITLE_GLYPH	20
 # define MARKETPLACE_REF_SLOT_INSET	10
-# define MARKETPLACE_REF_SLOT_FIRST_Y	48
 # define MARKETPLACE_REF_SLOT_PAD_X	3
 # define MARKETPLACE_REF_SLOT_PAD_Y	4
 # define MARKETPLACE_REF_SLOT_NAME_GLYPH	10
 # define MARKETPLACE_REF_SLOT_PRICE_GLYPH	10
-# define MARKETPLACE_REF_CHARACTER_STEP_Y	200
-# define MARKETPLACE_REF_CHARACTER_THUMB_INSET	24
+# define MARKETPLACE_REF_CHARACTER_FIRST_Y	48
+# define MARKETPLACE_REF_CHARACTER_STEP_Y	170
+# define MARKETPLACE_REF_CHARACTER_THUMB_INSET	8
 # define MARKETPLACE_REF_CHARACTER_THUMB_HEIGHT	118
 # define MARKETPLACE_REF_CHARACTER_NAME_Y	126
-# define MARKETPLACE_REF_CHARACTER_PRICE_Y	148
-# define MARKETPLACE_REF_THEME_STEP_Y	106
-# define MARKETPLACE_REF_THEME_THUMB_INSET	12
+# define MARKETPLACE_REF_CHARACTER_PRICE_Y	150
+# define MARKETPLACE_REF_THEME_FIRST_Y	42
+# define MARKETPLACE_REF_THEME_STEP_Y	86
+# define MARKETPLACE_REF_THEME_THUMB_INSET	10
 # define MARKETPLACE_REF_THEME_THUMB_HEIGHT	46
 # define MARKETPLACE_REF_THEME_NAME_Y	52
-# define MARKETPLACE_REF_THEME_PRICE_Y	74
-/* Detail card interior, measured from the card origin. */
+# define MARKETPLACE_REF_THEME_PRICE_Y	72
+/*
+ * Detail card interior, measured from the card origin. A character is sold on
+ * four powers, so its preview stays narrow and leaves the width to the text; a
+ * theme has three lines to say and the artwork is the product, so its preview
+ * takes the space the powers would have used.
+ */
 # define MARKETPLACE_REF_DETAIL_PREVIEW_X	18
-# define MARKETPLACE_REF_DETAIL_PREVIEW_Y	22
-# define MARKETPLACE_REF_DETAIL_PREVIEW_SIZE	210
-# define MARKETPLACE_REF_DETAIL_TEXT_X	244
-# define MARKETPLACE_REF_DETAIL_TEXT_WIDTH	660
+# define MARKETPLACE_REF_DETAIL_PREVIEW_Y	26
+# define MARKETPLACE_REF_DETAIL_PREVIEW_HEIGHT	244
+# define MARKETPLACE_REF_DETAIL_PREVIEW_CHARACTER_W	226
+# define MARKETPLACE_REF_DETAIL_PREVIEW_THEME_W	300
+# define MARKETPLACE_REF_DETAIL_TEXT_CHARACTER_X	262
+# define MARKETPLACE_REF_DETAIL_TEXT_THEME_X	336
+# define MARKETPLACE_REF_DETAIL_TEXT_INSET	20
 # define MARKETPLACE_REF_DETAIL_NAME_Y	18
 # define MARKETPLACE_REF_DETAIL_STATUS_Y	58
 /*
@@ -825,6 +849,27 @@ typedef enum e_marketplace_action
 	MARKETPLACE_ACTION_QUIT
 }	marketplace_action_t;
 
+/*
+ * Marketplace feedback is a line inside the control region, not a floating
+ * notification card. A notification is a plane of its own raised over the
+ * screen, and raising or dropping one damages the cells it covers, which makes
+ * a stationary protocol retransmit the full-screen bitmap underneath - over
+ * every region plane, blanking the shelves, the card and the buttons until the
+ * next keystroke. Keeping every pixel this screen draws inside its own regions
+ * removes that whole class of failure, and the outcome of a purchase is
+ * already visible in the wallet and the tile anyway.
+ */
+typedef enum e_marketplace_feedback
+{
+	MARKETPLACE_FEEDBACK_NONE,
+	MARKETPLACE_FEEDBACK_BOUGHT,
+	MARKETPLACE_FEEDBACK_EQUIPPED,
+	MARKETPLACE_FEEDBACK_OWNED,
+	MARKETPLACE_FEEDBACK_INSUFFICIENT,
+	MARKETPLACE_FEEDBACK_LOCKED,
+	MARKETPLACE_FEEDBACK_VOLUME
+}	marketplace_feedback_t;
+
 typedef enum e_marketplace_purchase_result
 {
 	MARKETPLACE_PURCHASE_INVALID,
@@ -843,6 +888,8 @@ typedef struct s_marketplace_state
 	marketplace_section_t	section;
 	marketplace_section_t	preview;
 	marketplace_focus_t		focus;
+	marketplace_feedback_t	feedback;
+	int						feedback_value;
 	int						character_slot;
 	int						theme_slot;
 	int						character_slots;
@@ -871,6 +918,7 @@ typedef struct s_marketplace_layout
 	int					cell_px_y;
 	bool				opaque_background;
 	marketplace_rect_t	title;
+	marketplace_rect_t	wallet_card;
 	marketplace_rect_t	stats[3];
 	marketplace_rect_t	characters;
 	marketplace_rect_t	themes;
@@ -1166,6 +1214,7 @@ typedef struct
 	struct ncplane		*settings_themes_plane;
 	struct ncplane		*settings_volume_plane;
 	struct ncplane		*settings_ability_plane;
+	struct ncplane		*marketplace_stats_plane;
 	struct ncplane		*marketplace_characters_plane;
 	struct ncplane		*marketplace_themes_plane;
 	struct ncplane		*marketplace_detail_plane;
@@ -1262,6 +1311,7 @@ typedef struct
 	int					marketplace_background_rows;
 	int					marketplace_background_cols;
 	uint64_t			marketplace_static_signature;
+	uint64_t			marketplace_stats_signature;
 	uint64_t			marketplace_characters_signature;
 	uint64_t			marketplace_themes_signature;
 	uint64_t			marketplace_detail_signature;
@@ -1617,8 +1667,6 @@ bool			ui_notification_show(ui_notification_stack_t *stack,
 					const char *title, int percent, uint64_t now_ms);
 bool			ui_notification_show_ownership(
 					ui_notification_stack_t *stack, uint64_t now_ms);
-bool			ui_notification_show_notice(ui_notification_stack_t *stack,
-					const char *title, const char *message, uint64_t now_ms);
 bool			ui_notification_update(ui_notification_stack_t *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const ui_notification_t *notification,
@@ -1662,8 +1710,6 @@ void				render_notification_show_volume(render_ctx_t *ctx,
 void				render_notification_queue_volume(render_ctx_t *ctx,
 					int volume);
 void				render_notification_queue_ownership(render_ctx_t *ctx);
-void				render_notification_queue_notice(render_ctx_t *ctx,
-					const char *title, const char *message);
 void				render_notification_tick(render_ctx_t *ctx);
 int					render_notification_next_wake_ms(
 					const render_ctx_t *ctx);
@@ -1793,6 +1839,10 @@ settings_equip_result_t	marketplace_equip_focused(
 bool			marketplace_can_afford(
 					const app_marketplace_view_model_t *market,
 					const app_catalogue_item_view_model_t *item);
+void			marketplace_set_feedback(marketplace_state_t *state,
+					marketplace_feedback_t feedback, int value);
+const char		*marketplace_feedback_text(const marketplace_state_t *state,
+					char *out, size_t size);
 
 /* MARKETPLACE_LAYOUT.C */
 void			marketplace_layout_build(int origin_y, int origin_x, int rows,

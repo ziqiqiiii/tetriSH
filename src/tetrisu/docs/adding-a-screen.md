@@ -271,8 +271,26 @@ and to the terminal you developed in.
 | Regions blank each other when a card opens | two region planes overlapping on a stationary tier | make overlapping regions mutually exclusive |
 | Extra ~21 ms per keystroke | plane destroyed and recreated per frame | reuse the plane, blit in place |
 | Rows overlap the line below at some sizes | row pitch set from the glyph size | pitch rows from the ink band, not the cap height |
+| Whole screen blanks after an action | a notification plane raised over a full-screen bitmap | keep changing values in regions; report results inside one |
 
-That last one is easy to miss because it only bites text with descenders. The
+The blanking one is the fifth bug wearing a different hat, and it is worth
+spelling out because nothing in a screen's own code looks wrong. A
+notification is a plane like any other. Raising or dropping one damages the
+cells it covers, and a stationary protocol repairs that by retransmitting the
+bitmap underneath - which, for a full-screen static plane, means re-emitting
+it over every region above it. Settings survives this because its top strip is
+static and its notifications never coincide with a static rebuild. A screen
+where an action moves a value in the static layer *and* raises a card does not.
+
+The fix is the same rule stated at the top, applied to actions rather than to
+focus: **anything an action can change belongs in a region, not in the static
+layer**, and the result of that action belongs inside a region too. The
+Marketplace puts its wallet on a region plane, keeps best score and rank in
+the static frame because nothing there can move them, and reports purchases on
+a line inside its control region. Nothing the user does rebuilds its
+full-screen layer at all, so the failure cannot occur.
+
+The descender one is easy to miss because it only bites text with descenders. The
 shared atlas draws its whole ink band, so a glyph reaches roughly a quarter of
 its size above the baseline and 1.4 times its size below it — the tails of
 `g j p q y` and the comma live down there. A column of rows spaced by glyph

@@ -35,11 +35,9 @@ static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 				const app_data_provider_t *provider,
 				app_navigation_t *navigation, const menu_selection_t *menu);
 static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_screen_view_model_t *view,
-				const marketplace_state_t *state);
+				app_screen_view_model_t *view, marketplace_state_t *state);
 static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_screen_view_model_t *view,
-				const marketplace_state_t *state);
+				app_screen_view_model_t *view, marketplace_state_t *state);
 static void	discard_queued_input(render_ctx_t *ctx);
 static void	leaderboard_loading_view(const app_data_provider_t *provider,
 				app_screen_view_model_t *view);
@@ -922,21 +920,23 @@ static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 			return (-1);
 		if (marketplace_action_leaves_screen(action))
 			discard_queued_input(ctx);
-		if (action == MARKETPLACE_ACTION_VOLUME_UP)
+		if (action == MARKETPLACE_ACTION_VOLUME_UP
+			|| action == MARKETPLACE_ACTION_VOLUME_DOWN)
 		{
 			audio_play_menu_select(audio);
-			audio_volume_up(audio);
+			if (action == MARKETPLACE_ACTION_VOLUME_UP)
+				audio_volume_up(audio);
+			else
+				audio_volume_down(audio);
 			view.data.marketplace.music_volume = audio->music_volume;
-			render_notification_queue_volume(ctx, audio->music_volume);
-			if (!render_marketplace_show(ctx, &view, &state, false))
-				return (-1);
-		}
-		else if (action == MARKETPLACE_ACTION_VOLUME_DOWN)
-		{
-			audio_play_menu_select(audio);
-			audio_volume_down(audio);
-			view.data.marketplace.music_volume = audio->music_volume;
-			render_notification_queue_volume(ctx, audio->music_volume);
+			/*
+			 * Reported on the control row rather than through the shared
+			 * volume card. That card is a plane raised over the screen, and
+			 * on a stationary protocol raising one forces the full-screen
+			 * bitmap to be retransmitted over every region plane here.
+			 */
+			marketplace_set_feedback(&state, MARKETPLACE_FEEDBACK_VOLUME,
+				ui_notification_volume_percent(audio->music_volume));
 			if (!render_marketplace_show(ctx, &view, &state, false))
 				return (-1);
 		}
@@ -976,72 +976,48 @@ static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
  * caption both promise.
  */
 static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_screen_view_model_t *view, const marketplace_state_t *state)
+	app_screen_view_model_t *view, marketplace_state_t *state)
 {
 	const app_catalogue_item_view_model_t	*item;
 	marketplace_purchase_result_t			result;
-	char									name[APP_TEXT_MAX];
 
 	item = marketplace_focused_item(&view->data.marketplace, state);
 	if (item == NULL)
 		return (true);
-	snprintf(name, sizeof(name), "%s", item->name);
 	if (item->owned)
 		return (apply_marketplace_equip(ctx, audio, view, state));
 	result = marketplace_buy_focused(&view->data.marketplace, state);
 	if (result == MARKETPLACE_PURCHASE_INVALID)
 		return (true);
 	audio_play_menu_select(audio);
-	/*
-	 * Repaint before announcing. A purchase moves the wallet, so it rebuilds
-	 * the static layer and every region above it; queueing the card first
-	 * would present one frame whose planes still hold the pre-purchase model,
-	 * and on a stationary protocol the rebuilt full-screen bitmap would then
-	 * be emitted over the card that had just been raised above it.
-	 */
-	if (!render_marketplace_show(ctx, view, state, false))
-		return (false);
 	if (result == MARKETPLACE_PURCHASE_BOUGHT)
-		render_notification_queue_notice(ctx, UI_NOTIFICATION_PURCHASE_TITLE,
-			name);
+		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_BOUGHT, 0);
 	else if (result == MARKETPLACE_PURCHASE_INSUFFICIENT)
-		render_notification_queue_notice(ctx, UI_NOTIFICATION_FUNDS_TITLE,
-			UI_NOTIFICATION_FUNDS_MESSAGE);
+		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_INSUFFICIENT, 0);
 	else
-		render_notification_queue_notice(ctx, UI_NOTIFICATION_OWNED_TITLE,
-			name);
-	return (true);
+		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_OWNED, 0);
+	return (render_marketplace_show(ctx, view, state, false));
 }
 
 /**
  * @brief Equips the focused item when it is owned, or explains why it is not.
  */
 static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_screen_view_model_t *view, const marketplace_state_t *state)
+	app_screen_view_model_t *view, marketplace_state_t *state)
 {
-	const app_catalogue_item_view_model_t	*item;
-	settings_equip_result_t					result;
-	char									name[APP_TEXT_MAX];
+	settings_equip_result_t	result;
 
-	item = marketplace_focused_item(&view->data.marketplace, state);
-	if (item == NULL)
+	if (marketplace_focused_item(&view->data.marketplace, state) == NULL)
 		return (true);
-	snprintf(name, sizeof(name), "%s", item->name);
 	result = marketplace_equip_focused(&view->data.marketplace, state);
 	if (result != SETTINGS_EQUIP_CHANGED && result != SETTINGS_EQUIP_LOCKED)
 		return (true);
 	audio_play_menu_select(audio);
-	/* Equipping rebuilds the static layer for the same reason a purchase
-	 * does, so the repaint has to land before the card is raised over it. */
-	if (!render_marketplace_show(ctx, view, state, false))
-		return (false);
 	if (result == SETTINGS_EQUIP_CHANGED)
-		render_notification_queue_notice(ctx, UI_NOTIFICATION_EQUIPPED_TITLE,
-			name);
+		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_EQUIPPED, 0);
 	else
-		render_notification_queue_notice(ctx, UI_NOTIFICATION_OWNERSHIP_TITLE,
-			"BUY IT FIRST");
-	return (true);
+		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_LOCKED, 0);
+	return (render_marketplace_show(ctx, view, state, false));
 }
 
 /**

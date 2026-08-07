@@ -181,36 +181,6 @@ void	render_notification_queue_ownership(render_ctx_t *ctx)
 }
 
 /**
- * @brief Queues a titled card with caller-supplied copy.
- *
- * Used by the Marketplace to report purchase outcomes through the same
- * authored card the ownership warning uses, so a bought item, an insufficient
- * balance, and a locked equip all read as one family of feedback.
- *
- * @param ctx Active render context.
- * @param title Short card title.
- * @param message Body line, truncated to the card width by the model.
- */
-void	render_notification_queue_notice(render_ctx_t *ctx, const char *title,
-	const char *message)
-{
-	uint64_t	now_ms;
-	bool		content_changed;
-
-	if (ctx == NULL || ctx->nc == NULL || title == NULL)
-		return ;
-	now_ms = ui_notification_now_ms();
-	content_changed = ui_notification_show_notice(&ctx->notifications, title,
-			message, now_ms);
-	if (can_refresh_stationary_in_place(ctx, content_changed))
-	{
-		raise_planes(ctx);
-		return ;
-	}
-	refresh_notifications(ctx, now_ms);
-}
-
-/**
  * @brief Advances notification fade and expiry state.
  *
  * @param ctx Active render context.

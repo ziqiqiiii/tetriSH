@@ -35,6 +35,8 @@ void	marketplace_state_init(marketplace_state_t *state, bool signed_in,
 	state->section = MARKETPLACE_SECTION_CONTROLS;
 	state->preview = MARKETPLACE_SECTION_CHARACTERS;
 	state->focus = MARKETPLACE_FOCUS_BACK;
+	state->feedback = MARKETPLACE_FEEDBACK_NONE;
+	state->feedback_value = 0;
 	state->character_slot = 0;
 	state->theme_slot = 0;
 	state->character_slots = clamp_int(character_slots, 0,
@@ -64,6 +66,8 @@ bool	marketplace_state_view_changed(const marketplace_state_t *before,
 	return (before->section != after->section
 		|| before->preview != after->preview
 		|| before->focus != after->focus
+		|| before->feedback != after->feedback
+		|| before->feedback_value != after->feedback_value
 		|| before->character_slot != after->character_slot
 		|| before->theme_slot != after->theme_slot);
 }
@@ -354,19 +358,23 @@ marketplace_action_t	marketplace_handle_key(marketplace_state_t *state,
 		return (MARKETPLACE_ACTION_BUY);
 	if (state->signed_in && (key == 'e' || key == 'E'))
 		return (MARKETPLACE_ACTION_EQUIP);
+	/* Any movement retires the last result: it described the old cursor. */
 	if (key == NCKEY_LEFT || key == NCKEY_RIGHT)
 	{
+		state->feedback = MARKETPLACE_FEEDBACK_NONE;
 		move_horizontal(state, key == NCKEY_RIGHT ? 1 : -1);
 		return (MARKETPLACE_ACTION_NONE);
 	}
 	if (key == NCKEY_UP || key == NCKEY_DOWN)
 	{
+		state->feedback = MARKETPLACE_FEEDBACK_NONE;
 		move_vertical(state, key == NCKEY_DOWN ? 1 : -1);
 		return (MARKETPLACE_ACTION_NONE);
 	}
 	/* Tab advances, matching Settings and the on-screen hint. */
 	if (key == NCKEY_TAB)
 	{
+		state->feedback = MARKETPLACE_FEEDBACK_NONE;
 		marketplace_state_focus_next(state);
 		return (MARKETPLACE_ACTION_NONE);
 	}
@@ -598,4 +606,44 @@ static void	clear_equipped(app_catalogue_view_model_t *catalogue)
 		catalogue->items[index].equipped = false;
 		index++;
 	}
+}
+
+/**
+ * @brief Records the result of the last action for the control-row readout.
+ */
+void	marketplace_set_feedback(marketplace_state_t *state,
+	marketplace_feedback_t feedback, int value)
+{
+	if (state == NULL)
+		return ;
+	state->feedback = feedback;
+	state->feedback_value = value;
+}
+
+/**
+ * @brief Renders the last result as one line, or NULL when there is nothing.
+ *
+ * Both renderers read this so the bitmap and cell paths always report the same
+ * outcome in the same words.
+ */
+const char	*marketplace_feedback_text(const marketplace_state_t *state,
+	char *out, size_t size)
+{
+	if (state == NULL || out == NULL || size == 0)
+		return (NULL);
+	if (state->feedback == MARKETPLACE_FEEDBACK_BOUGHT)
+		snprintf(out, size, "PURCHASED - PRESS E TO EQUIP IT");
+	else if (state->feedback == MARKETPLACE_FEEDBACK_EQUIPPED)
+		snprintf(out, size, "EQUIPPED");
+	else if (state->feedback == MARKETPLACE_FEEDBACK_OWNED)
+		snprintf(out, size, "ALREADY OWNED");
+	else if (state->feedback == MARKETPLACE_FEEDBACK_INSUFFICIENT)
+		snprintf(out, size, "NOT ENOUGH WALLET POINTS");
+	else if (state->feedback == MARKETPLACE_FEEDBACK_LOCKED)
+		snprintf(out, size, "LOCKED - BUY IT FIRST");
+	else if (state->feedback == MARKETPLACE_FEEDBACK_VOLUME)
+		snprintf(out, size, "MUSIC VOLUME %d%%", state->feedback_value);
+	else
+		return (NULL);
+	return (out);
 }

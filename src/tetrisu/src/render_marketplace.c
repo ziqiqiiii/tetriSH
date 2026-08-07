@@ -82,6 +82,8 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 				const char *text, bool focused, bool enabled);
 static void	button_geometry(const struct ncplane *plane, int *row,
 				int *back_x, int *buy_x, int *down_x, int *up_x);
+static void	set_feedback_colour(struct ncplane *plane,
+				const marketplace_state_t *state);
 static int	min_int(int first, int second);
 
 /**
@@ -442,11 +444,12 @@ static void	draw_controls(struct ncplane *plane,
 	const app_marketplace_view_model_t *market,
 	const marketplace_state_t *state)
 {
-	int	row;
-	int	back_x;
-	int	buy_x;
-	int	down_x;
-	int	up_x;
+	char	feedback[64];
+	int		row;
+	int		back_x;
+	int		buy_x;
+	int		down_x;
+	int		up_x;
 
 	button_geometry(plane, &row, &back_x, &buy_x, &down_x, &up_x);
 	draw_button(plane, row, back_x, "BACK",
@@ -461,11 +464,21 @@ static void	draw_controls(struct ncplane *plane,
 	draw_button(plane, row, up_x, "VOL +",
 		state->focus == MARKETPLACE_FOCUS_VOLUME_UP
 		&& state->section == MARKETPLACE_SECTION_CONTROLS, true);
-	(void)ncplane_set_fg_rgb8(plane, MARKET_LAVENDER_R, MARKET_LAVENDER_G,
-		MARKET_LAVENDER_B);
-	if (market->signed_in)
+	if (marketplace_feedback_text(state, feedback, sizeof(feedback)) != NULL)
+	{
+		set_feedback_colour(plane, state);
+		put_centered(plane, row - 1, (int)ncplane_dim_x(plane), feedback,
+			true);
+	}
+	else if (market->signed_in)
+	{
+		(void)ncplane_set_fg_rgb8(plane, MARKET_LAVENDER_R, MARKET_LAVENDER_G,
+			MARKET_LAVENDER_B);
 		put_centered(plane, row - 1, (int)ncplane_dim_x(plane),
 			"UP INTO THE SHELVES    ENTER BUYS    E EQUIPS", false);
+	}
+	(void)ncplane_set_fg_rgb8(plane, MARKET_LAVENDER_R, MARKET_LAVENDER_G,
+		MARKET_LAVENDER_B);
 	put_centered(plane, row + 2, (int)ncplane_dim_x(plane),
 		market->signed_in
 		? "ARROWS MOVE  ENTER BUY  E EQUIP  B BUY  +/- VOLUME  ESC BACK"
@@ -678,6 +691,25 @@ static void	button_geometry(const struct ncplane *plane, int *row,
 	*buy_x = *back_x + MARKET_BUTTON_CELLS + MARKET_BUTTON_GAP;
 	*down_x = *buy_x + MARKET_BUTTON_CELLS + MARKET_BUTTON_GAP;
 	*up_x = *down_x + MARKET_BUTTON_CELLS + MARKET_BUTTON_GAP;
+}
+
+/**
+ * @brief Colours the result line by whether the action went through.
+ */
+static void	set_feedback_colour(struct ncplane *plane,
+	const marketplace_state_t *state)
+{
+	if (state->feedback == MARKETPLACE_FEEDBACK_BOUGHT
+		|| state->feedback == MARKETPLACE_FEEDBACK_EQUIPPED)
+		(void)ncplane_set_fg_rgb8(plane, MARKET_GREEN_R, MARKET_GREEN_G,
+			MARKET_GREEN_B);
+	else if (state->feedback == MARKETPLACE_FEEDBACK_INSUFFICIENT
+		|| state->feedback == MARKETPLACE_FEEDBACK_LOCKED)
+		(void)ncplane_set_fg_rgb8(plane, MARKET_RED_R, MARKET_RED_G,
+			MARKET_RED_B);
+	else
+		(void)ncplane_set_fg_rgb8(plane, MARKET_GOLD_R, MARKET_GOLD_G,
+			MARKET_GOLD_B);
 }
 
 static int	min_int(int first, int second)

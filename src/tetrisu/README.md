@@ -110,8 +110,20 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - `Enter` on a shelf tile buys a locked item and equips an owned one, which is
   what its caption and the Buy button's second line both promise. A purchase
   debits the wallet exactly once and never changes the equipped loadout;
-  equipping stays a separate, deliberate step. Both outcomes, along with an
-  insufficient balance, are reported on the shared notification card.
+  equipping stays a separate, deliberate step.
+- Results are reported on a line inside the control row rather than on a
+  floating notification card, and volume changes are reported there too. A
+  notification is a plane raised over the screen, and raising or dropping one
+  damages the cells it covers, which makes a stationary protocol retransmit
+  the full-screen bitmap underneath it - over every region plane, blanking the
+  shelves, the card and the buttons until the next keystroke. Keeping every
+  pixel this screen draws inside its own regions removes that failure, and the
+  outcome of a purchase is already visible in the wallet and the tile.
+- Nothing the user can do inside the Marketplace rebuilds its full-screen
+  layer. The wallet is a region plane of its own for exactly that reason,
+  while best score and rank - which cannot change here - stay in the static
+  frame. That wallet region is also the leftmost card only, so no region ever
+  reaches the top-right corner a notification would be raised into.
 - Locked artwork is desaturated on the shelf and in the detail card, so the
   panels read as stock rather than as inventory.
 - Notification cards are sized from the artwork's own aspect rather than a
@@ -541,11 +553,11 @@ buy Wolf-man to empty the wallet and confirm a further purchase is refused
 with the `NOT ENOUGH` card and no balance change. Resize mid-screen, then
 repeat the whole pass under `TETRISU_RENDERER=cell`.
 
-The purchase repaint is worth one extra look on a real Sixel terminal such as
-foot: buying rebuilds the full-screen static layer underneath four region
-planes, which is the combination the fifth bug in `docs/adding-a-screen.md`
-describes. Confirm the shelves, the detail card, and the buttons are all still
-drawn immediately after a purchase rather than only after the next keystroke.
+Buying, equipping and changing the volume must each leave the shelves, the
+detail card and the buttons on screen. None of them may repaint the whole
+screen: on a Sixel terminal a full-screen bitmap re-emitted over the region
+planes blanks them until the next keystroke, which is the fifth bug in
+`docs/adding-a-screen.md`.
 
 The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
 strict component build without allowing dependency installation with:

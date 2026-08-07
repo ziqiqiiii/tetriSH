@@ -59,6 +59,9 @@ static void	restack_marketplace_planes(render_ctx_t *ctx);
 static bool	compose_static(render_ctx_t *ctx,
 		const app_screen_view_model_t *view,
 		const marketplace_layout_t *layout, struct ncvisual *font);
+static bool	compose_stats(render_ctx_t *ctx,
+		const app_marketplace_view_model_t *market,
+		const marketplace_layout_t *layout, struct ncvisual *font);
 static bool	compose_inventory(render_ctx_t *ctx,
 		const app_marketplace_view_model_t *market,
 		const marketplace_state_t *state,
@@ -83,9 +86,12 @@ static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
 static void	draw_chrome(uint32_t *pixels, int width, int height,
 		const app_screen_view_model_t *view,
 		const marketplace_layout_t *layout, struct ncvisual *font);
-static void	draw_stat_cards(uint32_t *pixels, int width, int height,
+static void	draw_stat_plates(uint32_t *pixels, int width, int height,
 		const app_marketplace_view_model_t *market,
 		const marketplace_layout_t *layout, struct ncvisual *font);
+static void	draw_stat_card(uint32_t *pixels, int width, int height,
+		const marketplace_layout_t *layout, struct ncvisual *font, int index,
+		const char *label, const char *value, color_t tint);
 static void	draw_panel_plate(uint32_t *pixels, int width, int height,
 		const marketplace_layout_t *layout, int ref_x_value, int ref_y_value,
 		int ref_width, int ref_height, color_t edge);
@@ -115,7 +121,10 @@ static void	draw_detail_body(uint32_t *pixels, int width, int height,
 static void	draw_detail_status(uint32_t *pixels, int width, int height,
 		const app_catalogue_item_view_model_t *item,
 		const app_marketplace_view_model_t *market,
-		const marketplace_layout_t *layout, struct ncvisual *font);
+		const marketplace_layout_t *layout, struct ncvisual *font,
+		bool characters);
+static int	detail_text_x(bool characters);
+static int	detail_text_width(bool characters);
 static void	draw_buttons(uint32_t *pixels, int width, int height,
 		const app_marketplace_view_model_t *market,
 		const marketplace_state_t *state,
@@ -126,6 +135,7 @@ static const char	*price_caption(
 		const app_catalogue_item_view_model_t *item, char *out, size_t size);
 static color_t	item_colour(const app_catalogue_item_view_model_t *item,
 		const app_marketplace_view_model_t *market, bool focused);
+static color_t	feedback_colour(const marketplace_state_t *state);
 static bool	draw_artwork(uint32_t *pixels, int width, int height,
 		const marketplace_layout_t *layout, struct ncvisual *font,
 		render_ctx_t *ctx, int cache_slot, const char *path, int ref_x_value,
@@ -172,6 +182,8 @@ static const char	*status_detail(const app_screen_view_model_t *view);
 static uint64_t	market_hash(const void *data, size_t size, uint64_t hash);
 static uint64_t	static_signature(const app_screen_view_model_t *view,
 		const marketplace_layout_t *layout);
+static uint64_t	model_signature(const app_marketplace_view_model_t *market,
+		uint64_t seed);
 static bool	market_render_failed(const char *stage);
 static int	market_region_failed(const char *stage);
 
@@ -244,6 +256,11 @@ void	render_marketplace_pixel_destroy(render_ctx_t *ctx)
 		ncvisual_destroy(ctx->marketplace_font_visual);
 		ctx->marketplace_font_visual = NULL;
 	}
+	if (ctx->marketplace_stats_plane != NULL)
+	{
+		ncplane_destroy(ctx->marketplace_stats_plane);
+		ctx->marketplace_stats_plane = NULL;
+	}
 	if (ctx->marketplace_characters_plane != NULL)
 	{
 		ncplane_destroy(ctx->marketplace_characters_plane);
@@ -283,6 +300,7 @@ void	render_marketplace_pixel_destroy(render_ctx_t *ctx)
 	ctx->marketplace_background_rows = 0;
 	ctx->marketplace_background_cols = 0;
 	ctx->marketplace_static_signature = 0;
+	ctx->marketplace_stats_signature = 0;
 	ctx->marketplace_characters_signature = 0;
 	ctx->marketplace_themes_signature = 0;
 	ctx->marketplace_detail_signature = 0;
@@ -330,13 +348,33 @@ static int	update_region_layers(render_ctx_t *ctx,
 	const marketplace_layout_t *layout, struct ncvisual *font)
 {
 	marketplace_section_t	preview;
+	uint64_t				base;
 	uint64_t				signature;
 	int						slot;
 	int						changed;
 
-	changed = 0;
-	signature = market_hash(&state->section, sizeof(state->section),
+	/*
+	 * Every region is seeded with both the static signature and the model,
+	 * because the static layer no longer carries anything a purchase moves.
+	 * Buying flips a tile to OWNED, retitles the detail card and changes what
+	 * the Buy button offers, so a purchase has to dirty all four - the wallet
+	 * alone moving would otherwise leave stale prices on the shelves.
+	 */
+	base = model_signature(&view->data.marketplace,
 			ctx->marketplace_static_signature);
+	changed = 0;
+	signature = market_hash(&view->data.marketplace.profile.wallet_points,
+			sizeof(view->data.marketplace.profile.wallet_points),
+			ctx->marketplace_static_signature);
+	if (ctx->marketplace_stats_plane == NULL
+		|| signature != ctx->marketplace_stats_signature)
+	{
+		if (!compose_stats(ctx, &view->data.marketplace, layout, font))
+			return (market_region_failed("stats"));
+		ctx->marketplace_stats_signature = signature;
+		changed = 1;
+	}
+	signature = market_hash(&state->section, sizeof(state->section), base);
 	signature = market_hash(&state->character_slot,
 			sizeof(state->character_slot), signature);
 	if (ctx->marketplace_characters_plane == NULL
@@ -348,8 +386,7 @@ static int	update_region_layers(render_ctx_t *ctx,
 		ctx->marketplace_characters_signature = signature;
 		changed = 1;
 	}
-	signature = market_hash(&state->section, sizeof(state->section),
-			ctx->marketplace_static_signature);
+	signature = market_hash(&state->section, sizeof(state->section), base);
 	signature = market_hash(&state->theme_slot, sizeof(state->theme_slot),
 			signature);
 	if (ctx->marketplace_themes_plane == NULL
@@ -363,8 +400,7 @@ static int	update_region_layers(render_ctx_t *ctx,
 	}
 	preview = marketplace_focused_section(state);
 	slot = marketplace_focused_slot(state);
-	signature = market_hash(&preview, sizeof(preview),
-			ctx->marketplace_static_signature);
+	signature = market_hash(&preview, sizeof(preview), base);
 	signature = market_hash(&slot, sizeof(slot), signature);
 	if (ctx->marketplace_detail_plane == NULL
 		|| signature != ctx->marketplace_detail_signature)
@@ -375,9 +411,12 @@ static int	update_region_layers(render_ctx_t *ctx,
 		changed = 1;
 	}
 	/* The Buy caption tracks the focused item, so it hashes that too. */
-	signature = market_hash(&state->focus, sizeof(state->focus),
-			ctx->marketplace_static_signature);
+	signature = market_hash(&state->focus, sizeof(state->focus), base);
 	signature = market_hash(&state->section, sizeof(state->section), signature);
+	signature = market_hash(&state->feedback, sizeof(state->feedback),
+			signature);
+	signature = market_hash(&state->feedback_value,
+			sizeof(state->feedback_value), signature);
 	signature = market_hash(&preview, sizeof(preview), signature);
 	signature = market_hash(&slot, sizeof(slot), signature);
 	if (ctx->marketplace_controls_plane == NULL
@@ -402,6 +441,8 @@ static int	update_region_layers(render_ctx_t *ctx,
 static void	restack_marketplace_planes(render_ctx_t *ctx)
 {
 	ncplane_move_top(ctx->screen_plane);
+	if (ctx->marketplace_stats_plane != NULL)
+		ncplane_move_top(ctx->marketplace_stats_plane);
 	if (ctx->marketplace_characters_plane != NULL)
 		ncplane_move_top(ctx->marketplace_characters_plane);
 	if (ctx->marketplace_themes_plane != NULL)
@@ -599,7 +640,12 @@ static void	draw_chrome(uint32_t *pixels, int width, int height,
 		draw_text_ref(pixels, width, height, layout, font, "LOCAL UI PREVIEW",
 			MARKETPLACE_REF_CONTENT_X + MARKETPLACE_REF_CONTENT_WIDTH - 230,
 			MARKETPLACE_REF_TITLE_Y + 12, 230, 12, g_market_gold, true);
-	draw_stat_cards(pixels, width, height, market, layout, font);
+	/*
+	 * The stat cards' plates belong here, but their values do not: a purchase
+	 * moves the wallet, and anything a purchase can change has to sit on a
+	 * region plane above this one. Only the empty plates are drawn here.
+	 */
+	draw_stat_plates(pixels, width, height, market, layout, font);
 	draw_panel_plate(pixels, width, height, layout,
 		MARKETPLACE_REF_CHARACTERS_X, MARKETPLACE_REF_CHARACTERS_Y,
 		MARKETPLACE_REF_CHARACTERS_WIDTH, MARKETPLACE_REF_CHARACTERS_HEIGHT,
@@ -638,47 +684,95 @@ static void	draw_chrome(uint32_t *pixels, int width, int height,
 }
 
 /**
- * @brief Draws the wallet, score, and rank cards above the shelves.
+ * @brief Writes one stat card's label and value at the card's own origin.
  */
-static void	draw_stat_cards(uint32_t *pixels, int width, int height,
+static void	draw_stat_card(uint32_t *pixels, int width, int height,
+	const marketplace_layout_t *layout, struct ncvisual *font, int index,
+	const char *label, const char *value, color_t tint)
+{
+	int	card_x;
+
+	card_x = MARKETPLACE_REF_STATS_X + index * MARKETPLACE_REF_STAT_STEP_X;
+	draw_text_ref(pixels, width, height, layout, font, label, card_x + 14,
+		MARKETPLACE_REF_STATS_Y + 11, MARKETPLACE_REF_STAT_WIDTH - 28, 12,
+		g_market_lavender, false);
+	draw_text_ref(pixels, width, height, layout, font, value, card_x + 14,
+		MARKETPLACE_REF_STATS_Y + 34, MARKETPLACE_REF_STAT_WIDTH - 28, 24,
+		tint, false);
+}
+
+/**
+ * @brief Draws the three stat plates, and the two values that cannot change.
+ *
+ * Best score and rank are settled before the shop opens and nothing here can
+ * move them, so they belong in the static frame. Only the wallet is left to
+ * the region plane above.
+ */
+static void	draw_stat_plates(uint32_t *pixels, int width, int height,
 	const app_marketplace_view_model_t *market,
 	const marketplace_layout_t *layout, struct ncvisual *font)
 {
-	static const char	*labels[3] = {"WALLET POINTS", "BEST SCORE", "RANK"};
-	char				value[64];
-	int					index;
-	int					card_x;
+	char	value[64];
+	bool	live;
+	int		index;
 
 	index = 0;
 	while (index < 3)
 	{
-		card_x = MARKETPLACE_REF_CONTENT_X
-			+ index * MARKETPLACE_REF_STAT_STEP_X;
-		draw_panel_plate(pixels, width, height, layout, card_x,
-			MARKETPLACE_REF_STAT_Y, MARKETPLACE_REF_STAT_WIDTH,
-			MARKETPLACE_REF_STAT_HEIGHT, g_market_lavender);
-		draw_text_ref(pixels, width, height, layout, font, labels[index],
-			card_x + 14, MARKETPLACE_REF_STAT_Y + 12,
-			MARKETPLACE_REF_STAT_WIDTH - 28, 12, g_market_lavender, false);
-		if (market->signed_in && !market->offline)
-		{
-			if (index == 0)
-				snprintf(value, sizeof(value), "%d",
-					market->profile.wallet_points);
-			else if (index == 1)
-				snprintf(value, sizeof(value), "%" PRIu64,
-					market->profile.score);
-			else
-				snprintf(value, sizeof(value), "#%d", market->profile.rank);
-		}
-		else
-			snprintf(value, sizeof(value), "-");
-		draw_text_ref(pixels, width, height, layout, font, value,
-			card_x + 14, MARKETPLACE_REF_STAT_Y + 36,
-			MARKETPLACE_REF_STAT_WIDTH - 28, 24,
-			index == 0 ? g_market_gold : g_market_green, false);
+		draw_panel_plate(pixels, width, height, layout,
+			MARKETPLACE_REF_STATS_X + index * MARKETPLACE_REF_STAT_STEP_X,
+			MARKETPLACE_REF_STATS_Y, MARKETPLACE_REF_STAT_WIDTH,
+			MARKETPLACE_REF_STATS_HEIGHT, g_market_lavender);
 		index++;
 	}
+	live = market->signed_in && !market->offline;
+	if (live)
+		snprintf(value, sizeof(value), "%" PRIu64, market->profile.score);
+	else
+		snprintf(value, sizeof(value), "-");
+	draw_stat_card(pixels, width, height, layout, font, 1, "BEST SCORE", value,
+		g_market_green);
+	if (live)
+		snprintf(value, sizeof(value), "#%d", market->profile.rank);
+	else
+		snprintf(value, sizeof(value), "-");
+	draw_stat_card(pixels, width, height, layout, font, 2, "RANK", value,
+		g_market_green);
+}
+
+/**
+ * @brief Repaints the wallet the shop spends from.
+ *
+ * This is its own region because the wallet moves on every purchase. Keeping
+ * it off the full-screen plane is what lets a purchase repaint small planes
+ * instead of re-emitting a full-screen bitmap over all of them.
+ */
+static bool	compose_stats(render_ctx_t *ctx,
+	const app_marketplace_view_model_t *market,
+	const marketplace_layout_t *layout, struct ncvisual *font)
+{
+	marketplace_rect_t	region;
+	uint32_t			*pixels;
+	char				value[64];
+
+	pixels = region_canvas(ctx, layout);
+	if (pixels == NULL)
+		return (false);
+	if (market->signed_in && !market->offline)
+		snprintf(value, sizeof(value), "%d", market->profile.wallet_points);
+	else
+		snprintf(value, sizeof(value), "-");
+	draw_stat_card(pixels, layout->pixel_width, layout->pixel_height, layout,
+		font, 0, "WALLET POINTS", value, g_market_gold);
+	region = layout->wallet_card;
+	if (!create_region_plane(ctx, pixels, layout->pixel_width,
+			layout->pixel_height, &region, &ctx->marketplace_stats_plane))
+	{
+		free(pixels);
+		return (false);
+	}
+	free(pixels);
+	return (true);
 }
 
 /**
@@ -826,7 +920,8 @@ static void	slot_geometry(bool characters, int index, market_slot_t *slot)
 	slot->width = (panel_width - 2 * MARKETPLACE_REF_SLOT_INSET)
 		/ MARKETPLACE_INVENTORY_COLUMNS;
 	slot->x = panel_x + MARKETPLACE_REF_SLOT_INSET + column * slot->width;
-	slot->y = panel_y + MARKETPLACE_REF_SLOT_FIRST_Y + row * (characters
+	slot->y = panel_y + (characters ? MARKETPLACE_REF_CHARACTER_FIRST_Y
+			: MARKETPLACE_REF_THEME_FIRST_Y) + row * (characters
 			? MARKETPLACE_REF_CHARACTER_STEP_Y : MARKETPLACE_REF_THEME_STEP_Y);
 	slot->thumb_width = slot->width - (characters
 			? MARKETPLACE_REF_CHARACTER_THUMB_INSET
@@ -995,15 +1090,15 @@ static bool	compose_detail(render_ctx_t *ctx,
 		font, ctx, cache_slot, item->portrait_asset,
 		MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_PREVIEW_X,
 		MARKETPLACE_REF_DETAIL_Y + MARKETPLACE_REF_DETAIL_PREVIEW_Y,
-		MARKETPLACE_REF_DETAIL_PREVIEW_SIZE,
-		MARKETPLACE_REF_DETAIL_PREVIEW_SIZE, item->owned);
+		characters ? MARKETPLACE_REF_DETAIL_PREVIEW_CHARACTER_W
+		: MARKETPLACE_REF_DETAIL_PREVIEW_THEME_W,
+		MARKETPLACE_REF_DETAIL_PREVIEW_HEIGHT, item->owned);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
-		font, item->name,
-		MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_TEXT_X,
+		font, item->name, detail_text_x(characters),
 		MARKETPLACE_REF_DETAIL_Y + MARKETPLACE_REF_DETAIL_NAME_Y,
-		MARKETPLACE_REF_DETAIL_TEXT_WIDTH, 26, g_market_cream, false);
+		detail_text_width(characters), 26, g_market_cream, false);
 	draw_detail_status(pixels, layout->pixel_width, layout->pixel_height, item,
-		market, layout, font);
+		market, layout, font, characters);
 	draw_detail_body(pixels, layout->pixel_width, layout->pixel_height, item,
 		layout, font, characters);
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
@@ -1022,7 +1117,7 @@ static bool	compose_detail(render_ctx_t *ctx,
 static void	draw_detail_status(uint32_t *pixels, int width, int height,
 	const app_catalogue_item_view_model_t *item,
 	const app_marketplace_view_model_t *market,
-	const marketplace_layout_t *layout, struct ncvisual *font)
+	const marketplace_layout_t *layout, struct ncvisual *font, bool characters)
 {
 	char	line[APP_TEXT_MAX + 96];
 	color_t	tint;
@@ -1052,9 +1147,30 @@ static void	draw_detail_status(uint32_t *pixels, int width, int height,
 		tint = g_market_red;
 	}
 	draw_text_ref(pixels, width, height, layout, font, line,
-		MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_TEXT_X,
+		detail_text_x(characters),
 		MARKETPLACE_REF_DETAIL_Y + MARKETPLACE_REF_DETAIL_STATUS_Y,
-		MARKETPLACE_REF_DETAIL_TEXT_WIDTH, 15, tint, false);
+		detail_text_width(characters), 15, tint, false);
+}
+
+/**
+ * @brief Left edge of the detail card's text column.
+ */
+static int	detail_text_x(bool characters)
+{
+	return (MARKETPLACE_REF_DETAIL_X + (characters
+			? MARKETPLACE_REF_DETAIL_TEXT_CHARACTER_X
+			: MARKETPLACE_REF_DETAIL_TEXT_THEME_X));
+}
+
+/**
+ * @brief Width the detail card's text column has left after the preview.
+ */
+static int	detail_text_width(bool characters)
+{
+	return (MARKETPLACE_REF_DETAIL_WIDTH - (characters
+			? MARKETPLACE_REF_DETAIL_TEXT_CHARACTER_X
+			: MARKETPLACE_REF_DETAIL_TEXT_THEME_X)
+		- MARKETPLACE_REF_DETAIL_TEXT_INSET);
 }
 
 /**
@@ -1084,11 +1200,9 @@ static void	draw_detail_body(uint32_t *pixels, int width, int height,
 		while (index < 3)
 		{
 			draw_text_ref(pixels, width, height, layout, font,
-				theme_lines[index],
-				MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_TEXT_X,
+				theme_lines[index], detail_text_x(false),
 				body_y + index * MARKETPLACE_REF_DETAIL_STEP_Y,
-				MARKETPLACE_REF_DETAIL_TEXT_WIDTH, 11, g_market_lavender,
-				false);
+				detail_text_width(false), 11, g_market_lavender, false);
 			index++;
 		}
 		return ;
@@ -1099,16 +1213,15 @@ static void	draw_detail_body(uint32_t *pixels, int width, int height,
 		snprintf(heading, sizeof(heading), "L%d  %s", index + 1,
 			item->abilities[index].name);
 		draw_text_ref(pixels, width, height, layout, font, heading,
-			MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_TEXT_X,
+			detail_text_x(true),
 			body_y + index * MARKETPLACE_REF_DETAIL_STEP_Y,
-			MARKETPLACE_REF_DETAIL_TEXT_WIDTH,
+			detail_text_width(true),
 			MARKETPLACE_REF_DETAIL_NAME_GLYPH, g_market_gold, false);
 		draw_wrapped_text_ref(pixels, width, height, layout, font,
-			item->abilities[index].description,
-			MARKETPLACE_REF_DETAIL_X + MARKETPLACE_REF_DETAIL_TEXT_X + 20,
+			item->abilities[index].description, detail_text_x(true) + 20,
 			body_y + index * MARKETPLACE_REF_DETAIL_STEP_Y
 			+ MARKETPLACE_REF_DETAIL_DESC_Y,
-			MARKETPLACE_REF_DETAIL_TEXT_WIDTH - 20,
+			detail_text_width(true) - 20,
 			MARKETPLACE_REF_DETAIL_DESC_GLYPH,
 			MARKETPLACE_REF_DETAIL_DESC_STEP, g_market_cream, 2);
 		index++;
@@ -1151,6 +1264,7 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 		"BACK", "BUY", "VOLUME -", "VOLUME +"
 	};
 	char				captions[MARKETPLACE_BUTTON_COUNT][32];
+	char				feedback[64];
 	color_t				colour;
 	int					index;
 	int					button_x;
@@ -1197,6 +1311,16 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 			enabled ? g_market_lavender : g_market_disabled, true);
 		index++;
 	}
+	/*
+	 * The result of the last action is reported here rather than on a floating
+	 * notification plane: a plane raised over this screen damages the cells it
+	 * covers and makes a stationary protocol retransmit the full-screen bitmap
+	 * over every region, which blanked the whole screen after a purchase.
+	 */
+	if (marketplace_feedback_text(state, feedback, sizeof(feedback)) != NULL)
+		draw_text_ref(pixels, width, height, layout, font, feedback,
+			MARKETPLACE_REF_CONTENT_X, MARKETPLACE_REF_FEEDBACK_Y,
+			MARKETPLACE_REF_CONTENT_WIDTH, 14, feedback_colour(state), true);
 	/*
 	 * The Marketplace takes no pointer input, so the grids and the purchase
 	 * keys need spelling out here or they are undiscoverable.
@@ -1245,6 +1369,20 @@ static const char	*price_caption(
 	else
 		snprintf(out, size, "%d P", item->price);
 	return (out);
+}
+
+/**
+ * @brief Colours the control-row result line by whether it went through.
+ */
+static color_t	feedback_colour(const marketplace_state_t *state)
+{
+	if (state->feedback == MARKETPLACE_FEEDBACK_BOUGHT
+		|| state->feedback == MARKETPLACE_FEEDBACK_EQUIPPED)
+		return (g_market_green);
+	if (state->feedback == MARKETPLACE_FEEDBACK_INSUFFICIENT
+		|| state->feedback == MARKETPLACE_FEEDBACK_LOCKED)
+		return (g_market_red);
+	return (g_market_gold);
 }
 
 /**
@@ -1882,31 +2020,56 @@ static uint64_t	market_hash(const void *data, size_t size, uint64_t hash)
 }
 
 /**
- * @brief Hashes everything the static layer draws from.
+ * @brief Hashes everything the static layer draws from - and nothing else.
  *
  * Fields are hashed one at a time rather than as a struct: hashing a struct
  * wholesale folds in its padding bytes, which are never written and make the
  * signature unstable, so the layer would recompose on keystrokes that changed
- * nothing. The wallet is included, so a purchase rebuilds the header.
+ * nothing.
+ *
+ * Only session-level facts appear here. The wallet, the prices, and the owned
+ * and equipped flags are deliberately absent: they all move when the user buys
+ * something, and this layer is a full-screen bitmap that a stationary protocol
+ * would re-emit over every region plane above it. Keeping them out means
+ * nothing the user can do inside the Marketplace rebuilds this layer at all.
  */
 static uint64_t	static_signature(const app_screen_view_model_t *view,
 	const marketplace_layout_t *layout)
 {
 	const app_marketplace_view_model_t	*market;
 	uint64_t							hash;
-	int									index;
 
 	market = &view->data.marketplace;
 	hash = market_hash(&view->status, sizeof(view->status), 0);
 	hash = market_hash(&view->local_preview, sizeof(view->local_preview), hash);
 	hash = market_hash(&market->signed_in, sizeof(market->signed_in), hash);
 	hash = market_hash(&market->offline, sizeof(market->offline), hash);
-	hash = market_hash(&market->profile.wallet_points,
-			sizeof(market->profile.wallet_points), hash);
+	/* Best score and rank are drawn here; the wallet deliberately is not. */
 	hash = market_hash(&market->profile.score, sizeof(market->profile.score),
 			hash);
 	hash = market_hash(&market->profile.rank, sizeof(market->profile.rank),
 			hash);
+	hash = market_hash(&layout->pixel_width, sizeof(layout->pixel_width), hash);
+	hash = market_hash(&layout->pixel_height, sizeof(layout->pixel_height),
+			hash);
+	return (hash);
+}
+
+/**
+ * @brief Hashes every model field the region planes draw from.
+ *
+ * The wallet, the prices and the owned and equipped flags all live here rather
+ * than in the static signature: they change when the user buys something, and
+ * the region planes are the only layers allowed to change during a session.
+ */
+static uint64_t	model_signature(const app_marketplace_view_model_t *market,
+	uint64_t seed)
+{
+	uint64_t	hash;
+	int			index;
+
+	hash = market_hash(&market->profile.wallet_points,
+			sizeof(market->profile.wallet_points), seed);
 	hash = market_hash(&market->characters.count,
 			sizeof(market->characters.count), hash);
 	hash = market_hash(&market->themes.count, sizeof(market->themes.count),
@@ -1918,15 +2081,16 @@ static uint64_t	static_signature(const app_screen_view_model_t *view,
 				sizeof(bool), hash);
 		hash = market_hash(&market->characters.items[index].equipped,
 				sizeof(bool), hash);
+		hash = market_hash(&market->characters.items[index].price,
+				sizeof(int), hash);
 		hash = market_hash(&market->themes.items[index].owned, sizeof(bool),
 				hash);
-		hash = market_hash(&market->themes.items[index].equipped, sizeof(bool),
+		hash = market_hash(&market->themes.items[index].equipped,
+				sizeof(bool), hash);
+		hash = market_hash(&market->themes.items[index].price, sizeof(int),
 				hash);
 		index++;
 	}
-	hash = market_hash(&layout->pixel_width, sizeof(layout->pixel_width), hash);
-	hash = market_hash(&layout->pixel_height, sizeof(layout->pixel_height),
-			hash);
 	return (hash);
 }
 

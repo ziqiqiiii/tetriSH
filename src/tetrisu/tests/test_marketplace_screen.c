@@ -56,8 +56,8 @@ static void	cell_span(const marketplace_rect_t *rect, int cell_px_x,
 static void	test_region_planes_never_overlap(void)
 {
 	marketplace_layout_t	layout;
-	marketplace_rect_t		regions[4];
-	int						bounds[4][4];
+	marketplace_rect_t		regions[5];
+	int						bounds[5][4];
 	int						cols;
 	int						rows;
 	int						cell;
@@ -74,12 +74,13 @@ static void	test_region_planes_never_overlap(void)
 			while (cell <= 40)
 			{
 				marketplace_layout_build(0, 0, rows, cols, cell, cell, &layout);
-				regions[0] = layout.characters;
-				regions[1] = layout.themes;
-				regions[2] = layout.detail;
-				regions[3] = layout.controls;
+				regions[0] = layout.wallet_card;
+				regions[1] = layout.characters;
+				regions[2] = layout.themes;
+				regions[3] = layout.detail;
+				regions[4] = layout.controls;
 				first = 0;
-				while (first < 4)
+				while (first < 5)
 				{
 					cell_span(&regions[first], layout.cell_px_x,
 						layout.cell_px_y, &bounds[first][0], &bounds[first][1],
@@ -87,10 +88,10 @@ static void	test_region_planes_never_overlap(void)
 					first++;
 				}
 				first = 0;
-				while (first < 4)
+				while (first < 5)
 				{
 					second = first + 1;
-					while (second < 4)
+					while (second < 5)
 					{
 						assert(bounds[first][2] <= bounds[second][0]
 							|| bounds[second][2] <= bounds[first][0]
@@ -121,10 +122,24 @@ static void	test_marketplace_layout_contract(void)
 	assert(layout.title.width > 0 && layout.title.height > 0);
 	assert(layout.characters.x < layout.themes.x);
 	assert(layout.characters.y == layout.themes.y);
+	assert(layout.characters.y
+		> layout.wallet_card.y + layout.wallet_card.height);
 	assert(layout.detail.y > layout.characters.y + layout.characters.height);
 	assert(layout.controls.y > layout.detail.y + layout.detail.height);
 	assert(layout.stats[0].x < layout.stats[1].x);
 	assert(layout.stats[1].x < layout.stats[2].x);
+	/*
+	 * Only the wallet card is a region. It must be exactly the leftmost stat
+	 * card, and it must stop well short of the right edge of the content band:
+	 * notification cards are raised into that corner, and a region reaching
+	 * them would be the overlap that blanks the screen after a purchase.
+	 */
+	assert(layout.wallet_card.x == layout.stats[0].x);
+	assert(layout.wallet_card.y == layout.stats[0].y);
+	assert(layout.wallet_card.width == layout.stats[0].width);
+	assert(layout.wallet_card.height == layout.stats[0].height);
+	assert(layout.wallet_card.x + layout.wallet_card.width
+		< layout.stats[1].x);
 	/* The four control rectangles share one row and stay left-to-right. */
 	index = 0;
 	while (index < MARKETPLACE_BUTTON_COUNT)

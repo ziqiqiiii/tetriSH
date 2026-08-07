@@ -47,12 +47,15 @@ void	marketplace_layout_build(int origin_y, int origin_x, int rows, int cols,
 	layout->title = map_rect(MARKETPLACE_REF_CONTENT_X, MARKETPLACE_REF_TITLE_Y,
 			MARKETPLACE_REF_CONTENT_WIDTH, MARKETPLACE_REF_TITLE_HEIGHT,
 			pixel_width, pixel_height);
+	layout->wallet_card = map_rect(MARKETPLACE_REF_STATS_X,
+			MARKETPLACE_REF_STATS_Y, MARKETPLACE_REF_STAT_WIDTH,
+			MARKETPLACE_REF_STATS_HEIGHT, pixel_width, pixel_height);
 	index = 0;
 	while (index < 3)
 	{
-		layout->stats[index] = map_rect(MARKETPLACE_REF_CONTENT_X
-				+ index * MARKETPLACE_REF_STAT_STEP_X, MARKETPLACE_REF_STAT_Y,
-				MARKETPLACE_REF_STAT_WIDTH, MARKETPLACE_REF_STAT_HEIGHT,
+		layout->stats[index] = map_rect(MARKETPLACE_REF_STATS_X
+				+ index * MARKETPLACE_REF_STAT_STEP_X, MARKETPLACE_REF_STATS_Y,
+				MARKETPLACE_REF_STAT_WIDTH, MARKETPLACE_REF_STATS_HEIGHT,
 				pixel_width, pixel_height);
 		index++;
 	}
