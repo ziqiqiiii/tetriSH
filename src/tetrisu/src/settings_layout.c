@@ -72,4 +72,16 @@ void	settings_layout_build(int origin_y, int origin_x, int rows, int cols,
 	layout->buttons[3] = map_rect(SETTINGS_REF_BUTTON_VOLUME_UP_X,
 		SETTINGS_REF_BUTTON_Y, SETTINGS_REF_BUTTON_WIDTH,
 		SETTINGS_REF_BUTTON_HEIGHT, pixel_width, pixel_height);
+	layout->controls = map_rect(SETTINGS_REF_CONTROLS_X,
+		SETTINGS_REF_CONTROLS_Y, SETTINGS_REF_CONTROLS_WIDTH,
+		SETTINGS_REF_CONTROLS_HEIGHT, pixel_width, pixel_height);
+	layout->card = map_rect(SETTINGS_REF_CARD_X, SETTINGS_REF_CARD_Y,
+		SETTINGS_REF_CARD_WIDTH, SETTINGS_REF_CARD_HEIGHT, pixel_width,
+		pixel_height);
+	layout->volume = map_rect(SETTINGS_REF_VOLUME_X, SETTINGS_REF_VOLUME_Y,
+		SETTINGS_REF_VOLUME_WIDTH, SETTINGS_REF_VOLUME_HEIGHT, pixel_width,
+		pixel_height);
+	layout->volume_offline = map_rect(SETTINGS_REF_VOLUME_OFFLINE_X,
+		SETTINGS_REF_VOLUME_OFFLINE_Y, SETTINGS_REF_VOLUME_OFFLINE_WIDTH,
+		SETTINGS_REF_VOLUME_OFFLINE_HEIGHT, pixel_width, pixel_height);
 }

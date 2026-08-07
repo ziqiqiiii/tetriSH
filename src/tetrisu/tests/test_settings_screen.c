@@ -12,9 +12,11 @@ static void	test_powers_card_follows_focus(void);
 static void	test_settings_input_batch_boundaries(void);
 static void	test_backwards_focus_reaches_the_last_slot(void);
 static void	test_leaving_a_grid_focuses_the_button_below(void);
+static void	test_region_planes_never_overlap(void);
 
 int	main(void)
 {
+	test_region_planes_never_overlap();
 	test_fixture_settings_model();
 	test_offline_settings_are_account_free();
 	test_settings_focus_and_actions();
@@ -28,6 +30,92 @@ int	main(void)
 	test_backwards_focus_reaches_the_last_slot();
 	test_leaving_a_grid_focuses_the_button_below();
 	return (0);
+}
+
+/**
+ * @brief Expands a region to whole cells the way the renderer's planes do.
+ */
+static void	cell_span(const settings_rect_t *rect, int cell_px_x,
+	int cell_px_y, int *x0, int *y0, int *x1, int *y1)
+{
+	*x0 = rect->x / cell_px_x;
+	*y0 = rect->y / cell_px_y;
+	*x1 = (rect->x + rect->width + cell_px_x - 1) / cell_px_x;
+	*y1 = (rect->y + rect->height + cell_px_y - 1) / cell_px_y;
+}
+
+/**
+ * @brief Region planes must never share a cell on any supported geometry.
+ *
+ * Each region becomes its own bitmap plane. A stationary protocol cannot stack
+ * those: re-emitting one blanks whatever it overlaps. Because every plane is
+ * expanded out to whole cells, two rectangles that merely sit close together in
+ * reference pixels can still collide once the terminal's cell size is coarse
+ * enough, so the check sweeps geometries rather than trusting one.
+ */
+static void	test_region_planes_never_overlap(void)
+{
+	settings_layout_t	layout;
+	settings_rect_t		regions[5];
+	int					bounds[5][4];
+	int					cols;
+	int					rows;
+	int					cell;
+	int					first;
+	int					second;
+	int					count;
+
+	cols = 44;
+	while (cols <= 400)
+	{
+		rows = 20;
+		while (rows <= 120)
+		{
+			cell = 2;
+			while (cell <= 40)
+			{
+				settings_layout_build(0, 0, rows, cols, cell, cell, &layout);
+				/*
+				 * volume and card are mutually exclusive at runtime: the
+				 * signed-in readout sits inside the card, so the renderer only
+				 * ever keeps one of them alive. Every other pair must be
+				 * disjoint, and the offline readout must clear the card too.
+				 */
+				regions[0] = layout.controls;
+				regions[1] = layout.characters;
+				regions[2] = layout.themes;
+				regions[3] = layout.card;
+				regions[4] = layout.volume_offline;
+				count = 5;
+				first = 0;
+				while (first < count)
+				{
+					cell_span(&regions[first], layout.cell_px_x,
+						layout.cell_px_y, &bounds[first][0], &bounds[first][1],
+						&bounds[first][2], &bounds[first][3]);
+					first++;
+				}
+				first = 0;
+				while (first < count)
+				{
+					second = first + 1;
+					while (second < count)
+					{
+						assert(bounds[first][2] <= bounds[second][0]
+							|| bounds[second][2] <= bounds[first][0]
+							|| bounds[first][3] <= bounds[second][1]
+							|| bounds[second][3] <= bounds[first][1]);
+						second++;
+					}
+					first++;
+				}
+				cell += 2;
+			}
+			rows += 4;
+		}
+		cols += 13;
+	}
+	printf("PASS test_region_planes_never_overlap\n");
 }
 
 /**

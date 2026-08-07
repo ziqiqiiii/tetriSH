@@ -226,6 +226,7 @@ static int	update_region_layers(render_ctx_t *ctx,
 {
 	uint64_t	geometry;
 	uint64_t	signature;
+	bool		card_visible;
 	int			changed;
 
 	/*
@@ -234,6 +235,8 @@ static int	update_region_layers(render_ctx_t *ctx,
 	 * stationary protocol overwrites the cells they occupy; a region that did
 	 * not also recompose would stay blank until something else moved it.
 	 */
+	card_visible = settings_card_visible(state)
+		&& settings_card_character(&view->data.settings, state) != NULL;
 	geometry = settings_hash(&layout->pixel_width, sizeof(layout->pixel_width),
 			ctx->settings_static_signature);
 	geometry = settings_hash(&layout->pixel_height,
@@ -276,9 +279,26 @@ static int	update_region_layers(render_ctx_t *ctx,
 		ctx->settings_themes_signature = signature;
 		changed = 1;
 	}
+	/*
+	 * The volume readout sits inside the powers card, so the two regions would
+	 * be overlapping bitmap planes whenever the card is up. A stationary
+	 * protocol cannot stack those: re-emitting either one blanks the other. The
+	 * card already draws over the readout, so only ever keep one of them alive.
+	 */
 	signature = settings_hash(&view->data.settings.music_volume,
 			sizeof(view->data.settings.music_volume), geometry);
-	if (ctx->settings_volume_plane == NULL
+	signature = settings_hash(&card_visible, sizeof(card_visible), signature);
+	if (card_visible)
+	{
+		if (ctx->settings_volume_plane != NULL)
+		{
+			ncplane_destroy(ctx->settings_volume_plane);
+			ctx->settings_volume_plane = NULL;
+			changed = 1;
+		}
+		ctx->settings_volume_signature = signature;
+	}
+	else if (ctx->settings_volume_plane == NULL
 		|| signature != ctx->settings_volume_signature)
 	{
 		if (!compose_volume(ctx, &view->data.settings, layout, font))
@@ -605,10 +625,7 @@ static bool	compose_controls(render_ctx_t *ctx,
 		return (false);
 	draw_buttons(pixels, layout->pixel_width, layout->pixel_height, settings,
 		state, layout, font);
-	region.x = ref_x(layout, 200);
-	region.y = ref_y(layout, 850);
-	region.width = ref_x(layout, 1080);
-	region.height = ref_y(layout, 205);
+	region = layout->controls;
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
 			layout->pixel_height, &region, &ctx->settings_controls_plane))
 	{
@@ -651,14 +668,10 @@ static bool	compose_inventory(render_ctx_t *ctx,
 	draw_inventory(pixels, layout->pixel_width, layout->pixel_height,
 		characters ? &settings->characters : &settings->themes, state, layout,
 		font, characters, ctx);
-	region.x = ref_x(layout, characters ? SETTINGS_REF_CHARACTERS_X
-		: SETTINGS_REF_THEMES_X);
-	region.y = ref_y(layout, characters ? SETTINGS_REF_CHARACTERS_Y
-		: SETTINGS_REF_THEMES_Y);
-	region.width = ref_x(layout, characters ? SETTINGS_REF_CHARACTERS_WIDTH
-		: SETTINGS_REF_THEMES_WIDTH);
-	region.height = ref_y(layout, characters ? SETTINGS_REF_CHARACTERS_HEIGHT
-		: SETTINGS_REF_THEMES_HEIGHT);
+	if (characters)
+		region = layout->characters;
+	else
+		region = layout->themes;
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
 			layout->pixel_height, &region, slot))
 	{
@@ -682,19 +695,9 @@ static bool	compose_volume(render_ctx_t *ctx,
 	draw_volume_value(pixels, layout->pixel_width, layout->pixel_height,
 		settings, layout, font);
 	if (!settings->offline && settings->signed_in)
-	{
-		region.x = ref_x(layout, SETTINGS_REF_PROFILE_X + 168);
-		region.y = ref_y(layout, SETTINGS_REF_PROFILE_Y + 251);
-		region.width = ref_x(layout, 112);
-		region.height = ref_y(layout, 42);
-	}
+		region = layout->volume;
 	else
-	{
-		region.x = ref_x(layout, SETTINGS_REF_WALLET_X + 60);
-		region.y = ref_y(layout, SETTINGS_REF_WALLET_Y + 30);
-		region.width = ref_x(layout, 230);
-		region.height = ref_y(layout, 42);
-	}
+		region = layout->volume_offline;
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
 			layout->pixel_height, &region, &ctx->settings_volume_plane))
 	{
@@ -727,10 +730,7 @@ static bool	compose_ability(render_ctx_t *ctx,
 		return (false);
 	draw_ability_card(pixels, layout->pixel_width, layout->pixel_height,
 		layout, font, settings_card_character(settings, state));
-	region.x = ref_x(layout, SETTINGS_REF_CARD_X);
-	region.y = ref_y(layout, SETTINGS_REF_CARD_Y);
-	region.width = ref_x(layout, SETTINGS_REF_CARD_WIDTH);
-	region.height = ref_y(layout, SETTINGS_REF_CARD_HEIGHT);
+	region = layout->card;
 	if (!create_region_plane(ctx, pixels, layout->pixel_width,
 			layout->pixel_height, &region, &ctx->settings_ability_plane))
 	{

@@ -18,6 +18,7 @@ Battle while the authoritative `tetrisd` game loop is being built.
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
+- [Adding a Screen](#adding-a-screen)
 - [Authors](#authors)
 
 ---
@@ -531,6 +532,21 @@ rotation. Process memory remains bounded, the terminal queue drains normally,
 and Apple `leaks` reports `0 leaks for 0 total leaked bytes`. The renderer
 requires a real terminal for ownership checks because notcurses queries pixel
 geometry and graphics-protocol capabilities during startup.
+
+---
+
+## Adding a Screen
+
+[`docs/adding-a-screen.md`](docs/adding-a-screen.md) is the guide for building a
+new screen that stays responsive on every renderer tier. It covers splitting a
+screen into a cached static layer and small region planes, the signature rules
+that decide what recomposes, why bitmap planes are written in place instead of
+replaced, input coalescing, and the five rendering bugs the Settings and
+Leaderboard screens hit on the way there.
+
+The short version: a keystroke must repaint one region, never the screen.
+Whole-screen repaints cost 30–80 ms on a stationary protocol, and because the
+input loop is serial that cost becomes the input rate ceiling.
 
 ---
 

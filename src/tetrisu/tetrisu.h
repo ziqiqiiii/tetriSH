@@ -225,6 +225,25 @@
 # define SETTINGS_REF_CARD_WIDTH	(SETTINGS_REF_PROFILE_WIDTH - 16)
 # define SETTINGS_REF_CARD_HEIGHT	(SETTINGS_REF_PROFILE_HEIGHT - 16)
 # define SETTINGS_REF_CARD_STEP	62
+/*
+ * Region rectangles for the planes the renderer keeps above the static frame.
+ * Bitmap planes must never overlap on a stationary protocol, so these are kept
+ * beside each other here and checked for disjointness by the layout tests. The
+ * volume readout has two homes and the signed-in one lands inside the powers
+ * card, so those two regions are mutually exclusive rather than disjoint.
+ */
+# define SETTINGS_REF_CONTROLS_X	200
+# define SETTINGS_REF_CONTROLS_Y	850
+# define SETTINGS_REF_CONTROLS_WIDTH	1080
+# define SETTINGS_REF_CONTROLS_HEIGHT	205
+# define SETTINGS_REF_VOLUME_X	(SETTINGS_REF_PROFILE_X + 168)
+# define SETTINGS_REF_VOLUME_Y	(SETTINGS_REF_PROFILE_Y + 251)
+# define SETTINGS_REF_VOLUME_WIDTH	112
+# define SETTINGS_REF_VOLUME_HEIGHT	42
+# define SETTINGS_REF_VOLUME_OFFLINE_X	(SETTINGS_REF_WALLET_X + 60)
+# define SETTINGS_REF_VOLUME_OFFLINE_Y	(SETTINGS_REF_WALLET_Y + 30)
+# define SETTINGS_REF_VOLUME_OFFLINE_WIDTH	230
+# define SETTINGS_REF_VOLUME_OFFLINE_HEIGHT	42
 
 /* Inventory slot geometry, shared by the bitmap and cell inventory drawing. */
 # define SETTINGS_REF_SLOT_INSET	10
@@ -644,6 +663,10 @@ typedef struct s_settings_layout
 	settings_rect_t	themes;
 	settings_rect_t	stats[3];
 	settings_rect_t	buttons[SETTINGS_BUTTON_COUNT];
+	settings_rect_t	controls;
+	settings_rect_t	card;
+	settings_rect_t	volume;
+	settings_rect_t	volume_offline;
 } settings_layout_t;
 
 typedef struct s_app_room_summary_view_model
