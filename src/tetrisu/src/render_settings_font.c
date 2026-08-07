@@ -425,8 +425,7 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
 	if (!force && !geometry_changed && ctx->bg_plane != NULL)
 		return (true);
 	if (render_background_replace_exact(ctx, SETTINGS_BACKGROUND_PATH, false)
-		< 0 && render_background_replace_exact(ctx,
-			SETTINGS_BACKGROUND_LEGACY_PATH, false) < 0)
+		< 0)
 		return (false);
 	/*
 	 * Both caches are sized by the fitted geometry, so a resize invalidates
@@ -476,8 +475,6 @@ static bool	cache_background(render_ctx_t *ctx)
 		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
 		return (false);
 	visual = ncvisual_from_file(SETTINGS_BACKGROUND_PATH);
-	if (visual == NULL)
-		visual = ncvisual_from_file(SETTINGS_BACKGROUND_LEGACY_PATH);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
 		if (visual != NULL)

@@ -442,7 +442,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `DEFAULT_HUD_PATH` | Transparent 512 x 384 Solo HUD/frame |
 | `DEFAULT_TILE_PATH` | Guideline-color tiles, garbage, and two clear frames |
 | `DEFAULT_MIRURUN_PATH` | Solo character portrait, centered in its panel |
-| `SETTINGS_BACKGROUND_PATH` | Cached 1448 x 1086 Settings/Profile backdrop (`settings_profile_background_v2.png`) |
+| `SETTINGS_BACKGROUND_PATH` | Cached 1448 x 1086 Settings/Profile backdrop (`default_theme/settings_profile_background_v2.png`) |
 | `HALLOWEEN_PORTRAIT_PATH`, `PRINCESS_PORTRAIT_PATH`, `WOLFMAN_PORTRAIT_PATH` | Character inventory thumbnails; Mirurun uses `DEFAULT_MIRURUN_PATH` |
 | `SETTINGS_THEME_CLASSIC_PREVIEW_PATH` | `settings_previews/theme_classic.png` (192 x 192 Classic thumbnail) |
 | `SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH` | `settings_previews/theme_design_ai_university.png` (192 x 192 Design AI University thumbnail) |
@@ -451,7 +451,7 @@ Makefile sets to `src/tetrisu/assets`. The client loads:
 | `SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH` | `settings_previews/theme_al_merqaedes.png` (192 x 192 Al Merqaedes F1 Team thumbnail) |
 | `SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH` | `settings_previews/theme_nuclear_ghandi.png` (192 x 192 Nuclear Ghandi thumbnail) |
 | `SETTINGS_THEME_CLAUDING_PREVIEW_PATH` | `settings_previews/theme_clauding.png` (192 x 192 Clauding thumbnail) |
-| `MARKETPLACE_BACKGROUND_PATH` | `marketplace_background.png` (1448 x 1086 haunted shop interior; quiet dark centre, detail at the edges) |
+| `MARKETPLACE_BACKGROUND_PATH` | `default_theme/marketplace_background.png` (1448 x 1086 haunted shop interior; quiet dark centre, detail at the edges) |
 | `VOLUME_NOTIFICATION_PATH` | Mirurun-and-speaker pixel-art volume card |
 | `OWNERSHIP_NOTIFICATION_PATH` | Mirurun marketplace-stall pixel-art ownership-error card |
 | `SHARED_FONT_MASK_PATH` | White alpha mask for all HUD text |

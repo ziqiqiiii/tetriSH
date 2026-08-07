@@ -46,16 +46,14 @@
 # define LEADERBOARD_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/leaderboard_background.png"
 # define SETTINGS_BACKGROUND_PATH \
-	ASSET_DIR "/settings_profile_background_v2.png"
-# define SETTINGS_BACKGROUND_LEGACY_PATH \
-	ASSET_DIR "/settings_profile_background_v1.png"
+	ASSET_DIR "/default_theme/settings_profile_background_v2.png"
 /*
  * The Marketplace backdrop is a scene rather than an authored frame: the
  * renderer draws every plate and border itself, so a missing file degrades to
  * the Settings artwork instead of failing the screen.
  */
 # define MARKETPLACE_BACKGROUND_PATH \
-	ASSET_DIR "/marketplace_background.png"
+	ASSET_DIR "/default_theme/marketplace_background.png"
 # define AUTH_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/auth_screen.png"
 # define AUTH_LOGIN_BACKGROUND_PATH \
@@ -102,7 +100,8 @@
 	ASSET_DIR "/default_theme/ownership_notification.png"
 # define ABILITY_POPOVER_PATH \
 	ASSET_DIR "/default_theme/ability_popover.png"
-# define MULTIPLAYER_ASSET_PATH	ASSET_DIR "/multiplayer_background.png"
+# define MULTIPLAYER_ASSET_PATH \
+	ASSET_DIR "/default_theme/multiplayer_background.png"
 # define SHARED_FONT_MASK_PATH	ASSET_DIR "/shared_font_mask.png"
 # define SHARED_NUMBERS_MASK_PATH	ASSET_DIR "/shared_numbers_mask.png"
 # define MENU_MOVE_SFX_PATH \
