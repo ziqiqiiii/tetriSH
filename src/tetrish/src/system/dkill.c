@@ -140,7 +140,10 @@ static int load_active_daemons(const char *reg_path, DaemonInfo *daemons)
  */
 static void print_active_daemons(DaemonInfo *daemons, int count)
 {
-	char	index[8];
+	/* Sized for the widest "%2d) " an int can produce, sign included, so the
+	 * compiler can prove the row label is never truncated. The header reserves
+	 * four columns, which is what indices up to 99 occupy. */
+	char	index[16];
 	int		width;
 
 	/* Name column is sized to the longest entry so the pid column starts at
