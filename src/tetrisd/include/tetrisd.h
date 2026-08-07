@@ -20,6 +20,7 @@
 # include <sys/socket.h>
 # include <sys/stat.h>
 # include <sys/time.h>
+# include <sys/timerfd.h>
 # include <sys/types.h>
 # include <time.h>
 # include <unistd.h>
@@ -46,12 +47,16 @@
 ** thing tetrisd does; a worker owns only its own client until it hands the
 ** established session back (docs/adr/0008, step 3).
 **
-** Room tickers are still threads, so the remaining lock order is:
+** Gravity is one timerfd in the same epoll set. On expiry the loop reads the
+** monotonic clock once, advances every in-game room by that same elapsed, and
+** pushes STATE for whatever came back dirty - so a late or coalesced tick
+** stays correct rather than slowing the game down.
+**
+** The remaining lock order is:
 **     lobby_mutex > room->mutex > registry rwlock > outbox mutex
 ** No db_*, session_*, or IPC send happens under any lock - the outbox push
-** is the sole exception, and it never blocks. Step 4 replaces the tickers
-** with one timerfd and step 5 deletes every lock above; until then they are
-** load-bearing.
+** is the sole exception, and it never blocks. Nothing off the loop takes any
+** of them any more; step 5 deletes all four together.
 **
 ** The rule that makes epoll_event.data.ptr safe is stronger than any lock:
 ** no client is ever freed inside the event loop. client_kill unlinks it and
@@ -154,6 +159,7 @@ typedef enum e_event_source
 {
 	EVENT_LISTENER,
 	EVENT_WAKE,
+	EVENT_TIMER,
 	EVENT_CLIENT
 }	t_event_source;
 
@@ -271,7 +277,9 @@ typedef struct s_game
 
 /*
 ** A room's mutable runtime beside the pure t_room domain object: the mutex
-** that guards both, the per-slot games, and the ticker driving them.
+** that guards both and the per-slot games. `ticking` is the whole of what a
+** ticker thread used to be - the server's one timer walks every room and skips
+** the ones that are not playing.
 */
 typedef struct s_server_room
 {
@@ -279,10 +287,7 @@ typedef struct s_server_room
 	t_room			*room;
 	t_game			games[TD_MAX_GAMES];
 	bool			dirty[TD_MAX_GAMES];
-	struct timespec	last_tick;
-	pthread_t		ticker;
-	bool			ticker_started;
-	atomic_bool		running;
+	bool			ticking;
 	t_server		*srv;
 	int				index;
 }	t_server_room;
@@ -418,9 +423,11 @@ struct s_server
 	int				listen_fd;
 	int				port;
 	int				epoll_fd;
+	int				timer_fd;
 	int				wake[2];
 	t_event_tag		listener_tag;
 	t_event_tag		wake_tag;
+	t_event_tag		timer_tag;
 	t_handshake_pool	pool;
 	/*
 	** Clients unlinked during the current batch, freed by client_reap once the
@@ -436,11 +443,12 @@ struct s_server
 	atomic_bool		running;
 	atomic_bool		stopping;
 	/*
-	** The live tick period, kept beside the cfg record it was loaded from:
-	** SIGHUP rewrites it on the reactor while every room ticker is reading it,
-	** so this is the one setting that has to be atomic.
+	** The live tick period and when the timer last fired. Both belong to the
+	** loop alone: SIGHUP retiming is now a timerfd_settime call on the thread
+	** that owns the timer, rather than a store ninety-nine tickers read.
 	*/
-	atomic_int		tick_ms;
+	int				tick_ms;
+	struct timespec	last_tick;
 	uint64_t		started_ms;
 };
 
@@ -527,6 +535,7 @@ void			client_send(t_client *cli, t_htttp_message *msg, bool is_state);
 
 /* REACTOR.C */
 void			reactor_run(t_server *srv);
+int				reactor_arm_timer(t_server *srv);
 
 /* DISPATCH.C */
 void			client_handle_frame(t_client *cli, const unsigned char *frame, size_t len);
@@ -569,9 +578,8 @@ t_server_room	*server_room_at(t_server *srv, int index);
 t_server_room	*server_room_find(t_server *srv, const char *name);
 bool			server_room_probe(void *ctx, t_player_id pid);
 bool			server_room_seated(t_server *srv, t_client *cli);
-int				server_room_begin(t_server_room *rt, t_server *srv);
-void			server_room_stop(t_server_room *rt);
-void			server_room_stop_all(t_server *srv);
+void			server_room_begin(t_server_room *rt, t_server *srv);
+void			server_room_tick_all(t_server *srv, int elapsed_ms);
 void			server_room_forfeit(t_server *srv, t_client *cli);
 void			server_room_push_state(t_server_room *rt, const char *room_name, t_player_id pid, const t_body_state *snap);
 

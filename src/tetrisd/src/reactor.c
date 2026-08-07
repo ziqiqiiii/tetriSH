@@ -4,6 +4,7 @@
 static void	dispatch(t_server *srv, struct epoll_event *event);
 static void	accept_ready(t_server *srv);
 static void	wake_ready(t_server *srv);
+static void	timer_ready(t_server *srv);
 static void	take_handshakes(t_server *srv);
 static void	sweep(t_server *srv);
 static void	wind_down(t_server *srv);
@@ -55,6 +56,36 @@ void	reactor_run(t_server *srv)
 }
 
 /**
+ * @brief Arms the gravity timer at the configured tick period.
+ *
+ * Called at boot and again on SIGHUP. Retiming is a call on the thread that
+ * owns the timer rather than a store ninety-nine tickers had to read, which is
+ * the whole of what step 4 bought.
+ *
+ * @param srv Server whose timer is armed.
+ * @return 0 on success, -1 when the timer could not be set.
+ */
+int	reactor_arm_timer(t_server *srv)
+{
+	struct itimerspec	spec;
+
+	if (srv == NULL || srv->timer_fd < 0)
+		return (-1);
+	memset(&spec, 0, sizeof(spec));
+	spec.it_interval.tv_sec = srv->tick_ms / 1000;
+	spec.it_interval.tv_nsec = (long)(srv->tick_ms % 1000) * 1000000L;
+	spec.it_value = spec.it_interval;
+	if (timerfd_settime(srv->timer_fd, 0, &spec, NULL) != 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot arm the tick timer: %s",
+			strerror(errno));
+		return (-1);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &srv->last_tick);
+	return (0);
+}
+
+/**
  * @brief Routes one epoll event to whatever the kernel handed back.
  *
  * The tag is read before the pointer is used as a client, which is the whole
@@ -75,6 +106,8 @@ static void	dispatch(t_server *srv, struct epoll_event *event)
 		return (accept_ready(srv));
 	if (tag->source == EVENT_WAKE)
 		return (wake_ready(srv));
+	if (tag->source == EVENT_TIMER)
+		return (timer_ready(srv));
 	cli = event->data.ptr;
 	if (cli->dead)
 		return ;
@@ -127,6 +160,29 @@ static void	wake_ready(t_server *srv)
 	if (signals_take_state_dump())
 		server_state_dump(srv);
 	take_handshakes(srv);
+}
+
+/**
+ * @brief Runs one round of gravity for every room that is playing.
+ *
+ * The expiration count is read and discarded: elapsed comes from the clock,
+ * not from how many ticks the kernel thinks were missed, so a loop that was
+ * busy elsewhere catches the games up instead of running them slow. The sweep
+ * is armed because the snapshots this produced are sitting in outboxes.
+ *
+ * @param srv Server whose timer expired.
+ */
+static void	timer_ready(t_server *srv)
+{
+	uint64_t	expirations;
+	int			elapsed;
+
+	if (read(srv->timer_fd, &expirations, sizeof(expirations))
+		!= (ssize_t)sizeof(expirations))
+		return ;
+	elapsed = clock_elapsed_ms(&srv->last_tick);
+	server_room_tick_all(srv, elapsed);
+	srv->sweep_due = true;
 }
 
 /**
@@ -187,11 +243,10 @@ static void	sweep(t_server *srv)
 /**
  * @brief Tears the whole server down, on the thread that owns all of it.
  *
- * The order is the safety argument. The handshake pool stops first, so no new
- * client can arrive; the room tickers stop next, so nothing is still
- * enqueueing into an outbox; only then are the connections ended and freed.
- * Doing it the other way round - the order the threaded server used - would
- * leave a ticker holding a pointer to a client that had just been released.
+ * The handshake pool stops first, so no new client can arrive; then every
+ * connection is ended and freed. Ending a connection forfeits its game, so an
+ * interrupted game is still recorded - which is what the room tickers used to
+ * do on their way out, and why nothing here has to stop them.
  *
  * @param srv Server to wind down.
  */
@@ -206,7 +261,6 @@ static void	wind_down(t_server *srv)
 	handshake_pool_stop(&srv->pool);
 	while (handshake_pool_take(&srv->pool, &cli) == 0)
 		client_kill(cli);
-	server_room_stop_all(srv);
 	count = registry_snapshot(&srv->reg, srv->sweep,
 			(size_t)srv->cfg.max_clients);
 	i = 0;

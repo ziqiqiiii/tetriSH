@@ -55,7 +55,8 @@ export TETRISD_PID_PATH=tmp/tetrisd/tetrisd.pid
 # not take. A boot that *fails* still prints to the terminal instead.
 export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err
 
-# Concurrency limits and the room ticker period in milliseconds.
+# Simultaneous connections, and the period of the server's one gravity timer
+# in milliseconds. Every playing room advances on the same tick.
 export TETRISD_MAX_CLIENTS=64
 export TETRISD_TICK_MS=12
 

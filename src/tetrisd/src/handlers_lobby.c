@@ -9,7 +9,6 @@ static int			join_room(t_request_context *ctx, const char *name);
 static void			bind_room(t_client *cli, t_server_room *server_room, int slot);
 static const char	*seated_room_name(t_request_context *ctx);
 static int			start_games(t_server_room *server_room);
-static void			rollback_start(t_server_room *server_room);
 static int			start_status(t_request_context *ctx, t_start_verdict verdict);
 
 /**
@@ -170,11 +169,7 @@ int	start_handler(const t_htttp_message *msg, void *context)
 	pthread_mutex_unlock(&server_room->mutex);
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
-	if (server_room_begin(server_room, ctx->srv) != 0)
-	{
-		rollback_start(server_room);
-		return (500);
-	}
+	server_room_begin(server_room, ctx->srv);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
 	request_body_printf(ctx, "room %s\nstatus in-game\n", name);
 	return (200);
@@ -342,32 +337,6 @@ static int	start_games(t_server_room *server_room)
 		i++;
 	}
 	return (started);
-}
-
-/**
- * @brief Takes back a start whose ticker thread could not be created.
- *
- * Without this the room would sit IN_GAME forever with every board dealt and
- * nothing advancing them: no ticker means nothing ever ends the game, and the
- * room domain will not seat or start anybody while it believes a game is
- * running. The players keep their slots and can simply try again.
- *
- * @param server_room Room runtime whose start is being undone.
- */
-static void	rollback_start(t_server_room *server_room)
-{
-	int	i;
-
-	pthread_mutex_lock(&server_room->mutex);
-	i = 0;
-	while (i < TD_MAX_GAMES)
-	{
-		game_reset(&server_room->games[i]);
-		server_room->dirty[i] = false;
-		i++;
-	}
-	room_abort_start(server_room->room);
-	pthread_mutex_unlock(&server_room->mutex);
 }
 
 /**

@@ -91,7 +91,7 @@ The fork lives in `main.c` alone and never behind `server_start`, or the integra
 
 | Signal | Effect |
 |---|---|
-| `SIGTERM`, `SIGINT` | Leave the loop, stop the handshake pool, join every ticker, end every client, close the store |
+| `SIGTERM`, `SIGINT` | Leave the loop, stop the handshake pool, end every client, close the store |
 | `SIGHUP` | Re-read `.tetrishrc`; applies the log level and tick period |
 | `SIGUSR1` | Dump server state to the log: settings, connections, rooms, live games, log drop count |
 | `SIGPIPE` | Ignored — a vanished client kills its own connection, not the server |
@@ -115,7 +115,7 @@ Every path and setting comes from `.tetrishrc`, resolved as `argv[1]` → `$TETR
 | `TETRISD_PID_PATH` | `tmp/tetrisd/tetrisd.pid` | Pidfile claimed and `flock`ed for the process's lifetime; the single-instance guard, and what `tetrisctl` signals |
 | `TETRISD_ERR_PATH` | `tmp/tetrisd/tetrisd.err` | Where stderr goes once boot has succeeded — the last-resort copy of records the logger could not take |
 | `TETRISD_MAX_CLIENTS` | `64` | Simultaneous connections; beyond it, accepts are refused |
-| `TETRISD_TICK_MS` | `12` | Room ticker period |
+| `TETRISD_TICK_MS` | `12` | Gravity timer period, server-wide |
 | `TETRISD_BR_SLOTS` | `4` | Slots in a Battle Royale room (2–16) |
 | `TETRISD_INPUT_BURST` | `120` | Per-connection input tokens held at once |
 | `TETRISD_INPUT_RATE` | `60` | Input tokens refilled per second |
@@ -172,10 +172,10 @@ A request carrying a body must declare `Content-Type: application/tetris-command
 ### Threading model
 
 ```text
-reactor        epoll_wait(listener, wake pipe, every client)
+reactor        epoll_wait(listener, wake pipe, tick timer, every client)
                reads, opens frames, dispatches, seals, writes - owns all of it
+               and drives gravity for every room off one timerfd
 handshake pool TETRISD_HANDSHAKE_WORKERS threads, each blocked in one handshake
-per room       ticker thread   gravity on a fixed tick, then STATE snapshots
 logging        shipper thread  drains the ring, datagrams records to tetrislogd
 ```
 
@@ -186,7 +186,7 @@ One thread owns the lobby, every room, every game, the registry and every outbox
 
 Each client owns a bounded response FIFO plus a one-slot `STATE` mailbox. Overflowing the FIFO closes the connection — a client that cannot keep up must not grow the server's memory — while snapshots overwrite, so a stalled peer loses intermediate frames and never delays a room's ticker. The reactor pops, seals, and writes; a short write leaves a cursor in the send buffer and arms `EPOLLOUT`, since `session_send`'s retry loop is not available to a thread that drives every other connection too.
 
-Gravity accumulates real elapsed time against each player's own `gravity_interval_ms(level)`, so a descheduled ticker catches up rather than slowing the game down. Inputs mark the game dirty under the room's mutex; the ticker alone encodes and pushes, so inputs and gravity produce one `STATE` stream instead of two racing ones. A ticker enqueues and pokes the wake pipe — it never touches a socket — so the reactor is what turns a snapshot into bytes.
+Gravity is **one** `timerfd` armed at `TETRISD_TICK_MS`, not a thread per room. On expiry the loop reads the monotonic clock once and advances every playing room by that same elapsed; `t_game` accumulates it against each player's own `gravity_interval_ms(level)`, so a uniform coarse tick still produces per-player speeds and a late or coalesced tick catches the games up rather than slowing them down. Inputs and gravity therefore produce one `STATE` stream instead of two racing ones, and `SIGHUP` retiming is a `timerfd_settime` on the thread that owns the timer.
 
 ### Lock order
 

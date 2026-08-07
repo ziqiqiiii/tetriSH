@@ -1,8 +1,9 @@
 #include "tetrisd.h"
 
 // Static Functions
-static void		*ticker_main(void *arg);
-static int		tick_once(t_server_room *server_room, t_body_state *snaps, t_player_id *pids);
+static void		tick_room(t_server_room *server_room, int elapsed_ms);
+static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
+static void		push_all(t_server_room *server_room, int n, const t_body_state *snaps, const t_player_id *pids);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
@@ -12,8 +13,8 @@ static int64_t	coins_earned(const t_game *game);
 /**
  * @brief Pairs every lobby room with the runtime state tetrisd keeps beside it.
  *
- * The domain library owns the pure room; the mutex, the per-slot games, and
- * the ticker live here, one runtime per room, addressed by the same index.
+ * The domain library owns the pure room; the mutex and the per-slot games live
+ * here, one runtime per room, addressed by the same index.
  *
  * @param srv Server whose room runtimes are being prepared.
  */
@@ -29,7 +30,6 @@ void	server_room_init_all(t_server *srv)
 		srv->rooms[i].room = &srv->lobby.rooms[i];
 		srv->rooms[i].srv = srv;
 		srv->rooms[i].index = i;
-		atomic_store(&srv->rooms[i].running, false);
 		i++;
 	}
 }
@@ -130,62 +130,40 @@ bool	server_room_seated(t_server *srv, t_client *cli)
 }
 
 /**
- * @brief Starts the ticker thread that drives one room's games.
+ * @brief Marks a room as playing, so the server's timer starts advancing it.
  *
- * A previous game's ticker is joined first, so a room can host game after
- * game without leaking a thread each time.
+ * Beginning a game used to mean creating a thread, which could fail and had to
+ * be joined before the next game could start in the same room. It is now one
+ * flag the one timer reads, so there is nothing left to fail and nothing left
+ * to leak.
  *
  * @param server_room Room runtime to start; its room must already be IN_GAME.
  * @param srv Server the room belongs to.
- * @return 0 on success, -1 when the thread could not be created.
  */
-int	server_room_begin(t_server_room *server_room, t_server *srv)
+void	server_room_begin(t_server_room *server_room, t_server *srv)
 {
 	if (server_room == NULL || srv == NULL)
-		return (-1);
-	if (server_room->ticker_started)
-	{
-		pthread_join(server_room->ticker, NULL);
-		server_room->ticker_started = false;
-	}
-	server_room->srv = srv;
-	clock_gettime(CLOCK_MONOTONIC, &server_room->last_tick);
-	atomic_store(&server_room->running, true);
-	if (pthread_create(&server_room->ticker, NULL, ticker_main, server_room) != 0)
-	{
-		atomic_store(&server_room->running, false);
-		return (-1);
-	}
-	server_room->ticker_started = true;
-	return (0);
-}
-
-/**
- * @brief Stops a room's ticker and waits for it to finish.
- *
- * @param server_room Room runtime to stop; safe when no ticker ever ran.
- */
-void	server_room_stop(t_server_room *server_room)
-{
-	if (server_room == NULL)
 		return ;
-	atomic_store(&server_room->running, false);
-	if (server_room->ticker_started)
-		pthread_join(server_room->ticker, NULL);
-	server_room->ticker_started = false;
+	server_room->srv = srv;
+	server_room->ticking = true;
 }
 
 /**
- * @brief Stops every room's ticker, called by the reactor on its way out.
+ * @brief Advances every room that is playing, by the same elapsed time.
  *
- * Shutdown runs this before it ends any connection, so no ticker is left
- * holding a client the reactor is about to free. It is safe here and nowhere
- * else: only the reactor starts a ticker, so once it has stopped looping no
- * thread can create one behind this.
+ * This is what the ninety-nine ticker threads became. One reading of the clock
+ * drives every game, which is correct rather than merely cheap: t_game
+ * accumulates elapsed against each player's own gravity_interval_ms(level), so
+ * a uniform coarse tick still produces per-player speeds, and a tick that
+ * arrived late or coalesced with another advances by what actually passed.
  *
- * @param srv Server whose rooms are stopping.
+ * A room that has just ended gets one final pass before it is recorded, so the
+ * snapshot saying "you topped out" always reaches the player.
+ *
+ * @param srv Server whose rooms are advanced.
+ * @param elapsed_ms Milliseconds since the previous tick.
  */
-void	server_room_stop_all(t_server *srv)
+void	server_room_tick_all(t_server *srv, int elapsed_ms)
 {
 	int	i;
 
@@ -193,7 +171,11 @@ void	server_room_stop_all(t_server *srv)
 		return ;
 	i = 0;
 	while (i < LOBBY_MAX_ROOMS)
-		server_room_stop(&srv->rooms[i++]);
+	{
+		if (srv->rooms[i].ticking)
+			tick_room(&srv->rooms[i], elapsed_ms);
+		i++;
+	}
 }
 
 /**
@@ -278,88 +260,73 @@ void	server_room_push_state(t_server_room *server_room, const char *room_name,
 }
 
 /**
- * @brief Ticker thread: gravity for every game in one room, then snapshots.
+ * @brief Advances one playing room and pushes whatever changed.
  *
- * The room's mutex is held only while the games advance; encoding and
- * enqueueing happen outside it, so one stalled client can never hold up
- * another player's game. One last pass runs after the game ends, so the
- * snapshot that says "you topped out" is always sent before the room resets.
- * The tick period is re-read each round, so SIGHUP reaches running games.
- *
- * A snapshot lands in an outbox, not on a socket - the reactor is the only
- * thread allowed to write one - so the pipe is poked once per round to tell it
- * there is something to send. Step 4 folds this thread into the reactor's own
- * timer and the poke goes with it.
- *
- * @param arg The room runtime.
- * @return Always NULL.
+ * @param server_room Room runtime to advance.
+ * @param elapsed_ms Milliseconds since the previous tick.
  */
-static void	*ticker_main(void *arg)
+static void	tick_room(t_server_room *server_room, int elapsed_ms)
 {
-	t_body_state		snaps[TD_MAX_GAMES];
+	t_body_state	snaps[TD_MAX_GAMES];
 	t_player_id		pids[TD_MAX_GAMES];
-	struct timespec	period;
-	t_server_room		*server_room;
-	char			name[ROOM_NAME_MAX];
-	int				n;
 
-	server_room = arg;
-	period.tv_sec = 0;
-	while (atomic_load(&server_room->running) && atomic_load(&server_room->srv->running))
-	{
-		period.tv_nsec = (long)atomic_load(&server_room->srv->tick_ms) * 1000000L;
-		nanosleep(&period, NULL);
-		pthread_mutex_lock(&server_room->mutex);
-		snprintf(name, sizeof(name), "%s", server_room->room->name);
-		pthread_mutex_unlock(&server_room->mutex);
-		n = tick_once(server_room, snaps, pids);
-		while (n > 0)
-		{
-			n--;
-			server_room_push_state(server_room, name, pids[n], &snaps[n]);
-		}
-		server_wake(server_room->srv);
-		if (room_is_over(server_room))
-		{
-			n = tick_once(server_room, snaps, pids);
-			while (n > 0)
-			{
-				n--;
-				server_room_push_state(server_room, name, pids[n], &snaps[n]);
-			}
-			server_wake(server_room->srv);
-			break ;
-		}
-	}
+	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
+		snaps, pids);
+	if (!room_is_over(server_room))
+		return ;
+	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
+		snaps, pids);
+	server_room->ticking = false;
 	record_and_reset(server_room);
 	destroy_if_empty(server_room);
-	atomic_store(&server_room->running, false);
-	return (NULL);
+}
+
+/**
+ * @brief Pushes a tick's snapshots to the players they belong to.
+ *
+ * @param server_room Room runtime the snapshots came from.
+ * @param n Number of snapshots collected.
+ * @param snaps The snapshots.
+ * @param pids The matching subject player ids.
+ */
+static void	push_all(t_server_room *server_room, int n,
+			const t_body_state *snaps, const t_player_id *pids)
+{
+	char	name[ROOM_NAME_MAX];
+
+	pthread_mutex_lock(&server_room->mutex);
+	snprintf(name, sizeof(name), "%s", server_room->room->name);
+	pthread_mutex_unlock(&server_room->mutex);
+	while (n > 0)
+	{
+		n--;
+		server_room_push_state(server_room, name, pids[n], &snaps[n]);
+	}
 }
 
 /**
  * @brief Advances every live game in the room and collects what changed.
  *
  * @param server_room Room runtime to advance.
+ * @param elapsed_ms Milliseconds since the previous tick.
  * @param snaps Receives one snapshot per changed game.
  * @param pids Receives the matching subject player ids.
  * @return Number of snapshots collected.
  */
-static int	tick_once(t_server_room *server_room, t_body_state *snaps, t_player_id *pids)
+static int	tick_once(t_server_room *server_room, int elapsed_ms,
+			t_body_state *snaps, t_player_id *pids)
 {
-	int	elapsed;
 	int	slot;
 	int	n;
 
 	n = 0;
 	pthread_mutex_lock(&server_room->mutex);
-	elapsed = clock_elapsed_ms(&server_room->last_tick);
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (server_room->games[slot].player_id != 0)
 		{
-			if (game_gravity(&server_room->games[slot], elapsed))
+			if (game_gravity(&server_room->games[slot], elapsed_ms))
 				server_room->dirty[slot] = true;
 			if (server_room->dirty[slot])
 			{
@@ -476,10 +443,10 @@ static void	forfeit_slot(t_server_room *server_room, int slot, t_game *out)
  * lobby with the ghosts of finished games.
  *
  * The room's mutex is held across the destroy, not just across the test.
- * Destroying a room rewrites the very fields a ticker reads under that mutex,
- * so releasing it first would leave the same room guarded by two different
- * locks depending on who was asking - which is a data race, not a lock order.
- * Taking the lobby first keeps the documented order intact.
+ * Destroying a room rewrites the very fields a tick reads under that mutex, so
+ * releasing it first would leave the same room guarded by two different locks
+ * depending on who was asking. Taking the lobby first keeps the documented
+ * order intact.
  *
  * @param server_room Room runtime to check; its mutex must not be held.
  */

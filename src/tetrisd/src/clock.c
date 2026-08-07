@@ -17,8 +17,9 @@ uint64_t	clock_now_ms(void)
 /**
  * @brief Measures elapsed monotonic milliseconds and rearms the marker.
  *
- * Gravity accumulates real elapsed time rather than assuming the ticker slept
- * exactly its period, so a descheduled thread does not slow the game down.
+ * Gravity accumulates real elapsed time rather than assuming the timer fired
+ * exactly on its period, so a late or coalesced tick does not slow the game
+ * down.
  *
  * @param last Marker holding the previous reading; updated to now.
  * @return Milliseconds since the previous reading, never negative.

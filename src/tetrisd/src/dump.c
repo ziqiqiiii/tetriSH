@@ -50,7 +50,7 @@ static void	dump_header(t_server *srv)
 	logger_emit(&srv->log, COREIPC_LOG_INFO,
 		"state dump: port %d, uptime %llus, tick %dms, max clients %d",
 		srv->port, (unsigned long long)uptime,
-		atomic_load(&srv->tick_ms), srv->cfg.max_clients);
+		srv->tick_ms, srv->cfg.max_clients);
 	logger_emit(&srv->log, COREIPC_LOG_INFO,
 		"state dump: rc %s, data %s, log ipc %s",
 		srv->cfg.rc_path, srv->cfg.data_dir, srv->cfg.log_ipc);
@@ -125,7 +125,7 @@ static void	dump_room(t_server *srv, t_server_room *server_room)
 			server_room->room->name, mode_name(server_room->room->mode),
 			status_name(server_room->room->status), server_room->room->number_of_players,
 			server_room->room->slot_count,
-			atomic_load(&server_room->running) ? "yes" : "no");
+			server_room->ticking ? "yes" : "no");
 		slot = 0;
 		while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 		{

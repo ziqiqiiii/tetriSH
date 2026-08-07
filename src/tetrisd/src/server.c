@@ -4,6 +4,7 @@
 static void	*loop_main(void *arg);
 static int	bring_up(t_server *srv, const t_config *cfg);
 static int	open_reactor(t_server *srv);
+static int	open_timer(t_server *srv);
 static int	watch(t_server *srv, int fd, t_event_tag *tag);
 static void	destroy(t_server *srv);
 
@@ -158,7 +159,8 @@ void	server_reload(t_server *srv)
 	srv->cfg.log_level = fresh.log_level;
 	atomic_store(&srv->log.level, fresh.log_level);
 	srv->cfg.tick_ms = fresh.tick_ms;
-	atomic_store(&srv->tick_ms, fresh.tick_ms);
+	srv->tick_ms = fresh.tick_ms;
+	reactor_arm_timer(srv);
 	logger_emit(&srv->log, COREIPC_LOG_INFO, "reloaded %s", srv->cfg.rc_path);
 }
 
@@ -191,11 +193,13 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	srv->cfg = *cfg;
 	srv->listen_fd = -1;
 	srv->epoll_fd = -1;
+	srv->timer_fd = -1;
 	srv->wake[SELFPIPE_READ] = -1;
 	srv->wake[SELFPIPE_WRITE] = -1;
 	srv->listener_tag.source = EVENT_LISTENER;
 	srv->wake_tag.source = EVENT_WAKE;
-	atomic_store(&srv->tick_ms, cfg->tick_ms);
+	srv->timer_tag.source = EVENT_TIMER;
+	srv->tick_ms = cfg->tick_ms;
 	srv->started_ms = clock_now_ms();
 	logger_blank(&srv->log);
 	pthread_mutex_init(&srv->lobby_mutex, NULL);
@@ -250,7 +254,8 @@ static int	open_reactor(t_server *srv)
 		return (-1);
 	}
 	if (watch(srv, srv->listen_fd, &srv->listener_tag) != 0
-		|| watch(srv, srv->wake[SELFPIPE_READ], &srv->wake_tag) != 0)
+		|| watch(srv, srv->wake[SELFPIPE_READ], &srv->wake_tag) != 0
+		|| open_timer(srv) != 0)
 		return (-1);
 	if (handshake_pool_start(&srv->pool, srv) != 0)
 	{
@@ -259,6 +264,30 @@ static int	open_reactor(t_server *srv)
 		return (-1);
 	}
 	return (0);
+}
+
+/**
+ * @brief Opens the gravity timer and puts it in the epoll set.
+ *
+ * One timer for the whole server, not one per room: t_game already accumulates
+ * against each player's own gravity interval, so a uniform coarse tick still
+ * produces per-player speeds (docs/adr/0008).
+ *
+ * @param srv Server being brought up; its epoll set must be open.
+ * @return 0 on success, -1 on failure.
+ */
+static int	open_timer(t_server *srv)
+{
+	srv->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+	if (srv->timer_fd < 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the tick timer: %s",
+			strerror(errno));
+		return (-1);
+	}
+	if (watch(srv, srv->timer_fd, &srv->timer_tag) != 0)
+		return (-1);
+	return (reactor_arm_timer(srv));
 }
 
 /**
@@ -299,6 +328,8 @@ static void	destroy(t_server *srv)
 
 	handshake_pool_destroy(&srv->pool);
 	client_reap(srv);
+	if (srv->timer_fd >= 0)
+		close(srv->timer_fd);
 	if (srv->epoll_fd >= 0)
 		close(srv->epoll_fd);
 	if (srv->listen_fd >= 0)
