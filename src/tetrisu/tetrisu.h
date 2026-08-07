@@ -1651,6 +1651,13 @@ typedef struct s_backdrop_cache
 	uint32_t			*pixels;
 	int					pixels_width;
 	int					pixels_height;
+	/*
+	 * The geometry the plane is for, not the geometry it currently sits at:
+	 * an idle backdrop is parked off-screen rather than left stacked under the
+	 * live one, so its own coordinates say nothing about whether it still fits.
+	 */
+	int					rows;
+	int					cols;
 	uint64_t			used;
 }	backdrop_cache_t;
 

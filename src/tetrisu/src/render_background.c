@@ -28,6 +28,7 @@ static void	backdrop_keep_snapshot(render_ctx_t *ctx,
 static void	backdrop_restore_snapshot(render_ctx_t *ctx,
 				const backdrop_cache_t *entry);
 static void	backdrop_cache_clear(render_ctx_t *ctx);
+static void	backdrop_park(render_ctx_t *ctx, struct ncplane *plane);
 static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
 				int width, int height);
 static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
@@ -398,14 +399,15 @@ static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
 	struct ncplane		*stale;
 
 	entry = backdrop_find(ctx, path, exact, stretch);
-	if (entry == NULL || !render_plane_geometry_matches(entry->plane,
-			ctx->bg_row, ctx->bg_col, (unsigned)ctx->bg_rows,
-			(unsigned)ctx->bg_cols))
+	if (entry == NULL || entry->rows != ctx->bg_rows
+		|| entry->cols != ctx->bg_cols)
 		return (false);
 	entry->used = ++ctx->backdrop_tick;
 	if (entry->plane == ctx->bg_plane)
 		return (true);
 	stale = ctx->bg_plane;
+	backdrop_park(ctx, stale);
+	(void)ncplane_move_yx(entry->plane, ctx->bg_row, ctx->bg_col);
 	(void)ncplane_move_above(entry->plane, ctx->std);
 	ctx->bg_plane = entry->plane;
 	set_opaque_backdrop(ctx->std);
@@ -442,8 +444,26 @@ static void	backdrop_remember(render_ctx_t *ctx, const char *path,
 	entry->exact = exact;
 	entry->stretch = stretch;
 	entry->plane = ctx->bg_plane;
+	entry->rows = ctx->bg_rows;
+	entry->cols = ctx->bg_cols;
 	entry->used = ++ctx->backdrop_tick;
 	backdrop_keep_snapshot(ctx, entry);
+}
+
+/**
+ * @brief Moves an idle backdrop entirely out of the rendered area.
+ *
+ * Leaving it stacked under the live backdrop is what made a revisit expensive:
+ * a covered sprixel is torn down and sent again when it resurfaces. A plane
+ * that is merely somewhere else was never covered, so nothing has to be
+ * rebuilt to bring it back - the docs are explicit that a sprixel survives
+ * being moved.
+ */
+static void	backdrop_park(render_ctx_t *ctx, struct ncplane *plane)
+{
+	if (plane == NULL || !backdrop_is_cached(ctx, plane))
+		return ;
+	(void)ncplane_move_yx(plane, -(int)ncplane_dim_y(plane), 0);
 }
 
 /**
@@ -712,8 +732,6 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 	const char *image_path, bool stretch)
 {
 	struct ncvisual	*ncv;
-	unsigned		std_rows;
-	unsigned		std_cols;
 	int				pixel_rows;
 	int				pixel_cols;
 	int				result;
@@ -726,9 +744,6 @@ int	render_background_replace_exact(render_ctx_t *ctx,
 	ncv = ncvisual_from_file(image_path);
 	if (ncv == NULL)
 		return (-1);
-	ncplane_dim_yx(ctx->std, &std_rows, &std_cols);
-	(void)std_rows;
-	(void)std_cols;
 	if (ctx->cell_px_y <= 0 || ctx->cell_px_x <= 0
 		|| ctx->bg_rows > INT_MAX / ctx->cell_px_y
 		|| ctx->bg_cols > INT_MAX / ctx->cell_px_x)
@@ -836,6 +851,8 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 	 */
 	if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
 		ncplane_destroy(old_plane);
+	else
+		backdrop_park(ctx, old_plane);
 	return (0);
 }
 
