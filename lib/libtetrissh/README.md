@@ -49,9 +49,11 @@ C11 with `-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pedantic`.
 | Test file | Coverage |
 |---|---|
 | `test_io.c` | Exact read/write, partial EOF, u32/u64 big-endian encoding |
+| `test_credentials.c` | Load/free, unusable key, one load serving many and concurrent handshakes, survival after the files are deleted |
 | `test_handshake_socketpair.c` | Real client/server handshake, bidirectional frames, wrong CA |
 | `test_handshake_failures.c` | Stale-state wipe, oversized certificate, wrong RSA signature/wrapped lengths |
-| `test_session_frames.c` | Both frame directions, replay, oversized plaintext, closed-peer `SIGPIPE` |
+| `test_frame.c` | The codec over byte arrays: round trips, capacity limits, tamper, replay, reflection, wrong key |
+| `test_session_frames.c` | Both frame directions over a socket, replay, oversized plaintext, closed-peer `SIGPIPE` |
 | `test_session_security.c` | Tag tamper, reflection, zero/max boundary, malformed lengths, cleanup |
 
 
@@ -74,13 +76,19 @@ Both snippets begin after `connect()` or `accept()` has produced a connected des
 ```c
 #include "tetrissh.h"
 
+/* boot: once, before the first connection */
+t_tetrissh_credentials  *credentials;
+
+if (session_credentials_load(cert_path, key_path, &credentials) != 0)
+    return (-1);
+
 /* server: authenticate, then serve one request */
 t_session       sess;
 unsigned char   request[TETRISSH_MAX_PLAINTEXT];
 ssize_t         len;
 
 memset(&sess, 0, sizeof(sess));
-if (session_handshake_server(fd, &sess, cert_path, key_path) != 0)
+if (session_handshake_server(fd, &sess, credentials) != 0)
     return (-1);                       /* sess already wiped */
 len = session_recv(&sess, request, sizeof(request));
 if (len > 0)
@@ -107,11 +115,19 @@ Single public header, `include/tetrissh.h`. Every call takes the caller's `t_ses
 
 | Function | Description |
 |---|---|
-| `session_handshake_server(fd, sess, cert_path, key_path)` | Run the server side on a connected descriptor; `0` on success, `-1` on failure — which wipes and resets a non-NULL `sess` |
+| `session_credentials_load(cert_path, key_path, out)` | Read and parse the server certificate and private key once; `0` on success, `-1` on a null argument, unreadable file, or unparseable key — which leaves `*out` NULL |
+| `session_credentials_free(credentials)` | Release loaded credentials and the private key inside them; NULL is ignored |
+| `session_handshake_server(fd, sess, credentials)` | Run the server side on a connected descriptor; `0` on success, `-1` on failure — which wipes and resets a non-NULL `sess` |
 | `session_handshake_client(fd, sess, ca_path)` | Run the client side, including certificate-chain and nonce-signature verification; same return and wipe-on-failure contract |
-| `session_send(sess, buf, len)` | Encrypt and write exactly one frame; returns the plaintext byte count, or `-1` on invalid state, oversized input, or crypto/socket failure. Increments `send_seq` only on a fully written frame |
-| `session_recv(sess, buf, max_len)` | Read and authenticate exactly one frame; returns the plaintext byte count, `0` at clean EOF before the next prefix, or `-1` on a malformed frame, failed authentication, or too-small `max_len`. Increments `recv_seq` only on a fully accepted frame |
+| `session_frame_seal(sess, plain, plain_len, frame, frame_cap)` | Encrypt one plaintext into a caller-owned buffer; returns the frame byte count, or `-1` on invalid state, oversized input, a `frame_cap` below `plain_len + TETRISSH_FRAME_OVERHEAD`, or crypto failure. Increments `send_seq` on every sealed frame |
+| `session_frame_open(sess, frame, frame_len, plain, plain_cap)` | Authenticate one frame into a caller-owned buffer; returns the plaintext byte count, or `-1` on invalid state, a malformed frame, too-small `plain_cap`, or failed authentication — which wipes `plain` and leaves `recv_seq` where it was. Increments `recv_seq` only on a fully accepted frame |
+| `session_send(sess, buf, len)` | Blocking `session_frame_seal` plus the length prefix and frame write; returns the plaintext byte count, or `-1` on invalid state, oversized input, or crypto/socket failure. `send_seq` advances at seal, so a frame sealed but not written still consumes its number — a failed write ends the connection rather than resynchronising it |
+| `session_recv(sess, buf, max_len)` | Blocking prefix and frame read plus `session_frame_open`; returns the plaintext byte count, `0` at clean EOF before the next prefix, or `-1` on a malformed frame, failed authentication, or too-small `max_len` |
 | `session_close(sess)` | Cleanse the AES key, clear counters and `established`, set `fd` to `-1`. **Does not** `close(2)` — the caller owns the descriptor |
+
+The two `session_frame_*` calls perform no I/O and ignore `sess->fd`, so a
+caller that owns its own socket — the `tetrisd` reactor — drives the crypto
+without the library reaching for a descriptor.
 
 `session_recv` adds no NUL terminator; treat the output as binary and use the returned length.
 
@@ -124,6 +140,10 @@ Single public header, `include/tetrissh.h`. Every call takes the caller's `t_ses
 |---|---:|---|
 | `TETRISSH_KEY_LEN` | 32 | AES-256 session-key length |
 | `TETRISSH_MAX_PLAINTEXT` | 65536 | Largest plaintext one frame carries |
+| `TETRISSH_GCM_NONCE_LEN` | 12 | Per-frame random nonce |
+| `TETRISSH_GCM_TAG_LEN` | 16 | GCM authentication tag |
+| `TETRISSH_FRAME_OVERHEAD` | 28 | Frame bytes that are not ciphertext |
+| `TETRISSH_MAX_FRAME` | 65564 | Largest frame, length prefix excluded |
 
 ---
 
@@ -144,7 +164,7 @@ sequenceDiagram
         CU->>SD: open TCP connection
         activate CU
         activate SD
-        SD->>SS: session_handshake_server(fd, sess, cert_path, key_path)
+        SD->>SS: session_handshake_server(fd, sess, credentials)
         activate SS
         CU->>CS: session_handshake_client(fd, sess, ca_path)
         activate CS
@@ -384,8 +404,10 @@ libtetrissh/
 │   ├── internal.h          Private constants and declarations
 │   └── libs/common.h       Frozen course-provided crypto helper
 ├── src/
+│   ├── credentials.c       Server certificate and key, loaded once at boot
 │   ├── handshake.c         Nonce, certificate, RSA-PSS, RSA-OAEP
-│   ├── session.c           AES-256-GCM frame send/receive
+│   ├── frame.c             AES-256-GCM frame codec — pure, no I/O
+│   ├── session.c           Blocking send/receive wrappers over the codec
 │   ├── io.c                Exact socket I/O and endian helpers
 │   └── common.c            Frozen course-provided crypto helper
 ├── assets/                 Sequence-diagram sources and renders

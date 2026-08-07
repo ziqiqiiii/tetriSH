@@ -47,7 +47,7 @@ static void	test_invalid_arguments_reset_session(void)
 	assert(session_handshake_client(-1, &sess, NULL) == -1);
 	assert_session_reset(&sess);
 	seed_session(&sess);
-	assert(session_handshake_server(-1, &sess, NULL, "unused") == -1);
+	assert(session_handshake_server(-1, &sess, NULL) == -1);
 	assert_session_reset(&sess);
 	printf("PASS test_invalid_arguments_reset_session\n");
 }
@@ -185,19 +185,22 @@ static void	*wrong_wrapped_length_peer(void *arg)
 
 static void	test_wrong_wrapped_length_rejected_before_body(void)
 {
-	int			fds[2];
-	t_peer_args	peer;
-	pthread_t	thread;
-	t_session	sess;
-	char		leftover;
+	int						fds[2];
+	t_peer_args				peer;
+	pthread_t				thread;
+	t_session				sess;
+	char					leftover;
+	t_tetrissh_credentials	*credentials;
 
 	assert(system("sh ./scripts/generate_test_certs.sh tests/tmp/certs") == 0);
+	assert(session_credentials_load("tests/tmp/certs/server.crt",
+			"tests/tmp/certs/server.key", &credentials) == 0);
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	peer.fd = fds[0];
 	assert(pthread_create(&thread, NULL, wrong_wrapped_length_peer, &peer) == 0);
-	assert(session_handshake_server(fds[1], &sess,
-		"tests/tmp/certs/server.crt", "tests/tmp/certs/server.key") == -1);
+	assert(session_handshake_server(fds[1], &sess, credentials) == -1);
 	assert(pthread_join(thread, NULL) == 0);
+	session_credentials_free(credentials);
 	assert(recv(fds[1], &leftover, 1, 0) == 1);
 	assert(leftover == 'W');
 	assert_session_reset(&sess);

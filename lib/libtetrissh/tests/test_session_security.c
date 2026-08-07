@@ -75,7 +75,7 @@ static void	test_tampered_tag_rejected(void)
 	init_session(&receiver, target[1], TETRISSH_ROLE_SERVER);
 	assert(session_send(&sender, "tag", 3) == 3);
 	frame = capture_frame(source[1], &len);
-	frame[SESSIONIO_GCM_NONCE_LEN] ^= 0x01u;
+	frame[TETRISSH_GCM_NONCE_LEN] ^= 0x01u;
 	inject_frame(target[0], frame, len);
 	assert(session_recv(&receiver, out, sizeof(out)) == -1);
 	assert(receiver.recv_seq == 0);
@@ -165,14 +165,14 @@ static void	test_malformed_lengths_rejected(void)
 
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	init_session(&receiver, fds[1], TETRISSH_ROLE_SERVER);
-	assert(sessionio_write_u32(fds[0], SESSIONIO_FRAME_OVERHEAD - 1u) == 0);
+	assert(sessionio_write_u32(fds[0], TETRISSH_FRAME_OVERHEAD - 1u) == 0);
 	assert(session_recv(&receiver, out, sizeof(out)) == -1);
 	close(fds[0]);
 	close(fds[1]);
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 	init_session(&receiver, fds[1], TETRISSH_ROLE_SERVER);
 	assert(sessionio_write_u32(fds[0],
-		SESSIONIO_FRAME_OVERHEAD + TETRISSH_MAX_PLAINTEXT + 1u) == 0);
+		TETRISSH_FRAME_OVERHEAD + TETRISSH_MAX_PLAINTEXT + 1u) == 0);
 	assert(session_recv(&receiver, out, sizeof(out)) == -1);
 	close(fds[0]);
 	close(fds[1]);

@@ -179,6 +179,18 @@ enum (`TETRISSH_ROLE_CLIENT` / `TETRISSH_ROLE_SERVER`). `session_recv` returns
 one complete decrypted message. `src/common.c` is the frozen course-provided
 crypto helper — the Makefile compiles it separately with relaxed flags.
 
+Beneath the two blocking calls sits a pure frame codec: `session_frame_seal` /
+`session_frame_open` (`frame.c`) do the AES-256-GCM work over caller-owned byte
+arrays, perform no I/O, and ignore `sess->fd`; `session_send` / `session_recv`
+are thin wrappers that add the socket and the 4-byte length prefix. That split
+is ADR-0008 step 1, and it is what lets the reactor own the socket.
+
+The server's certificate and private key are loaded once into an opaque
+`t_tetrissh_credentials` (`session_credentials_load` / `session_credentials_free`),
+which `session_handshake_server` takes instead of two paths — so the handshake
+never touches the disk (ADR-0008 step 2). The object is immutable after loading
+and safe to share across concurrent handshakes.
+
 ## libtetrisroom API (tetrisroom.h)
 
 Pure domain library — no I/O, no networking, same discipline as `libtetrisbrain`.

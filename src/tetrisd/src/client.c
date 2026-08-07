@@ -123,8 +123,7 @@ static void	*reader_main(void *arg)
 
 	cli = arg;
 	buf = malloc(TETRISSH_MAX_PLAINTEXT);
-	if (buf != NULL && session_handshake_server(cli->fd, &cli->sess,
-			cli->srv->cfg.cert_path, cli->srv->cfg.key_path) == 0)
+	if (buf != NULL && session_handshake_server(cli->fd, &cli->sess, cli->srv->credentials) == 0)
 	{
 		registry_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
 		if (pthread_create(&cli->writer, NULL, writer_main, cli) == 0)

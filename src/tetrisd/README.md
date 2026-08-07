@@ -81,7 +81,7 @@ tetrisctl status
 tetrisctl stop tetrisd
 ```
 
-`tetrisd` daemonises itself: `main.c` double-forks, claims the pidfile named by `TETRISD_PID_PATH`, and reports itself ready only once the listener is up. Running the binary by name therefore returns to the prompt when the server is actually serving — and exits non-zero, with the reason printed, when it is not. It refuses to boot when `cert_path` or `key_path` cannot be read, so it can never silently serve players unauthenticated.
+`tetrisd` daemonises itself: `main.c` double-forks, claims the pidfile named by `TETRISD_PID_PATH`, and reports itself ready only once the listener is up. Running the binary by name therefore returns to the prompt when the server is actually serving — and exits non-zero, with the reason printed, when it is not. It refuses to boot when `cert_path` or `key_path` cannot be read *or parsed* — both are loaded once at boot and held for the server's lifetime — so it can never silently serve players unauthenticated, and no connection waits on the disk to be authenticated. A `SIGHUP` does not reload them; the listener they authenticate is already open.
 
 The fork lives in `main.c` alone and never behind `server_start`, or the integration suite — which runs a real server in-process on port 0 — would begin forking.
 

@@ -242,6 +242,11 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 		return (-1);
 	if (logger_init(&srv->log, &srv->cfg) != 0)
 		return (-1);
+	if (session_credentials_load(cfg->cert_path, cfg->key_path, &srv->credentials) != 0)
+	{
+		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot load %s and %s", cfg->cert_path, cfg->key_path);
+		return (-1);
+	}
 	if (db_open(cfg->data_dir, cfg->config_dir, &srv->db) != DB_OK)
 	{
 		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the player store");
@@ -304,6 +309,7 @@ static void	destroy(t_server *srv)
 	}
 	pthread_mutex_destroy(&srv->lobby_mutex);
 	registry_destroy(&srv->reg);
+	session_credentials_free(srv->credentials);
 	if (srv->db != NULL)
 		db_close(srv->db);
 	logger_shutdown(&srv->log);

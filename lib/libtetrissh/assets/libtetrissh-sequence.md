@@ -18,7 +18,7 @@ sequenceDiagram
         CU->>SD: open TCP connection
         activate CU
         activate SD
-        SD->>SS: session_handshake_server(fd, sess, cert_path, key_path)
+        SD->>SS: session_handshake_server(fd, sess, credentials)
         activate SS
         CU->>CS: session_handshake_client(fd, sess, ca_path)
         activate CS

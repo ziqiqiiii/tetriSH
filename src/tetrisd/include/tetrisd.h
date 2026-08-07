@@ -295,6 +295,13 @@ struct s_server
 	t_config			cfg;
 	t_logger		log;
 	t_db			*db;
+	/*
+	** The certificate bytes and parsed private key, read once at boot. They
+	** are immutable afterwards, so every client thread's handshake shares one
+	** copy and none of them opens a file. SIGHUP does not reload them - the
+	** listening socket they authenticate is already open.
+	*/
+	t_tetrissh_credentials	*credentials;
 	t_registry		reg;
 	t_lobby			lobby;
 	pthread_mutex_t	lobby_mutex;
@@ -412,8 +419,8 @@ void			game_snapshot(const t_game *g, t_body_state *out);
 
 /* ROOM.C */
 void			server_room_init_all(t_server *srv);
-t_server_room		*server_room_at(t_server *srv, int index);
-t_server_room		*server_room_find(t_server *srv, const char *name);
+t_server_room	*server_room_at(t_server *srv, int index);
+t_server_room	*server_room_find(t_server *srv, const char *name);
 bool			server_room_probe(void *ctx, t_player_id pid);
 bool			server_room_seated(t_server *srv, t_client *cli);
 int				server_room_begin(t_server_room *rt, t_server *srv);
