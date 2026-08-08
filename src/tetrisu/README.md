@@ -43,7 +43,9 @@ waiting room with chat and a pre-match countdown — while the authoritative
 - Best-effort audio — missing device, assets, or SDL libraries degrade to silent, never fatal
 - Audio compiled out entirely (`-DTETRISU_ENABLE_AUDIO=0`) when SDL2/SDL2_mixer are absent
 - Endless 10 x 20 Solo play with SRS, seven-bag generation, next-three preview,
-  ghost piece, move-reset lock delay, modern scoring, and a guaranteed 350 ms
+  ghost piece, Guideline move-reset lock delay (500 ms, 15 resets, from
+  `libtetrisbrain` so the offline rules and `tetrisd` cannot disagree),
+  modern scoring, and a guaranteed 350 ms
   view of the final board before any top-out panel appears
 - Responsive 4:3 Solo layout built from one 512 x 384 master canvas, fitted to
   the terminal without changing the HUD aspect ratio
@@ -365,8 +367,20 @@ against the server.
 
 | Screen | Server reach today |
 |---|---|
-| Login / Sign Up, Settings profile, Single Player, Multiplayer lobby & create/join | Driven by `tetrisd` |
-| Marketplace, catalogues, leaderboard, waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+| Login / Sign Up, Settings profile, Single Player, Leaderboard, Multiplayer lobby & create/join | Driven by `tetrisd` |
+| Marketplace, catalogues, waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+
+Signing in twice is a supported path, not an accident of backing out: identity
+belongs to the connection, so `tetrisd` refuses a second `LOGIN` on a bound
+socket with `409`, and the provider dials a fresh one rather than passing that
+refusal to the form as a bad password
+([`docs/bugs/`](../../docs/bugs/the_auth_screen_kept_a_session_it_could_not_reuse.md)).
+
+`net_client.c` mutes `stdout` and `stderr` for the length of the handshake.
+The certificate report is printed by the frozen `common.c`, which cannot be
+changed, and it lands on the screen notcurses owns
+([`docs/bugs/`](../../docs/bugs/the_handshake_printed_onto_the_board.md)). Set
+`TETRISU_NET_LOG=<path>` to keep it instead of discarding it.
 
 ---
 
@@ -660,8 +674,23 @@ screen: on a Sixel terminal a full-screen bitmap re-emitted over the region
 planes blanks them until the next keystroke, which is the fifth bug in
 `docs/adding-a-screen.md`.
 
-The unit suite covers the notcurses/SDL-free app and Solo game state. Run the
-strict component build without allowing dependency installation with:
+The unit suite covers the notcurses/SDL-free app and Solo game state. Three
+integration suites boot a throwaway `tetrisd` — one server bring-up, shared by
+all three as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
+and drive a real socket against it:
+
+| Suite | Client | What it covers |
+|---|---|---|
+| `test_net_solo.sh` | `net_smoke` | The wire: `JOIN`/`START`, every gameplay action, `STATE` decoded into the Solo view model |
+| `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join |
+| `test_solo_authority.sh` | `solo_authority_smoke` | The layer `solo_mode.c` calls: who owns the board, and the hold that stops `tetrisd`'s clock for the length of the client's 3-2-1 |
+
+The fixture walks its port upward from the suite's base rather than using a
+fixed one: a fixed port inside the kernel's ephemeral range collides with
+whatever else the machine is doing, and the suite fails for a reason that has
+nothing to do with `tetrisu`.
+
+Run the strict component build without allowing dependency installation with:
 
 ```bash
 make clean DEPS_READY=1 AUTO_INSTALL_DEPS=0

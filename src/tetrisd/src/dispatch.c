@@ -14,7 +14,8 @@ static const t_htttp_route	g_routes[] = {
 	{"HOLD", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, hold_handler},
 	{"PAUSE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, pause_handler},
 	{"RESTART", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, restart_handler},
-	{"ABILITY", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, ability_handler}
+	{"ABILITY", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, ability_handler},
+	{"LEADERBOARD", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, leaderboard_handler}
 };
 
 // Static Functions

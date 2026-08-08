@@ -22,7 +22,7 @@ static t_app_provider_result	stub_settings(void *userdata,
 static t_app_provider_result	stub_catalogue(void *userdata,
 				t_app_catalogue_kind kind,
 				t_app_catalogue_view_model *view);
-static t_app_provider_result	stub_leaderboard(void *userdata,
+static t_app_provider_result	net_load_leaderboard(void *userdata,
 				t_app_leaderboard_view_model *view);
 static t_app_provider_result	net_load_lobby(void *userdata,
 				t_app_lobby_view_model *view);
@@ -34,6 +34,7 @@ static t_app_provider_result	net_create_room(void *userdata,
 static t_app_game_mode		map_body_mode(t_body_mode mode);
 static t_app_room_state		map_body_status(t_body_room_status status);
 static t_app_game_mode		mode_from_room_name(const char *name);
+static bool			session_ready_for_credentials(t_app_net_session *session);
 
 void	app_net_provider_init(t_app_data_provider *provider,
 		t_app_net_session *session)
@@ -50,7 +51,7 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->load_settings = stub_settings;
 	provider->load_catalogue = stub_catalogue;
 	provider->preview_login = NULL;
-	provider->load_leaderboard = stub_leaderboard;
+	provider->load_leaderboard = net_load_leaderboard;
 	provider->load_lobby = net_load_lobby;
 	provider->load_room = net_load_room;
 	provider->create_room = net_create_room;
@@ -68,6 +69,8 @@ static t_app_provider_result	net_sign_up_action(void *userdata,
 		|| username[0] == '\0' || password[0] == '\0' || view == NULL)
 		return (APP_PROVIDER_INVALID);
 	session = (t_app_net_session *)userdata;
+	if (!session_ready_for_credentials(session))
+		return (APP_PROVIDER_UNAVAILABLE);
 	memset(&result, 0, sizeof(result));
 	if (net_signup(&session->net, username, password, &result) != 0)
 		return (APP_PROVIDER_UNAVAILABLE);
@@ -91,6 +94,8 @@ static t_app_provider_result	net_login_action(void *userdata,
 		|| username[0] == '\0' || password[0] == '\0' || view == NULL)
 		return (APP_PROVIDER_INVALID);
 	session = (t_app_net_session *)userdata;
+	if (!session_ready_for_credentials(session))
+		return (APP_PROVIDER_UNAVAILABLE);
 	memset(&result, 0, sizeof(result));
 	if (net_login(&session->net, username, password, &result) != 0)
 		return (APP_PROVIDER_UNAVAILABLE);
@@ -147,12 +152,53 @@ static t_app_provider_result	stub_catalogue(void *userdata,
 	return (APP_PROVIDER_UNAVAILABLE);
 }
 
-static t_app_provider_result	stub_leaderboard(void *userdata,
+/*
+** LEADERBOARD /leaderboard - the ranking tetrisd has been recording all
+** along.
+**
+** Every finished or forfeited game is written to the store (ADR-0002), so
+** the scores a player earns in Solo against a live server were already
+** counted; this screen simply had no way to ask for them and answered "not
+** served" while the preview build showed fixtures.
+**
+** An empty table is a successful read, not a failure: a server nobody has
+** finished a game on has a leaderboard, and it has nought rows.
+*/
+static t_app_provider_result	net_load_leaderboard(void *userdata,
 		t_app_leaderboard_view_model *view)
 {
-	(void)userdata;
-	(void)view;
-	return (APP_PROVIDER_UNAVAILABLE);
+	t_app_net_session		*session;
+	t_net_result			result;
+	t_body_leaderboard_row	rows[APP_LEADERBOARD_MAX_ENTRIES];
+	size_t					count;
+	int						i;
+
+	if (userdata == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_AUTHED)
+		return (APP_PROVIDER_UNAVAILABLE);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "LEADERBOARD",
+			TETRISU_ROUTE_LEADERBOARD, NULL, &result) != 0
+		|| result.status != 200)
+		return (APP_PROVIDER_UNAVAILABLE);
+	count = 0;
+	if (body_leaderboard_decode(result.body, strlen(result.body), rows,
+			APP_LEADERBOARD_MAX_ENTRIES, &count) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	memset(view, 0, sizeof(*view));
+	view->count = (int)count;
+	i = 0;
+	while (i < view->count)
+	{
+		view->entries[i].position = rows[i].rank;
+		snprintf(view->entries[i].username,
+			sizeof(view->entries[i].username), "%s", rows[i].username);
+		view->entries[i].score = rows[i].score;
+		i++;
+	}
+	return (APP_PROVIDER_OK);
 }
 
 static t_app_game_mode	map_body_mode(t_body_mode mode)
@@ -173,6 +219,30 @@ static t_app_room_state	map_body_status(t_body_room_status status)
 	if (status == BODY_ROOM_FINISHED)
 		return (APP_ROOM_STATE_FINISHED);
 	return (APP_ROOM_STATE_WAITING);
+}
+
+/*
+** Credentials need a connection that is not signed in as anybody yet.
+**
+** tetrisd answers a LOGIN on an already-authenticated connection with 409:
+** identity belongs to the socket (ADR-0001), so the only way to sign in as
+** somebody else - or as the same player again after backing out to the auth
+** screen - is on a socket that has not claimed a player. And a session lost
+** while a game was running leaves the handle offline while the form still
+** reads ONLINE, because nothing told the form.
+**
+** Both cases are the same repair: throw this connection away and dial again.
+** The alternative was what the player saw - a filled-in form that refused
+** every sign-in until they retyped the server address to force a reconnect.
+*/
+static bool	session_ready_for_credentials(t_app_net_session *session)
+{
+	if (session->net.state == NET_CONNECTED)
+		return (true);
+	if (session->cfg.host[0] == '\0')
+		net_config_load(&session->cfg);
+	session->connected = net_connect(&session->net, &session->cfg) == 0;
+	return (session->connected);
 }
 
 static t_app_game_mode	mode_from_room_name(const char *name)

@@ -28,6 +28,9 @@ static int	refused(t_net_result *out, const t_net_result *result);
 static void	apply_cells(t_solo_game *game, const t_body_state *snap);
 static void	apply_counters(t_solo_game *game, const t_body_state *snap);
 static void	apply_phase(t_solo_game *game, const t_body_state *snap);
+static void	apply_clearing(t_solo_game *game, const t_body_state *snap);
+static void	apply_clear_label(t_solo_game *game, const t_body_state *snap,
+				uint64_t previous_score);
 static t_solo_ability_result	verdict_of(const char *reason);
 
 /**
@@ -214,13 +217,15 @@ void	net_solo_ability_feedback(const t_net_result *result,
  * @param game View model to overwrite.
  * @return true when a snapshot was applied, false when none has arrived.
  */
-bool	net_solo_apply(const t_net_client *net, t_solo_game *game)
+bool	net_solo_apply(t_net_client *net, t_solo_game *game)
 {
 	const t_body_state	*snap;
+	uint64_t			previous_score;
 
 	if (net == NULL || game == NULL || !net->has_state)
 		return (false);
 	snap = &net->state_snapshot;
+	previous_score = game->scoring.total;
 	apply_cells(game, snap);
 	game->active = piece_spawn((t_piece_type)snap->piece.type);
 	game->active.rotation = snap->piece.rotation;
@@ -234,8 +239,31 @@ bool	net_solo_apply(const t_net_client *net, t_solo_game *game)
 		game->hold = (t_piece_type)snap->hold;
 	game->hold_used = snap->hold_used;
 	apply_counters(game, snap);
+	apply_clearing(game, snap);
+	apply_clear_label(game, snap, previous_score);
 	apply_phase(game, snap);
+	net->applied_seq = snap->seq;
 	return (true);
+}
+
+/**
+ * @brief Reports whether a filed snapshot has not been applied yet.
+ *
+ * The socket has two readers: net_pump, and net_request while it waits for a
+ * reply. Both file what they find, so "did net_pump see one?" is not the same
+ * question as "is there one the view model has not been built from?" - and it
+ * was the wrong one to ask. During play almost every STATE crosses an input
+ * request, so the board fell behind the server for as long as the player kept
+ * their hands on the keys.
+ *
+ * @param net Client to ask.
+ * @return true when the latest snapshot is newer than the last applied.
+ */
+bool	net_solo_pending(const t_net_client *net)
+{
+	if (net == NULL || !net->has_state)
+		return (false);
+	return (net->state_snapshot.seq != net->applied_seq);
 }
 
 /**
@@ -347,12 +375,81 @@ static void	apply_counters(t_solo_game *game, const t_body_state *snap)
 }
 
 /**
+ * @brief Copies the clear in progress, rows and all.
+ *
+ * The renderer draws the animation from `clear_rows`, `clear_count` and
+ * `clear_elapsed_ms`, and online all three come from here - the offset is the
+ * server's, not a timer of the client's. That is what keeps the flash on rows
+ * the board still has: the same snapshot carries both, so they cannot
+ * disagree.
+ *
+ * @param game View model to write.
+ * @param snap Snapshot to read.
+ */
+static void	apply_clearing(t_solo_game *game, const t_body_state *snap)
+{
+	int	i;
+
+	game->clear_count = snap->clearing_count;
+	if (game->clear_count > BRAIN_MAX_CLEAR_LINES)
+		game->clear_count = BRAIN_MAX_CLEAR_LINES;
+	if (game->clear_count < 0)
+		game->clear_count = 0;
+	game->clear_elapsed_ms = snap->clearing_ms;
+	i = 0;
+	while (i < game->clear_count)
+	{
+		game->clear_rows[i] = snap->clearing_rows[i];
+		i++;
+	}
+}
+
+/**
+ * @brief Fires the score banner when the server reports a fresh clear.
+ *
+ * The label is the server's; the points it awarded are not on the wire, so
+ * they are read as the jump in the total the same snapshot carries. The
+ * banner is what says TETRIS rather than SINGLE, and it was never shown
+ * online because nothing looked at `last_clear`.
+ *
+ * The trigger is the score moving, not the label being non-none: the label
+ * stays set until the next lock, so a snapshot mid-animation would re-fire
+ * the banner sixteen times over one clear.
+ *
+ * @param game View model to write.
+ * @param snap Snapshot to read.
+ * @param previous_score The total before this snapshot was applied.
+ */
+static void	apply_clear_label(t_solo_game *game, const t_body_state *snap,
+			uint64_t previous_score)
+{
+	if (snap->last_clear == BODY_CLEAR_NONE
+		|| snap->score <= previous_score)
+		return ;
+	memset(&game->last_score, 0, sizeof(game->last_score));
+	game->last_score.total_awarded = snap->score - previous_score;
+	game->last_perfect_clear = snap->last_clear == BODY_CLEAR_PERFECT;
+	game->last_lines = 0;
+	if (snap->last_clear == BODY_CLEAR_SINGLE)
+		game->last_lines = 1;
+	else if (snap->last_clear == BODY_CLEAR_DOUBLE)
+		game->last_lines = 2;
+	else if (snap->last_clear == BODY_CLEAR_TRIPLE)
+		game->last_lines = 3;
+	else if (snap->last_clear == BODY_CLEAR_TETRIS)
+		game->last_lines = 4;
+	game->score_event_active = true;
+	game->score_event_elapsed_ms = 0;
+}
+
+/**
  * @brief Maps the server's phase onto the renderer's.
  *
- * The client keeps its own clearing animation, so a server phase of
- * `clearing` sets the flag the renderer watches and leaves the local timer
- * to run it out. Pause is the server's, though: it is the one phase a player
- * asked for, and showing it before the server agreed would be a lie.
+ * The clearing phase is the server's now, and so is the offset through it -
+ * the client stopped keeping a timer of its own the moment tetrisd started
+ * holding the rows (docs/bugs/the_line_clear_never_reached_the_client.md).
+ * Pause is the server's for the same reason: showing it before the server
+ * agreed would be a lie.
  *
  * @param game View model to write.
  * @param snap Snapshot to read.

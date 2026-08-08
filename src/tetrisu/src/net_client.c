@@ -25,6 +25,8 @@ static void	take_player_id(t_net_client *net, const t_htttp_message *msg);
 static void	take_reason(const t_htttp_message *msg, t_net_result *out);
 static void	take_body(const t_htttp_message *msg, t_net_result *out);
 static int	env_port(const char *value, int fallback);
+static void	console_mute(int saved[2]);
+static void	console_unmute(int saved[2]);
 
 /**
  * @brief Reads where tetrisd is out of the environment .tetrishrc exports.
@@ -58,12 +60,28 @@ void	net_config_load(t_net_config *cfg)
  * before there is a game to keep running, which is why it is allowed to be
  * blocking here when nothing else on this path is.
  *
+ * It is also the one thing on this path that writes to the terminal. The
+ * certificate report comes out of lib/libtetrissh/src/common.c, which is the
+ * frozen course-provided helper and cannot be quietened where it is written
+ * - and notcurses owns the screen those lines land on, so they scroll the
+ * board out from under the player. The descriptors are therefore muted for
+ * the length of the handshake and given straight back.
+ *
+ * Any client already open on this handle is closed first: net_connect blanked
+ * the struct and leaked the socket, which is how a second sign-in left a
+ * connection tetrisd still believed in.
+ *
  * @param net Client to bring up; blanked first.
  * @param cfg Where the server is and which CA to trust.
  * @return 0 on success, -1 with net->error saying which step failed.
  */
 int	net_connect(t_net_client *net, const t_net_config *cfg)
 {
+	int	saved[2];
+	int	handshake;
+
+	if (net->state != NET_OFFLINE)
+		net_disconnect(net);
 	memset(net, 0, sizeof(*net));
 	net->fd = -1;
 	net->fd = dial(cfg->host, cfg->port);
@@ -72,7 +90,10 @@ int	net_connect(t_net_client *net, const t_net_config *cfg)
 		snprintf(net->error, sizeof(net->error), "no server");
 		return (-1);
 	}
-	if (session_handshake_client(net->fd, &net->sess, cfg->ca_path) != 0)
+	console_mute(saved);
+	handshake = session_handshake_client(net->fd, &net->sess, cfg->ca_path);
+	console_unmute(saved);
+	if (handshake != 0)
 	{
 		close(net->fd);
 		net->fd = -1;
@@ -492,4 +513,77 @@ static int	env_port(const char *value, int fallback)
 		|| port < 1 || port > 65535)
 		return (fallback);
 	return ((int)port);
+}
+
+/**
+ * @brief Points stdout and stderr somewhere harmless and remembers where
+ *        they were.
+ *
+ * TETRISU_NET_LOG names a file to keep the muted output in, because a
+ * handshake that fails silently is worse than one that scrolls the screen.
+ * Without it the output is discarded: net->error is what the screen shows,
+ * and it says the same thing.
+ *
+ * Both descriptors are restored or neither is muted - a half-applied
+ * redirection would leave the caller with no way back.
+ *
+ * @param saved Receives the duplicated descriptors, or -1 when nothing was
+ *        muted.
+ */
+static void	console_mute(int saved[2])
+{
+	const char	*log_path;
+	int			sink;
+
+	saved[0] = -1;
+	saved[1] = -1;
+	log_path = getenv("TETRISU_NET_LOG");
+	if (log_path != NULL && log_path[0] != '\0')
+		sink = open(log_path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+	else
+		sink = open("/dev/null", O_WRONLY | O_CLOEXEC);
+	if (sink < 0)
+		return ;
+	fflush(stdout);
+	fflush(stderr);
+	saved[0] = dup(STDOUT_FILENO);
+	saved[1] = dup(STDERR_FILENO);
+	if (saved[0] < 0 || saved[1] < 0)
+	{
+		if (saved[0] >= 0)
+			close(saved[0]);
+		if (saved[1] >= 0)
+			close(saved[1]);
+		saved[0] = -1;
+		saved[1] = -1;
+	}
+	else
+	{
+		(void)dup2(sink, STDOUT_FILENO);
+		(void)dup2(sink, STDERR_FILENO);
+	}
+	close(sink);
+}
+
+/**
+ * @brief Puts stdout and stderr back where console_mute found them.
+ *
+ * The flush happens while the sink is still installed, so anything the muted
+ * code left in a stdio buffer goes to the sink rather than arriving on the
+ * terminal one statement after it was unmuted.
+ *
+ * @param saved The descriptors console_mute duplicated.
+ */
+static void	console_unmute(int saved[2])
+{
+	if (saved[0] < 0 || saved[1] < 0)
+		return ;
+	fflush(stdout);
+	fflush(stderr);
+	(void)dup2(saved[0], STDOUT_FILENO);
+	(void)dup2(saved[1], STDERR_FILENO);
+	close(saved[0]);
+	close(saved[1]);
+	saved[0] = -1;
+	saved[1] = -1;
 }

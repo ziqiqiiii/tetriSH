@@ -64,6 +64,36 @@ int	gravity_interval_ms(int level)
 }
 
 /**
+ * @brief How long full rows stay on the board before they are taken away.
+ *
+ * This is a rule, not a flourish: for the length of it the rows are still
+ * there, no new piece has spawned, and the player cannot act. It lives here
+ * beside the gravity curve because both ends of the game need the same
+ * answer - tetrisd holds the board in that state and tetrisu draws it, and
+ * two copies of the table would drift into a client animating a clear the
+ * server had already finished.
+ *
+ * It shortens with level for the same reason gravity does: at speed, a fixed
+ * pause is the slowest thing on the board.
+ *
+ * @param level Current level.
+ * @return Milliseconds the completed rows are held for.
+ */
+int	clear_duration_ms(int level)
+{
+	level = valid_level(level);
+	if (level <= 6)
+		return (200);
+	if (level == 7)
+		return (175);
+	if (level == 8)
+		return (150);
+	if (level == 9)
+		return (125);
+	return (100);
+}
+
+/**
  * @brief Initialises caller-owned scoring state to its starting values.
  *
  * @param state Scoring state to initialise.

@@ -28,6 +28,12 @@ static int	check_lobby_lists_the_room(t_app_data_provider *provider,
 static int	check_create_and_join_room(t_app_data_provider *provider,
 				t_app_net_session *session,
 				t_app_net_session *helper);
+static int	check_signing_in_again_works(t_app_data_provider *provider,
+				t_app_net_session *session, const char *name);
+static int	check_a_dead_session_redials(t_app_data_provider *provider,
+				t_app_net_session *session, const char *name);
+static int	check_leaderboard_lists_the_account(t_app_data_provider *provider,
+				t_app_net_session *session, const char *name);
 static int	leave_room(t_app_net_session *session);
 static int	sign_in_raw(t_net_client *net, const char *name);
 static void	report(const char *name, int ok, int *failures);
@@ -64,6 +70,13 @@ int	main(void)
 		check_lobby_lists_the_room(&provider, &session), &failures);
 	report("create and join a room",
 		check_create_and_join_room(&provider, &session, &helper),
+		&failures);
+	report("signing in again from the auth screen works",
+		check_signing_in_again_works(&provider, &session, name), &failures);
+	report("a lost session redials on the next sign-in",
+		check_a_dead_session_redials(&provider, &session, name), &failures);
+	report("the leaderboard lists this account",
+		check_leaderboard_lists_the_account(&provider, &session, name),
 		&failures);
 	net_disconnect(&session.net);
 	return (failures != 0);
@@ -255,6 +268,95 @@ static int	leave_room(t_app_net_session *session)
 	session->net.play_path[0] = '\0';
 	session->net.has_state = false;
 	return (0);
+}
+
+/**
+ * @brief LOGIN a second time on a session that is already signed in.
+ *
+ * Backing out of Home to the auth screen and pressing SIGN IN again is one of
+ * the shortest paths through this client, and it was broken: identity belongs
+ * to the socket (ADR-0001), so tetrisd answers a LOGIN on an authenticated
+ * connection with 409, and the screen showed a filled-in form that refused
+ * every attempt until the player retyped the server address - which forced
+ * the reconnect that was the actual repair.
+ *
+ * The provider now redials for them, so this asserts the second sign-in
+ * succeeds and lands on a connection that is genuinely bound.
+ */
+static int	check_signing_in_again_works(t_app_data_provider *provider,
+			t_app_net_session *session, const char *name)
+{
+	t_app_auth_view_model	view;
+
+	if (session->net.state < NET_AUTHED)
+		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->login(session, name, "hunter2", "127.0.0.1", &view)
+		!= APP_PROVIDER_OK)
+		return (0);
+	if (!view.signed_in || strcmp(view.username, name) != 0)
+		return (0);
+	if (session->net.state < NET_AUTHED || session->net.player_id == 0)
+		return (0);
+	return (session->connected);
+}
+
+/**
+ * @brief LOGIN after the session died the way a dropped game kills it.
+ *
+ * solo_authority.c disconnects when a session is lost mid-game, which left
+ * the handle offline while the auth form still read ONLINE - nothing told the
+ * form. The next sign-in has to dial again rather than send a request down a
+ * socket that is not there.
+ */
+static int	check_a_dead_session_redials(t_app_data_provider *provider,
+			t_app_net_session *session, const char *name)
+{
+	t_app_auth_view_model	view;
+
+	net_disconnect(&session->net);
+	if (session->net.state != NET_OFFLINE)
+		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->login(session, name, "hunter2", "127.0.0.1", &view)
+		!= APP_PROVIDER_OK)
+		return (0);
+	return (view.signed_in && session->net.state >= NET_AUTHED);
+}
+
+/**
+ * @brief LEADERBOARD /leaderboard through the provider.
+ *
+ * The Leaderboard screen answered "not served" against a live session while
+ * the preview build showed fixtures, because tetrisd had no route for the
+ * ranking it had been recording since M1. This asserts the round trip: the
+ * account that just signed up is on the board, ranks are one-based and
+ * ascending, and the view model the screen reads is the one the fixture
+ * provider used to fill.
+ */
+static int	check_leaderboard_lists_the_account(t_app_data_provider *provider,
+			t_app_net_session *session, const char *name)
+{
+	t_app_leaderboard_view_model	view;
+	int								found;
+	int								i;
+
+	memset(&view, 0, sizeof(view));
+	if (provider->load_leaderboard(session, &view) != APP_PROVIDER_OK)
+		return (0);
+	if (view.count < 1)
+		return (0);
+	found = 0;
+	i = 0;
+	while (i < view.count)
+	{
+		if (view.entries[i].position != i + 1)
+			return (0);
+		if (strcmp(view.entries[i].username, name) == 0)
+			found = 1;
+		i++;
+	}
+	return (found);
 }
 
 /**

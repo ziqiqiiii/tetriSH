@@ -40,6 +40,7 @@
 # define TETRISU_ROUTE_SESSION	"/session"
 # define TETRISU_ROUTE_ROOMS	"/rooms"
 # define TETRISU_ROUTE_ROOM		"/room/"
+# define TETRISU_ROUTE_LEADERBOARD	"/leaderboard"
 
 /* where tetrisd is and how to prove it is tetrisd; all of it from .tetrishrc */
 typedef struct s_net_config
@@ -69,7 +70,13 @@ typedef enum e_net_state
 ** here, because different routes answer with different keys and a struct per
 ** route would be a schema this side does not own.
 */
-# define NET_BODY_MAX	512
+/*
+** Big enough for the longest body a route answers with, which is the
+** leaderboard: ten lines of `<rank> <username> <score>`, and a username may
+** be 31 characters. At 512 a table of long names came back cut in half and
+** decoded as a short one, which reads as a real answer.
+*/
+# define NET_BODY_MAX	1024
 
 typedef struct s_net_result
 {
@@ -95,6 +102,15 @@ typedef struct s_net_client
 	t_body_state	state_snapshot;
 	bool			has_state;
 	uint64_t		last_seq;
+	/*
+	** The sequence number the view model was last built from, which is not
+	** the same as the one that arrived. Snapshots are filed by whoever reads
+	** the socket, and net_request reads it too - a STATE that crosses a reply
+	** is filed there, not by net_pump. A loop that asked net_pump "did
+	** anything arrive?" therefore missed every snapshot that crossed an
+	** input, which during play is most of them.
+	*/
+	uint64_t		applied_seq;
 	char			error[NET_REASON_MAX];
 }	t_net_client;
 

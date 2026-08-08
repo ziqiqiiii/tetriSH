@@ -107,7 +107,7 @@ typedef struct s_body_ability
 **   lines <n>  level <n>  combo <n>  b2b <0|1>  charge <0-10>
 **   ability <level> <0|1>
 **   clear <none|single|double|triple|tetris|tspin|tspin_mini|perfect>
-**   clearing <count> <ms> [<rows>...]
+**   clearing <count> <elapsed_ms> [<rows>...]
 **   board            (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
 **
@@ -115,6 +115,12 @@ typedef struct s_body_ability
 ** field says the hold has already been spent on the falling piece, which is
 ** what stops a player swapping back and forth forever; it is the server's
 ** answer, not a request the client can make.
+**
+** `clearing` is how far through the clear the server is, not how long is
+** left: the rows named are still filled in the board that follows, and the
+** count is 0 whenever no clear is running. The client draws the animation
+** from that offset rather than timing one of its own, so it cannot still be
+** flashing rows the server has taken away.
 */
 typedef struct s_body_state
 {

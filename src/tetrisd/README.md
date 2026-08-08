@@ -95,6 +95,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `SIGNUP` | `/account` | Register a player; `201` with its id, `409` when the name is taken |
 | `LOGIN` | `/session` | Bind the connection to a player, displacing any older one |
 | `LIST` | `/rooms` | Every occupied room, in-game ones included |
+| `LEADERBOARD` | `/leaderboard` | Top ten by recorded score, rank ascending; registering is what puts a player on it, so a fresh account ranks last with nought |
 | `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
 | `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
 | `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
@@ -107,6 +108,25 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `RESTART` | `/room/<name>/player/<pid>` | No body — deal a fresh game, discarding the one in progress; **Single only** |
 | `ABILITY` | `/room/<name>/player/<pid>` | Body `level <1-4>`, optionally `column <0-9>` to aim Sol |
 | `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick |
+
+A piece that touches down does not lock on the spot either. It keeps
+`LOCKDOWN_DELAY_MS` (500 ms), and every accepted `MOVE` or `ROTATE` buys that
+half-second back, up to `LOCKDOWN_MAX_RESETS` (15) times — refilled whenever
+the piece falls past the lowest row it has occupied. That is the Guideline's
+Extended Placement lock down, and it is what makes it possible to slide a
+piece into a gap instead of only dropping it onto one. `DROP HARD` is exempt:
+it means "and I am done with it", and locks at once. `DROP SOFT` is only
+gravity in a hurry, so on the floor it is refused (`409 input-blocked`) and
+the piece keeps its delay
+([`docs/bugs/`](../../docs/bugs/the_piece_locked_the_moment_it_landed.md)).
+
+A lock that completes rows does not clear them on the spot. They are held for
+`clear_duration_ms(level)` — still filled in the board, nothing scored yet, no
+piece dealt — and every tick of that hold is a `STATE` carrying `phase
+clearing`, the rows, and how far through the server is. Input is refused for
+its length, because the piece has locked and the next one does not exist yet.
+Before this the clear happened between two ticks and no client could ever see
+it ([`docs/bugs/`](../../docs/bugs/the_line_clear_never_reached_the_client.md)).
 
 Rooms are named by the lobby (`S-01`, `D-02`, `BR-03`), never by clients, which is why creation addresses the collection rather than a name. Request and response bodies are the same `key value` line format the status bodies use, one key per line.
 
@@ -260,7 +280,7 @@ src/tetrisd/
 
 ## Testing
 
-Ten suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
+Thirteen suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
 
 ```bash
 make -C src/tetrisd test

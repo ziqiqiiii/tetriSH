@@ -165,8 +165,14 @@
 # define SOLO_COUNTDOWN_STEP_MS	600
 # define SOLO_COUNTDOWN_STEPS	4
 # define SOLO_EVENT_ANIMATION_FRAME_MS	33
-# define SOLO_LOCK_DELAY_MS	500
-# define SOLO_LOCK_RESET_LIMIT	15
+/*
+** The offline rules run the same lock down the server does, so the two
+** numbers come from the brain rather than being written twice. A client that
+** held a landed piece for a different half-second than tetrisd would play
+** differently depending on whether anyone was listening.
+*/
+# define SOLO_LOCK_DELAY_MS	LOCKDOWN_DELAY_MS
+# define SOLO_LOCK_RESET_LIMIT	LOCKDOWN_MAX_RESETS
 # define SOLO_DEFAULT_DAS_MS	167
 # define SOLO_DEFAULT_ARR_MS	33
 # define SOLO_DEFAULT_SOFT_DROP_FACTOR	20
@@ -2009,12 +2015,20 @@ typedef struct s_solo_game
 ** and is borrowed, never opened here; `online` is the answer to the only
 ** question the loop asks, and `lost` records that a session went away
 ** mid-game so the screen can say so.
+**
+** `countdown_hold` is the one place the two clocks are reconciled. The 3-2-1
+** is the client's presentation, but tetrisd starts gravity the moment it
+** accepts a START, so an online game is held paused for exactly as long as
+** the countdown is on screen and resumed when it clears. Without it the
+** server would drop a piece through three seconds the player is not allowed
+** to touch.
 */
 typedef struct s_solo_authority
 {
 	t_net_client	*net;
 	bool			online;
 	bool			lost;
+	bool			countdown_hold;
 }	t_solo_authority;
 
 typedef struct s_solo_render
@@ -2635,6 +2649,8 @@ void			audio_teardown(t_audio_ctx *audio);
 void			solo_game_init(t_solo_game *game, uint32_t seed);
 bool			solo_game_apply_action(t_solo_game *game, t_solo_action action);
 bool			solo_game_update(t_solo_game *game, int elapsed_ms);
+bool			solo_game_update_presentation(t_solo_game *game,
+					int elapsed_ms);
 bool			solo_game_update_danger(t_solo_game *game, int elapsed_ms);
 unsigned		solo_game_danger_dim(const t_solo_game *game);
 uint32_t		solo_game_take_events(t_solo_game *game);
@@ -2727,7 +2743,8 @@ int				net_solo_ability(t_net_client *net, t_solo_ability ability,
 					t_net_result *out);
 void			net_solo_ability_feedback(const t_net_result *result,
 					t_solo_ability ability, t_solo_game *game);
-bool			net_solo_apply(const t_net_client *net, t_solo_game *game);
+bool			net_solo_apply(t_net_client *net, t_solo_game *game);
+bool			net_solo_pending(const t_net_client *net);
 
 /* SOLO_AUTHORITY.C — the one place that knows who owns the board */
 void			solo_authority_open(t_solo_authority *authority,

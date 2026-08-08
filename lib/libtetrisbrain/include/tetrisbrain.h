@@ -12,6 +12,8 @@
 # define BRAIN_MAX_CLEAR_LINES	4
 # define LINES_PER_CHARGE		2
 # define BAG_FALLBACK_SEED		0x6D2B79F5u
+# define LOCKDOWN_DELAY_MS		500
+# define LOCKDOWN_MAX_RESETS	15
 
 /* what's in a cell */
 typedef enum
@@ -51,6 +53,18 @@ typedef struct
 	int				row;
 	int				rotation;
 }	t_piece;
+
+/* Guideline Extended Placement lock down: a piece that has landed is still
+ * the player's for LOCKDOWN_DELAY_MS, and every move or rotation buys that
+ * half-second back - up to LOCKDOWN_MAX_RESETS times, refilled whenever the
+ * piece falls past the lowest row it has occupied so far. Without the cap a
+ * player could hold a piece above the stack forever. */
+typedef struct
+{
+	int	elapsed_ms;
+	int	resets;
+	int	lowest_row;
+}	t_lockdown;
 
 /* row-down (col, row) offset from a piece's anchor; used by pieces.c's
  * per-rotation shape and wall-kick tables */
@@ -164,6 +178,13 @@ t_brain_result	piece_soft_drop(const t_board *b, t_piece *p);
 void			piece_hard_drop(const t_board *b, t_piece *p);
 int				piece_drop_distance(const t_board *b, const t_piece *p);
 
+/* LOCKDOWN.C */
+void			lockdown_init(t_lockdown *lock, const t_piece *p);
+bool			lockdown_grounded(const t_board *b, const t_piece *p);
+void			lockdown_on_fall(t_lockdown *lock, const t_piece *p);
+void			lockdown_on_shift(t_lockdown *lock, bool was_grounded);
+bool			lockdown_tick(t_lockdown *lock, bool grounded, int elapsed_ms);
+
 /* LINECLEAR.C */
 int				board_clear_lines(t_board *b);
 int				board_find_full_lines(const t_board *b,
@@ -174,6 +195,7 @@ bool			board_is_empty(const t_board *b);
 int				score_on_clear(int lines_cleared, int level);
 int				level_from_lines(int total_lines);
 int				gravity_interval_ms(int level);
+int				clear_duration_ms(int level);
 void			score_state_init(t_score_state *state);
 t_score_result	score_apply_clear(t_score_state *state, int lines_cleared,
 					int level, t_spin_type spin, bool perfect_clear);

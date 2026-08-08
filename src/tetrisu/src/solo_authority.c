@@ -22,8 +22,12 @@
 */
 
 // Static Functions
-static bool	online_update(t_solo_authority *authority, t_solo_game *game);
+static bool	online_update(t_solo_authority *authority, t_solo_game *game,
+				int elapsed_ms);
 static void	fall_offline(t_solo_authority *authority, t_solo_game *game);
+static void	countdown_hold_begin(t_solo_authority *authority);
+static bool	countdown_hold_release(t_solo_authority *authority,
+				t_solo_game *game);
 
 /**
  * @brief Opens Solo against tetrisd when there is a session, else locally.
@@ -53,6 +57,7 @@ void	solo_authority_open(t_solo_authority *authority, t_net_client *net,
 	if (net_solo_start(net, NULL) != 0)
 		return ;
 	authority->online = true;
+	countdown_hold_begin(authority);
 }
 
 /**
@@ -112,6 +117,8 @@ bool	solo_authority_action(t_solo_authority *authority, t_solo_game *game,
 
 	if (!authority->online)
 		return (solo_game_apply_action(game, action));
+	if (authority->countdown_hold)
+		return (false);
 	if (net_solo_action(authority->net, action, &result) != 0)
 	{
 		fall_offline(authority, game);
@@ -161,6 +168,8 @@ bool	solo_authority_pause(t_solo_authority *authority, t_solo_game *game)
 		solo_game_toggle_pause(game);
 		return (true);
 	}
+	if (authority->countdown_hold)
+		return (false);
 	if (net_solo_pause(authority->net, !game->paused, &result) != 0)
 	{
 		fall_offline(authority, game);
@@ -201,6 +210,10 @@ bool	solo_authority_restart(t_solo_authority *authority, t_solo_game *game,
 		return (true);
 	}
 	solo_game_set_personal_best(game, personal_best);
+	game->phase = SOLO_ACTIVE;
+	game->paused = false;
+	solo_game_start_countdown(game);
+	countdown_hold_begin(authority);
 	return (true);
 }
 
@@ -222,29 +235,38 @@ bool	solo_authority_update(t_solo_authority *authority, t_solo_game *game,
 {
 	if (!authority->online)
 		return (solo_game_update(game, elapsed_ms));
-	return (online_update(authority, game));
+	return (online_update(authority, game, elapsed_ms));
 }
 
 /**
  * @brief Takes whatever the server has sent and puts it on the view model.
  *
+ * The presentation timers are advanced here and nowhere else on this path.
+ * They are the client's either way, and online they are all there is to run -
+ * the board, the piece and the score arrive already decided.
+ *
  * @param authority Authority in charge.
  * @param game View model to overwrite.
- * @return true when a newer snapshot arrived.
+ * @param elapsed_ms Milliseconds since the last turn of the loop.
+ * @return true when the renderer has something new to draw.
  */
-static bool	online_update(t_solo_authority *authority, t_solo_game *game)
+static bool	online_update(t_solo_authority *authority, t_solo_game *game,
+			int elapsed_ms)
 {
-	int	fresh;
+	bool	changed;
+	int		fresh;
 
+	changed = solo_game_update_presentation(game, elapsed_ms);
+	changed = countdown_hold_release(authority, game) || changed;
 	fresh = net_pump(authority->net);
 	if (fresh < 0)
 	{
 		fall_offline(authority, game);
 		return (true);
 	}
-	if (fresh == 0)
-		return (false);
-	return (net_solo_apply(authority->net, game));
+	if (!net_solo_pending(authority->net))
+		return (changed);
+	return (net_solo_apply(authority->net, game) || changed);
 }
 
 /**
@@ -264,4 +286,49 @@ static void	fall_offline(t_solo_authority *authority, t_solo_game *game)
 	net_disconnect(authority->net);
 	authority->online = false;
 	authority->lost = true;
+	authority->countdown_hold = false;
+}
+
+/**
+ * @brief Stops the server's clock for as long as the 3-2-1 is on screen.
+ *
+ * A refused PAUSE is not fatal: the countdown still runs and the player still
+ * gets their board, they just lose the seconds it covers. Ending the game
+ * over it would be a worse answer than starting it slightly behind.
+ *
+ * @param authority Authority whose game has just started.
+ */
+static void	countdown_hold_begin(t_solo_authority *authority)
+{
+	t_net_result	result;
+
+	if (!authority->online)
+		return ;
+	if (net_solo_pause(authority->net, true, &result) != 0)
+		return ;
+	authority->countdown_hold = result.status == 200;
+}
+
+/**
+ * @brief Hands the board back to the server when the countdown has run out.
+ *
+ * @param authority Authority holding the game paused.
+ * @param game View model whose countdown is being watched.
+ * @return true when the hold ended on this turn.
+ */
+static bool	countdown_hold_release(t_solo_authority *authority,
+			t_solo_game *game)
+{
+	t_net_result	result;
+
+	if (!authority->countdown_hold || game->countdown_active)
+		return (false);
+	authority->countdown_hold = false;
+	if (net_solo_pause(authority->net, false, &result) != 0)
+	{
+		fall_offline(authority, game);
+		return (true);
+	}
+	game->paused = false;
+	return (true);
 }
