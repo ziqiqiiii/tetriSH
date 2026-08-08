@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (9 of 9 suites pass, valgrind-clean). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, and the self-affecting half of the Gaiden ability catalogue + tests (10 of 10 suites pass). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 

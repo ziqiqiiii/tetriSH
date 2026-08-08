@@ -278,14 +278,34 @@ typedef struct s_game
 	t_charge_state		charge;
 	t_effect_state		effects;
 	int					next[BODY_NEXT_COUNT];
+	/*
+	** The hold slot, which libtetrisbrain deliberately does not own: it is a
+	** rule about a session, not about a board. `hold_used` is what makes hold
+	** a swap rather than a shuffle - it is set on every hold and cleared only
+	** by a lock, so a piece can be held once and no more.
+	*/
+	int					hold;
+	bool				has_hold;
+	bool				hold_used;
 	int					lines;
 	int					level;
 	uint64_t			seq;
 	int					accum_ms;
+	/*
+	** `active` is "this game is still being played" and is what decides
+	** whether the room is over; `paused` is "it is being played, but not
+	** right now". They have to be separate flags: a pause that cleared
+	** `active` would read as a finished game and the room would record the
+	** score and evict the player who asked for a breather.
+	*/
 	bool				active;
+	bool				paused;
 	bool				topped_out;
 	bool				recorded;
 	t_player_id			player_id;
+	/* the seed this game was dealt, so a restart can deal the next one */
+	uint32_t			seed;
+	t_body_ability		last_ability;
 	t_body_clear_label	last_clear;
 }	t_game;
 
@@ -331,8 +351,46 @@ typedef enum e_input_action
 {
 	INPUT_MOVE,
 	INPUT_ROTATE,
-	INPUT_DROP
+	INPUT_DROP,
+	INPUT_HOLD,
+	INPUT_PAUSE,
+	INPUT_RESTART,
+	INPUT_ABILITY
 }	t_input_action;
+
+/*
+** The Gaiden ability catalogue, as tetrisd has to see it.
+**
+** A player's four abilities come from the character they have equipped, so
+** (character, level) is the identity of an ability and the level alone is
+** not - level 1 is Fry for Halloween and Cut for Wolf-man. The client sends
+** the level; the server reads the character out of the store, because that
+** is a fact about the account and not something a request may assert.
+**
+** `needs_target` is the whole of why Single mode refuses most of them.
+** docs/CONTEXT.md: "Single mode has no Target, so offensive abilities are
+** unavailable there." An ability that lands on somebody else has nobody to
+** land on in a one-player room, so it is refused rather than quietly
+** redirected at the player who paid for it.
+*/
+typedef struct s_ability_def
+{
+	t_item_id	character_id;
+	int			level;
+	const char	*name;
+	bool		needs_target;
+}	t_ability_def;
+
+/* how an ABILITY request was answered */
+typedef enum e_ability_verdict
+{
+	ABILITY_ACTIVATED,
+	ABILITY_NO_CHARGE,
+	ABILITY_NO_TARGET,
+	ABILITY_BLOCKED,
+	ABILITY_UNAVAILABLE,
+	ABILITY_INVALID
+}	t_ability_verdict;
 
 /* connection state machine - identity is owned by the connection (ADR-0001) */
 typedef enum e_client_state
@@ -606,11 +664,21 @@ int				leave_handler(const t_htttp_message *msg, void *context);
 int				start_handler(const t_htttp_message *msg, void *context);
 bool			request_is_authorised(t_request_context *ctx);
 
-/* HANDLERS_INPUT.C */
+/* REQUEST_TARGET.C */
+int				request_input_target(t_request_context *ctx, t_server_room **out);
+int				request_body_token(t_request_context *ctx, char *out, size_t cap);
 bool			rate_limit_take_token(t_client *cli);
+
+/* HANDLERS_INPUT.C */
 int				move_handler(const t_htttp_message *msg, void *context);
 int				rotate_handler(const t_htttp_message *msg, void *context);
 int				drop_handler(const t_htttp_message *msg, void *context);
+int				hold_handler(const t_htttp_message *msg, void *context);
+
+/* HANDLERS_GAME.C */
+int				pause_handler(const t_htttp_message *msg, void *context);
+int				restart_handler(const t_htttp_message *msg, void *context);
+int				ability_handler(const t_htttp_message *msg, void *context);
 
 /* GAME.C */
 void			game_reset(t_game *g);
@@ -619,7 +687,17 @@ bool			game_gravity(t_game *g, int elapsed_ms);
 bool			game_move(t_game *g, int dcol);
 bool			game_rotate(t_game *g, int dir);
 bool			game_drop(t_game *g, bool hard);
+bool			game_hold(t_game *g);
+bool			game_pause(t_game *g, bool paused);
+bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
+
+/* ABILITY_CTRL.C */
+const t_ability_def	*ability_lookup(t_item_id character_id, int level);
+bool			ability_is_playable_solo(const t_ability_def *def);
+t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
+					int argument);
+const char		*ability_verdict_reason(t_ability_verdict verdict);
 
 /* ROOM.C */
 int				server_rooms_init(t_server *srv, int br_slots);
@@ -632,6 +710,9 @@ int				server_room_open(t_server *srv, t_client *cli, t_game_mode mode);
 t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli, int *slot);
 t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
+bool			server_room_is_solo(const t_server_room *server_room);
+t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
+void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
 const t_game	*server_room_game_at(const t_server_room *server_room, int slot);

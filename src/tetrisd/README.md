@@ -29,7 +29,7 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 - Inputs are rate limited per connection with a token bucket, answering `429` with `Retry-After`; passwords are salted and SHA-256 hashed here, so the plaintext never reaches the store
 - Detaches itself, holds a locked pidfile, and reports its boot over a readiness pipe
 
-Single mode is served end to end. Double and Battle Royale are designed but unbuilt.
+Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue. Double and Battle Royale are designed but unbuilt, and with them the twelve abilities that need a Target.
 
 ---
 
@@ -102,13 +102,35 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `MOVE` | `/room/<name>/player/<pid>` | Body `LEFT` or `RIGHT` |
 | `ROTATE` | `/room/<name>/player/<pid>` | Body `CW` or `CCW` |
 | `DROP` | `/room/<name>/player/<pid>` | Body `SOFT` or `HARD` |
+| `HOLD` | `/room/<name>/player/<pid>` | No body — swap the falling piece with the hold slot, once per piece |
+| `PAUSE` | `/room/<name>/player/<pid>` | Body `PAUSE` or `RESUME`; **Single only** |
+| `RESTART` | `/room/<name>/player/<pid>` | No body — deal a fresh game, discarding the one in progress; **Single only** |
+| `ABILITY` | `/room/<name>/player/<pid>` | Body `level <1-4>`, optionally `column <0-9>` to aim Sol |
 | `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick |
 
 Rooms are named by the lobby (`S-01`, `D-02`, `BR-03`), never by clients, which is why creation addresses the collection rather than a name. Request and response bodies are the same `key value` line format the status bodies use, one key per line.
 
 Statuses in use: `200`, `201`, `400`, `401`, `403`, `404`, `409`, `413`, `429`, `500`, `501`.
 
-A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`. A bare status would leave a player unable to tell a full room from one already playing.
+A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`. A bare status would leave a player unable to tell a full room from one already playing, or "you cannot afford that" from "that ability has nothing here to act on".
+
+### Abilities
+
+An `ABILITY` body names a **level**, never an ability. Which four abilities a level selects from is decided by the character the player has equipped, and `tetrisd` reads that out of the store rather than taking it from the request — it is a fact about the account. Level 1 is Fry for Halloween and Cut for Wolf-man; a client that could name the ability could use one it has not equipped.
+
+Charge is `libtetrisbrain`'s: two cleared lines bank one, and levels 1–4 cost 2/4/6/8. It is deducted only once an activation has been accepted, so a refusal costs nothing. The client's own charge counter is never read — it arrives in `STATE` and goes nowhere.
+
+**Single mode has no Target** ([`docs/CONTEXT.md`](../../docs/CONTEXT.md)), so the twelve abilities that land on somebody else are refused with `reason no-target` rather than redirected at the player who asked for one. Four are self-affecting and served end to end — every character has one:
+
+| Character | Level | Ability | What it does to its own board |
+|---|---|---|---|
+| Halloween | 1 | Fry | Fills the bottom three rows; they burn off at the next lock |
+| Mirurun | 1 | Mirurun | Removes the bottom four rows |
+| Princess | 1 | Sol | Clears three adjacent columns, aimed by the body's `column` |
+| Wolf-man | 1 | Cut | Removes the top four rows |
+| Wolf-man | 4 | Thwack | For the next four pieces, blocks cascade after a clear |
+
+Every transform is tried on a copy and kept only when the falling piece survives it, so an ability that would leave the piece inside the stack is refused whole rather than half-applied.
 
 ---
 
@@ -223,7 +245,9 @@ src/tetrisd/
 │   ├── registry.c         Live connections, addressable by player id
 │   ├── handshake_pool.c   Bounded workers for the one blocking call
 │   ├── dispatch.c         Frame → route → status; body field helpers
-│   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input
+│   ├── request_target.c   Who may act on whose board, and the input budget
+│   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input, game
+│   ├── ability_ctrl.c     The Gaiden catalogue, targeting, and what it costs
 │   ├── room.c             Both halves of a Room; ticking and STATE push
 │   ├── game.c             t_game — the aggregate libtetrisbrain does not own
 │   └── …                  config, logger, listener, buffer, clock, signals, dump
@@ -236,7 +260,7 @@ src/tetrisd/
 
 ## Testing
 
-Nine suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
+Ten suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
 
 ```bash
 make -C src/tetrisd test

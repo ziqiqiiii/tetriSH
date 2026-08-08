@@ -295,25 +295,86 @@ bool	server_room_input(t_server_room *server_room, t_client *cli,
 {
 	t_game	*game;
 	bool	ok;
-	int		index;
 
-	if (server_room == NULL || cli == NULL)
-		return (false);
-	index = cli->binding.slot_index - 1;
-	if (index < 0 || index >= TD_MAX_GAMES)
-		return (false);
-	game = &server_room->games[index];
-	if (game->player_id != cli->player_id || !game->active)
+	game = server_room_game_of(server_room, cli);
+	if (game == NULL || !game->active)
 		return (false);
 	if (action == INPUT_MOVE)
 		ok = game_move(game, argument);
 	else if (action == INPUT_ROTATE)
 		ok = game_rotate(game, argument);
+	else if (action == INPUT_HOLD)
+		ok = game_hold(game);
+	else if (action == INPUT_PAUSE)
+		ok = game_pause(game, argument != 0);
+	else if (action == INPUT_RESTART)
+		ok = game_restart(game);
 	else
 		ok = game_drop(game, argument != 0);
 	if (ok)
-		server_room->dirty[index] = true;
+		server_room->dirty[cli->binding.slot_index - 1] = true;
 	return (ok);
+}
+
+/**
+ * @brief Marks the caller's own game as owing a snapshot.
+ *
+ * An ability is applied through game_ability rather than server_room_input,
+ * because its verdict is richer than "it happened" - but the snapshot it owes
+ * is queued exactly the same way, by the tick and not by the handler.
+ *
+ * @param server_room Room holding the game.
+ * @param cli Client whose game changed.
+ */
+void	server_room_mark_dirty(t_server_room *server_room, const t_client *cli)
+{
+	if (server_room_game_of(server_room, cli) == NULL)
+		return ;
+	server_room->dirty[cli->binding.slot_index - 1] = true;
+}
+
+/**
+ * @brief Borrows the caller's own game out of the room it is sitting in.
+ *
+ * The slot a client believes it holds is a copy of the room's fact, so the
+ * player id on the game is checked against the connection before the game is
+ * handed back - a stale binding names a slot somebody else may now be in.
+ *
+ * @param server_room Room holding the game.
+ * @param cli Client whose own game is wanted.
+ * @return The game, or NULL when this client has none in this room.
+ */
+t_game	*server_room_game_of(t_server_room *server_room, const t_client *cli)
+{
+	int	index;
+
+	if (server_room == NULL || cli == NULL)
+		return (NULL);
+	index = cli->binding.slot_index - 1;
+	if (index < 0 || index >= TD_MAX_GAMES
+		|| index >= server_room->room->slot_count)
+		return (NULL);
+	if (server_room->games[index].player_id != cli->player_id)
+		return (NULL);
+	return (&server_room->games[index]);
+}
+
+/**
+ * @brief Reports whether this room is played alone.
+ *
+ * Pausing and restarting are one-player affordances: in a room with anybody
+ * else in it, one player stopping their own clock is an advantage over
+ * everyone whose clock keeps running. Abilities ask the same question for a
+ * different reason - a room with one player in it has no Target
+ * (docs/CONTEXT.md), so most of the catalogue has nothing to act on.
+ *
+ * @param server_room Room to ask about.
+ * @return true when the room's mode is Single.
+ */
+bool	server_room_is_solo(const t_server_room *server_room)
+{
+	return (server_room != NULL && server_room->room != NULL
+		&& server_room->room->mode == MODE_SINGLE);
 }
 
 /**

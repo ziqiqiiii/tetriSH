@@ -118,6 +118,8 @@ static int	validate_state(const t_body_state *in)
 		return (-1);
 	if (in->piece.type < 0 || in->piece.rotation < 0)
 		return (-1);
+	if (in->hold < BODY_HOLD_EMPTY || in->hold > BODY_COLOR_MAX)
+		return (-1);
 	return (validate_cells(in));
 }
 
@@ -156,7 +158,7 @@ static int	validate_cells(const t_body_state *in)
 }
 
 /**
- * @brief Writes the seq, phase, piece, and next lines.
+ * @brief Writes the seq, phase, piece, next, and hold lines.
  *
  * @param in The frame being serialised.
  * @param out The body buffer.
@@ -176,6 +178,9 @@ static int	encode_head(const t_body_state *in, char *out, size_t cap,
 		return (-1);
 	if (body_append(out, cap, off, "next %d %d %d\n", in->next[0], in->next[1],
 			in->next[2]) != 0)
+		return (-1);
+	if (body_append(out, cap, off, "hold %d %d\n", in->hold,
+			in->hold_used) != 0)
 		return (-1);
 	return (0);
 }
@@ -273,7 +278,7 @@ static int	encode_board(const t_body_state *in, char *out, size_t cap,
 }
 
 /**
- * @brief Reads the seq, phase, piece, and next lines in order.
+ * @brief Reads the seq, phase, piece, next, and hold lines in order.
  *
  * @param c The body cursor.
  * @param out The frame being filled.
@@ -283,6 +288,7 @@ static int	decode_head(t_body_cursor *c, t_body_state *out)
 {
 	char	line[BODY_LINE_MAX];
 	char	word[BODY_LINE_MAX];
+	int		used;
 	int		n;
 
 	if (body_take_line(c, line, sizeof(line)) != 0
@@ -305,6 +311,12 @@ static int	decode_head(t_body_cursor *c, t_body_state *out)
 		|| sscanf(line, "next %d %d %d%n", &out->next[0], &out->next[1],
 			&out->next[2], &n) != 3 || line[n] != '\0')
 		return (-1);
+	if (body_take_line(c, line, sizeof(line)) != 0
+		|| sscanf(line, "hold %d %d%n", &out->hold, &used, &n) != 2
+		|| line[n] != '\0' || out->hold < BODY_HOLD_EMPTY
+		|| out->hold > BODY_COLOR_MAX || (used != 0 && used != 1))
+		return (-1);
+	out->hold_used = (used == 1);
 	return (0);
 }
 
