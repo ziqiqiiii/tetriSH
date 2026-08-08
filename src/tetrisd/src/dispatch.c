@@ -232,8 +232,7 @@ static bool	body_declares_itself(const t_htttp_message *msg)
  * @param msg The parsed message, or NULL when parsing itself failed.
  * @return The status code to answer with.
  */
-static unsigned int	result_status(t_htttp_result res,
-					const t_htttp_message *msg)
+static unsigned int	result_status(t_htttp_result res, const t_htttp_message *msg)
 {
 	const char	*player;
 

@@ -303,3 +303,4 @@ valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_game
 - [Concurrent Servers Design](https://eli.thegreenplace.net/2017/concurrent-servers-part-1-introduction/)
 - [Building a Multiplayer FPS](https://codersblock.org/multiplayer-fps/part1/)
 - [Reactive Programming](https://medium.com/@anju.elias_67491/reactive-programming-a58693a08c27)
+- [Garuna War — a single-threaded C++ UDP game server](https://github.com/eubrunomiguel/garuna)

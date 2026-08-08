@@ -17,8 +17,7 @@ static const char	*g_level_names[] = {"DEBUG", "INFO", "WARNING", "ERROR"};
  * @param msg The formatted log text; must not be NULL.
  * @return 0 on success, -1 with errno = EINVAL on NULL out/msg or bad level.
  */
-int	logrecord_make(t_log_record *out, t_log_level level, uint64_t timestamp_ms,
-		uint32_t pid, const char *component, const char *msg)
+int	logrecord_make(t_log_record *out, t_log_level level, uint64_t timestamp_ms, uint32_t pid, const char *component, const char *msg)
 {
 	if (!out || !msg || level > COREIPC_LOG_ERROR)
 	{
