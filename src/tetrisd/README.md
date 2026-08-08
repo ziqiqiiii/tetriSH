@@ -257,3 +257,5 @@ valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_game
 
 - [HTTP Server from scratch in C](https://medium.com/from-the-scratch/http-server-what-do-you-need-to-know-to-build-a-simple-http-server-from-scratch-d1ef8945e4fa)
 - [Concurrent Servers Design](https://eli.thegreenplace.net/2017/concurrent-servers-part-1-introduction/)
+- [Building a Multiplayer FPS](https://codersblock.org/multiplayer-fps/part1/)
+- [Reactive Programming](https://medium.com/@anju.elias_67491/reactive-programming-a58693a08c27)
