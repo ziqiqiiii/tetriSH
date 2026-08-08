@@ -27,7 +27,7 @@ static void	test_screen_names_and_parents(void)
 	screen = APP_SCREEN_ENTRY;
 	while (screen < APP_SCREEN_COUNT)
 	{
-		assert(strcmp(app_screen_name((app_screen_t)screen), "Unknown") != 0);
+		assert(strcmp(app_screen_name((t_app_screen)screen), "Unknown") != 0);
 		screen++;
 	}
 	assert(app_screen_parent(APP_SCREEN_LOGIN) == APP_SCREEN_LOGIN);
@@ -45,7 +45,7 @@ static void	test_screen_names_and_parents(void)
 
 static void	test_entry_and_account_navigation(void)
 {
-	app_navigation_t	navigation;
+	t_app_navigation	navigation;
 
 	app_navigation_init(&navigation, APP_SCREEN_ENTRY);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN));
@@ -69,21 +69,21 @@ static void	test_entry_and_account_navigation(void)
 
 static void	test_home_destinations_and_back(void)
 {
-	static const app_nav_action_t	actions[] = {
+	static const t_app_nav_action	actions[] = {
 		APP_NAV_OPEN_SOLO,
 		APP_NAV_OPEN_MARKETPLACE,
 		APP_NAV_OPEN_SETTINGS,
 		APP_NAV_OPEN_LEADERBOARD,
 		APP_NAV_OPEN_MULTIPLAYER_MODE
 	};
-	static const app_screen_t		screens[] = {
+	static const t_app_screen		screens[] = {
 		APP_SCREEN_SOLO,
 		APP_SCREEN_MARKETPLACE,
 		APP_SCREEN_SETTINGS,
 		APP_SCREEN_LEADERBOARD,
 		APP_SCREEN_MULTIPLAYER_MODE
 	};
-	app_navigation_t				navigation;
+	t_app_navigation				navigation;
 	size_t							index;
 
 	index = 0;
@@ -104,7 +104,7 @@ static void	test_home_destinations_and_back(void)
 
 static void	test_multiplayer_navigation_chain(void)
 {
-	app_navigation_t	navigation;
+	t_app_navigation	navigation;
 
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
 	/* Multiplayer now opens the mode picker; the lobby hangs off that. */
@@ -135,7 +135,7 @@ static void	test_multiplayer_navigation_chain(void)
 
 static void	test_invalid_transitions_are_rejected(void)
 {
-	app_navigation_t	navigation;
+	t_app_navigation	navigation;
 
 	app_navigation_init(&navigation, APP_SCREEN_ENTRY);
 	assert(!app_navigation_dispatch(&navigation, APP_NAV_OPEN_SOLO));
@@ -169,7 +169,7 @@ static void	test_five_item_menu_labels(void)
 
 static void	test_menu_navigation_wraps(void)
 {
-	menu_selection_t	menu;
+	t_menu_selection	menu;
 
 	menu.selected = 0;
 	menu_move_selection(&menu, NCKEY_UP);

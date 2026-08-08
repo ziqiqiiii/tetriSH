@@ -22,7 +22,7 @@
 # define LEADERBOARD_REF_CONTROLS_HEIGHT	108
 
 static int	min_int(int first, int second);
-static leaderboard_pixel_rect_t	map_pixel_rect(int x, int y, int width,
+static t_leaderboard_pixel_rect	map_pixel_rect(int x, int y, int width,
 				int height, int pixel_width, int pixel_height);
 
 /**
@@ -32,8 +32,8 @@ static leaderboard_pixel_rect_t	map_pixel_rect(int x, int y, int width,
  * only at lifecycle boundaries (entry and resize), then reuse it for focus and
  * data refresh draws so stationary protocols do not churn a full-screen plane.
  */
-leaderboard_background_action_t	leaderboard_background_action_for(
-	tetrisu_pixel_policy_t pixels, bool rebuild_requested)
+t_leaderboard_background_action	leaderboard_background_action_for(
+	t_tetrisu_pixel_policy pixels, bool rebuild_requested)
 {
 	if (pixels == TETRISU_PIXELS_NONE)
 		return (LEADERBOARD_BACKGROUND_CELL);
@@ -49,7 +49,7 @@ leaderboard_background_action_t	leaderboard_background_action_for(
  * than shrinking below the 20-row layout required to show all ten ranks.
  */
 bool	leaderboard_layout_resolve(int terminal_rows, int terminal_cols,
-	bool compatibility, leaderboard_layout_t *layout)
+	bool compatibility, t_leaderboard_layout *layout)
 {
 	int	margin;
 
@@ -84,7 +84,7 @@ bool	leaderboard_layout_resolve(int terminal_rows, int terminal_cols,
  */
 void	leaderboard_pixel_layout_build(int origin_y, int origin_x,
 	int rows, int cols, int cell_px_y, int cell_px_x,
-	leaderboard_pixel_layout_t *layout)
+	t_leaderboard_pixel_layout *layout)
 {
 	if (layout == NULL)
 		return ;
@@ -116,10 +116,10 @@ void	leaderboard_pixel_layout_build(int origin_y, int origin_x,
 /**
  * @brief Resolves a terminal pointer position against pixel-rendered controls.
  */
-bool	leaderboard_pixel_hit_test(const leaderboard_pixel_layout_t *layout,
-	int input_y, int input_x, leaderboard_focus_t *focus)
+bool	leaderboard_pixel_hit_test(const t_leaderboard_pixel_layout *layout,
+	int input_y, int input_x, t_leaderboard_focus *focus)
 {
-	const leaderboard_pixel_rect_t	*rect;
+	const t_leaderboard_pixel_rect	*rect;
 	int64_t							pixel_y;
 	int64_t							pixel_x;
 	int								index;
@@ -142,7 +142,7 @@ bool	leaderboard_pixel_hit_test(const leaderboard_pixel_layout_t *layout,
 		if (pixel_x >= rect->x && pixel_x < rect->x + rect->width
 			&& pixel_y >= rect->y && pixel_y < rect->y + rect->height)
 		{
-			*focus = (leaderboard_focus_t)index;
+			*focus = (t_leaderboard_focus)index;
 			return (true);
 		}
 		index++;
@@ -153,8 +153,8 @@ bool	leaderboard_pixel_hit_test(const leaderboard_pixel_layout_t *layout,
 /**
  * @brief Finds a rank by its explicit position, independent of provider order.
  */
-const app_leaderboard_entry_view_model_t	*leaderboard_entry_for_position(
-	const app_leaderboard_view_model_t *leaderboard, int position)
+const t_app_leaderboard_entry_view_model	*leaderboard_entry_for_position(
+	const t_app_leaderboard_view_model *leaderboard, int position)
 {
 	int	index;
 
@@ -178,10 +178,10 @@ static int	min_int(int first, int second)
 	return (second);
 }
 
-static leaderboard_pixel_rect_t	map_pixel_rect(int x, int y, int width,
+static t_leaderboard_pixel_rect	map_pixel_rect(int x, int y, int width,
 	int height, int pixel_width, int pixel_height)
 {
-	leaderboard_pixel_rect_t	mapped;
+	t_leaderboard_pixel_rect	mapped;
 
 	mapped.x = (int)((int64_t)x * pixel_width / LEADERBOARD_REF_WIDTH);
 	mapped.y = (int)((int64_t)y * pixel_height / LEADERBOARD_REF_HEIGHT);

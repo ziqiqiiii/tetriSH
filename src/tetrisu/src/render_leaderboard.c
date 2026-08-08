@@ -31,38 +31,38 @@
 # define LB_BRONZE_G			145
 # define LB_BRONZE_B			91
 
-static bool	create_panel(render_ctx_t *ctx, bool compatibility,
+static bool	create_panel(t_render_ctx *ctx, bool compatibility,
 				bool *compact);
-static bool	show_too_small(render_ctx_t *ctx);
-static void	draw_leaderboard(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const leaderboard_state_t *state, bool compatibility,
+static bool	show_too_small(t_render_ctx *ctx);
+static void	draw_leaderboard(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_leaderboard_state *state, bool compatibility,
 				bool compact);
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 				bool compatibility);
 static void	draw_cell_backdrop(struct ncplane *plane, int rows, int cols);
 static void	draw_header(struct ncplane *plane,
-				const app_screen_view_model_t *view, int cols);
+				const t_app_screen_view_model *view, int cols);
 static void	draw_status(struct ncplane *plane,
-				const app_screen_view_model_t *view, int rows, int cols);
+				const t_app_screen_view_model *view, int rows, int cols);
 static void	draw_rankings(struct ncplane *plane,
-				const app_leaderboard_view_model_t *leaderboard,
+				const t_app_leaderboard_view_model *leaderboard,
 				int rows, int cols, bool compact);
 static void	draw_podium(struct ncplane *plane,
-				const app_leaderboard_view_model_t *leaderboard, int cols);
+				const t_app_leaderboard_view_model *leaderboard, int cols);
 static void	draw_podium_entry(struct ncplane *plane,
-				const app_leaderboard_entry_view_model_t *entry,
+				const t_app_leaderboard_entry_view_model *entry,
 				int center, int width, int place);
 static void	fill_podium_card(struct ncplane *plane, int row, int center,
 				int width, int place);
 static void	draw_rank_list(struct ncplane *plane,
-				const app_leaderboard_view_model_t *leaderboard,
+				const t_app_leaderboard_view_model *leaderboard,
 				int first_row, int last_row, int cols);
 static void	draw_compact_list(struct ncplane *plane,
-				const app_leaderboard_view_model_t *leaderboard,
+				const t_app_leaderboard_view_model *leaderboard,
 				int rows, int cols);
 static void	draw_controls(struct ncplane *plane,
-				const leaderboard_state_t *state, int rows, int cols);
+				const t_leaderboard_state *state, int rows, int cols);
 static void	draw_button(struct ncplane *plane, int row, int x,
 				const char *text, bool focused);
 static void	button_geometry(const struct ncplane *plane, int *row,
@@ -83,8 +83,8 @@ static int	min_int(int first, int second);
  * presentation cannot load, draw a self-contained generic fallback with the
  * same data and controls.
  */
-bool	render_leaderboard_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const leaderboard_state_t *state,
+bool	render_leaderboard_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_leaderboard_state *state,
 	bool rebuild_background)
 {
 	bool							compact;
@@ -114,8 +114,8 @@ bool	render_leaderboard_show(render_ctx_t *ctx,
 /**
  * @brief Resolves pointer hover/click coordinates to a leaderboard button.
  */
-bool	render_leaderboard_hit_test(const render_ctx_t *ctx,
-	const ncinput *input, leaderboard_focus_t *focus)
+bool	render_leaderboard_hit_test(const t_render_ctx *ctx,
+	const ncinput *input, t_leaderboard_focus *focus)
 {
 	int	plane_y;
 	int	plane_x;
@@ -128,7 +128,7 @@ bool	render_leaderboard_hit_test(const render_ctx_t *ctx,
 		return (false);
 	if (ctx->leaderboard_pixel_active)
 	{
-		leaderboard_pixel_layout_t	layout;
+		t_leaderboard_pixel_layout	layout;
 
 		leaderboard_pixel_layout_build(ctx->bg_row, ctx->bg_col,
 			ctx->bg_rows, ctx->bg_cols, ctx->cell_px_y, ctx->cell_px_x,
@@ -156,16 +156,16 @@ bool	render_leaderboard_hit_test(const render_ctx_t *ctx,
 /**
  * @brief Removes the leaderboard plane.
  */
-void	render_leaderboard_destroy(render_ctx_t *ctx)
+void	render_leaderboard_destroy(t_render_ctx *ctx)
 {
 	render_screen_destroy(ctx);
 	render_leaderboard_pixel_destroy(ctx);
 }
 
-static bool	create_panel(render_ctx_t *ctx, bool compatibility, bool *compact)
+static bool	create_panel(t_render_ctx *ctx, bool compatibility, bool *compact)
 {
 	ncplane_options	options;
-	leaderboard_layout_t	layout;
+	t_leaderboard_layout	layout;
 	uint64_t		channels;
 	unsigned		std_rows;
 	unsigned		std_cols;
@@ -198,7 +198,7 @@ static bool	create_panel(render_ctx_t *ctx, bool compatibility, bool *compact)
  * A resize notice replaces the panel so opening this screen can never quit the
  * application merely because the terminal is temporarily too small.
  */
-static bool	show_too_small(render_ctx_t *ctx)
+static bool	show_too_small(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -234,8 +234,8 @@ static bool	show_too_small(render_ctx_t *ctx)
 	return (notcurses_render(ctx->nc) == 0);
 }
 
-static void	draw_leaderboard(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const leaderboard_state_t *state,
+static void	draw_leaderboard(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_leaderboard_state *state,
 	bool compatibility, bool compact)
 {
 	struct ncplane	*plane;
@@ -307,7 +307,7 @@ static void	draw_cell_backdrop(struct ncplane *plane, int rows, int cols)
 }
 
 static void	draw_header(struct ncplane *plane,
-	const app_screen_view_model_t *view, int cols)
+	const t_app_screen_view_model *view, int cols)
 {
 	(void)ncplane_set_fg_rgb8(plane, LB_PINK_R, LB_PINK_G, LB_PINK_B);
 	put_centered(plane, 1, ":: LEADERBOARD ::", cols, true);
@@ -325,7 +325,7 @@ static void	draw_header(struct ncplane *plane,
 }
 
 static void	draw_status(struct ncplane *plane,
-	const app_screen_view_model_t *view, int rows, int cols)
+	const t_app_screen_view_model *view, int rows, int cols)
 {
 	const char	*title;
 	const char	*detail;
@@ -357,7 +357,7 @@ static void	draw_status(struct ncplane *plane,
 }
 
 static void	draw_rankings(struct ncplane *plane,
-	const app_leaderboard_view_model_t *leaderboard, int rows, int cols,
+	const t_app_leaderboard_view_model *leaderboard, int rows, int cols,
 	bool compact)
 {
 	if (!compact)
@@ -370,7 +370,7 @@ static void	draw_rankings(struct ncplane *plane,
 }
 
 static void	draw_podium(struct ncplane *plane,
-	const app_leaderboard_view_model_t *leaderboard, int cols)
+	const t_app_leaderboard_view_model *leaderboard, int cols)
 {
 	int	width;
 
@@ -384,7 +384,7 @@ static void	draw_podium(struct ncplane *plane,
 }
 
 static void	draw_podium_entry(struct ncplane *plane,
-	const app_leaderboard_entry_view_model_t *entry, int center, int width,
+	const t_app_leaderboard_entry_view_model *entry, int center, int width,
 	int place)
 {
 	char	score[32];
@@ -451,10 +451,10 @@ static void	fill_podium_card(struct ncplane *plane, int row, int center,
 }
 
 static void	draw_rank_list(struct ncplane *plane,
-	const app_leaderboard_view_model_t *leaderboard, int first_row,
+	const t_app_leaderboard_view_model *leaderboard, int first_row,
 	int last_row, int cols)
 {
-	const app_leaderboard_entry_view_model_t	*entry;
+	const t_app_leaderboard_entry_view_model	*entry;
 	char										line[APP_TEXT_MAX + 48];
 	int											position;
 	int											row;
@@ -483,9 +483,9 @@ static void	draw_rank_list(struct ncplane *plane,
 }
 
 static void	draw_compact_list(struct ncplane *plane,
-	const app_leaderboard_view_model_t *leaderboard, int rows, int cols)
+	const t_app_leaderboard_view_model *leaderboard, int rows, int cols)
 {
-	const app_leaderboard_entry_view_model_t	*entry;
+	const t_app_leaderboard_entry_view_model	*entry;
 	char										line[APP_TEXT_MAX + 40];
 	int											position;
 	int											row;
@@ -524,7 +524,7 @@ static void	draw_compact_list(struct ncplane *plane,
 }
 
 static void	draw_controls(struct ncplane *plane,
-	const leaderboard_state_t *state, int rows, int cols)
+	const t_leaderboard_state *state, int rows, int cols)
 {
 	int	row;
 	int	back_x;

@@ -1,7 +1,7 @@
 #include "tetrisu.h"
 
 // Static Functions
-static tetrisu_pixel_policy_t	registry_policy(const char *term);
+static t_tetrisu_pixel_policy	registry_policy(const char *term);
 static bool	backend_uses_image_registry(ncpixelimpl_e backend);
 static bool	contains_fold(const char *haystack, const char *needle);
 
@@ -30,8 +30,8 @@ static bool	contains_fold(const char *haystack, const char *needle);
  * @param forced Tier requested through TETRISU_RENDERER.
  * @return The capability tier the renderer must stay within.
  */
-tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
-	const char *term, tetrisu_renderer_mode_t forced)
+t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
+	const char *term, t_tetrisu_renderer_mode forced)
 {
 	if (forced == TETRISU_RENDERER_CELL)
 		return (TETRISU_PIXELS_NONE);
@@ -64,7 +64,7 @@ tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
  * @return true when the tier can display the authored notification bitmap.
  */
 bool	tetrisu_pixel_policy_supports_notification_art(
-	tetrisu_pixel_policy_t policy)
+	t_tetrisu_pixel_policy policy)
 {
 	return (policy != TETRISU_PIXELS_NONE);
 }
@@ -80,7 +80,7 @@ bool	tetrisu_pixel_policy_supports_notification_art(
  * @return true when notification art must be rebuilt after screen redraws.
  */
 bool	tetrisu_pixel_policy_notification_needs_reemit(
-	tetrisu_pixel_policy_t policy)
+	t_tetrisu_pixel_policy policy)
 {
 	return (policy == TETRISU_PIXELS_STATIONARY);
 }
@@ -96,7 +96,7 @@ bool	tetrisu_pixel_policy_notification_needs_reemit(
  * @param term Detected terminal name, or NULL when unknown.
  * @return The tier this registry terminal has earned.
  */
-static tetrisu_pixel_policy_t	registry_policy(const char *term)
+static t_tetrisu_pixel_policy	registry_policy(const char *term)
 {
 	if (term == NULL)
 		return (TETRISU_PIXELS_STATIONARY);

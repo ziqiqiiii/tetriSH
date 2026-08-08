@@ -1,22 +1,22 @@
 #include "tetrisu.h"
 
-static bool	has_inventory(const marketplace_state_t *state);
-static int	section_slots(const marketplace_state_t *state,
-				marketplace_section_t section);
-static void	enter_inventory(marketplace_state_t *state,
-				marketplace_section_t section, int row, bool rightmost);
-static void	move_horizontal(marketplace_state_t *state, int step);
-static void	move_vertical(marketplace_state_t *state, int step);
-static void	move_control(marketplace_state_t *state, int step);
-static void	focus_control_column(marketplace_state_t *state, int column);
-static marketplace_action_t	activate_focus(const marketplace_state_t *state);
+static bool	has_inventory(const t_marketplace_state *state);
+static int	section_slots(const t_marketplace_state *state,
+				t_marketplace_section section);
+static void	enter_inventory(t_marketplace_state *state,
+				t_marketplace_section section, int row, bool rightmost);
+static void	move_horizontal(t_marketplace_state *state, int step);
+static void	move_vertical(t_marketplace_state *state, int step);
+static void	move_control(t_marketplace_state *state, int step);
+static void	focus_control_column(t_marketplace_state *state, int column);
+static t_marketplace_action	activate_focus(const t_marketplace_state *state);
 static int	slot_rows(int slots);
 static int	clamp_int(int value, int low, int high);
 static int	min_int(int left, int right);
-static app_catalogue_view_model_t	*mutable_catalogue(
-				app_marketplace_view_model_t *market,
-				const marketplace_state_t *state);
-static void	clear_equipped(app_catalogue_view_model_t *catalogue);
+static t_app_catalogue_view_model	*mutable_catalogue(
+				t_app_marketplace_view_model *market,
+				const t_marketplace_state *state);
+static void	clear_equipped(t_app_catalogue_view_model *catalogue);
 
 /**
  * @brief Starts the Marketplace on the safe Back action.
@@ -27,7 +27,7 @@ static void	clear_equipped(app_catalogue_view_model_t *catalogue);
  * preview starts on the characters panel so the detail card describes
  * something from the first frame instead of opening blank.
  */
-void	marketplace_state_init(marketplace_state_t *state, bool signed_in,
+void	marketplace_state_init(t_marketplace_state *state, bool signed_in,
 	int character_slots, int theme_slots)
 {
 	if (state == NULL)
@@ -58,8 +58,8 @@ void	marketplace_state_init(marketplace_state_t *state, bool signed_in,
  * The screen repaints on this rather than on "any key arrived", so a burst of
  * repeats that lands back on the same slot costs no bitmap work at all.
  */
-bool	marketplace_state_view_changed(const marketplace_state_t *before,
-	const marketplace_state_t *after)
+bool	marketplace_state_view_changed(const t_marketplace_state *before,
+	const t_marketplace_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -95,7 +95,7 @@ bool	marketplace_navigation_keys_coalesce(uint32_t active_key,
  * Queued terminal repeats are discarded at these boundaries so input produced
  * for the Marketplace cannot leak into Home or shutdown handling.
  */
-bool	marketplace_action_leaves_screen(marketplace_action_t action)
+bool	marketplace_action_leaves_screen(t_marketplace_action action)
 {
 	return (action == MARKETPLACE_ACTION_BACK
 		|| action == MARKETPLACE_ACTION_QUIT);
@@ -108,8 +108,8 @@ bool	marketplace_action_leaves_screen(marketplace_action_t action)
  * control row it is the panel the cursor came from, so stepping down to Buy
  * keeps pointing at the item that was being inspected.
  */
-marketplace_section_t	marketplace_focused_section(
-	const marketplace_state_t *state)
+t_marketplace_section	marketplace_focused_section(
+	const t_marketplace_state *state)
 {
 	if (state == NULL)
 		return (MARKETPLACE_SECTION_CHARACTERS);
@@ -121,7 +121,7 @@ marketplace_section_t	marketplace_focused_section(
 /**
  * @brief Returns the drawn slot the detail card and Buy button act on.
  */
-int	marketplace_focused_slot(const marketplace_state_t *state)
+int	marketplace_focused_slot(const t_marketplace_state *state)
 {
 	if (state == NULL)
 		return (-1);
@@ -133,7 +133,7 @@ int	marketplace_focused_slot(const marketplace_state_t *state)
 /**
  * @brief Reports whether the acted-on panel is the characters grid.
  */
-bool	marketplace_focused_is_character(const marketplace_state_t *state)
+bool	marketplace_focused_is_character(const t_marketplace_state *state)
 {
 	return (marketplace_focused_section(state)
 		== MARKETPLACE_SECTION_CHARACTERS);
@@ -142,9 +142,9 @@ bool	marketplace_focused_is_character(const marketplace_state_t *state)
 /**
  * @brief Returns the catalogue the acted-on panel draws from.
  */
-const app_catalogue_view_model_t	*marketplace_focused_catalogue(
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state)
+const t_app_catalogue_view_model	*marketplace_focused_catalogue(
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state)
 {
 	if (market == NULL || state == NULL)
 		return (NULL);
@@ -159,11 +159,11 @@ const app_catalogue_view_model_t	*marketplace_focused_catalogue(
  * Returns NULL rather than a clamped neighbour when the slot is past what the
  * panel draws, so callers cannot buy or equip something the user never saw.
  */
-const app_catalogue_item_view_model_t	*marketplace_focused_item(
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state)
+const t_app_catalogue_item_view_model	*marketplace_focused_item(
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state)
 {
-	const app_catalogue_view_model_t	*catalogue;
+	const t_app_catalogue_view_model	*catalogue;
 	int									slot;
 	int									limit;
 
@@ -181,8 +181,8 @@ const app_catalogue_item_view_model_t	*marketplace_focused_item(
 /**
  * @brief Reports whether the wallet covers one catalogue entry.
  */
-bool	marketplace_can_afford(const app_marketplace_view_model_t *market,
-	const app_catalogue_item_view_model_t *item)
+bool	marketplace_can_afford(const t_app_marketplace_view_model *market,
+	const t_app_catalogue_item_view_model *item)
 {
 	if (market == NULL || item == NULL)
 		return (false);
@@ -198,11 +198,11 @@ bool	marketplace_can_afford(const app_marketplace_view_model_t *market,
  *
  * @return Bought, already owned, insufficient funds, or invalid selection.
  */
-marketplace_purchase_result_t	marketplace_buy_focused(
-	app_marketplace_view_model_t *market, const marketplace_state_t *state)
+t_marketplace_purchase_result	marketplace_buy_focused(
+	t_app_marketplace_view_model *market, const t_marketplace_state *state)
 {
-	app_catalogue_view_model_t				*catalogue;
-	const app_catalogue_item_view_model_t	*item;
+	t_app_catalogue_view_model				*catalogue;
+	const t_app_catalogue_item_view_model	*item;
 	int										slot;
 
 	item = marketplace_focused_item(market, state);
@@ -228,11 +228,11 @@ marketplace_purchase_result_t	marketplace_buy_focused(
  *
  * @return Changed, unchanged, locked, or invalid selection result.
  */
-settings_equip_result_t	marketplace_equip_focused(
-	app_marketplace_view_model_t *market, const marketplace_state_t *state)
+t_settings_equip_result	marketplace_equip_focused(
+	t_app_marketplace_view_model *market, const t_marketplace_state *state)
 {
-	app_catalogue_view_model_t				*catalogue;
-	const app_catalogue_item_view_model_t	*item;
+	t_app_catalogue_view_model				*catalogue;
+	const t_app_catalogue_item_view_model	*item;
 	int										slot;
 
 	item = marketplace_focused_item(market, state);
@@ -267,7 +267,7 @@ settings_equip_result_t	marketplace_equip_focused(
  * Tab remains a single linear escape hatch so the whole screen is reachable
  * without knowing the grid shape.
  */
-void	marketplace_state_focus_next(marketplace_state_t *state)
+void	marketplace_state_focus_next(t_marketplace_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -306,7 +306,7 @@ void	marketplace_state_focus_next(marketplace_state_t *state)
  * panels draw, which is the rightmost slot of the last row rather than the
  * first row: asking for row zero would leave later rows unreachable.
  */
-void	marketplace_state_focus_previous(marketplace_state_t *state)
+void	marketplace_state_focus_previous(t_marketplace_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -341,7 +341,7 @@ void	marketplace_state_focus_previous(marketplace_state_t *state)
 /**
  * @brief Converts Marketplace keyboard input into semantic actions.
  */
-marketplace_action_t	marketplace_handle_key(marketplace_state_t *state,
+t_marketplace_action	marketplace_handle_key(t_marketplace_state *state,
 	uint32_t key)
 {
 	if (state == NULL)
@@ -390,7 +390,7 @@ marketplace_action_t	marketplace_handle_key(marketplace_state_t *state,
  * equip it when it is already owned. The renderer labels the slot accordingly,
  * so the same key never means two things at once from the user's side.
  */
-static marketplace_action_t	activate_focus(const marketplace_state_t *state)
+static t_marketplace_action	activate_focus(const t_marketplace_state *state)
 {
 	if (state->section != MARKETPLACE_SECTION_CONTROLS)
 		return (MARKETPLACE_ACTION_BUY);
@@ -412,7 +412,7 @@ static marketplace_action_t	activate_focus(const marketplace_state_t *state)
  * inventory grids do not, because their outer edges are where the crossing to
  * the neighbouring panel has to happen.
  */
-static void	move_horizontal(marketplace_state_t *state, int step)
+static void	move_horizontal(t_marketplace_state *state, int step)
 {
 	int	slots;
 	int	*slot;
@@ -445,7 +445,7 @@ static void	move_horizontal(marketplace_state_t *state, int step)
 /**
  * @brief Steps between grid rows, falling through to the control row.
  */
-static void	move_vertical(marketplace_state_t *state, int step)
+static void	move_vertical(t_marketplace_state *state, int step)
 {
 	int	slots;
 	int	*slot;
@@ -491,20 +491,20 @@ static void	move_vertical(marketplace_state_t *state, int step)
  * grid lands on the button directly below rather than on whichever button
  * happened to be focused before the panels were entered.
  */
-static void	focus_control_column(marketplace_state_t *state, int column)
+static void	focus_control_column(t_marketplace_state *state, int column)
 {
 	int	focus;
 
 	focus = clamp_int(column, 0, MARKETPLACE_BUTTON_COUNT - 1);
 	if (focus == (int)MARKETPLACE_FOCUS_BUY && !state->signed_in)
 		focus = (int)MARKETPLACE_FOCUS_BACK;
-	state->focus = (marketplace_focus_t)focus;
+	state->focus = (t_marketplace_focus)focus;
 }
 
 /**
  * @brief Cycles the four control buttons, skipping Buy when signed out.
  */
-static void	move_control(marketplace_state_t *state, int step)
+static void	move_control(t_marketplace_state *state, int step)
 {
 	int	focus;
 
@@ -514,14 +514,14 @@ static void	move_control(marketplace_state_t *state, int step)
 	if (focus == (int)MARKETPLACE_FOCUS_BUY && !state->signed_in)
 		focus = (focus + (step > 0 ? 1 : MARKETPLACE_BUTTON_COUNT - 1))
 			% MARKETPLACE_BUTTON_COUNT;
-	state->focus = (marketplace_focus_t)focus;
+	state->focus = (t_marketplace_focus)focus;
 }
 
 /**
  * @brief Focuses a panel at the requested row, clamped to what it draws.
  */
-static void	enter_inventory(marketplace_state_t *state,
-	marketplace_section_t section, int row, bool rightmost)
+static void	enter_inventory(t_marketplace_state *state,
+	t_marketplace_section section, int row, bool rightmost)
 {
 	int	slots;
 	int	rows;
@@ -544,8 +544,8 @@ static void	enter_inventory(marketplace_state_t *state,
 		state->theme_slot = slot;
 }
 
-static int	section_slots(const marketplace_state_t *state,
-	marketplace_section_t section)
+static int	section_slots(const t_marketplace_state *state,
+	t_marketplace_section section)
 {
 	if (section == MARKETPLACE_SECTION_CHARACTERS)
 		return (state->character_slots);
@@ -554,7 +554,7 @@ static int	section_slots(const marketplace_state_t *state,
 	return (MARKETPLACE_BUTTON_COUNT);
 }
 
-static bool	has_inventory(const marketplace_state_t *state)
+static bool	has_inventory(const t_marketplace_state *state)
 {
 	return (state->character_slots > 0 || state->theme_slots > 0);
 }
@@ -586,8 +586,8 @@ static int	min_int(int left, int right)
 /**
  * @brief Returns the writable catalogue behind the focused panel.
  */
-static app_catalogue_view_model_t	*mutable_catalogue(
-	app_marketplace_view_model_t *market, const marketplace_state_t *state)
+static t_app_catalogue_view_model	*mutable_catalogue(
+	t_app_marketplace_view_model *market, const t_marketplace_state *state)
 {
 	if (market == NULL || state == NULL)
 		return (NULL);
@@ -596,7 +596,7 @@ static app_catalogue_view_model_t	*mutable_catalogue(
 	return (&market->themes);
 }
 
-static void	clear_equipped(app_catalogue_view_model_t *catalogue)
+static void	clear_equipped(t_app_catalogue_view_model *catalogue)
 {
 	int	index;
 
@@ -611,8 +611,8 @@ static void	clear_equipped(app_catalogue_view_model_t *catalogue)
 /**
  * @brief Records the result of the last action for the control-row readout.
  */
-void	marketplace_set_feedback(marketplace_state_t *state,
-	marketplace_feedback_t feedback, int value)
+void	marketplace_set_feedback(t_marketplace_state *state,
+	t_marketplace_feedback feedback, int value)
 {
 	if (state == NULL)
 		return ;
@@ -626,7 +626,7 @@ void	marketplace_set_feedback(marketplace_state_t *state,
  * Both renderers read this so the bitmap and cell paths always report the same
  * outcome in the same words.
  */
-const char	*marketplace_feedback_text(const marketplace_state_t *state,
+const char	*marketplace_feedback_text(const t_marketplace_state *state,
 	char *out, size_t size)
 {
 	if (state == NULL || out == NULL || size == 0)

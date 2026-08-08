@@ -8,16 +8,16 @@
 # define MARKET_FONT_SPACING_REF	4
 # define MARKET_FONT_SHADOW_REF	3
 
-static const color_t	g_market_cream = {250, 242, 221};
-static const color_t	g_market_gold = {255, 203, 102};
-static const color_t	g_market_pink = {255, 112, 190};
-static const color_t	g_market_lavender = {190, 155, 218};
-static const color_t	g_market_green = {112, 214, 174};
-static const color_t	g_market_red = {255, 111, 142};
-static const color_t	g_market_disabled = {105, 99, 120};
-static const color_t	g_market_shadow = {22, 8, 31};
-static const color_t	g_market_plate = {26, 12, 42};
-static const color_t	g_market_slot_plate = {74, 40, 104};
+static const t_color	g_market_cream = {250, 242, 221};
+static const t_color	g_market_gold = {255, 203, 102};
+static const t_color	g_market_pink = {255, 112, 190};
+static const t_color	g_market_lavender = {190, 155, 218};
+static const t_color	g_market_green = {112, 214, 174};
+static const t_color	g_market_red = {255, 111, 142};
+static const t_color	g_market_disabled = {105, 99, 120};
+static const t_color	g_market_shadow = {22, 8, 31};
+static const t_color	g_market_plate = {26, 12, 42};
+static const t_color	g_market_slot_plate = {74, 40, 104};
 
 typedef struct s_market_slot
 {
@@ -30,7 +30,7 @@ typedef struct s_market_slot
 	int	thumb_height;
 	int	name_y;
 	int	price_y;
-}	market_slot_t;
+}	t_market_slot;
 
 /*
  * One glyph size per panel, fitted from the longest caption it will draw.
@@ -44,145 +44,145 @@ typedef struct s_market_caption_metrics
 	int	name_spacing;
 	int	price_glyph;
 	int	price_spacing;
-}	market_caption_metrics_t;
+}	t_market_caption_metrics;
 
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font);
-static bool	refresh_background(render_ctx_t *ctx, bool force);
-static bool	cache_background(render_ctx_t *ctx);
-static int	update_static_layer(render_ctx_t *ctx,
-		const app_screen_view_model_t *view,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static int	update_region_layers(render_ctx_t *ctx,
-		const app_screen_view_model_t *view, const marketplace_state_t *state,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static void	restack_marketplace_planes(render_ctx_t *ctx);
-static bool	compose_static(render_ctx_t *ctx,
-		const app_screen_view_model_t *view,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static bool	compose_stats(render_ctx_t *ctx,
-		const app_marketplace_view_model_t *market,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static bool	compose_inventory(render_ctx_t *ctx,
-		const app_marketplace_view_model_t *market,
-		const marketplace_state_t *state,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font);
+static bool	refresh_background(t_render_ctx *ctx, bool force);
+static bool	cache_background(t_render_ctx *ctx);
+static int	update_static_layer(t_render_ctx *ctx,
+		const t_app_screen_view_model *view,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static int	update_region_layers(t_render_ctx *ctx,
+		const t_app_screen_view_model *view, const t_marketplace_state *state,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static void	restack_marketplace_planes(t_render_ctx *ctx);
+static bool	compose_static(t_render_ctx *ctx,
+		const t_app_screen_view_model *view,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static bool	compose_stats(t_render_ctx *ctx,
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static bool	compose_inventory(t_render_ctx *ctx,
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_state *state,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		bool characters);
-static bool	compose_detail(render_ctx_t *ctx,
-		const app_screen_view_model_t *view, const marketplace_state_t *state,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static bool	compose_controls(render_ctx_t *ctx,
-		const app_marketplace_view_model_t *market,
-		const marketplace_state_t *state,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static uint32_t	*region_canvas(render_ctx_t *ctx,
-		const marketplace_layout_t *layout);
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	compose_detail(t_render_ctx *ctx,
+		const t_app_screen_view_model *view, const t_marketplace_state *state,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static bool	compose_controls(t_render_ctx *ctx,
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_state *state,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static uint32_t	*region_canvas(t_render_ctx *ctx,
+		const t_marketplace_layout *layout);
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 		int width, int height);
-static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_static_plane(t_render_ctx *ctx, uint32_t *pixels,
 		int width, int height);
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-		int width, int height, const marketplace_rect_t *region,
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+		int width, int height, const t_marketplace_rect *region,
 		struct ncplane **slot);
 static void	draw_chrome(uint32_t *pixels, int width, int height,
-		const app_screen_view_model_t *view,
-		const marketplace_layout_t *layout, struct ncvisual *font);
+		const t_app_screen_view_model *view,
+		const t_marketplace_layout *layout, struct ncvisual *font);
 static void	draw_stat_plates(uint32_t *pixels, int width, int height,
-		const app_marketplace_view_model_t *market,
-		const marketplace_layout_t *layout, struct ncvisual *font);
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_layout *layout, struct ncvisual *font);
 static void	draw_stat_card(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font, int index,
-		const char *label, const char *value, color_t tint);
+		const t_marketplace_layout *layout, struct ncvisual *font, int index,
+		const char *label, const char *value, t_color tint);
 static void	draw_panel_plate(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, int ref_x_value, int ref_y_value,
-		int ref_width, int ref_height, color_t edge);
+		const t_marketplace_layout *layout, int ref_x_value, int ref_y_value,
+		int ref_width, int ref_height, t_color edge);
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, const market_slot_t *slot);
-static void	slot_geometry(bool characters, int index, market_slot_t *slot);
-static void	caption_metrics(const app_catalogue_view_model_t *catalogue,
-		int visible, bool characters, const marketplace_layout_t *layout,
-		int slot_width, market_caption_metrics_t *metrics);
-static const char	*slot_label(const app_catalogue_item_view_model_t *item,
+		const t_marketplace_layout *layout, const t_market_slot *slot);
+static void	slot_geometry(bool characters, int index, t_market_slot *slot);
+static void	caption_metrics(const t_app_catalogue_view_model *catalogue,
+		int visible, bool characters, const t_marketplace_layout *layout,
+		int slot_width, t_market_caption_metrics *metrics);
+static const char	*slot_label(const t_app_catalogue_item_view_model *item,
 		bool characters);
 static void	draw_inventory_slot(uint32_t *pixels, int width, int height,
-		const app_catalogue_item_view_model_t *item,
-		const app_marketplace_view_model_t *market,
-		const marketplace_layout_t *layout, struct ncvisual *font,
-		render_ctx_t *ctx, const market_slot_t *slot, int cache_slot,
+		const t_app_catalogue_item_view_model *item,
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_layout *layout, struct ncvisual *font,
+		t_render_ctx *ctx, const t_market_slot *slot, int cache_slot,
 		bool characters, bool focused,
-		const market_caption_metrics_t *metrics);
+		const t_market_caption_metrics *metrics);
 static void	draw_text_fixed(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		const char *text, int ref_x_value, int ref_y_value, int ref_width,
-		int glyph_size, int spacing, color_t tint, bool centered);
+		int glyph_size, int spacing, t_color tint, bool centered);
 static void	draw_detail_body(uint32_t *pixels, int width, int height,
-		const app_catalogue_item_view_model_t *item,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_app_catalogue_item_view_model *item,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		bool characters);
 static void	draw_detail_status(uint32_t *pixels, int width, int height,
-		const app_catalogue_item_view_model_t *item,
-		const app_marketplace_view_model_t *market,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_app_catalogue_item_view_model *item,
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		bool characters);
 static int	detail_text_x(bool characters);
 static int	detail_text_width(bool characters);
 static void	draw_buttons(uint32_t *pixels, int width, int height,
-		const app_marketplace_view_model_t *market,
-		const marketplace_state_t *state,
-		const marketplace_layout_t *layout, struct ncvisual *font);
-static void	button_caption(const app_marketplace_view_model_t *market,
-		const marketplace_state_t *state, char *out, size_t size);
+		const t_app_marketplace_view_model *market,
+		const t_marketplace_state *state,
+		const t_marketplace_layout *layout, struct ncvisual *font);
+static void	button_caption(const t_app_marketplace_view_model *market,
+		const t_marketplace_state *state, char *out, size_t size);
 static const char	*price_caption(
-		const app_catalogue_item_view_model_t *item, char *out, size_t size);
-static color_t	item_colour(const app_catalogue_item_view_model_t *item,
-		const app_marketplace_view_model_t *market, bool focused);
-static color_t	feedback_colour(const marketplace_state_t *state);
+		const t_app_catalogue_item_view_model *item, char *out, size_t size);
+static t_color	item_colour(const t_app_catalogue_item_view_model *item,
+		const t_app_marketplace_view_model *market, bool focused);
+static t_color	feedback_colour(const t_marketplace_state *state);
 static bool	draw_artwork(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font,
-		render_ctx_t *ctx, int cache_slot, const char *path, int ref_x_value,
+		const t_marketplace_layout *layout, struct ncvisual *font,
+		t_render_ctx *ctx, int cache_slot, const char *path, int ref_x_value,
 		int ref_y_value, int ref_width, int ref_height, bool owned);
-static struct ncvisual	*cached_artwork(render_ctx_t *ctx, int cache_slot,
+static struct ncvisual	*cached_artwork(t_render_ctx *ctx, int cache_slot,
 		const char *path);
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, int ref_x_value, int ref_y_value,
-		int ref_width, int ref_height, color_t tint, unsigned alpha);
+		const t_marketplace_layout *layout, int ref_x_value, int ref_y_value,
+		int ref_width, int ref_height, t_color tint, unsigned alpha);
 static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		const char *text, int ref_x_value, int ref_y_value, int ref_width,
-		int ref_glyph, int ref_line_step, color_t tint, int max_lines);
+		int ref_glyph, int ref_line_step, t_color tint, int max_lines);
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		const char *text, int ref_x_value, int ref_y_value, int ref_width,
-		int ref_glyph, color_t tint, bool centered);
+		int ref_glyph, t_color tint, bool centered);
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-		const marketplace_layout_t *layout, struct ncvisual *font,
+		const t_marketplace_layout *layout, struct ncvisual *font,
 		const char *text, int x, int y, int glyph_size, int spacing,
-		color_t tint);
+		t_color tint);
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 		struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-		color_t tint, const marketplace_layout_t *layout);
+		t_color tint, const t_marketplace_layout *layout);
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 		struct ncvisual *font, int glyph, int source_x, int source_y,
-		int x, int y, int cell_width, int cell_height, color_t tint,
+		int x, int y, int cell_width, int cell_height, t_color tint,
 		bool opaque);
 static int	ink_span(int units, int glyph_size);
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-		color_t tint, unsigned alpha, bool opaque);
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha);
-static int	ref_x(const marketplace_layout_t *layout, int value);
-static int	ref_y(const marketplace_layout_t *layout, int value);
-static int	ref_size(const marketplace_layout_t *layout, int value);
+		t_color tint, unsigned alpha, bool opaque);
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
+static int	ref_x(const t_marketplace_layout *layout, int value);
+static int	ref_y(const t_marketplace_layout *layout, int value);
+static int	ref_size(const t_marketplace_layout *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
-static int	fit_glyph_size(const marketplace_layout_t *layout,
+static int	fit_glyph_size(const t_marketplace_layout *layout,
 		const char *text, int ref_width, int ref_glyph, int *spacing);
 static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static const char	*nonempty(const char *text);
-static const char	*status_title(const app_screen_view_model_t *view);
-static const char	*status_detail(const app_screen_view_model_t *view);
+static const char	*status_title(const t_app_screen_view_model *view);
+static const char	*status_detail(const t_app_screen_view_model *view);
 static uint64_t	market_hash(const void *data, size_t size, uint64_t hash);
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-		const marketplace_layout_t *layout);
-static uint64_t	model_signature(const app_marketplace_view_model_t *market,
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+		const t_marketplace_layout *layout);
+static uint64_t	model_signature(const t_app_marketplace_view_model *market,
 		uint64_t seed);
 static bool	market_render_failed(const char *stage);
 static int	market_region_failed(const char *stage);
@@ -196,11 +196,11 @@ static int	market_region_failed(const char *stage);
  * Region planes are written in place rather than replaced, so a keystroke
  * costs one small region instead of the whole screen.
  */
-bool	render_marketplace_pixel_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_state_t *state,
+bool	render_marketplace_pixel_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_state *state,
 	bool rebuild_background)
 {
-	marketplace_layout_t	layout;
+	t_marketplace_layout	layout;
 	struct ncvisual			*font;
 	int						rebuilt;
 	int						changed;
@@ -245,7 +245,7 @@ bool	render_marketplace_pixel_show(render_ctx_t *ctx,
 /**
  * @brief Releases Marketplace-only cached artwork while keeping the backdrop.
  */
-void	render_marketplace_pixel_destroy(render_ctx_t *ctx)
+void	render_marketplace_pixel_destroy(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -312,8 +312,8 @@ void	render_marketplace_pixel_destroy(render_ctx_t *ctx)
  *
  * @return 1 when the layer was rebuilt, 0 when it was reused, -1 on failure.
  */
-static int	update_static_layer(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_layout_t *layout,
+static int	update_static_layer(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_layout *layout,
 	struct ncvisual *font)
 {
 	uint64_t	signature;
@@ -343,11 +343,11 @@ static int	update_static_layer(render_ctx_t *ctx,
  * @return 1 when at least one region was rewritten, 0 when none were, -1 on
  * failure.
  */
-static int	update_region_layers(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_state_t *state,
-	const marketplace_layout_t *layout, struct ncvisual *font)
+static int	update_region_layers(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_state *state,
+	const t_marketplace_layout *layout, struct ncvisual *font)
 {
-	marketplace_section_t	preview;
+	t_marketplace_section	preview;
 	uint64_t				base;
 	uint64_t				signature;
 	int						slot;
@@ -438,7 +438,7 @@ static int	update_region_layers(render_ctx_t *ctx,
  * plane it touches, so a frame that merely rewrote a region leaves the order
  * alone: creation order already puts the regions on top.
  */
-static void	restack_marketplace_planes(render_ctx_t *ctx)
+static void	restack_marketplace_planes(t_render_ctx *ctx)
 {
 	ncplane_move_top(ctx->screen_plane);
 	if (ctx->marketplace_stats_plane != NULL)
@@ -460,7 +460,7 @@ static void	restack_marketplace_planes(render_ctx_t *ctx)
  * to the Settings backdrop rather than failing the screen: every plate this
  * renderer draws is opaque and covers the older art's frames anyway.
  */
-static bool	refresh_background(render_ctx_t *ctx, bool force)
+static bool	refresh_background(t_render_ctx *ctx, bool force)
 {
 	bool	geometry_changed;
 
@@ -501,7 +501,7 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
  * millions of them. Doing that walk once per geometry change and keeping the
  * result turns every later frame prefill into a memcpy.
  */
-static bool	cache_background(render_ctx_t *ctx)
+static bool	cache_background(t_render_ctx *ctx)
 {
 	struct ncvisual	*visual;
 	uint32_t		*buffer;
@@ -555,7 +555,7 @@ static bool	cache_background(render_ctx_t *ctx)
 	return (true);
 }
 
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font)
 {
 	ncvgeom	geom;
 
@@ -587,8 +587,8 @@ static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
  * every region canvas is a copy of this frame, so a region redraw reproduces
  * its own plate for free and never has to repaint one that did not move.
  */
-static bool	compose_static(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_layout_t *layout,
+static bool	compose_static(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_layout *layout,
 	struct ncvisual *font)
 {
 	uint32_t	*pixels;
@@ -624,10 +624,10 @@ static bool	compose_static(render_ctx_t *ctx,
  * @brief Draws the title, wallet header, and every panel plate.
  */
 static void	draw_chrome(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const marketplace_layout_t *layout,
+	const t_app_screen_view_model *view, const t_marketplace_layout *layout,
 	struct ncvisual *font)
 {
-	const app_marketplace_view_model_t	*market;
+	const t_app_marketplace_view_model	*market;
 	bool								ready;
 
 	market = &view->data.marketplace;
@@ -687,8 +687,8 @@ static void	draw_chrome(uint32_t *pixels, int width, int height,
  * @brief Writes one stat card's label and value at the card's own origin.
  */
 static void	draw_stat_card(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font, int index,
-	const char *label, const char *value, color_t tint)
+	const t_marketplace_layout *layout, struct ncvisual *font, int index,
+	const char *label, const char *value, t_color tint)
 {
 	int	card_x;
 
@@ -709,8 +709,8 @@ static void	draw_stat_card(uint32_t *pixels, int width, int height,
  * the region plane above.
  */
 static void	draw_stat_plates(uint32_t *pixels, int width, int height,
-	const app_marketplace_view_model_t *market,
-	const marketplace_layout_t *layout, struct ncvisual *font)
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_layout *layout, struct ncvisual *font)
 {
 	char	value[64];
 	bool	live;
@@ -747,11 +747,11 @@ static void	draw_stat_plates(uint32_t *pixels, int width, int height,
  * it off the full-screen plane is what lets a purchase repaint small planes
  * instead of re-emitting a full-screen bitmap over all of them.
  */
-static bool	compose_stats(render_ctx_t *ctx,
-	const app_marketplace_view_model_t *market,
-	const marketplace_layout_t *layout, struct ncvisual *font)
+static bool	compose_stats(t_render_ctx *ctx,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_layout *layout, struct ncvisual *font)
 {
-	marketplace_rect_t	region;
+	t_marketplace_rect	region;
 	uint32_t			*pixels;
 	char				value[64];
 
@@ -783,8 +783,8 @@ static bool	compose_stats(render_ctx_t *ctx,
  * protocol cannot write transparency over what is already on the terminal.
  */
 static void	draw_panel_plate(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height, color_t edge)
+	const t_marketplace_layout *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, t_color edge)
 {
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
 		ref_width, ref_height, g_market_plate, 236u);
@@ -806,8 +806,8 @@ static void	draw_panel_plate(uint32_t *pixels, int width, int height,
  * stationary tier use small planes at all: Sixel cannot write transparency
  * over existing content, but it can overwrite it.
  */
-static uint32_t	*region_canvas(render_ctx_t *ctx,
-	const marketplace_layout_t *layout)
+static uint32_t	*region_canvas(t_render_ctx *ctx,
+	const t_marketplace_layout *layout)
 {
 	uint32_t	*canvas;
 	size_t		count;
@@ -833,15 +833,15 @@ static uint32_t	*region_canvas(render_ctx_t *ctx,
 /**
  * @brief Repaints one shelf panel with its current focus highlight.
  */
-static bool	compose_inventory(render_ctx_t *ctx,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, const marketplace_layout_t *layout,
+static bool	compose_inventory(t_render_ctx *ctx,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, const t_marketplace_layout *layout,
 	struct ncvisual *font, bool characters)
 {
-	const app_catalogue_view_model_t	*catalogue;
-	market_caption_metrics_t			metrics;
-	marketplace_rect_t					region;
-	market_slot_t						slot;
+	const t_app_catalogue_view_model	*catalogue;
+	t_market_caption_metrics			metrics;
+	t_marketplace_rect					region;
+	t_market_slot						slot;
 	struct ncplane						**plane;
 	uint32_t							*pixels;
 	int									visible;
@@ -901,7 +901,7 @@ static bool	compose_inventory(render_ctx_t *ctx,
  * Both panels are four columns wide, so the column arithmetic here and the
  * focus arithmetic in marketplace_screen.c must agree on the same count.
  */
-static void	slot_geometry(bool characters, int index, market_slot_t *slot)
+static void	slot_geometry(bool characters, int index, t_market_slot *slot)
 {
 	int	panel_x;
 	int	panel_y;
@@ -940,11 +940,11 @@ static void	slot_geometry(bool characters, int index, market_slot_t *slot)
  * @brief Draws one shelf tile: art, caption, and what it would cost.
  */
 static void	draw_inventory_slot(uint32_t *pixels, int width, int height,
-	const app_catalogue_item_view_model_t *item,
-	const app_marketplace_view_model_t *market,
-	const marketplace_layout_t *layout, struct ncvisual *font,
-	render_ctx_t *ctx, const market_slot_t *slot, int cache_slot,
-	bool characters, bool focused, const market_caption_metrics_t *metrics)
+	const t_app_catalogue_item_view_model *item,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_layout *layout, struct ncvisual *font,
+	t_render_ctx *ctx, const t_market_slot *slot, int cache_slot,
+	bool characters, bool focused, const t_market_caption_metrics *metrics)
 {
 	char	caption[APP_TEXT_MAX + 16];
 
@@ -976,7 +976,7 @@ static void	draw_inventory_slot(uint32_t *pixels, int width, int height,
  * inside a 98-reference-pixel tile is shortened, and only where the canonical
  * name is long enough to be shrunk into illegibility.
  */
-static const char	*slot_label(const app_catalogue_item_view_model_t *item,
+static const char	*slot_label(const t_app_catalogue_item_view_model *item,
 	bool characters)
 {
 	if (item == NULL)
@@ -1000,9 +1000,9 @@ static const char	*slot_label(const app_catalogue_item_view_model_t *item,
  * Both are measured from the longest string the panel will draw, so every tile
  * in it renders at the same size however long its own caption is.
  */
-static void	caption_metrics(const app_catalogue_view_model_t *catalogue,
-	int visible, bool characters, const marketplace_layout_t *layout,
-	int slot_width, market_caption_metrics_t *metrics)
+static void	caption_metrics(const t_app_catalogue_view_model *catalogue,
+	int visible, bool characters, const t_marketplace_layout *layout,
+	int slot_width, t_market_caption_metrics *metrics)
 {
 	const char	*longest;
 	int			index;
@@ -1031,7 +1031,7 @@ static void	caption_metrics(const app_catalogue_view_model_t *catalogue,
  * text rather than on the marker.
  */
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, const market_slot_t *slot)
+	const t_marketplace_layout *layout, const t_market_slot *slot)
 {
 	int	focus_x;
 	int	focus_y;
@@ -1057,13 +1057,13 @@ static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
 /**
  * @brief Repaints the detail card for whichever item the cursor last touched.
  */
-static bool	compose_detail(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_state_t *state,
-	const marketplace_layout_t *layout, struct ncvisual *font)
+static bool	compose_detail(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_state *state,
+	const t_marketplace_layout *layout, struct ncvisual *font)
 {
-	const app_marketplace_view_model_t		*market;
-	const app_catalogue_item_view_model_t	*item;
-	marketplace_rect_t						region;
+	const t_app_marketplace_view_model		*market;
+	const t_app_catalogue_item_view_model	*item;
+	t_marketplace_rect						region;
 	uint32_t								*pixels;
 	int										cache_slot;
 	bool									characters;
@@ -1115,12 +1115,12 @@ static bool	compose_detail(render_ctx_t *ctx,
  * @brief States the price against the balance so the outcome is never a guess.
  */
 static void	draw_detail_status(uint32_t *pixels, int width, int height,
-	const app_catalogue_item_view_model_t *item,
-	const app_marketplace_view_model_t *market,
-	const marketplace_layout_t *layout, struct ncvisual *font, bool characters)
+	const t_app_catalogue_item_view_model *item,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_layout *layout, struct ncvisual *font, bool characters)
 {
 	char	line[APP_TEXT_MAX + 96];
-	color_t	tint;
+	t_color	tint;
 
 	if (item->equipped)
 	{
@@ -1181,8 +1181,8 @@ static int	detail_text_width(bool characters)
  * says what a theme changes instead of leaving two thirds of it blank.
  */
 static void	draw_detail_body(uint32_t *pixels, int width, int height,
-	const app_catalogue_item_view_model_t *item,
-	const marketplace_layout_t *layout, struct ncvisual *font, bool characters)
+	const t_app_catalogue_item_view_model *item,
+	const t_marketplace_layout *layout, struct ncvisual *font, bool characters)
 {
 	static const char	*theme_lines[3] = {
 		"A theme restyles the board, the tetromino tiles, and the music.",
@@ -1228,12 +1228,12 @@ static void	draw_detail_body(uint32_t *pixels, int width, int height,
 	}
 }
 
-static bool	compose_controls(render_ctx_t *ctx,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, const marketplace_layout_t *layout,
+static bool	compose_controls(t_render_ctx *ctx,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, const t_marketplace_layout *layout,
 	struct ncvisual *font)
 {
-	marketplace_rect_t	region;
+	t_marketplace_rect	region;
 	uint32_t			*pixels;
 
 	pixels = region_canvas(ctx, layout);
@@ -1256,8 +1256,8 @@ static bool	compose_controls(render_ctx_t *ctx,
  * @brief Draws the four control buttons and the key legend below them.
  */
 static void	draw_buttons(uint32_t *pixels, int width, int height,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, const marketplace_layout_t *layout,
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, const t_marketplace_layout *layout,
 	struct ncvisual *font)
 {
 	static const char	*labels[MARKETPLACE_BUTTON_COUNT] = {
@@ -1265,7 +1265,7 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 	};
 	char				captions[MARKETPLACE_BUTTON_COUNT][32];
 	char				feedback[64];
-	color_t				colour;
+	t_color				colour;
 	int					index;
 	int					button_x;
 	bool				focused;
@@ -1336,10 +1336,10 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 /**
  * @brief Writes the second Buy-button line: what pressing it would do now.
  */
-static void	button_caption(const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, char *out, size_t size)
+static void	button_caption(const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, char *out, size_t size)
 {
-	const app_catalogue_item_view_model_t	*item;
+	const t_app_catalogue_item_view_model	*item;
 
 	item = marketplace_focused_item(market, state);
 	if (item == NULL)
@@ -1358,7 +1358,7 @@ static void	button_caption(const app_marketplace_view_model_t *market,
  * @brief Writes a shelf tile's price line.
  */
 static const char	*price_caption(
-	const app_catalogue_item_view_model_t *item, char *out, size_t size)
+	const t_app_catalogue_item_view_model *item, char *out, size_t size)
 {
 	if (item->equipped)
 		snprintf(out, size, "EQUIPPED");
@@ -1374,7 +1374,7 @@ static const char	*price_caption(
 /**
  * @brief Colours the control-row result line by whether it went through.
  */
-static color_t	feedback_colour(const marketplace_state_t *state)
+static t_color	feedback_colour(const t_marketplace_state *state)
 {
 	if (state->feedback == MARKETPLACE_FEEDBACK_BOUGHT
 		|| state->feedback == MARKETPLACE_FEEDBACK_EQUIPPED)
@@ -1388,8 +1388,8 @@ static color_t	feedback_colour(const marketplace_state_t *state)
 /**
  * @brief Colours a shelf caption by focus first, then by what it costs.
  */
-static color_t	item_colour(const app_catalogue_item_view_model_t *item,
-	const app_marketplace_view_model_t *market, bool focused)
+static t_color	item_colour(const t_app_catalogue_item_view_model *item,
+	const t_app_marketplace_view_model *market, bool focused)
 {
 	if (focused)
 		return (g_market_gold);
@@ -1400,7 +1400,7 @@ static color_t	item_colour(const app_catalogue_item_view_model_t *item,
 	return (g_market_disabled);
 }
 
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	if (ctx->marketplace_background_pixels == NULL
@@ -1412,7 +1412,7 @@ static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
 	return (true);
 }
 
-static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_static_plane(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	ncplane_options	options;
@@ -1460,8 +1460,8 @@ static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
  * geometry is written in place; only a geometry change replaces it, because
  * destroying a sprixel plane forces the bitmap beneath it to be retransmitted.
  */
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-	int width, int height, const marketplace_rect_t *region,
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_marketplace_rect *region,
 	struct ncplane **slot)
 {
 	ncplane_options	options;
@@ -1519,13 +1519,13 @@ static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
  * shelf reads as stock rather than as inventory.
  */
 static bool	draw_artwork(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font,
-	render_ctx_t *ctx, int cache_slot, const char *path, int ref_x_value,
+	const t_marketplace_layout *layout, struct ncvisual *font,
+	t_render_ctx *ctx, int cache_slot, const char *path, int ref_x_value,
 	int ref_y_value, int ref_width, int ref_height, bool owned)
 {
 	struct ncvisual	*visual;
 	ncvgeom			geom;
-	color_t			tint;
+	t_color			tint;
 	uint32_t		pixel;
 	unsigned		gray;
 	int				draw_width;
@@ -1538,7 +1538,7 @@ static bool	draw_artwork(uint32_t *pixels, int width, int height,
 	ref_width = max_int(1, ref_width);
 	ref_height = max_int(1, ref_height);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
-		ref_width, ref_height, (color_t){39, 24, 62}, 255u);
+		ref_width, ref_height, (t_color){39, 24, 62}, 255u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
 		ref_width, 2, owned ? g_market_lavender : g_market_disabled, 220u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value,
@@ -1609,7 +1609,7 @@ static bool	draw_artwork(uint32_t *pixels, int width, int height,
  * A focus move recomposes a region, so re-reading and re-decoding the PNG each
  * time would put file I/O straight onto the input path.
  */
-static struct ncvisual	*cached_artwork(render_ctx_t *ctx, int cache_slot,
+static struct ncvisual	*cached_artwork(t_render_ctx *ctx, int cache_slot,
 	const char *path)
 {
 	struct ncvisual	*visual;
@@ -1642,8 +1642,8 @@ static struct ncvisual	*cached_artwork(render_ctx_t *ctx, int cache_slot,
  * @brief Fills a reference-space rectangle.
  */
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height, color_t tint, unsigned alpha)
+	const t_marketplace_layout *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, t_color tint, unsigned alpha)
 {
 	int	left;
 	int	top;
@@ -1671,9 +1671,9 @@ static void	fill_ref_rect(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font,
+	const t_marketplace_layout *layout, struct ncvisual *font,
 	const char *text, int ref_x_value, int ref_y_value, int ref_width,
-	int ref_glyph, int ref_line_step, color_t tint, int max_lines)
+	int ref_glyph, int ref_line_step, t_color tint, int max_lines)
 {
 	char	line_text[APP_ABILITY_TEXT_MAX + 4];
 	int		line_start;
@@ -1714,7 +1714,7 @@ static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
 /**
  * @brief Shrinks a glyph size until the text fits its reference-space box.
  */
-static int	fit_glyph_size(const marketplace_layout_t *layout,
+static int	fit_glyph_size(const t_marketplace_layout *layout,
 	const char *text, int ref_width, int ref_glyph, int *spacing)
 {
 	int	glyph_size;
@@ -1732,9 +1732,9 @@ static int	fit_glyph_size(const marketplace_layout_t *layout,
 }
 
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font,
+	const t_marketplace_layout *layout, struct ncvisual *font,
 	const char *text, int ref_x_value, int ref_y_value, int ref_width,
-	int ref_glyph, color_t tint, bool centered)
+	int ref_glyph, t_color tint, bool centered)
 {
 	int	glyph_size;
 	int	spacing;
@@ -1753,9 +1753,9 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
  * from the longest one rather than letting each shrink independently.
  */
 static void	draw_text_fixed(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font,
+	const t_marketplace_layout *layout, struct ncvisual *font,
 	const char *text, int ref_x_value, int ref_y_value, int ref_width,
-	int glyph_size, int spacing, color_t tint, bool centered)
+	int glyph_size, int spacing, t_color tint, bool centered)
 {
 	char	visible[APP_ABILITY_TEXT_MAX + 4];
 	int		max_chars;
@@ -1791,8 +1791,8 @@ static void	draw_text_fixed(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-	const marketplace_layout_t *layout, struct ncvisual *font,
-	const char *text, int x, int y, int glyph_size, int spacing, color_t tint)
+	const t_marketplace_layout *layout, struct ncvisual *font,
+	const char *text, int x, int y, int glyph_size, int spacing, t_color tint)
 {
 	int	glyph;
 	int	codepoint;
@@ -1833,7 +1833,7 @@ static int	ink_span(int units, int glyph_size)
  */
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-	color_t tint, const marketplace_layout_t *layout)
+	t_color tint, const t_marketplace_layout *layout)
 {
 	int	source_y;
 	int	source_x;
@@ -1860,7 +1860,7 @@ static void	draw_glyph(uint32_t *pixels, int width, int height,
 
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int source_x, int source_y,
-	int x, int y, int cell_width, int cell_height, color_t tint, bool opaque)
+	int x, int y, int cell_width, int cell_height, t_color tint, bool opaque)
 {
 	uint32_t	source;
 	unsigned	alpha;
@@ -1892,7 +1892,7 @@ static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 }
 
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-	color_t tint, unsigned alpha, bool opaque)
+	t_color tint, unsigned alpha, bool opaque)
 {
 	uint32_t	*pixel;
 
@@ -1908,7 +1908,7 @@ static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 	}
 }
 
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 {
 	unsigned	old_alpha;
 	unsigned	out_alpha;
@@ -1930,17 +1930,17 @@ static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
 	ncpixel_set_a(pixel, out_alpha);
 }
 
-static int	ref_x(const marketplace_layout_t *layout, int value)
+static int	ref_x(const t_marketplace_layout *layout, int value)
 {
 	return (value * layout->pixel_width / MARKETPLACE_REFERENCE_WIDTH);
 }
 
-static int	ref_y(const marketplace_layout_t *layout, int value)
+static int	ref_y(const t_marketplace_layout *layout, int value)
 {
 	return (value * layout->pixel_height / MARKETPLACE_REFERENCE_HEIGHT);
 }
 
-static int	ref_size(const marketplace_layout_t *layout, int value)
+static int	ref_size(const t_marketplace_layout *layout, int value)
 {
 	int	x_size;
 	int	y_size;
@@ -1975,7 +1975,7 @@ static const char	*nonempty(const char *text)
 	return (text != NULL && text[0] != '\0' ? text : "-");
 }
 
-static const char	*status_title(const app_screen_view_model_t *view)
+static const char	*status_title(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("OPENING THE SHOP...");
@@ -1988,7 +1988,7 @@ static const char	*status_title(const app_screen_view_model_t *view)
 	return ("MARKETPLACE UNAVAILABLE");
 }
 
-static const char	*status_detail(const app_screen_view_model_t *view)
+static const char	*status_detail(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("PLEASE WAIT");
@@ -2033,10 +2033,10 @@ static uint64_t	market_hash(const void *data, size_t size, uint64_t hash)
  * would re-emit over every region plane above it. Keeping them out means
  * nothing the user can do inside the Marketplace rebuilds this layer at all.
  */
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-	const marketplace_layout_t *layout)
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+	const t_marketplace_layout *layout)
 {
-	const app_marketplace_view_model_t	*market;
+	const t_app_marketplace_view_model	*market;
 	uint64_t							hash;
 
 	market = &view->data.marketplace;
@@ -2062,7 +2062,7 @@ static uint64_t	static_signature(const app_screen_view_model_t *view,
  * than in the static signature: they change when the user buys something, and
  * the region planes are the only layers allowed to change during a session.
  */
-static uint64_t	model_signature(const app_marketplace_view_model_t *market,
+static uint64_t	model_signature(const t_app_marketplace_view_model *market,
 	uint64_t seed)
 {
 	uint64_t	hash;

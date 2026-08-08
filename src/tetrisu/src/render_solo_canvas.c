@@ -1,25 +1,25 @@
 #include "tetrisu.h"
 
 // Static Variables
-static const color_t	g_white = {250, 245, 250};
-static const color_t	g_pink = {255, 112, 190};
-static const color_t	g_purple = {112, 62, 145};
-static const color_t	g_dark = {20, 8, 28};
-static const color_t	g_ghost = {255, 255, 255};
-static const color_t	g_playfield = {7, 13, 23};
-static const color_t	g_panel = {11, 23, 34};
+static const t_color	g_white = {250, 245, 250};
+static const t_color	g_pink = {255, 112, 190};
+static const t_color	g_purple = {112, 62, 145};
+static const t_color	g_dark = {20, 8, 28};
+static const t_color	g_ghost = {255, 255, 255};
+static const t_color	g_playfield = {7, 13, 23};
+static const t_color	g_panel = {11, 23, 34};
 
 // Static Functions
-static bool	pixel_asset_load(const char *path, pixel_asset_t *asset);
+static bool	pixel_asset_load(const char *path, t_pixel_asset *asset);
 static bool	pixel_asset_load_sized(const char *path, int width, int height,
-	pixel_asset_t *asset);
-static void	pixel_asset_destroy(pixel_asset_t *asset);
-static void	repair_background_alpha(pixel_asset_t *asset);
-static bool	asset_dimensions_are(const pixel_asset_t *asset, int width,
+	t_pixel_asset *asset);
+static void	pixel_asset_destroy(t_pixel_asset *asset);
+static void	repair_background_alpha(t_pixel_asset *asset);
+static bool	asset_dimensions_are(const t_pixel_asset *asset, int width,
 	int height);
-static void	align_authored_hud(pixel_asset_t *hud);
+static void	align_authored_hud(t_pixel_asset *hud);
 static void	blit_asset_scaled(uint32_t *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *asset, int dest_x, int dest_y,
+	int canvas_height, const t_pixel_asset *asset, int dest_x, int dest_y,
 	int dest_width, int dest_height, unsigned opacity);
 static void	put_pixel_sized(uint32_t *canvas, int canvas_width,
 	int canvas_height, int x, int y, uint32_t pixel);
@@ -28,67 +28,67 @@ static uint32_t	with_opacity(uint32_t pixel, unsigned opacity);
 static void	draw_rect(uint32_t *canvas, int x, int y, int width, int height,
 	uint32_t pixel);
 static void	put_pixel(uint32_t *canvas, int x, int y, uint32_t pixel);
-static uint32_t	make_pixel(color_t color, unsigned alpha);
+static uint32_t	make_pixel(t_color color, unsigned alpha);
 static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend);
-static color_t	mix_color(color_t base, color_t accent, unsigned strength);
-static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game);
+static t_color	mix_color(t_color base, t_color accent, unsigned strength);
+static void	draw_next_queue(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game);
 static void	draw_preview_piece(uint32_t *canvas,
-	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_y,
+	const t_solo_render *solo, t_piece_type type, int slot_x, int slot_y,
 	int slot_width, int slot_height, unsigned opacity, int forced_tile);
-static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_tile(uint32_t *canvas, const t_solo_render *solo,
 	int tile_index, int x, int y, int size, unsigned opacity, bool outline_only);
-static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game);
-static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game, solo_ability_t ability);
+static void	draw_crystal_meter(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game);
+static void	draw_ability_marker(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game, t_solo_ability ability);
 static void	draw_filled_circle(uint32_t *canvas, int center_x, int center_y,
 	int radius, uint32_t pixel);
 static void	draw_circle_ring(uint32_t *canvas, int center_x, int center_y,
 	int radius, int thickness, uint32_t pixel);
-static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game);
-static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_score_panel(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game);
+static void	draw_text_centered(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint);
+	int spacing, t_color tint);
 static void	draw_text_centered_opacity(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int center_x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint,
+	const t_solo_render *solo, const char *text, int center_x, int y,
+	int glyph_width, int glyph_height, int spacing, t_color tint,
 	unsigned opacity);
 static int	text_width(const char *text, int glyph_width, int spacing);
-static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_text_shadowed(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint);
-static void	draw_text(uint32_t *canvas, const solo_render_t *solo,
+	int spacing, t_color tint);
+static void	draw_text(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint, unsigned opacity);
+	int spacing, t_color tint, unsigned opacity);
 static void	draw_mask(uint32_t *canvas, const uint32_t *mask,
 	int mask_width, int source_x, int source_y, int source_width,
 	int source_height, int dest_x, int dest_y, int dest_width, int dest_height,
-	color_t tint, unsigned opacity);
-static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
+	t_color tint, unsigned opacity);
+static void	draw_score_number(uint32_t *canvas, const t_solo_render *solo,
 	uint64_t score);
 static void	draw_numbers_centered_fit(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int y, color_t tint,
+	const t_solo_render *solo, const char *text, int y, t_color tint,
 	unsigned opacity);
 static void	draw_numbers_shadowed(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint,
+	const t_solo_render *solo, const char *text, int x, int y,
+	int glyph_width, int glyph_height, int spacing, t_color tint,
 	unsigned opacity);
-static void	draw_numbers(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_numbers(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint, unsigned opacity);
+	int spacing, t_color tint, unsigned opacity);
 static int	number_glyph_index(char c);
-static void	draw_stat_line(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_stat_line(uint32_t *canvas, const t_solo_render *solo,
 	const char *label, int value, int y);
-static const char	*clear_name(const solo_game_t *game);
-static void	reset_board_frame(solo_render_t *solo);
-static void	draw_settled_board(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game);
-static void	draw_piece(uint32_t *canvas, const solo_render_t *solo,
+static const char	*clear_name(const t_solo_game *game);
+static void	reset_board_frame(t_solo_render *solo);
+static void	draw_settled_board(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game);
+static void	draw_piece(uint32_t *canvas, const t_solo_render *solo,
 	const t_piece *piece, unsigned opacity, bool ghost);
-static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game);
+static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game);
 static void	draw_outline(uint32_t *canvas, int x, int y, int width,
 	int height, int thickness, uint32_t pixel);
 
@@ -101,14 +101,14 @@ static void	draw_outline(uint32_t *canvas, int x, int y, int width,
  * @param solo Pointer to the Solo render state.
  * @return true when every asset and allocation succeeds, otherwise false.
  */
-bool	solo_canvas_load(solo_render_t *solo)
+bool	solo_canvas_load(t_solo_render *solo)
 {
-	pixel_asset_t	background;
-	pixel_asset_t	hud;
-	pixel_asset_t	mirurun;
-	pixel_asset_t	tiles;
-	pixel_asset_t	font;
-	pixel_asset_t	numbers;
+	t_pixel_asset	background;
+	t_pixel_asset	hud;
+	t_pixel_asset	mirurun;
+	t_pixel_asset	tiles;
+	t_pixel_asset	font;
+	t_pixel_asset	numbers;
 	size_t			canvas_bytes;
 	bool			loaded;
 
@@ -331,7 +331,7 @@ bool	solo_canvas_buffer_bytes(int width, int height, size_t *bytes)
  * @param message Human-readable error message.
  * @param path Optional asset path.
  */
-void	solo_canvas_set_error(solo_render_t *solo, const char *message,
+void	solo_canvas_set_error(t_solo_render *solo, const char *message,
 	const char *path)
 {
 	if (path == NULL)
@@ -350,8 +350,8 @@ void	solo_canvas_set_error(solo_render_t *solo, const char *message,
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-void	solo_canvas_compose_hud(solo_render_t *solo,
-	const solo_game_t *game)
+void	solo_canvas_compose_hud(t_solo_render *solo,
+	const t_solo_game *game)
 {
 	memcpy(solo->frame_pixels, solo->static_pixels,
 		(size_t)SOLO_CANVAS_WIDTH * SOLO_CANVAS_HEIGHT
@@ -370,8 +370,8 @@ void	solo_canvas_compose_hud(solo_render_t *solo,
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-void	solo_canvas_compose_board(solo_render_t *solo,
-	const solo_game_t *game)
+void	solo_canvas_compose_board(t_solo_render *solo,
+	const t_solo_game *game)
 {
 	t_piece	ghost;
 
@@ -395,10 +395,10 @@ void	solo_canvas_compose_board(solo_render_t *solo,
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-void	solo_canvas_compose_danger_background(solo_render_t *solo,
-	const solo_game_t *game)
+void	solo_canvas_compose_danger_background(t_solo_render *solo,
+	const t_solo_game *game)
 {
-	color_t	color;
+	t_color	color;
 	uint32_t	pixel;
 	unsigned	dim;
 	int			protected_left;
@@ -447,7 +447,7 @@ void	solo_canvas_compose_danger_background(solo_render_t *solo,
  * @param asset Pointer to the decoded pixel asset.
  * @return true on complete decode, otherwise false.
  */
-static bool	pixel_asset_load(const char *path, pixel_asset_t *asset)
+static bool	pixel_asset_load(const char *path, t_pixel_asset *asset)
 {
 	return (pixel_asset_load_sized(path, 0, 0, asset));
 }
@@ -466,7 +466,7 @@ static bool	pixel_asset_load(const char *path, pixel_asset_t *asset)
  *   behind.
  */
 static bool	pixel_asset_load_sized(const char *path, int width, int height,
-	pixel_asset_t *asset)
+	t_pixel_asset *asset)
 {
 	struct ncvisual	*ncv;
 	ncvgeom			geom;
@@ -535,7 +535,7 @@ static bool	pixel_asset_load_sized(const char *path, int width, int height,
  *
  * @param asset Pointer to the decoded pixel asset.
  */
-static void	pixel_asset_destroy(pixel_asset_t *asset)
+static void	pixel_asset_destroy(t_pixel_asset *asset)
 {
 	free(asset->pixels);
 	memset(asset, 0, sizeof(*asset));
@@ -549,7 +549,7 @@ static void	pixel_asset_destroy(pixel_asset_t *asset)
  *
  * @param asset Pointer to the decoded pixel asset.
  */
-static void	repair_background_alpha(pixel_asset_t *asset)
+static void	repair_background_alpha(t_pixel_asset *asset)
 {
 	uint32_t	replacement;
 	uint32_t	*pixel;
@@ -590,7 +590,7 @@ static void	repair_background_alpha(pixel_asset_t *asset)
  * @param height Pixel height.
  * @return true when both dimensions match, otherwise false.
  */
-static bool	asset_dimensions_are(const pixel_asset_t *asset, int width,
+static bool	asset_dimensions_are(const t_pixel_asset *asset, int width,
 	int height)
 {
 	return (asset->width == width && asset->height == height);
@@ -604,7 +604,7 @@ static bool	asset_dimensions_are(const pixel_asset_t *asset, int width,
  *
  * @param hud Pointer to the decoded authored HUD asset.
  */
-static void	align_authored_hud(pixel_asset_t *hud)
+static void	align_authored_hud(t_pixel_asset *hud)
 {
 	int	y;
 	int	x;
@@ -666,7 +666,7 @@ static void	align_authored_hud(pixel_asset_t *hud)
  * @param opacity Alpha multiplier from 0 through 255.
  */
 static void	blit_asset_scaled(uint32_t *canvas, int canvas_width,
-	int canvas_height, const pixel_asset_t *asset, int dest_x, int dest_y,
+	int canvas_height, const t_pixel_asset *asset, int dest_x, int dest_y,
 	int dest_width, int dest_height, unsigned opacity)
 {
 	int			y;
@@ -838,7 +838,7 @@ static void	put_pixel(uint32_t *canvas, int x, int y, uint32_t pixel)
  * @param alpha Alpha channel from 0 through 255.
  * @return Encoded Notcurses RGBA pixel.
  */
-static uint32_t	make_pixel(color_t color, unsigned alpha)
+static uint32_t	make_pixel(t_color color, unsigned alpha)
 {
 	uint32_t	pixel;
 
@@ -860,7 +860,7 @@ static uint32_t	make_pixel(color_t color, unsigned alpha)
  */
 static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend)
 {
-	color_t	color;
+	t_color	color;
 
 	if (ncpixel_a(source) == 0)
 		return (0);
@@ -876,7 +876,7 @@ static uint32_t	make_ghost_pixel(uint32_t source, unsigned blend)
 /**
  * @brief Linearly mixes one theme color toward an accent without glow.
  */
-static color_t	mix_color(color_t base, color_t accent, unsigned strength)
+static t_color	mix_color(t_color base, t_color accent, unsigned strength)
 {
 	if (strength > 255u)
 		strength = 255u;
@@ -901,8 +901,8 @@ static color_t	mix_color(color_t base, color_t accent, unsigned strength)
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game)
+static void	draw_next_queue(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	int	index;
 	int	slot_x;
@@ -942,7 +942,7 @@ static void	draw_next_queue(uint32_t *canvas, const solo_render_t *solo,
  * @param forced_tile Fixed tile size in pixels, or 0 to auto-fit.
  */
 static void	draw_preview_piece(uint32_t *canvas,
-	const solo_render_t *solo, t_piece_type type, int slot_x, int slot_y,
+	const t_solo_render *solo, t_piece_type type, int slot_x, int slot_y,
 	int slot_width, int slot_height, unsigned opacity, int forced_tile)
 {
 	t_piece	piece;
@@ -1026,7 +1026,7 @@ static void	draw_preview_piece(uint32_t *canvas,
  * @param opacity Alpha multiplier from 0 through 255.
  * @param outline_only Whether to draw ghost-style shading.
  */
-static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_tile(uint32_t *canvas, const t_solo_render *solo,
 	int tile_index, int x, int y, int size, unsigned opacity, bool outline_only)
 {
 	int			draw_y;
@@ -1069,10 +1069,10 @@ static void	draw_tile(uint32_t *canvas, const solo_render_t *solo,
  * @param solo Pointer to the renderer containing hover state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game)
+static void	draw_crystal_meter(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game)
 {
-	solo_ability_t	ability;
+	t_solo_ability	ability;
 	int				segment;
 	int				segment_height;
 	int				y;
@@ -1109,12 +1109,12 @@ static void	draw_crystal_meter(uint32_t *canvas, const solo_render_t *solo,
  * @param game Pointer to the current Solo state.
  * @param ability Ability represented by this marker.
  */
-static void	draw_ability_marker(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game, solo_ability_t ability)
+static void	draw_ability_marker(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game, t_solo_ability ability)
 {
 	char		number[2];
-	color_t	ring;
-	color_t	digit;
+	t_color	ring;
+	t_color	digit;
 	unsigned	pulse;
 	int			center_x;
 	int			center_y;
@@ -1228,8 +1228,8 @@ static void	draw_circle_ring(uint32_t *canvas, int center_x, int center_y,
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game)
+static void	draw_score_panel(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	char	points[32];
 	unsigned	event_opacity;
@@ -1280,9 +1280,9 @@ static void	draw_score_panel(uint32_t *canvas, const solo_render_t *solo,
  * @param spacing Pixels between adjacent glyphs.
  * @param tint Color applied to visible mask pixels.
  */
-static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_text_centered(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int center_x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint)
+	int spacing, t_color tint)
 {
 	int	width;
 
@@ -1295,8 +1295,8 @@ static void	draw_text_centered(uint32_t *canvas, const solo_render_t *solo,
  * @brief Centers masked text with a shadow at a caller-controlled opacity.
  */
 static void	draw_text_centered_opacity(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int center_x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint,
+	const t_solo_render *solo, const char *text, int center_x, int y,
+	int glyph_width, int glyph_height, int spacing, t_color tint,
 	unsigned opacity)
 {
 	int	width;
@@ -1343,9 +1343,9 @@ static int	text_width(const char *text, int glyph_width, int spacing)
  * @param spacing Pixels between adjacent glyphs.
  * @param tint Color applied to visible mask pixels.
  */
-static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_text_shadowed(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint)
+	int spacing, t_color tint)
 {
 	draw_text(canvas, solo, text, x + 1, y + 1, glyph_width, glyph_height,
 		spacing, g_dark, 190);
@@ -1370,9 +1370,9 @@ static void	draw_text_shadowed(uint32_t *canvas, const solo_render_t *solo,
  * @param tint Color applied to visible mask pixels.
  * @param opacity Alpha multiplier from 0 through 255.
  */
-static void	draw_text(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_text(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint, unsigned opacity)
+	int spacing, t_color tint, unsigned opacity)
 {
 	unsigned	codepoint;
 	int			glyph;
@@ -1424,7 +1424,7 @@ static void	draw_text(uint32_t *canvas, const solo_render_t *solo,
 static void	draw_mask(uint32_t *canvas, const uint32_t *mask,
 	int mask_width, int source_x, int source_y, int source_width,
 	int source_height, int dest_x, int dest_y, int dest_width, int dest_height,
-	color_t tint, unsigned opacity)
+	t_color tint, unsigned opacity)
 {
 	int			y;
 	int			x;
@@ -1460,7 +1460,7 @@ static void	draw_mask(uint32_t *canvas, const uint32_t *mask,
  * @param solo Pointer to the Solo render state.
  * @param score Total score value.
  */
-static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_score_number(uint32_t *canvas, const t_solo_render *solo,
 	uint64_t score)
 {
 	char	score_text[32];
@@ -1483,7 +1483,7 @@ static void	draw_score_number(uint32_t *canvas, const solo_render_t *solo,
  * @param tint Color applied to visible mask pixels.
  */
 static void	draw_numbers_centered_fit(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int y, color_t tint,
+	const t_solo_render *solo, const char *text, int y, t_color tint,
 	unsigned opacity)
 {
 	int		length;
@@ -1529,8 +1529,8 @@ static void	draw_numbers_centered_fit(uint32_t *canvas,
  * @param tint Color applied to visible mask pixels.
  */
 static void	draw_numbers_shadowed(uint32_t *canvas,
-	const solo_render_t *solo, const char *text, int x, int y,
-	int glyph_width, int glyph_height, int spacing, color_t tint,
+	const t_solo_render *solo, const char *text, int x, int y,
+	int glyph_width, int glyph_height, int spacing, t_color tint,
 	unsigned opacity)
 {
 	draw_numbers(canvas, solo, text, x + 1, y + 1, glyph_width, glyph_height,
@@ -1558,9 +1558,9 @@ static void	draw_numbers_shadowed(uint32_t *canvas,
  * @param tint Color applied to visible mask pixels.
  * @param opacity Alpha multiplier from 0 through 255.
  */
-static void	draw_numbers(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_numbers(uint32_t *canvas, const t_solo_render *solo,
 	const char *text, int x, int y, int glyph_width, int glyph_height,
-	int spacing, color_t tint, unsigned opacity)
+	int spacing, t_color tint, unsigned opacity)
 {
 	int	glyph;
 	int	draw_x;
@@ -1618,7 +1618,7 @@ static int	number_glyph_index(char c)
  * @param value Numeric stat value.
  * @param y Canvas y coordinate.
  */
-static void	draw_stat_line(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_stat_line(uint32_t *canvas, const t_solo_render *solo,
 	const char *label, int value, int y)
 {
 	char	value_text[32];
@@ -1642,7 +1642,7 @@ static void	draw_stat_line(uint32_t *canvas, const solo_render_t *solo,
  * @param game Pointer to the current Solo game state.
  * @return Static event-label string, which may be empty.
  */
-static const char	*clear_name(const solo_game_t *game)
+static const char	*clear_name(const t_solo_game *game)
 {
 	if (game->last_perfect_clear)
 		return ("PERFECT CLEAR");
@@ -1669,7 +1669,7 @@ static const char	*clear_name(const solo_game_t *game)
  *
  * @param solo Pointer to the Solo render state.
  */
-static void	reset_board_frame(solo_render_t *solo)
+static void	reset_board_frame(t_solo_render *solo)
 {
 	size_t	bytes;
 	int		row;
@@ -1695,8 +1695,8 @@ static void	reset_board_frame(solo_render_t *solo)
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_settled_board(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game)
+static void	draw_settled_board(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	t_cell	cell;
 	int		clear_tile;
@@ -1747,7 +1747,7 @@ static void	draw_settled_board(uint32_t *canvas, const solo_render_t *solo,
  * @param opacity Alpha multiplier from 0 through 255.
  * @param ghost Whether to draw the landing-projection shading.
  */
-static void	draw_piece(uint32_t *canvas, const solo_render_t *solo,
+static void	draw_piece(uint32_t *canvas, const t_solo_render *solo,
 	const t_piece *piece, unsigned opacity, bool ghost)
 {
 	int	cols[4];
@@ -1778,8 +1778,8 @@ static void	draw_piece(uint32_t *canvas, const solo_render_t *solo,
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-static void	draw_overlays(uint32_t *canvas, const solo_render_t *solo,
-	const solo_game_t *game)
+static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	char		countdown[12];
 	const char	*title;

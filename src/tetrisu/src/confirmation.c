@@ -3,8 +3,8 @@
 /**
  * @brief Initializes a confirmation with the safe answer selected.
  */
-void	confirmation_dialog_init(confirmation_dialog_t *dialog,
-	confirmation_kind_t kind)
+void	confirmation_dialog_init(t_confirmation_dialog *dialog,
+	t_confirmation_kind kind)
 {
 	if (dialog == NULL)
 		return ;
@@ -17,8 +17,8 @@ void	confirmation_dialog_init(confirmation_dialog_t *dialog,
 /**
  * @brief Applies one key without performing the confirmed action itself.
  */
-confirmation_result_t	confirmation_dialog_handle_key(
-	confirmation_dialog_t *dialog, uint32_t key)
+t_confirmation_result	confirmation_dialog_handle_key(
+	t_confirmation_dialog *dialog, uint32_t key)
 {
 	if (dialog == NULL || !dialog->visible)
 		return (CONFIRM_RESULT_NONE);
@@ -44,7 +44,7 @@ confirmation_result_t	confirmation_dialog_handle_key(
 	return (CONFIRM_RESULT_NONE);
 }
 
-const char	*confirmation_title(confirmation_kind_t kind)
+const char	*confirmation_title(t_confirmation_kind kind)
 {
 	if (kind == CONFIRM_LEAVE_ROOM)
 		return ("LEAVE ROOM?");
@@ -53,7 +53,7 @@ const char	*confirmation_title(confirmation_kind_t kind)
 	return ("QUIT TETRISH?");
 }
 
-const char	*confirmation_body(confirmation_kind_t kind)
+const char	*confirmation_body(t_confirmation_kind kind)
 {
 	if (kind == CONFIRM_LEAVE_ROOM)
 		return ("Do you really want to leave this room?");

@@ -1,34 +1,33 @@
 #include "tetrisu.h"
 
 // Static Functions
-static void	reset_piece_timers(solo_game_t *game);
-static bool	apply_shift(solo_game_t *game, int direction);
-static bool	piece_is_grounded(const solo_game_t *game);
-static void	reset_lock_after_move(solo_game_t *game, bool was_grounded);
-static bool	apply_rotation(solo_game_t *game, int direction);
-static bool	apply_hold(solo_game_t *game);
-static void	lock_active_piece(solo_game_t *game);
+static void	reset_piece_timers(t_solo_game *game);
+static bool	apply_shift(t_solo_game *game, int direction);
+static bool	piece_is_grounded(const t_solo_game *game);
+static void	reset_lock_after_move(t_solo_game *game, bool was_grounded);
+static bool	apply_rotation(t_solo_game *game, int direction);
+static bool	apply_hold(t_solo_game *game);
+static void	lock_active_piece(t_solo_game *game);
 static bool	piece_touches_top(const t_piece *piece);
-static void	begin_top_out_reveal(solo_game_t *game);
-static void	remember_score_event(solo_game_t *game, int lines,
-	t_spin_type spin, bool perfect_clear);
-static void	activate_piece(solo_game_t *game, t_piece_type type);
-static void	spawn_queued_piece(solo_game_t *game);
-static bool	process_due_event(solo_game_t *game);
-static void	finish_line_clear(solo_game_t *game);
-static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms);
-static bool	advance_personal_best(solo_game_t *game, int elapsed_ms);
-static bool	advance_event_animations(solo_game_t *game, int elapsed_ms);
-static bool	advance_danger_presentation(solo_game_t *game, int elapsed_ms);
+static void	begin_top_out_reveal(t_solo_game *game);
+static void	remember_score_event(t_solo_game *game, int lines, t_spin_type spin, bool perfect_clear);
+static void	activate_piece(t_solo_game *game, t_piece_type type);
+static void	spawn_queued_piece(t_solo_game *game);
+static bool	process_due_event(t_solo_game *game);
+static void	finish_line_clear(t_solo_game *game);
+static bool	advance_ability_feedback(t_solo_game *game, int elapsed_ms);
+static bool	advance_personal_best(t_solo_game *game, int elapsed_ms);
+static bool	advance_event_animations(t_solo_game *game, int elapsed_ms);
+static bool	advance_danger_presentation(t_solo_game *game, int elapsed_ms);
 static bool	advance_timed_animation(int *elapsed_ms, bool *active,
 				int duration_ms, int step_ms);
 static unsigned	pulse_fade_opacity(int elapsed_ms, int pulse_ms, int fade_ms);
 static int	animation_wake_ms(int wake_ms, bool active, int remaining_ms);
-static int	gameplay_next_wake_ms(const solo_game_t *game);
-static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms);
+static int	gameplay_next_wake_ms(const t_solo_game *game);
+static bool	advance_top_out_reveal(t_solo_game *game, int *remaining_ms);
 static int	min_int(int left, int right);
-static bool	advance_clearing(solo_game_t *game, int *remaining_ms);
-static bool	advance_active(solo_game_t *game, int *remaining_ms);
+static bool	advance_clearing(t_solo_game *game, int *remaining_ms);
+static bool	advance_active(t_solo_game *game, int *remaining_ms);
 
 /**
  * @brief Initializes a new endless Solo game.
@@ -39,7 +38,7 @@ static bool	advance_active(solo_game_t *game, int *remaining_ms);
  * @param game Pointer to the Solo state to initialize.
  * @param seed Deterministic seed for the seven-bag generator.
  */
-void	solo_game_init(solo_game_t *game, uint32_t seed)
+void	solo_game_init(t_solo_game *game, uint32_t seed)
 {
 	int	index;
 
@@ -69,7 +68,7 @@ void	solo_game_init(solo_game_t *game, uint32_t seed)
  * @param action Requested movement, rotation, or drop.
  * @return true when the action changed game state, otherwise false.
  */
-bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
+bool	solo_game_apply_action(t_solo_game *game, t_solo_action action)
 {
 	int	distance;
 
@@ -118,7 +117,7 @@ bool	solo_game_apply_action(solo_game_t *game, solo_action_t action)
  * @param elapsed_ms Elapsed monotonic time in milliseconds.
  * @return true when visible game state changed, otherwise false.
  */
-bool	solo_game_update(solo_game_t *game, int elapsed_ms)
+bool	solo_game_update(t_solo_game *game, int elapsed_ms)
 {
 	int		remaining_ms;
 	int		due_events;
@@ -184,7 +183,7 @@ bool	solo_game_update(solo_game_t *game, int elapsed_ms)
  * @param elapsed_ms Elapsed active-play time in milliseconds.
  * @return true only when danger was entered or exited.
  */
-bool	solo_game_update_danger(solo_game_t *game, int elapsed_ms)
+bool	solo_game_update_danger(t_solo_game *game, int elapsed_ms)
 {
 	int	highest_row;
 	int	row;
@@ -249,7 +248,7 @@ bool	solo_game_update_danger(solo_game_t *game, int elapsed_ms)
  * @param game Pointer to the Solo state.
  * @return Black-mix strength from 0 through SOLO_DANGER_DIM_MAX.
  */
-unsigned	solo_game_danger_dim(const solo_game_t *game)
+unsigned	solo_game_danger_dim(const t_solo_game *game)
 {
 	if (game == NULL || game->danger_fade_elapsed_ms <= 0)
 		return (0);
@@ -263,9 +262,9 @@ unsigned	solo_game_danger_dim(const solo_game_t *game)
  * @brief Returns and clears gameplay events accumulated since the last frame.
  *
  * @param game Pointer to the Solo state.
- * @return Bitmask of solo_event_t values.
+ * @return Bitmask of t_solo_event values.
  */
-uint32_t	solo_game_take_events(solo_game_t *game)
+uint32_t	solo_game_take_events(t_solo_game *game)
 {
 	uint32_t	events;
 
@@ -282,7 +281,7 @@ uint32_t	solo_game_take_events(solo_game_t *game)
  * @param game Pointer to the Solo state.
  * @param score Previously persisted best score.
  */
-void	solo_game_set_personal_best(solo_game_t *game, uint64_t score)
+void	solo_game_set_personal_best(t_solo_game *game, uint64_t score)
 {
 	if (game != NULL)
 		game->personal_best = score;
@@ -297,7 +296,7 @@ void	solo_game_set_personal_best(solo_game_t *game, uint64_t score)
  * @param game Pointer to the Solo state.
  * @return true only when this completed game established a new best.
  */
-bool	solo_game_finish_personal_best(solo_game_t *game)
+bool	solo_game_finish_personal_best(t_solo_game *game)
 {
 	if (game == NULL || game->phase != SOLO_GAME_OVER
 		|| game->personal_best_checked)
@@ -318,7 +317,7 @@ bool	solo_game_finish_personal_best(solo_game_t *game)
  * @param game Pointer to the Solo state.
  * @return Alpha from 0 through 255.
  */
-unsigned	solo_game_personal_best_opacity(const solo_game_t *game)
+unsigned	solo_game_personal_best_opacity(const t_solo_game *game)
 {
 	int	elapsed;
 	int	phase;
@@ -344,7 +343,7 @@ unsigned	solo_game_personal_best_opacity(const solo_game_t *game)
 /**
  * @brief Starts the four-step 3, 2, 1, GO presentation before Solo input.
  */
-void	solo_game_start_countdown(solo_game_t *game)
+void	solo_game_start_countdown(t_solo_game *game)
 {
 	if (game == NULL || game->phase != SOLO_ACTIVE)
 		return ;
@@ -357,7 +356,7 @@ void	solo_game_start_countdown(solo_game_t *game)
 /**
  * @brief Returns 3, 2, 1, or 0 for GO while the countdown is visible.
  */
-int	solo_game_countdown_value(const solo_game_t *game)
+int	solo_game_countdown_value(const t_solo_game *game)
 {
 	int	stage;
 
@@ -374,7 +373,7 @@ int	solo_game_countdown_value(const solo_game_t *game)
 /**
  * @brief Returns one countdown label's restrained hold-and-fade opacity.
  */
-unsigned	solo_game_countdown_opacity(const solo_game_t *game)
+unsigned	solo_game_countdown_opacity(const t_solo_game *game)
 {
 	int	step_elapsed;
 	int	fade_start;
@@ -392,7 +391,7 @@ unsigned	solo_game_countdown_opacity(const solo_game_t *game)
 /**
  * @brief Returns the active line-clear score-label pulse/fade opacity.
  */
-unsigned	solo_game_score_event_opacity(const solo_game_t *game)
+unsigned	solo_game_score_event_opacity(const t_solo_game *game)
 {
 	if (game == NULL || !game->score_event_active)
 		return (0);
@@ -403,7 +402,7 @@ unsigned	solo_game_score_event_opacity(const solo_game_t *game)
 /**
  * @brief Returns the newly affordable ability-marker pulse strength.
  */
-unsigned	solo_game_ability_ready_opacity(const solo_game_t *game)
+unsigned	solo_game_ability_ready_opacity(const t_solo_game *game)
 {
 	if (game == NULL || !game->ability_ready_active)
 		return (0);
@@ -414,7 +413,7 @@ unsigned	solo_game_ability_ready_opacity(const solo_game_t *game)
 /**
  * @brief Returns activation/rejection feedback pulse/fade opacity.
  */
-unsigned	solo_game_ability_result_opacity(const solo_game_t *game)
+unsigned	solo_game_ability_result_opacity(const t_solo_game *game)
 {
 	int	pulse_ms;
 
@@ -435,7 +434,7 @@ unsigned	solo_game_ability_result_opacity(const solo_game_t *game)
  * @return Milliseconds until the next deadline, 0 when due, or -1 when no
  *   timer is active.
  */
-int	solo_game_next_wake_ms(const solo_game_t *game)
+int	solo_game_next_wake_ms(const t_solo_game *game)
 {
 	int	feedback_ms;
 	int	personal_best_ms;
@@ -483,7 +482,7 @@ int	solo_game_next_wake_ms(const solo_game_t *game)
  * @param game Pointer to the current Solo state.
  * @return Milliseconds until the next gameplay deadline, or -1 when idle.
  */
-static int	gameplay_next_wake_ms(const solo_game_t *game)
+static int	gameplay_next_wake_ms(const t_solo_game *game)
 {
 	int	clear_ms;
 	int	gravity_ms;
@@ -554,7 +553,7 @@ int	solo_clear_duration_ms(int level)
  * @param game Pointer to the Solo state.
  * @return Ghost piece positioned at its landing row.
  */
-t_piece	solo_game_ghost(const solo_game_t *game)
+t_piece	solo_game_ghost(const t_solo_game *game)
 {
 	t_piece	ghost;
 
@@ -573,7 +572,7 @@ t_piece	solo_game_ghost(const solo_game_t *game)
  * @param row Board row to query.
  * @return true when the row is clearing, otherwise false.
  */
-bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
+bool	solo_game_row_is_clearing(const t_solo_game *game, int row)
 {
 	int	index;
 
@@ -596,7 +595,7 @@ bool	solo_game_row_is_clearing(const solo_game_t *game, int row)
  *
  * @param game Pointer to the Solo state.
  */
-void	solo_game_toggle_pause(solo_game_t *game)
+void	solo_game_toggle_pause(t_solo_game *game)
 {
 	if (!game->countdown_active
 		&& (game->phase == SOLO_ACTIVE || game->phase == SOLO_CLEARING))
@@ -614,7 +613,7 @@ void	solo_game_toggle_pause(solo_game_t *game)
  *
  * @param game Pointer to the Solo state.
  */
-static void	reset_piece_timers(solo_game_t *game)
+static void	reset_piece_timers(t_solo_game *game)
 {
 	game->gravity_elapsed_ms = 0;
 	game->lock_elapsed_ms = 0;
@@ -633,7 +632,7 @@ static void	reset_piece_timers(solo_game_t *game)
  * @param direction Horizontal delta, normally -1 or 1.
  * @return true when the piece moved, otherwise false.
  */
-static bool	apply_shift(solo_game_t *game, int direction)
+static bool	apply_shift(t_solo_game *game, int direction)
 {
 	bool	was_grounded;
 
@@ -654,7 +653,7 @@ static bool	apply_shift(solo_game_t *game, int direction)
  * @param game Pointer to the Solo state.
  * @return true when downward movement is blocked, otherwise false.
  */
-static bool	piece_is_grounded(const solo_game_t *game)
+static bool	piece_is_grounded(const t_solo_game *game)
 {
 	t_piece	probe;
 
@@ -671,7 +670,7 @@ static bool	piece_is_grounded(const solo_game_t *game)
  * @param game Pointer to the Solo state.
  * @param was_grounded Whether the piece was grounded before the action.
  */
-static void	reset_lock_after_move(solo_game_t *game, bool was_grounded)
+static void	reset_lock_after_move(t_solo_game *game, bool was_grounded)
 {
 	if (was_grounded && game->lock_resets < SOLO_LOCK_RESET_LIMIT)
 	{
@@ -689,7 +688,7 @@ static void	reset_lock_after_move(solo_game_t *game, bool was_grounded)
  * @param direction Rotation direction, normally -1 or 1.
  * @return true when a kick candidate succeeded, otherwise false.
  */
-static bool	apply_rotation(solo_game_t *game, int direction)
+static bool	apply_rotation(t_solo_game *game, int direction)
 {
 	bool	was_grounded;
 	int		kick_index;
@@ -715,7 +714,7 @@ static bool	apply_rotation(solo_game_t *game, int direction)
  * @param game Pointer to the Solo state.
  * @return true when the hold changed state, otherwise false.
  */
-static bool	apply_hold(solo_game_t *game)
+static bool	apply_hold(t_solo_game *game)
 {
 	t_piece_type	outgoing;
 	t_piece_type	incoming;
@@ -748,7 +747,7 @@ static bool	apply_hold(solo_game_t *game)
  *
  * @param game Pointer to the Solo state.
  */
-static void	lock_active_piece(solo_game_t *game)
+static void	lock_active_piece(t_solo_game *game)
 {
 	t_spin_type	spin;
 
@@ -811,7 +810,7 @@ static bool	piece_touches_top(const t_piece *piece)
  *
  * @param game Pointer to the Solo state.
  */
-static void	begin_top_out_reveal(solo_game_t *game)
+static void	begin_top_out_reveal(t_solo_game *game)
 {
 	game->top_out_elapsed_ms = 0;
 	game->phase = SOLO_TOP_OUT_REVEAL;
@@ -828,7 +827,7 @@ static void	begin_top_out_reveal(solo_game_t *game)
  * @param spin Classified T-spin type.
  * @param perfect_clear Whether no settled cells remain.
  */
-static void	remember_score_event(solo_game_t *game, int lines,
+static void	remember_score_event(t_solo_game *game, int lines,
 	t_spin_type spin, bool perfect_clear)
 {
 	game->last_score = score_apply_clear(&game->scoring, lines, game->level,
@@ -847,7 +846,7 @@ static void	remember_score_event(solo_game_t *game, int lines,
  * @param game Pointer to the Solo state.
  * @param type Tetromino type to spawn.
  */
-static void	activate_piece(solo_game_t *game, t_piece_type type)
+static void	activate_piece(t_solo_game *game, t_piece_type type)
 {
 	game->active = piece_spawn(type);
 	reset_piece_timers(game);
@@ -867,7 +866,7 @@ static void	activate_piece(solo_game_t *game, t_piece_type type)
  *
  * @param game Pointer to the Solo state.
  */
-static void	spawn_queued_piece(solo_game_t *game)
+static void	spawn_queued_piece(t_solo_game *game)
 {
 	t_piece_type	type;
 	int				index;
@@ -892,7 +891,7 @@ static void	spawn_queued_piece(solo_game_t *game)
  * @param game Pointer to the Solo state.
  * @return true when one due event was processed, otherwise false.
  */
-static bool	process_due_event(solo_game_t *game)
+static bool	process_due_event(t_solo_game *game)
 {
 	int	clear_ms;
 	int	gravity_ms;
@@ -950,7 +949,7 @@ static bool	process_due_event(solo_game_t *game)
  *
  * @param game Pointer to the Solo state.
  */
-static void	finish_line_clear(solo_game_t *game)
+static void	finish_line_clear(t_solo_game *game)
 {
 	bool	perfect_clear;
 	int		previous_charge;
@@ -1011,14 +1010,14 @@ static void	finish_line_clear(solo_game_t *game)
 	ability = SOLO_ABILITY_MIRURUN;
 	while (ability <= SOLO_ABILITY_SIRTET)
 	{
-		if (previous_charge < solo_ability_cost((solo_ability_t)ability)
+		if (previous_charge < solo_ability_cost((t_solo_ability)ability)
 			&& game->crystal_charge
-				>= solo_ability_cost((solo_ability_t)ability))
+				>= solo_ability_cost((t_solo_ability)ability))
 		{
 			game->pending_events |= SOLO_EVENT_ABILITY_READY;
 			game->ability_ready_active = true;
 			game->ability_ready_elapsed_ms = 0;
-			game->ready_ability = (solo_ability_t)ability;
+			game->ready_ability = (t_solo_ability)ability;
 			break ;
 		}
 		ability++;
@@ -1037,7 +1036,7 @@ static void	finish_line_clear(solo_game_t *game)
  * @param elapsed_ms Elapsed monotonic milliseconds.
  * @return true when visible feedback expired, otherwise false.
  */
-static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms)
+static bool	advance_ability_feedback(t_solo_game *game, int elapsed_ms)
 {
 	if (game->ability_result == SOLO_ABILITY_RESULT_NONE)
 		return (false);
@@ -1060,7 +1059,7 @@ static bool	advance_ability_feedback(solo_game_t *game, int elapsed_ms)
  * @param elapsed_ms Elapsed monotonic milliseconds.
  * @return true while the visible banner opacity may have changed.
  */
-static bool	advance_personal_best(solo_game_t *game, int elapsed_ms)
+static bool	advance_personal_best(t_solo_game *game, int elapsed_ms)
 {
 	int	total_ms;
 
@@ -1078,7 +1077,7 @@ static bool	advance_personal_best(solo_game_t *game, int elapsed_ms)
 /**
  * @brief Advances bounded score, ready, and countdown animation timers.
  */
-static bool	advance_event_animations(solo_game_t *game, int elapsed_ms)
+static bool	advance_event_animations(t_solo_game *game, int elapsed_ms)
 {
 	int		before_stage;
 	int		after_stage;
@@ -1115,7 +1114,7 @@ static bool	advance_event_animations(solo_game_t *game, int elapsed_ms)
 /**
  * @brief Fades the environment dim level toward the current danger state.
  */
-static bool	advance_danger_presentation(solo_game_t *game, int elapsed_ms)
+static bool	advance_danger_presentation(t_solo_game *game, int elapsed_ms)
 {
 	int	before;
 
@@ -1202,7 +1201,7 @@ static int	animation_wake_ms(int wake_ms, bool active, int remaining_ms)
  * @param remaining_ms In/out unconsumed elapsed milliseconds.
  * @return true when the reveal deadline is reached, otherwise false.
  */
-static bool	advance_top_out_reveal(solo_game_t *game, int *remaining_ms)
+static bool	advance_top_out_reveal(t_solo_game *game, int *remaining_ms)
 {
 	int	step;
 
@@ -1241,7 +1240,7 @@ static int	min_int(int left, int right)
  * @param remaining_ms In/out unconsumed elapsed milliseconds.
  * @return true when a visual boundary was reached, otherwise false.
  */
-static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
+static bool	advance_clearing(t_solo_game *game, int *remaining_ms)
 {
 	int	duration_ms;
 	int	target;
@@ -1274,7 +1273,7 @@ static bool	advance_clearing(solo_game_t *game, int *remaining_ms)
  * @param remaining_ms In/out unconsumed elapsed milliseconds.
  * @return true when visible state changed, otherwise false.
  */
-static bool	advance_active(solo_game_t *game, int *remaining_ms)
+static bool	advance_active(t_solo_game *game, int *remaining_ms)
 {
 	int	gravity_ms;
 	int	to_gravity;

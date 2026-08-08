@@ -1,17 +1,17 @@
 #include "tetrisu.h"
 
 // Static Functions
-static mp_rect_t	map_rect(int x, int y, int width, int height,
+static t_mp_rect	map_rect(int x, int y, int width, int height,
 						int pixel_width, int pixel_height);
-static void	build_mode(mp_layout_t *layout);
-static void	build_lobby(mp_layout_t *layout);
-static void	build_create_room(mp_layout_t *layout);
-static void	build_waiting_room(mp_layout_t *layout);
+static void	build_mode(t_mp_layout *layout);
+static void	build_lobby(t_mp_layout *layout);
+static void	build_create_room(t_mp_layout *layout);
+static void	build_waiting_room(t_mp_layout *layout);
 
-static mp_rect_t	map_rect(int x, int y, int width, int height,
+static t_mp_rect	map_rect(int x, int y, int width, int height,
 	int pixel_width, int pixel_height)
 {
-	mp_rect_t	mapped;
+	t_mp_rect	mapped;
 
 	mapped.x = x * pixel_width / MULTIPLAYER_REFERENCE_WIDTH;
 	mapped.y = y * pixel_height / MULTIPLAYER_REFERENCE_HEIGHT;
@@ -39,8 +39,8 @@ static mp_rect_t	map_rect(int x, int y, int width, int height,
  * @param cell_px_x Cell width in pixels.
  * @param layout Destination geometry.
  */
-void	mp_layout_build(app_screen_t screen, int origin_y, int origin_x,
-	int rows, int cols, int cell_px_y, int cell_px_x, mp_layout_t *layout)
+void	mp_layout_build(t_app_screen screen, int origin_y, int origin_x,
+	int rows, int cols, int cell_px_y, int cell_px_x, t_mp_layout *layout)
 {
 	if (layout == NULL)
 		return ;
@@ -70,7 +70,7 @@ void	mp_layout_build(app_screen_t screen, int origin_y, int origin_x,
  * opaque and sits low where the art is plain. Only the card strip is a region;
  * everything else on the screen is settled before it opens.
  */
-static void	build_mode(mp_layout_t *layout)
+static void	build_mode(t_mp_layout *layout)
 {
 	int	index;
 
@@ -101,7 +101,7 @@ static void	build_mode(mp_layout_t *layout)
  * terminal-cell boundaries, so keeping a border on a separate plane lets the
  * crop overwrite it at coarse cell sizes. Full-panel ownership prevents that.
  */
-static void	build_lobby(mp_layout_t *layout)
+static void	build_lobby(t_mp_layout *layout)
 {
 	layout->rooms_plate = map_rect(LOBBY_REF_ROOMS_X, LOBBY_REF_ROOMS_Y,
 			LOBBY_REF_ROOMS_WIDTH, LOBBY_REF_ROOMS_HEIGHT,
@@ -122,7 +122,7 @@ static void	build_lobby(mp_layout_t *layout)
 /**
  * @brief Lays out the create-room panel: one plate, one region of options.
  */
-static void	build_create_room(mp_layout_t *layout)
+static void	build_create_room(t_mp_layout *layout)
 {
 	layout->panel = map_rect(CREATE_REF_PANEL_X, CREATE_REF_PANEL_Y,
 			CREATE_REF_PANEL_WIDTH, CREATE_REF_PANEL_HEIGHT,
@@ -141,7 +141,7 @@ static void	build_create_room(mp_layout_t *layout)
  * Three regions. Seats and chat own their complete plates so cell-expanded
  * bitmap crops cannot erase the frame drawn by a different plane.
  */
-static void	build_waiting_room(mp_layout_t *layout)
+static void	build_waiting_room(t_mp_layout *layout)
 {
 	layout->slots_plate = map_rect(ROOM_REF_SLOTS_PLATE_X,
 			ROOM_REF_SLOTS_PLATE_Y, ROOM_REF_SLOTS_PLATE_WIDTH,

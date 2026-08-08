@@ -9,48 +9,48 @@
 # define AUTH_TEXT_ADVANCE_NUM		3
 # define AUTH_TEXT_ADVANCE_DEN		2
 
-static const color_t	g_auth_value = {238, 223, 242};
-static const color_t	g_auth_focus = {255, 229, 244};
-static const color_t	g_auth_gold = {255, 206, 104};
-static const color_t	g_auth_lavender = {190, 156, 230};
-static const color_t	g_auth_red = {255, 111, 142};
-static const color_t	g_auth_green = {112, 224, 174};
-static const color_t	g_auth_disabled = {116, 111, 132};
+static const t_color	g_auth_value = {238, 223, 242};
+static const t_color	g_auth_focus = {255, 229, 244};
+static const t_color	g_auth_gold = {255, 206, 104};
+static const t_color	g_auth_lavender = {190, 156, 230};
+static const t_color	g_auth_red = {255, 111, 142};
+static const t_color	g_auth_green = {112, 224, 174};
+static const t_color	g_auth_disabled = {116, 111, 132};
 
-static uint64_t			form_signature(const auth_form_t *form);
-static bool				ensure_font_atlas(render_ctx_t *ctx);
-static bool				cache_background_visual(render_ctx_t *ctx,
+static uint64_t			form_signature(const t_auth_form *form);
+static bool				ensure_font_atlas(t_render_ctx *ctx);
+static bool				cache_background_visual(t_render_ctx *ctx,
 								const char *path);
-static bool				add_value_sprite(render_ctx_t *ctx,
-							const auth_form_t *form, auth_focus_t focus,
+static bool				add_value_sprite(t_render_ctx *ctx,
+							const t_auth_form *form, t_auth_focus focus,
 							int row, int x, int width, const char *value,
 							bool password);
-static bool				add_status_sprite(render_ctx_t *ctx,
-							const auth_form_t *form, int row, int center_x,
+static bool				add_status_sprite(t_render_ctx *ctx,
+							const t_auth_form *form, int row, int center_x,
 							int width);
 static void				fit_status_text(char *output, size_t capacity,
 							const char *text, int plane_width);
-static bool				add_empty_slot(render_ctx_t *ctx);
-static bool				add_focus_sprites(render_ctx_t *ctx,
+static bool				add_empty_slot(t_render_ctx *ctx);
+static bool				add_focus_sprites(t_render_ctx *ctx,
 							int row, int x, int width, bool focused,
 							bool disabled);
-static bool				add_text_sprite(render_ctx_t *ctx, const char *text,
-							int row, int x, int plane_width, color_t tint,
+static bool				add_text_sprite(t_render_ctx *ctx, const char *text,
+							int row, int x, int plane_width, t_color tint,
 							bool centered);
-static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
+static struct ncplane	*create_text_sprite(t_render_ctx *ctx,
 							struct ncplane *plane, const char *text,
-							int row, int x, int plane_width, color_t tint,
+							int row, int x, int plane_width, t_color tint,
 							bool centered);
-static bool				prefill_sprite_background(render_ctx_t *ctx,
+static bool				prefill_sprite_background(t_render_ctx *ctx,
 								uint32_t *pixels, int row, int x,
 								int width, int pixel_rows);
-static void				blend_sprite_pixel(uint32_t *pixel, color_t tint,
+static void				blend_sprite_pixel(uint32_t *pixel, t_color tint,
 								unsigned alpha);
 static void				set_transparent_base(struct ncplane *plane);
 static size_t			visible_ascii(char *output, size_t capacity,
 							const char *text, int max_width);
 static uint64_t			sprite_signature(const char *text, int row, int x,
-							int width, color_t tint, bool centered);
+							int width, t_color tint, bool centered);
 
 /**
  * @brief Loads the authored auth screen for the active form.
@@ -59,8 +59,8 @@ static uint64_t			sprite_signature(const char *text, int row, int x,
  * status, and focus use separate small font sprites so they stay above the
  * background without repainting a full-screen image for every key press.
  */
-bool	render_auth_pixel_background_refresh(render_ctx_t *ctx,
-	const auth_form_t *form, bool force)
+bool	render_auth_pixel_background_refresh(t_render_ctx *ctx,
+	const t_auth_form *form, bool force)
 {
 	const char	*path;
 	uint64_t	signature;
@@ -90,8 +90,8 @@ bool	render_auth_pixel_background_refresh(render_ctx_t *ctx,
 /**
  * @brief Rebuilds small dynamic text sprites over the static auth bitmap.
  */
-bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
-	const auth_form_t *form)
+bool	render_auth_pixel_overlay_refresh(t_render_ctx *ctx,
+	const t_auth_form *form)
 {
 	int	field_x;
 	int	field_width;
@@ -191,7 +191,7 @@ bool	render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
 /**
  * @brief Removes all dynamic auth sprites.
  */
-void	render_auth_pixel_overlay_destroy(render_ctx_t *ctx)
+void	render_auth_pixel_overlay_destroy(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -212,7 +212,7 @@ void	render_auth_pixel_overlay_destroy(render_ctx_t *ctx)
 /**
  * @brief Invalidates the cached auth artwork signature.
  */
-void	render_auth_pixel_background_reset(render_ctx_t *ctx)
+void	render_auth_pixel_background_reset(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -224,7 +224,7 @@ void	render_auth_pixel_background_reset(render_ctx_t *ctx)
 	ctx->auth_background_signature = 0;
 }
 
-static uint64_t	form_signature(const auth_form_t *form)
+static uint64_t	form_signature(const t_auth_form *form)
 {
 	uint64_t	hash;
 
@@ -233,7 +233,7 @@ static uint64_t	form_signature(const auth_form_t *form)
 	return (hash);
 }
 
-static bool	ensure_font_atlas(render_ctx_t *ctx)
+static bool	ensure_font_atlas(t_render_ctx *ctx)
 {
 	ncvgeom	geom;
 
@@ -254,7 +254,7 @@ static bool	ensure_font_atlas(render_ctx_t *ctx)
 	return (true);
 }
 
-static bool	cache_background_visual(render_ctx_t *ctx, const char *path)
+static bool	cache_background_visual(t_render_ctx *ctx, const char *path)
 {
 	struct ncvisual	*ncv;
 	int				pixel_rows;
@@ -279,8 +279,8 @@ static bool	cache_background_visual(render_ctx_t *ctx, const char *path)
 	return (true);
 }
 
-static bool	add_value_sprite(render_ctx_t *ctx, const auth_form_t *form,
-	auth_focus_t focus, int row, int x, int width, const char *value,
+static bool	add_value_sprite(t_render_ctx *ctx, const t_auth_form *form,
+	t_auth_focus focus, int row, int x, int width, const char *value,
 	bool password)
 {
 	char	display[AUTH_FIELD_MAX];
@@ -297,11 +297,11 @@ static bool	add_value_sprite(render_ctx_t *ctx, const auth_form_t *form,
 			active ? g_auth_focus : g_auth_value, false));
 }
 
-static bool	add_status_sprite(render_ctx_t *ctx, const auth_form_t *form,
+static bool	add_status_sprite(t_render_ctx *ctx, const t_auth_form *form,
 	int row, int center_x, int width)
 {
 	char	fitted[AUTH_STATUS_MAX];
-	color_t	tint;
+	t_color	tint;
 	int		length;
 	int		x;
 
@@ -353,7 +353,7 @@ static void	fit_status_text(char *output, size_t capacity, const char *text,
 	snprintf(output, capacity, "%.*s...", max_chars - 3, text);
 }
 
-static bool	add_empty_slot(render_ctx_t *ctx)
+static bool	add_empty_slot(t_render_ctx *ctx)
 {
 	int	slot;
 
@@ -367,10 +367,10 @@ static bool	add_empty_slot(render_ctx_t *ctx)
 	return (true);
 }
 
-static bool	add_focus_sprites(render_ctx_t *ctx, int row, int x,
+static bool	add_focus_sprites(t_render_ctx *ctx, int row, int x,
 	int width, bool focused, bool disabled)
 {
-	color_t	tint;
+	t_color	tint;
 
 	if (disabled)
 		tint = g_auth_disabled;
@@ -382,8 +382,8 @@ static bool	add_focus_sprites(render_ctx_t *ctx, int row, int x,
 			AUTH_TEXT_CELL_COLS, tint, false));
 }
 
-static bool	add_text_sprite(render_ctx_t *ctx, const char *text,
-	int row, int x, int plane_width, color_t tint, bool centered)
+static bool	add_text_sprite(t_render_ctx *ctx, const char *text,
+	int row, int x, int plane_width, t_color tint, bool centered)
 {
 	char			visible[AUTH_FIELD_MAX + 4];
 	struct ncplane	*plane;
@@ -436,9 +436,9 @@ static bool	add_text_sprite(render_ctx_t *ctx, const char *text,
 	return (true);
 }
 
-static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
+static struct ncplane	*create_text_sprite(t_render_ctx *ctx,
 	struct ncplane *plane, const char *text, int row, int x,
-	int plane_width, color_t tint, bool centered)
+	int plane_width, t_color tint, bool centered)
 {
 	struct ncvisual_options	vopts;
 	ncplane_options			opts;
@@ -607,7 +607,7 @@ static struct ncplane	*create_text_sprite(render_ctx_t *ctx,
 	return (plane);
 }
 
-static bool	prefill_sprite_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	prefill_sprite_background(t_render_ctx *ctx, uint32_t *pixels,
 	int row, int x, int width, int pixel_rows)
 {
 	uint32_t	pixel;
@@ -640,7 +640,7 @@ static bool	prefill_sprite_background(render_ctx_t *ctx, uint32_t *pixels,
 	return (true);
 }
 
-static void	blend_sprite_pixel(uint32_t *pixel, color_t tint,
+static void	blend_sprite_pixel(uint32_t *pixel, t_color tint,
 	unsigned alpha)
 {
 	unsigned	red;
@@ -692,7 +692,7 @@ static size_t	visible_ascii(char *output, size_t capacity,
 }
 
 static uint64_t	sprite_signature(const char *text, int row, int x,
-	int width, color_t tint, bool centered)
+	int width, t_color tint, bool centered)
 {
 	const unsigned char	*cursor;
 	uint64_t			hash;

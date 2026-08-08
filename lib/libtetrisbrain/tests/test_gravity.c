@@ -1,90 +1,105 @@
-// tests/test_gravity.c
 #include "tetrisbrain.h"
+
 #include <assert.h>
 #include <stdio.h>
 
-void test_gravity_tick_moves_down(void) {
-  t_board b;
-  board_init(&b);
-  t_piece p = piece_spawn(PIECE_T); // col=3,row=0
+void	test_gravity_tick_moves_down(void)
+{
+	t_board	b;
+	t_piece	p;
 
-  assert(gravity_tick(&b, &p) == BRAIN_OK);
-  assert(p.row == 1);
-  assert(piece_is_valid(&b, &p));
-
-  printf("PASS test_gravity_tick_moves_down\n");
+	board_init(&b);
+	p = piece_spawn(PIECE_T); // col=3,row=0
+	assert(gravity_tick(&b, &p) == BRAIN_OK);
+	assert(p.row == 1);
+	assert(piece_is_valid(&b, &p));
+	printf("PASS test_gravity_tick_moves_down\n");
 }
 
-void test_gravity_tick_locks_at_floor(void) {
-  t_board b;
-  board_init(&b);
-  t_piece p = piece_spawn(PIECE_I); // col=3,row=-1, occupies row 0
+void	test_gravity_tick_locks_at_floor(void)
+{
+	t_board	b;
+	t_piece	p;
+	t_piece	before;
+	int		i;
 
-  // drop to the floor (row=18, occupies row 19)
-  for (int i = 0; i < 19; i++)
-    assert(piece_move(&b, &p, 0, 1) == BRAIN_OK);
-  assert(p.row == 18);
-
-  t_piece before = p;
-  assert(gravity_tick(&b, &p) == BRAIN_LOCKED);
-  assert(p.row == before.row && p.col == before.col &&
-         p.rotation == before.rotation);
-
-  printf("PASS test_gravity_tick_locks_at_floor\n");
+	board_init(&b);
+	p = piece_spawn(PIECE_I); // col=3,row=-1, occupies row 0
+	// drop to the floor (row=18, occupies row 19)
+	i = 0;
+	while (i < 19)
+	{
+		assert(piece_move(&b, &p, 0, 1) == BRAIN_OK);
+		i++;
+	}
+	assert(p.row == 18);
+	before = p;
+	assert(gravity_tick(&b, &p) == BRAIN_LOCKED);
+	assert(p.row == before.row && p.col == before.col
+		&& p.rotation == before.rotation);
+	printf("PASS test_gravity_tick_locks_at_floor\n");
 }
 
-void test_soft_drop_moves_then_locks(void) {
-  t_board b;
-  board_init(&b);
-  t_piece p = piece_spawn(PIECE_O); // col=4,row=0, occupies rows 0-1
+void	test_soft_drop_moves_then_locks(void)
+{
+	t_board	b;
+	t_piece	p;
+	t_piece	before;
+	int		i;
 
-  assert(piece_soft_drop(&b, &p) == BRAIN_OK);
-  assert(p.row == 1);
-
-  // O piece rests at row=18 (occupies rows 18-19)
-  for (int i = 0; i < 17; i++)
-    assert(piece_move(&b, &p, 0, 1) == BRAIN_OK);
-  assert(p.row == 18);
-
-  t_piece before = p;
-  assert(piece_soft_drop(&b, &p) == BRAIN_LOCKED);
-  assert(p.row == before.row);
-
-  printf("PASS test_soft_drop_moves_then_locks\n");
+	board_init(&b);
+	p = piece_spawn(PIECE_O); // col=4,row=0, occupies rows 0-1
+	assert(piece_soft_drop(&b, &p) == BRAIN_OK);
+	assert(p.row == 1);
+	// O piece rests at row=18 (occupies rows 18-19)
+	i = 0;
+	while (i < 17)
+	{
+		assert(piece_move(&b, &p, 0, 1) == BRAIN_OK);
+		i++;
+	}
+	assert(p.row == 18);
+	before = p;
+	assert(piece_soft_drop(&b, &p) == BRAIN_LOCKED);
+	assert(p.row == before.row);
+	printf("PASS test_soft_drop_moves_then_locks\n");
 }
 
-void test_hard_drop_moves_to_floor(void) {
-  t_board b;
-  board_init(&b);
-  t_piece p = piece_spawn(PIECE_I); // col=3,row=-1
+void	test_hard_drop_moves_to_floor(void)
+{
+	t_board	b;
+	t_piece	p;
 
-  piece_hard_drop(&b, &p);
-  assert(p.row == 18);
-  assert(p.col == 3);
-  assert(piece_move(&b, &p, 0, 1) == BRAIN_BLOCKED); // resting on floor
-
-  printf("PASS test_hard_drop_moves_to_floor\n");
+	board_init(&b);
+	p = piece_spawn(PIECE_I); // col=3,row=-1
+	piece_hard_drop(&b, &p);
+	assert(p.row == 18);
+	assert(p.col == 3);
+	assert(piece_move(&b, &p, 0, 1) == BRAIN_BLOCKED); // resting on floor
+	printf("PASS test_hard_drop_moves_to_floor\n");
 }
 
-void test_drop_distance_does_not_mutate_piece(void) {
-  t_board b;
-  t_piece p;
-  t_piece before;
+void	test_drop_distance_does_not_mutate_piece(void)
+{
+	t_board	b;
+	t_piece	p;
+	t_piece	before;
 
-  board_init(&b);
-  p = piece_spawn(PIECE_O);
-  before = p;
-  assert(piece_drop_distance(&b, &p) == 18);
-  assert(p.col == before.col && p.row == before.row &&
-         p.rotation == before.rotation && p.type == before.type);
-  printf("PASS test_drop_distance_does_not_mutate_piece\n");
+	board_init(&b);
+	p = piece_spawn(PIECE_O);
+	before = p;
+	assert(piece_drop_distance(&b, &p) == 18);
+	assert(p.col == before.col && p.row == before.row
+		&& p.rotation == before.rotation && p.type == before.type);
+	printf("PASS test_drop_distance_does_not_mutate_piece\n");
 }
 
-int main(void) {
-  test_gravity_tick_moves_down();
-  test_gravity_tick_locks_at_floor();
-  test_soft_drop_moves_then_locks();
-  test_hard_drop_moves_to_floor();
-  test_drop_distance_does_not_mutate_piece();
-  return 0;
+int	main(void)
+{
+	test_gravity_tick_moves_down();
+	test_gravity_tick_locks_at_floor();
+	test_soft_drop_moves_then_locks();
+	test_hard_drop_moves_to_floor();
+	test_drop_distance_does_not_mutate_piece();
+	return (0);
 }

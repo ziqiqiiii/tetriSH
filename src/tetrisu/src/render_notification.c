@@ -38,26 +38,26 @@ typedef struct s_notif_box
 	int	y;
 	int	width;
 	int	height;
-}	notif_box_t;
+}	t_notif_box;
 
-static const color_t	g_notification_gold = {255, 210, 118};
-static const color_t	g_notification_cream = {255, 244, 250};
-static const color_t	g_notification_filled = {255, 94, 167};
-static const color_t	g_notification_empty = {116, 76, 142};
+static const t_color	g_notification_gold = {255, 210, 118};
+static const t_color	g_notification_cream = {255, 244, 250};
+static const t_color	g_notification_filled = {255, 94, 167};
+static const t_color	g_notification_empty = {116, 76, 142};
 
-static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms);
-static int	art_columns(const render_ctx_t *ctx);
-static bool	notification_position(render_ctx_t *ctx, int index, int cols,
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms);
+static int	art_columns(const t_render_ctx *ctx);
+static bool	notification_position(t_render_ctx *ctx, int index, int cols,
 						int *y, int *x);
-static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
-						const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_art_plane(t_render_ctx *ctx, int y, int x,
+						const t_ui_notification *notification, int opacity,
 						bool *content_embedded);
-static uint32_t	*build_canvas(render_ctx_t *ctx, int y, int x,
-						const ui_notification_t *notification, int opacity,
+static uint32_t	*build_canvas(t_render_ctx *ctx, int y, int x,
+						const t_ui_notification *notification, int opacity,
 						int width, int height);
-static struct ncplane	*blit_canvas(render_ctx_t *ctx, const uint32_t *canvas,
+static struct ncplane	*blit_canvas(t_render_ctx *ctx, const uint32_t *canvas,
 						int width, int height, int y, int x, int cols);
-static void	fill_backdrop(render_ctx_t *ctx, uint32_t *canvas, int width,
+static void	fill_backdrop(t_render_ctx *ctx, uint32_t *canvas, int width,
 						int height, int y, int x);
 static void	copy_backdrop_row(uint32_t *dest, int width,
 						const uint32_t *source, int source_width,
@@ -67,57 +67,57 @@ static void	compose_card(uint32_t *canvas, int width, int height,
 static void	blend_over(uint32_t *dest, unsigned red, unsigned green,
 						unsigned blue, unsigned alpha);
 static void	fill_rect(uint32_t *canvas, int width, int height,
-						const notif_box_t *rect, color_t tint, unsigned alpha);
-static const pixel_asset_t	*notification_font(render_ctx_t *ctx);
-static notif_box_t	text_box(const ui_notification_t *notification,
+						const t_notif_box *rect, t_color tint, unsigned alpha);
+static const t_pixel_asset	*notification_font(t_render_ctx *ctx);
+static t_notif_box	text_box(const t_ui_notification *notification,
 						int width, int height);
-static notif_box_t	band(const notif_box_t *box, int index);
-static notif_box_t	place_line(const notif_box_t *band_box, const char *text,
+static t_notif_box	band(const t_notif_box *box, int index);
+static t_notif_box	place_line(const t_notif_box *band_box, const char *text,
 						int limit);
 static int	cap_row(int band_y, int glyph_size);
-static void	draw_card_text(render_ctx_t *ctx, uint32_t *canvas, int width,
-						int height, const ui_notification_t *notification);
+static void	draw_card_text(t_render_ctx *ctx, uint32_t *canvas, int width,
+						int height, const t_ui_notification *notification);
 static void	draw_ownership_text(uint32_t *canvas, int width, int height,
-						const pixel_asset_t *font,
-						const ui_notification_t *notification,
-						const notif_box_t *box);
+						const t_pixel_asset *font,
+						const t_ui_notification *notification,
+						const t_notif_box *box);
 static void	draw_volume_text(uint32_t *canvas, int width, int height,
-						const pixel_asset_t *font,
-						const ui_notification_t *notification,
-						const notif_box_t *box);
+						const t_pixel_asset *font,
+						const t_ui_notification *notification,
+						const t_notif_box *box);
 static void	draw_volume_bar(uint32_t *canvas, int width, int height,
-						const notif_box_t *band_box, int percent);
+						const t_notif_box *band_box, int percent);
 static void	draw_atlas_text(uint32_t *canvas, int width, int height,
-						const pixel_asset_t *font, const char *text,
-						const notif_box_t *at, color_t tint);
+						const t_pixel_asset *font, const char *text,
+						const t_notif_box *at, t_color tint);
 static void	draw_atlas_glyph(uint32_t *canvas, int width, int height,
-						const pixel_asset_t *font, int glyph, int x, int y,
-						int glyph_size, color_t tint);
+						const t_pixel_asset *font, int glyph, int x, int y,
+						int glyph_size, t_color tint);
 static void	draw_atlas_texel(uint32_t *canvas, int width, int height,
-						unsigned alpha, const notif_box_t *cell, color_t tint);
+						unsigned alpha, const t_notif_box *cell, t_color tint);
 static int	ink_span(int units, int glyph_size);
 static int	glyph_spacing(int glyph_size);
 static int	text_pixels(const char *text, int glyph_size);
 static int	fit_glyph(const char *text, int box_width, int glyph_size);
-static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
-						const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_text_plane(t_render_ctx *ctx, int y, int x,
+						const t_ui_notification *notification, int opacity,
 						bool has_art);
 static const char	*notification_asset_path(
-						const ui_notification_t *notification);
+						const t_ui_notification *notification);
 static void	draw_notification(struct ncplane *plane,
-						const ui_notification_t *notification, int opacity,
+						const t_ui_notification *notification, int opacity,
 						int row_offset);
 static void	draw_bar(struct ncplane *plane, int percent, int opacity,
 						int row);
 static void	draw_fallback_frame(struct ncplane *plane,
-						const ui_notification_t *notification, int opacity);
+						const t_ui_notification *notification, int opacity);
 static void	set_transparent_base(struct ncplane *plane);
 static void	set_color(struct ncplane *plane, unsigned r, unsigned g,
 						unsigned b, int opacity);
 static unsigned	fade_component(unsigned component, int opacity);
-static void	destroy_notification_planes(render_ctx_t *ctx);
-static void	raise_planes(render_ctx_t *ctx);
-static bool	can_refresh_stationary_in_place(const render_ctx_t *ctx,
+static void	destroy_notification_planes(t_render_ctx *ctx);
+static void	raise_planes(t_render_ctx *ctx);
+static bool	can_refresh_stationary_in_place(const t_render_ctx *ctx,
 						bool content_changed);
 
 /**
@@ -130,7 +130,7 @@ static bool	can_refresh_stationary_in_place(const render_ctx_t *ctx,
  * @param ctx Active render context.
  * @param volume Mixer volume in the application range.
  */
-void	render_notification_show_volume(render_ctx_t *ctx, int volume)
+void	render_notification_show_volume(t_render_ctx *ctx, int volume)
 {
 	if (ctx == NULL || ctx->nc == NULL)
 		return ;
@@ -141,7 +141,7 @@ void	render_notification_show_volume(render_ctx_t *ctx, int volume)
 /**
  * @brief Refreshes volume notification planes for a caller-owned render.
  */
-void	render_notification_queue_volume(render_ctx_t *ctx, int volume)
+void	render_notification_queue_volume(t_render_ctx *ctx, int volume)
 {
 	uint64_t	now_ms;
 	bool		content_changed;
@@ -162,7 +162,7 @@ void	render_notification_queue_volume(render_ctx_t *ctx, int volume)
 /**
  * @brief Queues the fixed Marketplace guidance shown for a locked item.
  */
-void	render_notification_queue_ownership(render_ctx_t *ctx)
+void	render_notification_queue_ownership(t_render_ctx *ctx)
 {
 	uint64_t	now_ms;
 	bool		content_changed;
@@ -185,7 +185,7 @@ void	render_notification_queue_ownership(render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_notification_tick(render_ctx_t *ctx)
+void	render_notification_tick(t_render_ctx *ctx)
 {
 	uint64_t	now_ms;
 	bool		changed;
@@ -206,7 +206,7 @@ void	render_notification_tick(render_ctx_t *ctx)
  * @param ctx Active render context.
  * @return Delay in milliseconds, or -1 with no visible notifications.
  */
-int	render_notification_next_wake_ms(const render_ctx_t *ctx)
+int	render_notification_next_wake_ms(const t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return (-1);
@@ -222,7 +222,7 @@ int	render_notification_next_wake_ms(const render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_notification_reflow(render_ctx_t *ctx)
+void	render_notification_reflow(t_render_ctx *ctx)
 {
 	if (ctx == NULL || ctx->nc == NULL || ctx->notifications.count == 0)
 		return ;
@@ -235,7 +235,7 @@ void	render_notification_reflow(render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_notification_raise(render_ctx_t *ctx)
+void	render_notification_raise(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -248,7 +248,7 @@ void	render_notification_raise(render_ctx_t *ctx)
 	raise_planes(ctx);
 }
 
-static void	raise_planes(render_ctx_t *ctx)
+static void	raise_planes(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -263,7 +263,7 @@ static void	raise_planes(render_ctx_t *ctx)
 	}
 }
 
-static bool	can_refresh_stationary_in_place(const render_ctx_t *ctx,
+static bool	can_refresh_stationary_in_place(const t_render_ctx *ctx,
 	bool content_changed)
 {
 	return (ctx->pixels == TETRISU_PIXELS_STATIONARY && !content_changed
@@ -276,7 +276,7 @@ static bool	can_refresh_stationary_in_place(const render_ctx_t *ctx,
  *
  * @param ctx Render context being torn down.
  */
-void	render_notification_destroy(render_ctx_t *ctx)
+void	render_notification_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -285,7 +285,7 @@ void	render_notification_destroy(render_ctx_t *ctx)
 	ui_notification_stack_init(&ctx->notifications);
 }
 
-static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms)
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 {
 	int		index;
 	int		opacity;
@@ -334,7 +334,7 @@ static void	refresh_notifications(render_ctx_t *ctx, uint64_t now_ms)
  * @param ctx Active render context.
  * @return Plane width in columns.
  */
-static int	art_columns(const render_ctx_t *ctx)
+static int	art_columns(const t_render_ctx *ctx)
 {
 	unsigned	rows;
 	unsigned	columns;
@@ -359,7 +359,7 @@ static int	art_columns(const render_ctx_t *ctx)
 	return (cols);
 }
 
-static bool	notification_position(render_ctx_t *ctx, int index, int cols,
+static bool	notification_position(t_render_ctx *ctx, int index, int cols,
 	int *y, int *x)
 {
 	unsigned	rows;
@@ -382,8 +382,8 @@ static bool	notification_position(render_ctx_t *ctx, int index, int cols,
  * the backdrop, the artwork and the lettering all share one blend path, and
  * so the stationary tier can flatten the result into opaque pixels.
  */
-static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
-	const ui_notification_t *notification, int opacity,
+static struct ncplane	*create_art_plane(t_render_ctx *ctx, int y, int x,
+	const t_ui_notification *notification, int opacity,
 	bool *content_embedded)
 {
 	uint32_t		*canvas;
@@ -410,8 +410,8 @@ static struct ncplane	*create_art_plane(render_ctx_t *ctx, int y, int x,
 	return (plane);
 }
 
-static uint32_t	*build_canvas(render_ctx_t *ctx, int y, int x,
-	const ui_notification_t *notification, int opacity, int width, int height)
+static uint32_t	*build_canvas(t_render_ctx *ctx, int y, int x,
+	const t_ui_notification *notification, int opacity, int width, int height)
 {
 	uint32_t		*canvas;
 	struct ncvisual	*visual;
@@ -450,7 +450,7 @@ static uint32_t	*build_canvas(render_ctx_t *ctx, int y, int x,
  * screen behind it. Painting the backdrop into the card first is what removes
  * that rectangle. Tiers that really composite need none of this.
  */
-static void	fill_backdrop(render_ctx_t *ctx, uint32_t *canvas, int width,
+static void	fill_backdrop(t_render_ctx *ctx, uint32_t *canvas, int width,
 	int height, int y, int x)
 {
 	const uint32_t	*source;
@@ -547,7 +547,7 @@ static void	blend_over(uint32_t *dest, unsigned red, unsigned green,
 }
 
 static void	fill_rect(uint32_t *canvas, int width, int height,
-	const notif_box_t *rect, color_t tint, unsigned alpha)
+	const t_notif_box *rect, t_color tint, unsigned alpha)
 {
 	int	y;
 	int	x;
@@ -567,7 +567,7 @@ static void	fill_rect(uint32_t *canvas, int width, int height,
 	}
 }
 
-static struct ncplane	*blit_canvas(render_ctx_t *ctx, const uint32_t *canvas,
+static struct ncplane	*blit_canvas(t_render_ctx *ctx, const uint32_t *canvas,
 	int width, int height, int y, int x, int cols)
 {
 	ncplane_options			options;
@@ -613,7 +613,7 @@ static struct ncplane	*blit_canvas(render_ctx_t *ctx, const uint32_t *canvas,
  * M, N and W apart at card size. Sharing the atlas the rest of the UI already
  * draws with removes both the ambiguity and a second font to maintain.
  */
-static const pixel_asset_t	*notification_font(render_ctx_t *ctx)
+static const t_pixel_asset	*notification_font(t_render_ctx *ctx)
 {
 	if (ctx->notification_font.pixels != NULL)
 		return (&ctx->notification_font);
@@ -625,10 +625,10 @@ static const pixel_asset_t	*notification_font(render_ctx_t *ctx)
 /**
  * @brief Maps the measured per-mille text box onto the drawn card.
  */
-static notif_box_t	text_box(const ui_notification_t *notification,
+static t_notif_box	text_box(const t_ui_notification *notification,
 	int width, int height)
 {
-	notif_box_t	box;
+	t_notif_box	box;
 
 	if (notification->kind == UI_NOTIFICATION_OWNERSHIP)
 	{
@@ -648,9 +648,9 @@ static notif_box_t	text_box(const ui_notification_t *notification,
 /**
  * @brief Returns one of the two stacked bands inside a card's text box.
  */
-static notif_box_t	band(const notif_box_t *box, int index)
+static t_notif_box	band(const t_notif_box *box, int index)
 {
-	notif_box_t	result;
+	t_notif_box	result;
 
 	result.x = box->x;
 	result.width = box->width;
@@ -661,11 +661,11 @@ static notif_box_t	band(const notif_box_t *box, int index)
 	return (result);
 }
 
-static void	draw_card_text(render_ctx_t *ctx, uint32_t *canvas, int width,
-	int height, const ui_notification_t *notification)
+static void	draw_card_text(t_render_ctx *ctx, uint32_t *canvas, int width,
+	int height, const t_ui_notification *notification)
 {
-	const pixel_asset_t	*font;
-	notif_box_t			box;
+	const t_pixel_asset	*font;
+	t_notif_box			box;
 
 	font = notification_font(ctx);
 	if (font == NULL)
@@ -692,10 +692,10 @@ static void	draw_card_text(render_ctx_t *ctx, uint32_t *canvas, int width,
  * @param limit Widest run allowed, normally the band width.
  * @return Box whose y is the cap row and whose height is the glyph size.
  */
-static notif_box_t	place_line(const notif_box_t *band_box, const char *text,
+static t_notif_box	place_line(const t_notif_box *band_box, const char *text,
 	int limit)
 {
-	notif_box_t	at;
+	t_notif_box	at;
 
 	at = *band_box;
 	at.height = at.height * FONT_INK_HEIGHT
@@ -718,11 +718,11 @@ static int	cap_row(int band_y, int glyph_size)
  * @brief Centres the locked-item title and its Marketplace hint in the box.
  */
 static void	draw_ownership_text(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, const ui_notification_t *notification,
-	const notif_box_t *box)
+	const t_pixel_asset *font, const t_ui_notification *notification,
+	const t_notif_box *box)
 {
-	notif_box_t	band_box;
-	notif_box_t	at;
+	t_notif_box	band_box;
+	t_notif_box	at;
 
 	band_box = band(box, 0);
 	at = place_line(&band_box, notification->title, box->width);
@@ -740,12 +740,12 @@ static void	draw_ownership_text(uint32_t *canvas, int width, int height,
  * @brief Draws the volume title with a right-aligned percentage and its bar.
  */
 static void	draw_volume_text(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, const ui_notification_t *notification,
-	const notif_box_t *box)
+	const t_pixel_asset *font, const t_ui_notification *notification,
+	const t_notif_box *box)
 {
 	char		percent[8];
-	notif_box_t	band_box;
-	notif_box_t	at;
+	t_notif_box	band_box;
+	t_notif_box	at;
 
 	snprintf(percent, sizeof(percent), "%d%%", notification->percent);
 	band_box = band(box, 0);
@@ -763,9 +763,9 @@ static void	draw_volume_text(uint32_t *canvas, int width, int height,
 }
 
 static void	draw_volume_bar(uint32_t *canvas, int width, int height,
-	const notif_box_t *band_box, int percent)
+	const t_notif_box *band_box, int percent)
 {
-	notif_box_t	segment;
+	t_notif_box	segment;
 	int			gap;
 	int			step;
 	int			filled_steps;
@@ -796,8 +796,8 @@ static void	draw_volume_bar(uint32_t *canvas, int width, int height,
 }
 
 static void	draw_atlas_text(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, const char *text, const notif_box_t *at,
-	color_t tint)
+	const t_pixel_asset *font, const char *text, const t_notif_box *at,
+	t_color tint)
 {
 	unsigned	codepoint;
 	int			index;
@@ -819,10 +819,10 @@ static void	draw_atlas_text(uint32_t *canvas, int width, int height,
  * @brief Draws one atlas glyph, ascender dots and descender tails included.
  */
 static void	draw_atlas_glyph(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, int glyph, int x, int y, int glyph_size,
-	color_t tint)
+	const t_pixel_asset *font, int glyph, int x, int y, int glyph_size,
+	t_color tint)
 {
-	notif_box_t	cell;
+	t_notif_box	cell;
 	int			source_y;
 	int			source_x;
 
@@ -850,7 +850,7 @@ static void	draw_atlas_glyph(uint32_t *canvas, int width, int height,
 }
 
 static void	draw_atlas_texel(uint32_t *canvas, int width, int height,
-	unsigned alpha, const notif_box_t *cell, color_t tint)
+	unsigned alpha, const t_notif_box *cell, t_color tint)
 {
 	if (alpha == 0 || cell->width <= 0 || cell->height <= 0)
 		return ;
@@ -898,8 +898,8 @@ static int	fit_glyph(const char *text, int box_width, int glyph_size)
 	return (glyph_size);
 }
 
-static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
-	const ui_notification_t *notification, int opacity, bool has_art)
+static struct ncplane	*create_text_plane(t_render_ctx *ctx, int y, int x,
+	const t_ui_notification *notification, int opacity, bool has_art)
 {
 	ncplane_options	opts;
 	struct ncplane	*plane;
@@ -921,7 +921,7 @@ static struct ncplane	*create_text_plane(render_ctx_t *ctx, int y, int x,
 }
 
 static void	draw_notification(struct ncplane *plane,
-	const ui_notification_t *notification, int opacity, int row_offset)
+	const t_ui_notification *notification, int opacity, int row_offset)
 {
 	char	percent[8];
 	int		percent_x;
@@ -979,7 +979,7 @@ static void	draw_bar(struct ncplane *plane, int percent, int opacity, int row)
 }
 
 static void	draw_fallback_frame(struct ncplane *plane,
-	const ui_notification_t *notification, int opacity)
+	const t_ui_notification *notification, int opacity)
 {
 	uint64_t	channels;
 	int			x;
@@ -1022,7 +1022,7 @@ static void	draw_fallback_frame(struct ncplane *plane,
 }
 
 static const char	*notification_asset_path(
-	const ui_notification_t *notification)
+	const t_ui_notification *notification)
 {
 	if (notification != NULL
 		&& notification->kind == UI_NOTIFICATION_OWNERSHIP)
@@ -1061,7 +1061,7 @@ static unsigned	fade_component(unsigned component, int opacity)
 	return ((component * (unsigned)opacity) / 255u);
 }
 
-static void	destroy_notification_planes(render_ctx_t *ctx)
+static void	destroy_notification_planes(t_render_ctx *ctx)
 {
 	int	index;
 

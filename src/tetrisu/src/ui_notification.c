@@ -1,13 +1,13 @@
 #include "tetrisu.h"
 
 static int	clamp_int(int value, int min, int max);
-static bool	show_notification(ui_notification_stack_t *stack,
-					ui_notification_kind_t kind, const char *title,
+static bool	show_notification(t_ui_notification_stack *stack,
+					t_ui_notification_kind kind, const char *title,
 					const char *message, int percent, uint64_t now_ms);
-static int	find_title(const ui_notification_stack_t *stack,
+static int	find_title(const t_ui_notification_stack *stack,
 				const char *title);
-static void	move_to_front(ui_notification_stack_t *stack, int index);
-static bool	notification_expired(const ui_notification_t *notification,
+static void	move_to_front(t_ui_notification_stack *stack, int index);
+static bool	notification_expired(const t_ui_notification *notification,
 				uint64_t now_ms);
 static int	clamp_delay(uint64_t delay_ms);
 
@@ -16,7 +16,7 @@ static int	clamp_delay(uint64_t delay_ms);
  *
  * @param stack Stack to initialize.
  */
-void	ui_notification_stack_init(ui_notification_stack_t *stack)
+void	ui_notification_stack_init(t_ui_notification_stack *stack)
 {
 	if (stack != NULL)
 		memset(stack, 0, sizeof(*stack));
@@ -33,7 +33,7 @@ void	ui_notification_stack_init(ui_notification_stack_t *stack)
  * @param percent Percentage value, clamped to 0..100.
  * @param now_ms Current monotonic timestamp.
  */
-bool	ui_notification_show(ui_notification_stack_t *stack,
+bool	ui_notification_show(t_ui_notification_stack *stack,
 	const char *title, int percent, uint64_t now_ms)
 {
 	return (show_notification(stack, UI_NOTIFICATION_VOLUME, title, "",
@@ -46,7 +46,7 @@ bool	ui_notification_show(ui_notification_stack_t *stack,
  * Keeping this copy in the model makes bitmap and compatibility renderers
  * present the same Marketplace guidance without duplicating strings.
  */
-bool	ui_notification_show_ownership(ui_notification_stack_t *stack,
+bool	ui_notification_show_ownership(t_ui_notification_stack *stack,
 	uint64_t now_ms)
 {
 	return (show_notification(stack, UI_NOTIFICATION_OWNERSHIP,
@@ -54,8 +54,8 @@ bool	ui_notification_show_ownership(ui_notification_stack_t *stack,
 		0, now_ms));
 }
 
-static bool	show_notification(ui_notification_stack_t *stack,
-	ui_notification_kind_t kind, const char *title, const char *message,
+static bool	show_notification(t_ui_notification_stack *stack,
+	t_ui_notification_kind kind, const char *title, const char *message,
 	int percent, uint64_t now_ms)
 {
 	int		index;
@@ -109,7 +109,7 @@ static bool	show_notification(ui_notification_stack_t *stack,
  * @param now_ms Current monotonic timestamp.
  * @return true when one or more entries were removed.
  */
-bool	ui_notification_update(ui_notification_stack_t *stack,
+bool	ui_notification_update(t_ui_notification_stack *stack,
 	uint64_t now_ms)
 {
 	int		read;
@@ -152,7 +152,7 @@ bool	ui_notification_update(ui_notification_stack_t *stack,
  * @param now_ms Current monotonic timestamp.
  * @return Opacity from 255 while held to 0 after the fade.
  */
-int	ui_notification_opacity(const ui_notification_t *notification,
+int	ui_notification_opacity(const t_ui_notification *notification,
 	uint64_t now_ms)
 {
 	uint64_t	elapsed;
@@ -177,7 +177,7 @@ int	ui_notification_opacity(const ui_notification_t *notification,
  * @param now_ms Current monotonic timestamp.
  * @return Delay in milliseconds, or -1 when the stack is empty.
  */
-int	ui_notification_next_wake_ms(const ui_notification_stack_t *stack,
+int	ui_notification_next_wake_ms(const t_ui_notification_stack *stack,
 	uint64_t now_ms)
 {
 	uint64_t	elapsed;
@@ -227,7 +227,7 @@ int	ui_notification_next_wake_ms(const ui_notification_stack_t *stack,
  * @param now_ms Current monotonic timestamp.
  * @return Delay in milliseconds, or -1 when the stack is empty.
  */
-int	ui_notification_next_expiry_ms(const ui_notification_stack_t *stack,
+int	ui_notification_next_expiry_ms(const t_ui_notification_stack *stack,
 	uint64_t now_ms)
 {
 	uint64_t	delay;
@@ -295,7 +295,7 @@ static int	clamp_int(int value, int min, int max)
 	return (value);
 }
 
-static int	find_title(const ui_notification_stack_t *stack,
+static int	find_title(const t_ui_notification_stack *stack,
 	const char *title)
 {
 	int	index;
@@ -311,9 +311,9 @@ static int	find_title(const ui_notification_stack_t *stack,
 	return (-1);
 }
 
-static void	move_to_front(ui_notification_stack_t *stack, int index)
+static void	move_to_front(t_ui_notification_stack *stack, int index)
 {
-	ui_notification_t	item;
+	t_ui_notification	item;
 
 	item = stack->items[index];
 	while (index > 0)
@@ -324,7 +324,7 @@ static void	move_to_front(ui_notification_stack_t *stack, int index)
 	stack->items[0] = item;
 }
 
-static bool	notification_expired(const ui_notification_t *notification,
+static bool	notification_expired(const t_ui_notification *notification,
 	uint64_t now_ms)
 {
 	if (now_ms < notification->shown_at_ms)

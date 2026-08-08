@@ -4,28 +4,28 @@
 # define CONFIRM_YES_BUTTON	"  YES   "
 # define CONFIRM_HINT		"ESC/N CANCEL  |  LEFT/RIGHT SELECT  |  ENTER CONFIRM"
 
-static bool	create_dialog_plane(render_ctx_t *ctx,
-				confirmation_dialog_t *dialog);
-static void	draw_dialog(confirmation_dialog_t *dialog);
+static bool	create_dialog_plane(t_render_ctx *ctx,
+				t_confirmation_dialog *dialog);
+static void	draw_dialog(t_confirmation_dialog *dialog);
 static void	draw_frame(struct ncplane *plane, int rows, int cols);
 static void	draw_button(struct ncplane *plane, int row, int x,
 				const char *text, bool focused);
 static void	put_centered(struct ncplane *plane, int row, int cols,
 				const char *text);
-static bool	show_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog);
-static void	paint_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog);
-static void	destroy_dialog(render_ctx_t *ctx,
-				confirmation_dialog_t *dialog);
+static bool	show_dialog(t_render_ctx *ctx, t_confirmation_dialog *dialog);
+static void	paint_dialog(t_render_ctx *ctx, t_confirmation_dialog *dialog);
+static void	destroy_dialog(t_render_ctx *ctx,
+				t_confirmation_dialog *dialog);
 
 /**
  * @brief Runs a persistent, safe-default Yes/No prompt over the active screen.
  */
-bool	confirmation_prompt_run(render_ctx_t *ctx, audio_ctx_t *audio,
-	confirmation_kind_t kind)
+bool	confirmation_prompt_run(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_confirmation_kind kind)
 {
-	confirmation_dialog_t	dialog;
-	confirmation_result_t	result;
-	confirmation_focus_t	previous_focus;
+	t_confirmation_dialog	dialog;
+	t_confirmation_result	result;
+	t_confirmation_focus	previous_focus;
 	ncinput					input;
 	uint32_t				key;
 	bool					accepted;
@@ -77,7 +77,7 @@ bool	confirmation_prompt_run(render_ctx_t *ctx, audio_ctx_t *audio,
 	return (accepted);
 }
 
-static bool	show_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog)
+static bool	show_dialog(t_render_ctx *ctx, t_confirmation_dialog *dialog)
 {
 	destroy_dialog(ctx, dialog);
 	if (!create_dialog_plane(ctx, dialog))
@@ -97,15 +97,15 @@ static bool	show_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog)
  * planes it is supposed to cover. Where bitmaps exist the dialog becomes one
  * itself; the cell drawing stays for terminals that have no other option.
  */
-static void	paint_dialog(render_ctx_t *ctx, confirmation_dialog_t *dialog)
+static void	paint_dialog(t_render_ctx *ctx, t_confirmation_dialog *dialog)
 {
 	if (render_confirmation_pixel_show(ctx, dialog))
 		return ;
 	draw_dialog(dialog);
 }
 
-static bool	create_dialog_plane(render_ctx_t *ctx,
-	confirmation_dialog_t *dialog)
+static bool	create_dialog_plane(t_render_ctx *ctx,
+	t_confirmation_dialog *dialog)
 {
 	ncplane_options	options;
 	unsigned		rows;
@@ -131,7 +131,7 @@ static bool	create_dialog_plane(render_ctx_t *ctx,
 	return (dialog->plane != NULL);
 }
 
-static void	draw_dialog(confirmation_dialog_t *dialog)
+static void	draw_dialog(t_confirmation_dialog *dialog)
 {
 	struct ncplane	*plane;
 	uint64_t		channels;
@@ -231,8 +231,8 @@ static void	put_centered(struct ncplane *plane, int row, int cols,
 	(void)ncplane_putstr_yx(plane, row, x, clipped);
 }
 
-static void	destroy_dialog(render_ctx_t *ctx,
-	confirmation_dialog_t *dialog)
+static void	destroy_dialog(t_render_ctx *ctx,
+	t_confirmation_dialog *dialog)
 {
 	(void)ctx;
 	if (dialog == NULL)

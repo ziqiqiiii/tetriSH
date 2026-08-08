@@ -12,7 +12,7 @@ static void	test_chat_ring_drops_the_oldest(void);
 static void	test_slot_labels_and_badges(void);
 static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
-static void	build_room(app_room_view_model_t *room, app_game_mode_t mode,
+static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
 int	main(void)
@@ -35,7 +35,7 @@ int	main(void)
 /**
  * @brief Builds a room owned from seat zero with a chosen ready-seat prefix.
  */
-static void	build_room(app_room_view_model_t *room, app_game_mode_t mode,
+static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 	int players, int ready)
 {
 	int	index;
@@ -67,7 +67,7 @@ static void	build_room(app_room_view_model_t *room, app_game_mode_t mode,
  */
 static void	test_double_needs_both_players_ready(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 1);
 	assert(!waiting_room_can_start(&room));
@@ -88,7 +88,7 @@ static void	test_double_needs_both_players_ready(void)
  */
 static void	test_battle_royale_needs_four_and_everyone_ready(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 3, 3);
 	assert(!waiting_room_can_start(&room));
@@ -110,7 +110,7 @@ static void	test_battle_royale_needs_four_and_everyone_ready(void)
  */
 static void	test_room_status_and_auto_start_policy(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 2);
 	assert(waiting_room_auto_start_allowed(&room));
@@ -140,7 +140,7 @@ static void	test_room_status_and_auto_start_policy(void)
  */
 static void	test_battle_royale_capacity_and_roster_bounds(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
 	assert(waiting_room_slot_count(&room) == 99);
@@ -164,9 +164,9 @@ static void	test_battle_royale_capacity_and_roster_bounds(void)
  */
 static void	test_roster_pagination(void)
 {
-	app_room_view_model_t	room;
-	waiting_room_state_t	state;
-	waiting_room_state_t	before;
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
+	t_waiting_room_state	before;
 	int					step;
 
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 99, 50);
@@ -201,7 +201,7 @@ static void	test_roster_pagination(void)
  */
 static void	test_start_blockers_explain_themselves(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 1);
 	assert(waiting_room_local_is_owner(&room));
@@ -229,7 +229,7 @@ static void	test_start_blockers_explain_themselves(void)
  */
 static void	test_countdown_runs_down_and_cancels(void)
 {
-	waiting_room_state_t	state;
+	t_waiting_room_state	state;
 	int						step;
 
 	waiting_room_state_init(&state);
@@ -261,8 +261,8 @@ static void	test_countdown_runs_down_and_cancels(void)
  */
 static void	test_chat_modes_read_input_differently(void)
 {
-	app_room_view_model_t	room;
-	waiting_room_state_t	state;
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
 	int						step;
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 1);
@@ -313,7 +313,7 @@ static void	test_chat_modes_read_input_differently(void)
  */
 static void	test_chat_ring_drops_the_oldest(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 	char					line[APP_ROOM_CHAT_TEXT_MAX];
 	int						step;
 
@@ -342,7 +342,7 @@ static void	test_chat_ring_drops_the_oldest(void)
  */
 static void	test_slot_labels_and_badges(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 	char					line[APP_TEXT_MAX * 2];
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 1);
@@ -371,8 +371,8 @@ static void	test_slot_labels_and_badges(void)
  */
 static void	test_status_and_feedback_copy(void)
 {
-	app_room_view_model_t	room;
-	waiting_room_state_t	state;
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
 	char					line[APP_TEXT_MAX * 2];
 	int						feedback;
 
@@ -401,7 +401,7 @@ static void	test_status_and_feedback_copy(void)
 	feedback = ROOM_FEEDBACK_READY;
 	while (feedback <= ROOM_FEEDBACK_VOLUME)
 	{
-		state.feedback = (room_feedback_t)feedback;
+		state.feedback = (t_room_feedback)feedback;
 		state.feedback_value = 70;
 		assert(waiting_room_feedback_text(&state, line, sizeof(line))[0]
 			!= '\0');
@@ -421,7 +421,7 @@ static void	test_status_and_feedback_copy(void)
  */
 static void	test_launch_action_matches_the_mode(void)
 {
-	app_room_view_model_t	room;
+	t_app_room_view_model	room;
 
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 2);
 	assert(waiting_room_launch_action(&room) == APP_NAV_START_DOUBLE);

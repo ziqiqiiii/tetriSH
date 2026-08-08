@@ -1,16 +1,16 @@
 #include "tetrisu.h"
 
 // Static Functions
-static lobby_action_t	handle_rooms_key(lobby_state_t *state, uint32_t key);
-static lobby_action_t	handle_join_key(lobby_state_t *state, uint32_t key);
-static void	move_selection(lobby_state_t *state, int delta);
-static void	clamp_selection(lobby_state_t *state);
-static void	sync_list_offset(lobby_state_t *state);
-static void	cycle_filter(lobby_state_t *state);
-static bool	append_room_id(lobby_state_t *state, uint32_t key);
+static t_lobby_action	handle_rooms_key(t_lobby_state *state, uint32_t key);
+static t_lobby_action	handle_join_key(t_lobby_state *state, uint32_t key);
+static void	move_selection(t_lobby_state *state, int delta);
+static void	clamp_selection(t_lobby_state *state);
+static void	sync_list_offset(t_lobby_state *state);
+static void	cycle_filter(t_lobby_state *state);
+static bool	append_room_id(t_lobby_state *state, uint32_t key);
 static bool	is_confirm_key(uint32_t key);
-static bool	room_matches(const app_room_summary_view_model_t *room,
-				app_game_mode_t filter);
+static bool	room_matches(const t_app_room_summary_view_model *room,
+				t_app_game_mode filter);
 
 /**
  * @brief Prepares the lobby for the mode the player picked.
@@ -23,8 +23,8 @@ static bool	room_matches(const app_room_summary_view_model_t *room,
  * @param filter Mode to list first; APP_GAME_MODE_NONE lists everything.
  * @param lobby Room list used to clamp the initial selection.
  */
-void	lobby_state_init(lobby_state_t *state, app_game_mode_t filter,
-	const app_lobby_view_model_t *lobby)
+void	lobby_state_init(t_lobby_state *state, t_app_game_mode filter,
+	const t_app_lobby_view_model *lobby)
 {
 	if (state == NULL)
 		return ;
@@ -48,8 +48,8 @@ void	lobby_state_init(lobby_state_t *state, app_game_mode_t filter,
  * @param state Lobby state to update.
  * @param lobby Current room list.
  */
-void	lobby_state_sync(lobby_state_t *state,
-	const app_lobby_view_model_t *lobby)
+void	lobby_state_sync(t_lobby_state *state,
+	const t_app_lobby_view_model *lobby)
 {
 	if (state == NULL)
 		return ;
@@ -70,7 +70,7 @@ void	lobby_state_sync(lobby_state_t *state,
  * @param key Key identifier from Notcurses.
  * @return The resolved action, or LOBBY_ACTION_NONE when only focus moved.
  */
-lobby_action_t	lobby_handle_key(lobby_state_t *state, uint32_t key)
+t_lobby_action	lobby_handle_key(t_lobby_state *state, uint32_t key)
 {
 	if (state == NULL)
 		return (LOBBY_ACTION_NONE);
@@ -88,8 +88,8 @@ lobby_action_t	lobby_handle_key(lobby_state_t *state, uint32_t key)
  * @param after State after the keystroke.
  * @return true when a repaint is required.
  */
-bool	lobby_state_view_changed(const lobby_state_t *before,
-	const lobby_state_t *after)
+bool	lobby_state_view_changed(const t_lobby_state *before,
+	const t_lobby_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -128,7 +128,7 @@ bool	lobby_navigation_keys_coalesce(uint32_t active_key, uint32_t queued_key)
  * @param action Action returned by lobby_handle_key().
  * @return true when the screen is about to be left.
  */
-bool	lobby_action_leaves_screen(lobby_action_t action)
+bool	lobby_action_leaves_screen(t_lobby_action action)
 {
 	return (action == LOBBY_ACTION_JOIN || action == LOBBY_ACTION_JOIN_BY_ID
 		|| action == LOBBY_ACTION_CREATE || action == LOBBY_ACTION_BACK
@@ -142,8 +142,8 @@ bool	lobby_action_leaves_screen(lobby_action_t action)
  * @param filter Mode to keep; APP_GAME_MODE_NONE keeps everything.
  * @return The number of listed rooms, never more than the model holds.
  */
-int	lobby_visible_count(const app_lobby_view_model_t *lobby,
-	app_game_mode_t filter)
+int	lobby_visible_count(const t_app_lobby_view_model *lobby,
+	t_app_game_mode filter)
 {
 	int	index;
 	int	count;
@@ -169,8 +169,8 @@ int	lobby_visible_count(const app_lobby_view_model_t *lobby,
  * @param index Position within the filtered list.
  * @return The room, or NULL when the index is past the end.
  */
-const app_room_summary_view_model_t	*lobby_visible_room(
-	const app_lobby_view_model_t *lobby, app_game_mode_t filter, int index)
+const t_app_room_summary_view_model	*lobby_visible_room(
+	const t_app_lobby_view_model *lobby, t_app_game_mode filter, int index)
 {
 	int	scan;
 	int	seen;
@@ -199,8 +199,8 @@ const app_room_summary_view_model_t	*lobby_visible_room(
  * @param state Lobby state holding the filter and the cursor.
  * @return The selected room, or NULL when the filtered list is empty.
  */
-const app_room_summary_view_model_t	*lobby_selected_room(
-	const app_lobby_view_model_t *lobby, const lobby_state_t *state)
+const t_app_room_summary_view_model	*lobby_selected_room(
+	const t_app_lobby_view_model *lobby, const t_lobby_state *state)
 {
 	if (state == NULL)
 		return (NULL);
@@ -217,8 +217,8 @@ const app_room_summary_view_model_t	*lobby_selected_room(
  * @param id Identifier to match.
  * @return The room, or NULL when no room carries that id.
  */
-const app_room_summary_view_model_t	*lobby_room_by_id(
-	const app_lobby_view_model_t *lobby, const char *id)
+const t_app_room_summary_view_model	*lobby_room_by_id(
+	const t_app_lobby_view_model *lobby, const char *id)
 {
 	int		index;
 	size_t	position;
@@ -253,8 +253,8 @@ const app_room_summary_view_model_t	*lobby_room_by_id(
  * @param room Room the player is trying to enter.
  * @return LOBBY_FEEDBACK_NONE when the join may proceed.
  */
-lobby_feedback_t	lobby_join_blocker(
-	const app_room_summary_view_model_t *room)
+t_lobby_feedback	lobby_join_blocker(
+	const t_app_room_summary_view_model *room)
 {
 	if (room == NULL)
 		return (LOBBY_FEEDBACK_EMPTY_LIST);
@@ -278,7 +278,7 @@ lobby_feedback_t	lobby_join_blocker(
  * @param mode Mode to label.
  * @return "D", "BR", or "-".
  */
-const char	*lobby_mode_tag(app_game_mode_t mode)
+const char	*lobby_mode_tag(t_app_game_mode mode)
 {
 	if (mode == APP_GAME_MODE_DOUBLE)
 		return ("D");
@@ -293,7 +293,7 @@ const char	*lobby_mode_tag(app_game_mode_t mode)
  * @param state Room state to label.
  * @return The stable room-state label used by both renderers.
  */
-const char	*lobby_state_tag(app_room_state_t state)
+const char	*lobby_state_tag(t_app_room_state state)
 {
 	if (state == APP_ROOM_STATE_IN_GAME)
 		return ("IN-GAME");
@@ -310,7 +310,7 @@ const char	*lobby_state_tag(app_room_state_t state)
  * @param filter Mode being listed.
  * @return A static, bounded caption.
  */
-const char	*lobby_filter_name(app_game_mode_t filter)
+const char	*lobby_filter_name(t_app_game_mode filter)
 {
 	if (filter == APP_GAME_MODE_DOUBLE)
 		return ("DOUBLE ROOMS");
@@ -326,7 +326,7 @@ const char	*lobby_filter_name(app_game_mode_t filter)
  * @param feedback Result to show.
  * @param value Percentage carried by the volume result.
  */
-void	lobby_set_feedback(lobby_state_t *state, lobby_feedback_t feedback,
+void	lobby_set_feedback(t_lobby_state *state, t_lobby_feedback feedback,
 	int value)
 {
 	if (state == NULL)
@@ -347,7 +347,7 @@ void	lobby_set_feedback(lobby_state_t *state, lobby_feedback_t feedback,
  * @param size Capacity of out.
  * @return out, holding "" when there is nothing to report.
  */
-const char	*lobby_feedback_text(const lobby_state_t *state, char *out,
+const char	*lobby_feedback_text(const t_lobby_state *state, char *out,
 	size_t size)
 {
 	if (out == NULL || size == 0)
@@ -381,7 +381,7 @@ const char	*lobby_feedback_text(const lobby_state_t *state, char *out,
 /**
  * @brief Reads one keystroke in the room table, where letters are commands.
  */
-static lobby_action_t	handle_rooms_key(lobby_state_t *state, uint32_t key)
+static t_lobby_action	handle_rooms_key(t_lobby_state *state, uint32_t key)
 {
 	if (key == 'q' || key == 'Q')
 		return (LOBBY_ACTION_QUIT);
@@ -419,7 +419,7 @@ static lobby_action_t	handle_rooms_key(lobby_state_t *state, uint32_t key)
 /**
  * @brief Reads one keystroke in the join field, where letters are text.
  */
-static lobby_action_t	handle_join_key(lobby_state_t *state, uint32_t key)
+static t_lobby_action	handle_join_key(t_lobby_state *state, uint32_t key)
 {
 	if (key == NCKEY_ESC || key == NCKEY_LEFT || key == NCKEY_TAB
 		|| key == '\t')
@@ -458,7 +458,7 @@ static lobby_action_t	handle_join_key(lobby_state_t *state, uint32_t key)
  * Clamping keeps a held arrow key from cycling the list back under the finger,
  * which reads as the cursor jumping rather than as reaching the end.
  */
-static void	move_selection(lobby_state_t *state, int delta)
+static void	move_selection(t_lobby_state *state, int delta)
 {
 	state->feedback = LOBBY_FEEDBACK_NONE;
 	if (state->visible_count <= 0)
@@ -474,7 +474,7 @@ static void	move_selection(lobby_state_t *state, int delta)
 /**
  * @brief Keeps the selected room inside the shared six-row viewport.
  */
-static void	sync_list_offset(lobby_state_t *state)
+static void	sync_list_offset(t_lobby_state *state)
 {
 	int	maximum;
 
@@ -494,7 +494,7 @@ static void	sync_list_offset(lobby_state_t *state)
 		state->list_offset = 0;
 }
 
-static void	clamp_selection(lobby_state_t *state)
+static void	clamp_selection(t_lobby_state *state)
 {
 	if (state->visible_count <= 0)
 	{
@@ -510,7 +510,7 @@ static void	clamp_selection(lobby_state_t *state)
 /**
  * @brief Steps the list filter through Double, Battle Royale and everything.
  */
-static void	cycle_filter(lobby_state_t *state)
+static void	cycle_filter(t_lobby_state *state)
 {
 	if (state->filter == APP_GAME_MODE_DOUBLE)
 		state->filter = APP_GAME_MODE_BATTLE_ROYALE;
@@ -531,7 +531,7 @@ static void	cycle_filter(lobby_state_t *state)
  * - arrow keys, function keys, multi-byte input - is dropped rather than
  * written as a replacement character the server would reject.
  */
-static bool	append_room_id(lobby_state_t *state, uint32_t key)
+static bool	append_room_id(t_lobby_state *state, uint32_t key)
 {
 	if (key < 0x20 || key > 0x7e)
 		return (false);
@@ -549,8 +549,8 @@ static bool	is_confirm_key(uint32_t key)
 	return (key == NCKEY_ENTER || key == '\n' || key == '\r');
 }
 
-static bool	room_matches(const app_room_summary_view_model_t *room,
-	app_game_mode_t filter)
+static bool	room_matches(const t_app_room_summary_view_model *room,
+	t_app_game_mode filter)
 {
 	if (filter == APP_GAME_MODE_NONE)
 		return (true);

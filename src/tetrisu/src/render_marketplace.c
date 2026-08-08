@@ -43,35 +43,35 @@
 # define MARKET_CONTROLS_ROWS	5
 # define MARKET_DETAIL_ROWS	7
 
-static bool	create_panel(render_ctx_t *ctx);
-static bool	show_too_small(render_ctx_t *ctx);
-static void	draw_marketplace(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const marketplace_state_t *state);
+static bool	create_panel(t_render_ctx *ctx);
+static bool	show_too_small(t_render_ctx *ctx);
+static void	draw_marketplace(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_marketplace_state *state);
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 				bool compatibility);
 static void	draw_header(struct ncplane *plane,
-				const app_screen_view_model_t *view, int cols);
+				const t_app_screen_view_model *view, int cols);
 static int	draw_catalogue(struct ncplane *plane,
-				const app_marketplace_view_model_t *market,
-				const marketplace_state_t *state, int row, int cols,
+				const t_app_marketplace_view_model *market,
+				const t_marketplace_state *state, int row, int cols,
 				bool characters);
 static void	draw_detail(struct ncplane *plane,
-				const app_marketplace_view_model_t *market,
-				const marketplace_state_t *state, int rows, int cols);
+				const t_app_marketplace_view_model *market,
+				const t_marketplace_state *state, int rows, int cols);
 static void	draw_unavailable(struct ncplane *plane,
-				const app_screen_view_model_t *view, int rows, int cols);
+				const t_app_screen_view_model *view, int rows, int cols);
 static void	draw_controls(struct ncplane *plane,
-				const app_marketplace_view_model_t *market,
-				const marketplace_state_t *state);
+				const t_app_marketplace_view_model *market,
+				const t_marketplace_state *state);
 static void	slot_prefix(char *out, size_t size, bool equipped, bool focused,
 				bool owned);
-static void	slot_suffix(const app_catalogue_item_view_model_t *item,
-				const app_marketplace_view_model_t *market, char *out,
+static void	slot_suffix(const t_app_catalogue_item_view_model *item,
+				const t_app_marketplace_view_model *market, char *out,
 				size_t size);
 static void	set_slot_colour(struct ncplane *plane,
-				const app_catalogue_item_view_model_t *item,
-				const app_marketplace_view_model_t *market, bool focused);
+				const t_app_catalogue_item_view_model *item,
+				const t_app_marketplace_view_model *market, bool focused);
 static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
 				const char *text, int max_lines);
 static void	put_line(struct ncplane *plane, int row, int x, int width,
@@ -83,7 +83,7 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 static void	button_geometry(const struct ncplane *plane, int *row,
 				int *back_x, int *buy_x, int *down_x, int *up_x);
 static void	set_feedback_colour(struct ncplane *plane,
-				const marketplace_state_t *state);
+				const t_marketplace_state *state);
 static int	min_int(int first, int second);
 
 /**
@@ -93,8 +93,8 @@ static int	min_int(int first, int second);
  * and TETRISU_RENDERER=cell. Every other tier uses the authored shop backdrop
  * and the bitmap-font overlays.
  */
-bool	render_marketplace_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_state_t *state,
+bool	render_marketplace_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_state *state,
 	bool rebuild_background)
 {
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
@@ -123,7 +123,7 @@ bool	render_marketplace_show(render_ctx_t *ctx,
 /**
  * @brief Releases Marketplace-owned planes without touching the backdrop.
  */
-void	render_marketplace_destroy(render_ctx_t *ctx)
+void	render_marketplace_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -131,7 +131,7 @@ void	render_marketplace_destroy(render_ctx_t *ctx)
 	render_marketplace_pixel_destroy(ctx);
 }
 
-static bool	create_panel(render_ctx_t *ctx)
+static bool	create_panel(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -179,7 +179,7 @@ static bool	create_panel(render_ctx_t *ctx)
  * Shown instead of the panel so a small window degrades to a readable notice
  * the user can resize or leave, rather than failing the screen.
  */
-static bool	show_too_small(render_ctx_t *ctx)
+static bool	show_too_small(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -222,10 +222,10 @@ static bool	show_too_small(render_ctx_t *ctx)
  * The two catalogues grow downwards, so they must stop before the detail block
  * and the control block rather than at fixed rows the lists can reach.
  */
-static void	draw_marketplace(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const marketplace_state_t *state)
+static void	draw_marketplace(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_marketplace_state *state)
 {
-	const app_marketplace_view_model_t	*market;
+	const t_app_marketplace_view_model	*market;
 	struct ncplane						*plane;
 	int									rows;
 	int									cols;
@@ -254,9 +254,9 @@ static void	draw_marketplace(render_ctx_t *ctx,
  * @brief Draws the title and the wallet the whole screen spends from.
  */
 static void	draw_header(struct ncplane *plane,
-	const app_screen_view_model_t *view, int cols)
+	const t_app_screen_view_model *view, int cols)
 {
-	const app_marketplace_view_model_t	*market;
+	const t_app_marketplace_view_model	*market;
 	char								line[APP_TEXT_MAX + 96];
 
 	market = &view->data.marketplace;
@@ -283,10 +283,10 @@ static void	draw_header(struct ncplane *plane,
  * @brief Draws one catalogue as a titled list and returns the next free row.
  */
 static int	draw_catalogue(struct ncplane *plane,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, int row, int cols, bool characters)
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, int row, int cols, bool characters)
 {
-	const app_catalogue_view_model_t	*catalogue;
+	const t_app_catalogue_view_model	*catalogue;
 	char								line[APP_TEXT_MAX + 96];
 	char								prefix[4];
 	char								suffix[32];
@@ -335,10 +335,10 @@ static int	draw_catalogue(struct ncplane *plane,
  * @brief Describes the focused item just above the control block.
  */
 static void	draw_detail(struct ncplane *plane,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state, int rows, int cols)
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state, int rows, int cols)
 {
-	const app_catalogue_item_view_model_t	*item;
+	const t_app_catalogue_item_view_model	*item;
 	char									line[APP_ABILITY_TEXT_MAX + 96];
 	int										row;
 	int										index;
@@ -404,7 +404,7 @@ static void	draw_detail(struct ncplane *plane,
  * @brief States why nothing is on the shelves.
  */
 static void	draw_unavailable(struct ncplane *plane,
-	const app_screen_view_model_t *view, int rows, int cols)
+	const t_app_screen_view_model *view, int rows, int cols)
 {
 	const char	*title;
 	const char	*detail;
@@ -441,8 +441,8 @@ static void	draw_unavailable(struct ncplane *plane,
 }
 
 static void	draw_controls(struct ncplane *plane,
-	const app_marketplace_view_model_t *market,
-	const marketplace_state_t *state)
+	const t_app_marketplace_view_model *market,
+	const t_marketplace_state *state)
 {
 	char	feedback[64];
 	int		row;
@@ -534,8 +534,8 @@ static void	slot_prefix(char *out, size_t size, bool equipped, bool focused,
 /**
  * @brief Writes what one catalogue line would cost, or that it is already had.
  */
-static void	slot_suffix(const app_catalogue_item_view_model_t *item,
-	const app_marketplace_view_model_t *market, char *out, size_t size)
+static void	slot_suffix(const t_app_catalogue_item_view_model *item,
+	const t_app_marketplace_view_model *market, char *out, size_t size)
 {
 	if (item->equipped)
 		snprintf(out, size, "[EQUIPPED]");
@@ -553,8 +553,8 @@ static void	slot_suffix(const app_catalogue_item_view_model_t *item,
  * @brief Colours one catalogue line: gold marks the cursor and nothing else.
  */
 static void	set_slot_colour(struct ncplane *plane,
-	const app_catalogue_item_view_model_t *item,
-	const app_marketplace_view_model_t *market, bool focused)
+	const t_app_catalogue_item_view_model *item,
+	const t_app_marketplace_view_model *market, bool focused)
 {
 	if (focused)
 		(void)ncplane_set_fg_rgb8(plane, MARKET_GOLD_R, MARKET_GOLD_G,
@@ -697,7 +697,7 @@ static void	button_geometry(const struct ncplane *plane, int *row,
  * @brief Colours the result line by whether the action went through.
  */
 static void	set_feedback_colour(struct ncplane *plane,
-	const marketplace_state_t *state)
+	const t_marketplace_state *state)
 {
 	if (state->feedback == MARKETPLACE_FEEDBACK_BOUGHT
 		|| state->feedback == MARKETPLACE_FEEDBACK_EQUIPPED)

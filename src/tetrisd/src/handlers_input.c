@@ -1,0 +1,227 @@
+#include "tetrisd.h"
+
+// Static Functions
+static int	input_target(t_request_context *ctx, t_server_room **out);
+static int	body_token(t_request_context *ctx, char *out, size_t cap);
+static int	apply_input(t_request_context *ctx, t_server_room *server_room, t_input_action action, int argument);
+
+/**
+ * @brief MOVE /room/<name>/player/<pid> - translate the falling piece.
+ *
+ * @param msg The request (unused).
+ * @param context The request context.
+ * @return 200 when applied, 409 when the move was blocked, 400 on a bad body.
+ */
+int	move_handler(const t_htttp_message *msg, void *context)
+{
+	t_request_context	*ctx;
+	t_server_room	*server_room;
+	char		token[16];
+	int			status;
+
+	(void)msg;
+	ctx = context;
+	status = input_target(ctx, &server_room);
+	if (status != 0)
+		return (status);
+	if (body_token(ctx, token, sizeof(token)) != 0)
+		return (400);
+	if (strcmp(token, "LEFT") == 0)
+		return (apply_input(ctx, server_room, INPUT_MOVE, -1));
+	if (strcmp(token, "RIGHT") == 0)
+		return (apply_input(ctx, server_room, INPUT_MOVE, 1));
+	return (400);
+}
+
+/**
+ * @brief ROTATE /room/<name>/player/<pid> - rotate the falling piece.
+ *
+ * @param msg The request (unused).
+ * @param context The request context.
+ * @return 200 when applied, 409 when every kick was blocked, 400 otherwise.
+ */
+int	rotate_handler(const t_htttp_message *msg, void *context)
+{
+	t_request_context	*ctx;
+	t_server_room	*server_room;
+	char		token[16];
+	int			status;
+
+	(void)msg;
+	ctx = context;
+	status = input_target(ctx, &server_room);
+	if (status != 0)
+		return (status);
+	if (body_token(ctx, token, sizeof(token)) != 0)
+		return (400);
+	if (strcmp(token, "CW") == 0)
+		return (apply_input(ctx, server_room, INPUT_ROTATE, 1));
+	if (strcmp(token, "CCW") == 0)
+		return (apply_input(ctx, server_room, INPUT_ROTATE, -1));
+	return (400);
+}
+
+/**
+ * @brief DROP /room/<name>/player/<pid> - soft or hard drop.
+ *
+ * @param msg The request (unused).
+ * @param context The request context.
+ * @return 200 when applied, 409 when the game is not running, 400 otherwise.
+ */
+int	drop_handler(const t_htttp_message *msg, void *context)
+{
+	t_request_context	*ctx;
+	t_server_room	*server_room;
+	char		token[16];
+	int			status;
+
+	(void)msg;
+	ctx = context;
+	status = input_target(ctx, &server_room);
+	if (status != 0)
+		return (status);
+	if (body_token(ctx, token, sizeof(token)) != 0)
+		return (400);
+	if (strcmp(token, "SOFT") == 0)
+		return (apply_input(ctx, server_room, INPUT_DROP, 0));
+	if (strcmp(token, "HARD") == 0)
+		return (apply_input(ctx, server_room, INPUT_DROP, 1));
+	return (400);
+}
+
+/**
+ * @brief Spends one token from this connection's input budget.
+ *
+ * Inputs are the one route a client can send without being asked to, and a
+ * flood of them costs the reactor real work it owes every other room. The
+ * bucket is sized from .tetrishrc far above what a person can press, so a
+ * client that empties it is not playing - it is hammering, and gets told to
+ * slow down rather than being served.
+ *
+ * The bucket belongs to the connection and is only touched by the reactor, so
+ * it needs no lock.
+ *
+ * @param cli Client spending a token.
+ * @return true when a token was available, false when the budget is empty.
+ */
+bool	rate_limit_take_token(t_client *cli)
+{
+	uint64_t	now;
+	int			cap;
+
+	cap = cli->srv->cfg.input_burst * TETRISD_TOKEN_SCALE;
+	now = clock_now_ms();
+	if (cli->tokens_at_ms == 0)
+	{
+		cli->tokens = cap;
+		cli->tokens_at_ms = now;
+	}
+	if (now > cli->tokens_at_ms)
+	{
+		cli->tokens += (int)((now - cli->tokens_at_ms)
+				* (uint64_t)cli->srv->cfg.input_rate);
+		cli->tokens_at_ms = now;
+	}
+	if (cli->tokens > cap)
+		cli->tokens = cap;
+	if (cli->tokens < TETRISD_TOKEN_SCALE)
+		return (false);
+	cli->tokens -= TETRISD_TOKEN_SCALE;
+	return (true);
+}
+
+/**
+ * @brief Resolves and authorises the room an input request addresses.
+ *
+ * The path names its own subject, so a player cannot drive somebody else's
+ * board even with a valid session: the subject must be the player bound to
+ * this connection.
+ *
+ * @param ctx Request context.
+ * @param out Receives the addressed room runtime.
+ * @return 0 when the request may proceed, otherwise the status to answer.
+ */
+static int	input_target(t_request_context *ctx, t_server_room **out)
+{
+	char		name[ROOM_NAME_MAX];
+	const char	*path;
+	const char	*sep;
+	size_t		len;
+
+	*out = NULL;
+	if (!request_is_authorised(ctx))
+		return (401);
+	if (!rate_limit_take_token(ctx->cli))
+		return (429);
+	path = ctx->msg->path;
+	if (path == NULL
+		|| strncmp(path, TETRISD_ROUTE_ROOM_PREFIX, strlen(TETRISD_ROUTE_ROOM_PREFIX)) != 0)
+		return (404);
+	path += strlen(TETRISD_ROUTE_ROOM_PREFIX);
+	sep = strstr(path, "/player/");
+	if (sep == NULL)
+		return (404);
+	len = (size_t)(sep - path);
+	if (len == 0 || len >= sizeof(name))
+		return (404);
+	memcpy(name, path, len);
+	name[len] = '\0';
+	if (strtoull(sep + strlen("/player/"), NULL, 10) != ctx->cli->player_id)
+		return (403);
+	*out = server_room_resolve(ctx->srv, ctx->cli, name);
+	if (*out == NULL)
+		return (409);
+	return (0);
+}
+
+/**
+ * @brief Reads the request body as a single upper-case command word.
+ *
+ * @param ctx Request context.
+ * @param out Buffer receiving the token.
+ * @param cap Size of out.
+ * @return 0 on success, -1 when the body is empty or too long to be a token.
+ */
+static int	body_token(t_request_context *ctx, char *out, size_t cap)
+{
+	size_t	len;
+	size_t	i;
+
+	if (ctx->msg->body == NULL || ctx->msg->body_len == 0)
+		return (-1);
+	len = ctx->msg->body_len;
+	while (len > 0 && (ctx->msg->body[len - 1] == '\n'
+			|| ctx->msg->body[len - 1] == '\r'
+			|| ctx->msg->body[len - 1] == ' '))
+		len--;
+	if (len == 0 || len >= cap)
+		return (-1);
+	i = 0;
+	while (i < len)
+	{
+		out[i] = (char)toupper(ctx->msg->body[i]);
+		i++;
+	}
+	out[len] = '\0';
+	return (0);
+}
+
+/**
+ * @brief Asks the room to apply one input to the caller's own game.
+ *
+ * The room owns the board and decides whether the move stands; this only turns
+ * its answer into a status a client can read.
+ *
+ * @param ctx Request context.
+ * @param server_room Room holding the game.
+ * @param action Which input to apply.
+ * @param argument Direction for a move or rotation, hard flag for a drop.
+ * @return 200 when the input was applied, 409 when it was refused.
+ */
+static int	apply_input(t_request_context *ctx, t_server_room *server_room, t_input_action action,
+			int argument)
+{
+	if (!server_room_input(server_room, ctx->cli, action, argument))
+		return (request_refuse(ctx, "input-blocked"));
+	return (200);
+}

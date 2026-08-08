@@ -35,7 +35,7 @@ static void	test_background_lifecycle_policy(void)
 
 static void	test_layout_rejects_unsupported_geometry(void)
 {
-	leaderboard_layout_t	layout;
+	t_leaderboard_layout	layout;
 
 	assert(!leaderboard_layout_resolve(19, 44, false, &layout));
 	assert(!leaderboard_layout_resolve(20, 43, true, &layout));
@@ -45,7 +45,7 @@ static void	test_layout_rejects_unsupported_geometry(void)
 
 static void	test_layout_preserves_complete_compact_surface(void)
 {
-	leaderboard_layout_t	layout;
+	t_leaderboard_layout	layout;
 
 	assert(leaderboard_layout_resolve(20, 44, false, &layout));
 	assert(layout.y == 0 && layout.x == 0);
@@ -61,7 +61,7 @@ static void	test_layout_preserves_complete_compact_surface(void)
 
 static void	test_layout_centers_full_presentation(void)
 {
-	leaderboard_layout_t	layout;
+	t_leaderboard_layout	layout;
 
 	assert(leaderboard_layout_resolve(40, 120, false, &layout));
 	assert(layout.y == 3 && layout.x == 10);
@@ -71,7 +71,7 @@ static void	test_layout_centers_full_presentation(void)
 
 static void	test_rank_lookup_uses_explicit_position(void)
 {
-	app_leaderboard_view_model_t	leaderboard;
+	t_app_leaderboard_view_model	leaderboard;
 
 	memset(&leaderboard, 0, sizeof(leaderboard));
 	leaderboard.count = 3;
@@ -90,8 +90,8 @@ static void	test_rank_lookup_uses_explicit_position(void)
 
 static void	test_pixel_layout_and_hitboxes(void)
 {
-	leaderboard_pixel_layout_t	layout;
-	leaderboard_focus_t			focus;
+	t_leaderboard_pixel_layout	layout;
+	t_leaderboard_focus			focus;
 
 	leaderboard_pixel_layout_build(2, 4, 54, 181, 20, 8, &layout);
 	assert(layout.pixel_width == 1448 && layout.pixel_height == 1080);

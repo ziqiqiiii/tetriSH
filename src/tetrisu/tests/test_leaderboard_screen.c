@@ -38,7 +38,7 @@ static void	test_input_batch_boundaries(void)
 
 static void	test_initial_focus_and_navigation(void)
 {
-	leaderboard_state_t	state;
+	t_leaderboard_state	state;
 
 	leaderboard_state_init(&state);
 	assert(state.focus == LEADERBOARD_FOCUS_BACK);
@@ -56,7 +56,7 @@ static void	test_initial_focus_and_navigation(void)
 
 static void	test_shortcuts_and_confirm(void)
 {
-	leaderboard_state_t	state;
+	t_leaderboard_state	state;
 
 	leaderboard_state_init(&state);
 	assert(leaderboard_handle_key(&state, NCKEY_ENTER)
@@ -81,12 +81,12 @@ static void	test_shortcuts_and_confirm(void)
 
 static void	test_pointer_focus_validation(void)
 {
-	leaderboard_state_t	state;
+	t_leaderboard_state	state;
 
 	leaderboard_state_init(&state);
 	leaderboard_set_focus(&state, LEADERBOARD_FOCUS_REFRESH);
 	assert(state.focus == LEADERBOARD_FOCUS_REFRESH);
-	leaderboard_set_focus(&state, (leaderboard_focus_t)42);
+	leaderboard_set_focus(&state, (t_leaderboard_focus)42);
 	assert(state.focus == LEADERBOARD_FOCUS_REFRESH);
 	leaderboard_set_focus(NULL, LEADERBOARD_FOCUS_BACK);
 	printf("PASS test_pointer_focus_validation\n");

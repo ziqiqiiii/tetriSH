@@ -1,23 +1,23 @@
 #include "tetrisu.h"
 
 // Static Functions
-static room_action_t	handle_room_key(waiting_room_state_t *state,
-							const app_room_view_model_t *room, uint32_t key);
-static room_action_t	handle_chat_key(waiting_room_state_t *state,
+static t_room_action	handle_room_key(t_waiting_room_state *state,
+							const t_app_room_view_model *room, uint32_t key);
+static t_room_action	handle_chat_key(t_waiting_room_state *state,
 							uint32_t key);
-static bool	append_compose(waiting_room_state_t *state, uint32_t key);
+static bool	append_compose(t_waiting_room_state *state, uint32_t key);
 static bool	is_confirm_key(uint32_t key);
-static bool	valid_slot(const app_room_view_model_t *room, int index);
-static bool	valid_room_snapshot(const app_room_view_model_t *room);
-static void	move_roster(waiting_room_state_t *state,
-					const app_room_view_model_t *room, int delta);
+static bool	valid_slot(const t_app_room_view_model *room, int index);
+static bool	valid_room_snapshot(const t_app_room_view_model *room);
+static void	move_roster(t_waiting_room_state *state,
+					const t_app_room_view_model *room, int delta);
 
 /**
  * @brief Resets the waiting room to browsing, not typing and not counting down.
  *
  * @param state Waiting-room state to initialise.
  */
-void	waiting_room_state_init(waiting_room_state_t *state)
+void	waiting_room_state_init(t_waiting_room_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -44,8 +44,8 @@ void	waiting_room_state_init(waiting_room_state_t *state)
  * @param key Key identifier from Notcurses.
  * @return The resolved action, or ROOM_ACTION_NONE when nothing else happened.
  */
-room_action_t	waiting_room_handle_key(waiting_room_state_t *state,
-	const app_room_view_model_t *room, uint32_t key)
+t_room_action	waiting_room_handle_key(t_waiting_room_state *state,
+	const t_app_room_view_model *room, uint32_t key)
 {
 	if (state == NULL)
 		return (ROOM_ACTION_NONE);
@@ -63,8 +63,8 @@ room_action_t	waiting_room_handle_key(waiting_room_state_t *state,
  * @param after State after the keystroke.
  * @return true when a repaint is required.
  */
-bool	waiting_room_state_view_changed(const waiting_room_state_t *before,
-	const waiting_room_state_t *after)
+bool	waiting_room_state_view_changed(const t_waiting_room_state *before,
+	const t_waiting_room_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -104,7 +104,7 @@ bool	waiting_room_navigation_keys_coalesce(uint32_t active_key,
  * @param action Action returned by waiting_room_handle_key().
  * @return true when the screen is about to be left.
  */
-bool	waiting_room_action_leaves_screen(room_action_t action)
+bool	waiting_room_action_leaves_screen(t_room_action action)
 {
 	return (action == ROOM_ACTION_LEAVE || action == ROOM_ACTION_LAUNCH
 		|| action == ROOM_ACTION_QUIT);
@@ -116,7 +116,7 @@ bool	waiting_room_action_leaves_screen(room_action_t action)
  * @param room Room snapshot to scan.
  * @return The ready count, 0 when the room is empty or missing.
  */
-int	waiting_room_ready_count(const app_room_view_model_t *room)
+int	waiting_room_ready_count(const t_app_room_view_model *room)
 {
 	int	index;
 	int	players;
@@ -149,7 +149,7 @@ int	waiting_room_ready_count(const app_room_view_model_t *room)
  * @param room Room snapshot to measure.
  * @return The ready threshold, or 0 when the room is missing.
  */
-int	waiting_room_required_ready(const app_room_view_model_t *room)
+int	waiting_room_required_ready(const t_app_room_view_model *room)
 {
 	if (room == NULL)
 		return (0);
@@ -165,7 +165,7 @@ int	waiting_room_required_ready(const app_room_view_model_t *room)
  * for indexing the fixed player array, even while an invalid snapshot is being
  * rendered with an explanatory status elsewhere.
  */
-int	waiting_room_slot_count(const app_room_view_model_t *room)
+int	waiting_room_slot_count(const t_app_room_view_model *room)
 {
 	int	seats;
 
@@ -182,7 +182,7 @@ int	waiting_room_slot_count(const app_room_view_model_t *room)
 /**
  * @brief Returns how many roster rows fit the authored waiting-room panel.
  */
-int	waiting_room_visible_slot_count(const app_room_view_model_t *room)
+int	waiting_room_visible_slot_count(const t_app_room_view_model *room)
 {
 	int	seats;
 
@@ -198,7 +198,7 @@ int	waiting_room_visible_slot_count(const app_room_view_model_t *room)
  * @param room Room snapshot to test.
  * @return true when a start would be accepted.
  */
-bool	waiting_room_can_start(const app_room_view_model_t *room)
+bool	waiting_room_can_start(const t_app_room_view_model *room)
 {
 	if (!valid_room_snapshot(room)
 		|| (room->state != APP_ROOM_STATE_WAITING
@@ -219,7 +219,7 @@ bool	waiting_room_can_start(const app_room_view_model_t *room)
  * Double is deliberately frictionless once both players are ready. Battle
  * Royale always waits for an explicit owner Start action.
  */
-bool	waiting_room_auto_start_allowed(const app_room_view_model_t *room)
+bool	waiting_room_auto_start_allowed(const t_app_room_view_model *room)
 {
 	return (room != NULL && room->mode == APP_GAME_MODE_DOUBLE
 		&& waiting_room_can_start(room));
@@ -233,9 +233,9 @@ bool	waiting_room_auto_start_allowed(const app_room_view_model_t *room)
  *
  * @return true when WAITING/READY changed; false for stable or terminal rooms.
  */
-bool	waiting_room_sync_state(app_room_view_model_t *room)
+bool	waiting_room_sync_state(t_app_room_view_model *room)
 {
-	app_room_state_t	next;
+	t_app_room_state	next;
 	int					minimum;
 
 	if (!valid_room_snapshot(room) || room->state == APP_ROOM_STATE_IN_GAME
@@ -259,7 +259,7 @@ bool	waiting_room_sync_state(app_room_view_model_t *room)
  * @param room Room snapshot to read.
  * @return true when the local seat carries the owner flag.
  */
-bool	waiting_room_local_is_owner(const app_room_view_model_t *room)
+bool	waiting_room_local_is_owner(const t_app_room_view_model *room)
 {
 	if (!valid_slot(room, room == NULL ? -1 : room->local_slot))
 		return (false);
@@ -272,7 +272,7 @@ bool	waiting_room_local_is_owner(const app_room_view_model_t *room)
  * @param room Room snapshot to read.
  * @return true when the local seat is ready.
  */
-bool	waiting_room_local_ready(const app_room_view_model_t *room)
+bool	waiting_room_local_ready(const t_app_room_view_model *room)
 {
 	if (!valid_slot(room, room == NULL ? -1 : room->local_slot))
 		return (false);
@@ -288,7 +288,7 @@ bool	waiting_room_local_ready(const app_room_view_model_t *room)
  * @param room Room snapshot to update.
  * @return true when a flag actually moved.
  */
-bool	waiting_room_toggle_ready(app_room_view_model_t *room)
+bool	waiting_room_toggle_ready(t_app_room_view_model *room)
 {
 	if (!valid_slot(room, room == NULL ? -1 : room->local_slot))
 		return (false);
@@ -303,7 +303,7 @@ bool	waiting_room_toggle_ready(app_room_view_model_t *room)
  * @param room Room snapshot to test.
  * @return ROOM_FEEDBACK_NONE when the start may proceed.
  */
-room_feedback_t	waiting_room_start_blocker(const app_room_view_model_t *room)
+t_room_feedback	waiting_room_start_blocker(const t_app_room_view_model *room)
 {
 	int	required_players;
 
@@ -333,7 +333,7 @@ room_feedback_t	waiting_room_start_blocker(const app_room_view_model_t *room)
  * @param state Waiting-room state to update.
  * @return true when the countdown was not already running.
  */
-bool	waiting_room_begin_countdown(waiting_room_state_t *state)
+bool	waiting_room_begin_countdown(t_waiting_room_state *state)
 {
 	if (state == NULL || state->counting_down)
 		return (false);
@@ -349,7 +349,7 @@ bool	waiting_room_begin_countdown(waiting_room_state_t *state)
  * @param state Waiting-room state to update.
  * @return true when a running countdown was stopped.
  */
-bool	waiting_room_cancel_countdown(waiting_room_state_t *state)
+bool	waiting_room_cancel_countdown(t_waiting_room_state *state)
 {
 	if (state == NULL || !state->counting_down)
 		return (false);
@@ -366,7 +366,7 @@ bool	waiting_room_cancel_countdown(waiting_room_state_t *state)
  * @param state Waiting-room state to update.
  * @return true when the countdown reached zero and the match should launch.
  */
-bool	waiting_room_tick(waiting_room_state_t *state)
+bool	waiting_room_tick(t_waiting_room_state *state)
 {
 	if (state == NULL || !state->counting_down)
 		return (false);
@@ -391,7 +391,7 @@ bool	waiting_room_tick(waiting_room_state_t *state)
  * @param system true for room events rather than player speech.
  * @return true when a line was stored.
  */
-bool	waiting_room_append_chat(app_room_view_model_t *room,
+bool	waiting_room_append_chat(t_app_room_view_model *room,
 	const char *author, const char *text, bool system)
 {
 	int	index;
@@ -426,8 +426,8 @@ bool	waiting_room_append_chat(app_room_view_model_t *room,
  * @param state Waiting-room state holding the composed text.
  * @return true when a message was posted.
  */
-bool	waiting_room_send_chat(app_room_view_model_t *room,
-	waiting_room_state_t *state)
+bool	waiting_room_send_chat(t_app_room_view_model *room,
+	t_waiting_room_state *state)
 {
 	const char	*author;
 
@@ -467,8 +467,8 @@ bool	waiting_room_send_chat(app_room_view_model_t *room,
  * @param size Capacity of out.
  * @return out.
  */
-const char	*waiting_room_status_text(const app_room_view_model_t *room,
-	const waiting_room_state_t *state, char *out, size_t size)
+const char	*waiting_room_status_text(const t_app_room_view_model *room,
+	const t_waiting_room_state *state, char *out, size_t size)
 {
 	int	required_players;
 
@@ -521,7 +521,7 @@ const char	*waiting_room_status_text(const app_room_view_model_t *room,
  * @param size Capacity of out.
  * @return out, holding "N. (empty)" for a seat nobody occupies.
  */
-const char	*waiting_room_slot_label(const app_room_view_model_t *room,
+const char	*waiting_room_slot_label(const t_app_room_view_model *room,
 	int index, char *out, size_t size)
 {
 	if (out == NULL || size == 0)
@@ -550,7 +550,7 @@ const char	*waiting_room_slot_label(const app_room_view_model_t *room,
  * @param index Seat index.
  * @return A static, bounded caption; "" for a seat nobody occupies.
  */
-const char	*waiting_room_badge_text(const app_room_view_model_t *room,
+const char	*waiting_room_badge_text(const t_app_room_view_model *room,
 	int index)
 {
 	if (room == NULL || index < 0 || index >= room->player_count
@@ -572,7 +572,7 @@ const char	*waiting_room_badge_text(const app_room_view_model_t *room,
  * @param size Capacity of out.
  * @return out, holding "" when there is nothing to report.
  */
-const char	*waiting_room_feedback_text(const waiting_room_state_t *state,
+const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
 	char *out, size_t size)
 {
 	if (out == NULL || size == 0)
@@ -613,8 +613,8 @@ const char	*waiting_room_feedback_text(const waiting_room_state_t *state,
  * @param room Room snapshot to read.
  * @return APP_NAV_START_DOUBLE or APP_NAV_START_BATTLE_ROYALE.
  */
-app_nav_action_t	waiting_room_launch_action(
-	const app_room_view_model_t *room)
+t_app_nav_action	waiting_room_launch_action(
+	const t_app_room_view_model *room)
 {
 	if (room != NULL && room->mode == APP_GAME_MODE_BATTLE_ROYALE)
 		return (APP_NAV_START_BATTLE_ROYALE);
@@ -624,8 +624,8 @@ app_nav_action_t	waiting_room_launch_action(
 /**
  * @brief Reads one keystroke outside the composer, where letters are commands.
  */
-static room_action_t	handle_room_key(waiting_room_state_t *state,
-	const app_room_view_model_t *room, uint32_t key)
+static t_room_action	handle_room_key(t_waiting_room_state *state,
+	const t_app_room_view_model *room, uint32_t key)
 {
 	if (key == 'q' || key == 'Q')
 		return (ROOM_ACTION_QUIT);
@@ -656,8 +656,8 @@ static room_action_t	handle_room_key(waiting_room_state_t *state,
 	return (ROOM_ACTION_NONE);
 }
 
-static void	move_roster(waiting_room_state_t *state,
-	const app_room_view_model_t *room, int delta)
+static void	move_roster(t_waiting_room_state *state,
+	const t_app_room_view_model *room, int delta)
 {
 	int	maximum;
 
@@ -675,7 +675,7 @@ static void	move_roster(waiting_room_state_t *state,
 /**
  * @brief Reads one keystroke inside the composer, where letters are text.
  */
-static room_action_t	handle_chat_key(waiting_room_state_t *state,
+static t_room_action	handle_chat_key(t_waiting_room_state *state,
 	uint32_t key)
 {
 	if (key == NCKEY_ESC)
@@ -715,7 +715,7 @@ static room_action_t	handle_chat_key(waiting_room_state_t *state,
  * input - is dropped rather than written as a replacement character, because
  * the chat frame this will become carries plain bytes.
  */
-static bool	append_compose(waiting_room_state_t *state, uint32_t key)
+static bool	append_compose(t_waiting_room_state *state, uint32_t key)
 {
 	if (key < 0x20 || key > 0x7e)
 		return (false);
@@ -733,7 +733,7 @@ static bool	is_confirm_key(uint32_t key)
 	return (key == NCKEY_ENTER || key == '\n' || key == '\r');
 }
 
-static bool	valid_slot(const app_room_view_model_t *room, int index)
+static bool	valid_slot(const t_app_room_view_model *room, int index)
 {
 	if (room == NULL || index < 0 || index >= room->player_count
 		|| index >= waiting_room_slot_count(room))
@@ -741,7 +741,7 @@ static bool	valid_slot(const app_room_view_model_t *room, int index)
 	return (true);
 }
 
-static bool	valid_room_snapshot(const app_room_view_model_t *room)
+static bool	valid_room_snapshot(const t_app_room_view_model *room)
 {
 	if (room == NULL
 		|| !multiplayer_room_capacity_valid(room->mode, room->capacity)

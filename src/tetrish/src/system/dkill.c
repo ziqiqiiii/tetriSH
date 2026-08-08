@@ -175,14 +175,12 @@ static void kill_one(const char *project_root, DaemonInfo daemon)
 {
 	if (kill(daemon.pid, SIGTERM) == 0)
 	{
-		printf("  %skilled%s %-14s %s%d%s\n", CL_RED, CL_RESET, daemon.name,
-			CL_BLUE, daemon.pid, CL_RESET);
+		printf("  %skilled%s %-14s %s%d%s\n", CL_RED, CL_RESET, daemon.name, CL_BLUE, daemon.pid, CL_RESET);
 		add_to_graveyard(project_root, daemon);
 	}
 	else
 	{
-		fprintf(stderr, "  %sfailed%s %-14s %s%d%s: %s\n", CL_RED, CL_RESET,
-			daemon.name, CL_BLUE, daemon.pid, CL_RESET, strerror(errno));
+		fprintf(stderr, "  %sfailed%s %-14s %s%d%s: %s\n", CL_RED, CL_RESET, daemon.name, CL_BLUE, daemon.pid, CL_RESET, strerror(errno));
 	}
 }
 

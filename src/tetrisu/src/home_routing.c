@@ -11,9 +11,9 @@
  * @param offline true when the user entered via Play Offline.
  * @return The resolved home menu route.
  */
-home_route_t	home_menu_route(int selected, bool offline)
+t_home_route	home_menu_route(int selected, bool offline)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route.action = HOME_ROUTE_BLOCKED;
 	route.nav_action = APP_NAV_NONE;
@@ -99,7 +99,7 @@ void	home_sign_in_body_line2(char *line2, size_t size)
 /**
  * @brief Initializes the sign-in modal to a hidden idle state.
  */
-void	sign_in_modal_init(sign_in_modal_t *modal)
+void	sign_in_modal_init(t_sign_in_modal *modal)
 {
 	if (modal == NULL)
 		return ;
@@ -116,7 +116,7 @@ void	sign_in_modal_init(sign_in_modal_t *modal)
  *
  * @return SIGN_IN_RESULT_DISMISS, SIGN_IN_RESULT_LOGIN, or _NONE.
  */
-sign_in_result_t	sign_in_modal_handle_key(sign_in_modal_t *modal,
+t_sign_in_result	sign_in_modal_handle_key(t_sign_in_modal *modal,
 	uint32_t key)
 {
 	if (modal == NULL || !modal->visible)

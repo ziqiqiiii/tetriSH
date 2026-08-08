@@ -12,7 +12,7 @@ int	main(void)
 
 static void	test_safe_default_and_explicit_yes(void)
 {
-	confirmation_dialog_t	dialog;
+	t_confirmation_dialog	dialog;
 
 	confirmation_dialog_init(&dialog, CONFIRM_QUIT_APP);
 	assert(dialog.visible);
@@ -29,7 +29,7 @@ static void	test_safe_default_and_explicit_yes(void)
 
 static void	test_shortcuts_and_copy(void)
 {
-	confirmation_dialog_t	dialog;
+	t_confirmation_dialog	dialog;
 
 	confirmation_dialog_init(&dialog, CONFIRM_LEAVE_ROOM);
 	assert(confirmation_dialog_handle_key(&dialog, NCKEY_ESC)

@@ -44,29 +44,29 @@
 # define SETTINGS_CONTROLS_ROWS	5
 # define SETTINGS_SUMMARY_ROWS	2
 
-static bool	create_panel(render_ctx_t *ctx);
-static bool	show_too_small(render_ctx_t *ctx);
-static void	draw_settings(render_ctx_t *ctx,
-			const app_screen_view_model_t *view,
-			const settings_state_t *state);
+static bool	create_panel(t_render_ctx *ctx);
+static bool	show_too_small(t_render_ctx *ctx);
+static void	draw_settings(t_render_ctx *ctx,
+			const t_app_screen_view_model *view,
+			const t_settings_state *state);
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 			bool compatibility);
 static void	draw_profile(struct ncplane *plane,
-			const app_settings_view_model_t *settings,
-			const settings_state_t *state, int rows, int cols);
+			const t_app_settings_view_model *settings,
+			const t_settings_state *state, int rows, int cols);
 static void	slot_prefix(char *out, size_t size, bool equipped, bool focused,
 					bool owned);
 static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
 			const char *text, int max_lines);
 static void	set_slot_colour(struct ncplane *plane, bool focused, bool owned);
 static void	draw_offline(struct ncplane *plane,
-			const app_settings_view_model_t *settings, int rows, int cols);
+			const t_app_settings_view_model *settings, int rows, int cols);
 static void	draw_ability_compat(struct ncplane *plane,
-			const app_settings_view_model_t *settings,
-			const settings_state_t *state, int rows, int cols);
+			const t_app_settings_view_model *settings,
+			const t_settings_state *state, int rows, int cols);
 static void	draw_controls(struct ncplane *plane,
-			const app_settings_view_model_t *settings,
-			const settings_state_t *state);
+			const t_app_settings_view_model *settings,
+			const t_settings_state *state);
 static void	put_line(struct ncplane *plane, int row, int x, int width,
 			const char *text, bool bold);
 static void	put_centered(struct ncplane *plane, int row, int cols,
@@ -75,7 +75,7 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 			const char *text, bool focused, bool enabled);
 static void	button_geometry(const struct ncplane *plane, int *row,
 			int *back_x, int *market_x, int *down_x, int *up_x);
-static const char *renderer_mode_name(tetrisu_renderer_mode_t mode);
+static const char *renderer_mode_name(t_tetrisu_renderer_mode mode);
 static int	min_int(int first, int second);
 
 /**
@@ -85,8 +85,8 @@ static int	min_int(int first, int second);
  * terminals and TETRISU_RENDERER=cell. Every other tier uses the authored
  * Settings bitmap and bitmap-font overlays.
  */
-bool	render_settings_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
+bool	render_settings_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state,
 	bool rebuild_background)
 {
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
@@ -115,7 +115,7 @@ bool	render_settings_show(render_ctx_t *ctx,
 /**
  * @brief Releases Settings-owned planes without touching the backdrop.
  */
-void	render_settings_destroy(render_ctx_t *ctx)
+void	render_settings_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -123,7 +123,7 @@ void	render_settings_destroy(render_ctx_t *ctx)
 	render_settings_pixel_destroy(ctx);
 }
 
-static bool	create_panel(render_ctx_t *ctx)
+static bool	create_panel(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -172,7 +172,7 @@ static bool	create_panel(render_ctx_t *ctx)
  * Shown instead of the panel so a small window degrades to a readable notice
  * the user can resize or leave, rather than failing the screen.
  */
-static bool	show_too_small(render_ctx_t *ctx)
+static bool	show_too_small(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -209,8 +209,8 @@ static bool	show_too_small(render_ctx_t *ctx)
 	return (notcurses_render(ctx->nc) == 0);
 }
 
-static void	draw_settings(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state)
+static void	draw_settings(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state)
 {
 	struct ncplane	*plane;
 	int			rows;
@@ -279,7 +279,7 @@ static void	draw_settings(render_ctx_t *ctx,
 }
 
 static void	draw_profile(struct ncplane *plane,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
+	const t_app_settings_view_model *settings, const t_settings_state *state,
 	int rows, int cols)
 {
 	char		line[APP_TEXT_MAX + 96];
@@ -427,7 +427,7 @@ static void	set_slot_colour(struct ncplane *plane, bool focused, bool owned)
 }
 
 static void	draw_offline(struct ncplane *plane,
-	const app_settings_view_model_t *settings, int rows, int cols)
+	const t_app_settings_view_model *settings, int rows, int cols)
 {
 	char	line[APP_TEXT_MAX + 64];
 	int		last_row;
@@ -465,10 +465,10 @@ static void	draw_offline(struct ncplane *plane,
 }
 
 static void	draw_ability_compat(struct ncplane *plane,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
+	const t_app_settings_view_model *settings, const t_settings_state *state,
 	int rows, int cols)
 {
-	const app_catalogue_item_view_model_t	*character;
+	const t_app_catalogue_item_view_model	*character;
 	char							line[APP_ABILITY_TEXT_MAX + 80];
 	int							index;
 	int							step;
@@ -560,7 +560,7 @@ static void	put_wrapped(struct ncplane *plane, int row, int x, int width,
 }
 
 static void	draw_controls(struct ncplane *plane,
-	const app_settings_view_model_t *settings, const settings_state_t *state)
+	const t_app_settings_view_model *settings, const t_settings_state *state)
 {
 	int	row;
 	int	back_x;
@@ -707,7 +707,7 @@ static void	button_geometry(const struct ncplane *plane, int *row,
 	*up_x = *down_x + SETTINGS_BUTTON_CELLS + SETTINGS_BUTTON_GAP;
 }
 
-static const char *renderer_mode_name(tetrisu_renderer_mode_t mode)
+static const char *renderer_mode_name(t_tetrisu_renderer_mode mode)
 {
 	if (mode == TETRISU_RENDERER_CELL)
 		return ("CELL");

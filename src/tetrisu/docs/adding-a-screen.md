@@ -159,8 +159,8 @@ so the cropped result must be opaque wherever the frame is.
 
 ## Step 2 — Lay the regions out
 
-Region rectangles live in the layout struct (`settings_layout_t`,
-`leaderboard_pixel_layout_t`), computed once from terminal geometry. Do not
+Region rectangles live in the layout struct (`t_settings_layout`,
+`t_leaderboard_pixel_layout`), computed once from terminal geometry. Do not
 hardcode them inside the compose functions — the renderer and the tests must
 read the same rectangles or the tests guard a copy that can drift.
 
@@ -225,8 +225,8 @@ will flag those as overlaps, so the sweep needs an explicit per-screen list of
 the rectangles that actually become planes:
 
 ```c
-static void	region_list(const mp_layout_t *layout, app_screen_t screen,
-	const mp_rect_t **regions, int *count)
+static void	region_list(const t_mp_layout *layout, t_app_screen screen,
+	const t_mp_rect **regions, int *count)
 ```
 
 Keep that list next to the sweep, not next to the renderer, and add to it when
@@ -576,7 +576,7 @@ plain opaque band behind those strips:
 
 ```c
 static void	draw_band(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, int ref_y_value, int ref_height)
+	const t_mp_layout *layout, int ref_y_value, int ref_height)
 {
 	fill_ref_rect(pixels, width, height, layout, MP_BAND_X, ref_y_value,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * MP_BAND_X, ref_height, g_mp_plate,

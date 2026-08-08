@@ -43,34 +43,34 @@
 # define MP_COL_OWNER	44
 
 // Static Functions
-static bool	show_screen(render_ctx_t *ctx,
-				const app_screen_view_model_t *view, const void *state,
+static bool	show_screen(t_render_ctx *ctx,
+				const t_app_screen_view_model *view, const void *state,
 				bool rebuild_background);
-static bool	create_panel(render_ctx_t *ctx);
-static bool	show_too_small(render_ctx_t *ctx);
+static bool	create_panel(t_render_ctx *ctx);
+static bool	show_too_small(t_render_ctx *ctx);
 static void	draw_frame(struct ncplane *plane, int rows, int cols,
 				bool compatibility);
-static void	draw_mode(struct ncplane *plane, const mp_mode_state_t *state,
+static void	draw_mode(struct ncplane *plane, const t_mp_mode_state *state,
 				int rows, int cols);
 static void	draw_lobby(struct ncplane *plane,
-				const app_screen_view_model_t *view, const lobby_state_t *state,
+				const t_app_screen_view_model *view, const t_lobby_state *state,
 				int rows, int cols);
 static void	draw_create_room(struct ncplane *plane,
-				const create_room_state_t *state, int rows, int cols);
+				const t_create_room_state *state, int rows, int cols);
 static void	draw_waiting_room(struct ncplane *plane,
-				const app_screen_view_model_t *view,
-				const waiting_room_state_t *state, int rows, int cols);
+				const t_app_screen_view_model *view,
+				const t_waiting_room_state *state, int rows, int cols);
 static int	draw_room_table(struct ncplane *plane,
-				const app_lobby_view_model_t *lobby, const lobby_state_t *state,
+				const t_app_lobby_view_model *lobby, const t_lobby_state *state,
 				int row, int cols, int limit);
-static void	draw_join_field(struct ncplane *plane, const lobby_state_t *state,
+static void	draw_join_field(struct ncplane *plane, const t_lobby_state *state,
 				int row, int cols);
-static int	draw_chat(struct ncplane *plane, const app_room_view_model_t *room,
-				const waiting_room_state_t *state, int row, int cols,
+static int	draw_chat(struct ncplane *plane, const t_app_room_view_model *room,
+				const t_waiting_room_state *state, int row, int cols,
 				int limit);
 static void	set_colour(struct ncplane *plane, int red, int green, int blue);
 static void	set_room_state_colour(struct ncplane *plane,
-				const app_room_summary_view_model_t *room);
+				const t_app_room_summary_view_model *room);
 static void	put_line(struct ncplane *plane, int row, int x, int width,
 				const char *text);
 static void	put_centered(struct ncplane *plane, int row, int cols,
@@ -81,8 +81,8 @@ static int	min_int(int first, int second);
 /**
  * @brief Draws the mode picker through the compositor or the cell fallback.
  */
-bool	render_mp_mode_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const mp_mode_state_t *state,
+bool	render_mp_mode_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_mp_mode_state *state,
 	bool rebuild_background)
 {
 	return (show_screen(ctx, view, state, rebuild_background));
@@ -91,8 +91,8 @@ bool	render_mp_mode_show(render_ctx_t *ctx,
 /**
  * @brief Draws the lobby through the compositor or the cell fallback.
  */
-bool	render_lobby_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const lobby_state_t *state,
+bool	render_lobby_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_lobby_state *state,
 	bool rebuild_background)
 {
 	return (show_screen(ctx, view, state, rebuild_background));
@@ -101,8 +101,8 @@ bool	render_lobby_show(render_ctx_t *ctx,
 /**
  * @brief Draws the create-room panel through the compositor or the fallback.
  */
-bool	render_create_room_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const create_room_state_t *state,
+bool	render_create_room_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_create_room_state *state,
 	bool rebuild_background)
 {
 	return (show_screen(ctx, view, state, rebuild_background));
@@ -111,8 +111,8 @@ bool	render_create_room_show(render_ctx_t *ctx,
 /**
  * @brief Draws the waiting room through the compositor or the cell fallback.
  */
-bool	render_waiting_room_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const waiting_room_state_t *state,
+bool	render_waiting_room_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_waiting_room_state *state,
 	bool rebuild_background)
 {
 	return (show_screen(ctx, view, state, rebuild_background));
@@ -121,7 +121,7 @@ bool	render_waiting_room_show(render_ctx_t *ctx,
 /**
  * @brief Releases multiplayer-owned planes without touching the backdrop.
  */
-void	render_multiplayer_destroy(render_ctx_t *ctx)
+void	render_multiplayer_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -137,7 +137,7 @@ void	render_multiplayer_destroy(render_ctx_t *ctx)
  * than failing the screen: the loops treat false as fatal, and opening a lobby
  * must never be able to quit the client.
  */
-static bool	show_screen(render_ctx_t *ctx, const app_screen_view_model_t *view,
+static bool	show_screen(t_render_ctx *ctx, const t_app_screen_view_model *view,
 	const void *state, bool rebuild_background)
 {
 	int	rows;
@@ -171,7 +171,7 @@ static bool	show_screen(render_ctx_t *ctx, const app_screen_view_model_t *view,
 	return (notcurses_render(ctx->nc) == 0);
 }
 
-static bool	create_panel(render_ctx_t *ctx)
+static bool	create_panel(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -214,7 +214,7 @@ static bool	create_panel(render_ctx_t *ctx)
 /**
  * @brief Explains that the terminal is smaller than the panel needs.
  */
-static bool	show_too_small(render_ctx_t *ctx)
+static bool	show_too_small(t_render_ctx *ctx)
 {
 	ncplane_options	options;
 	uint64_t		channels;
@@ -269,7 +269,7 @@ static void	draw_frame(struct ncplane *plane, int rows, int cols,
 /**
  * @brief Draws the mode picker's two options as a cell list.
  */
-static void	draw_mode(struct ncplane *plane, const mp_mode_state_t *state,
+static void	draw_mode(struct ncplane *plane, const t_mp_mode_state *state,
 	int rows, int cols)
 {
 	char	line[APP_TEXT_MAX * 2];
@@ -313,10 +313,10 @@ static void	draw_mode(struct ncplane *plane, const mp_mode_state_t *state,
  * @brief Draws the lobby stacked: identity, room table, join field, status.
  */
 static void	draw_lobby(struct ncplane *plane,
-	const app_screen_view_model_t *view, const lobby_state_t *state, int rows,
+	const t_app_screen_view_model *view, const t_lobby_state *state, int rows,
 	int cols)
 {
-	const app_profile_view_model_t	*profile;
+	const t_app_profile_view_model	*profile;
 	char							line[APP_TEXT_MAX * 3];
 	int								row;
 	int								limit;
@@ -365,10 +365,10 @@ static void	draw_lobby(struct ncplane *plane,
  * @return The row after the last one drawn.
  */
 static int	draw_room_table(struct ncplane *plane,
-	const app_lobby_view_model_t *lobby, const lobby_state_t *state, int row,
+	const t_app_lobby_view_model *lobby, const t_lobby_state *state, int row,
 	int cols, int limit)
 {
-	const app_room_summary_view_model_t	*room;
+	const t_app_room_summary_view_model	*room;
 	char								cell[APP_TEXT_MAX];
 	int									index;
 
@@ -419,7 +419,7 @@ static int	draw_room_table(struct ncplane *plane,
 /**
  * @brief Draws the join-by-id field, showing the caret only when focused.
  */
-static void	draw_join_field(struct ncplane *plane, const lobby_state_t *state,
+static void	draw_join_field(struct ncplane *plane, const t_lobby_state *state,
 	int row, int cols)
 {
 	char	line[LOBBY_ROOM_ID_MAX + 40];
@@ -441,7 +441,7 @@ static void	draw_join_field(struct ncplane *plane, const lobby_state_t *state,
  * @brief Draws the create-room panel's two options as a cell list.
  */
 static void	draw_create_room(struct ncplane *plane,
-	const create_room_state_t *state, int rows, int cols)
+	const t_create_room_state *state, int rows, int cols)
 {
 	char	line[APP_TEXT_MAX * 2];
 	int		index;
@@ -483,10 +483,10 @@ static void	draw_create_room(struct ncplane *plane,
  * @brief Draws the waiting room stacked: seats, status, then the transcript.
  */
 static void	draw_waiting_room(struct ncplane *plane,
-	const app_screen_view_model_t *view, const waiting_room_state_t *state,
+	const t_app_screen_view_model *view, const t_waiting_room_state *state,
 	int rows, int cols)
 {
-	const app_room_view_model_t	*room;
+	const t_app_room_view_model	*room;
 	char						line[APP_TEXT_MAX * 3];
 	int							seats;
 	int							visible;
@@ -560,8 +560,8 @@ static void	draw_waiting_room(struct ncplane *plane,
  *
  * @return The row after the composer.
  */
-static int	draw_chat(struct ncplane *plane, const app_room_view_model_t *room,
-	const waiting_room_state_t *state, int row, int cols, int limit)
+static int	draw_chat(struct ncplane *plane, const t_app_room_view_model *room,
+	const t_waiting_room_state *state, int row, int cols, int limit)
 {
 	char	line[APP_TEXT_MAX + APP_ROOM_CHAT_TEXT_MAX + 8];
 	int		visible;
@@ -617,7 +617,7 @@ static void	set_colour(struct ncplane *plane, int red, int green, int blue)
 }
 
 static void	set_room_state_colour(struct ncplane *plane,
-	const app_room_summary_view_model_t *room)
+	const t_app_room_summary_view_model *room)
 {
 	if (room->state == APP_ROOM_STATE_IN_GAME
 		|| room->state == APP_ROOM_STATE_FINISHED)

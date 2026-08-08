@@ -1,15 +1,15 @@
 #include "tetrisu.h"
 
-static bool	has_inventory(const settings_state_t *state);
-static int	section_slots(const settings_state_t *state,
-				settings_section_t section);
-static void	enter_inventory(settings_state_t *state,
-				settings_section_t section, int row, bool rightmost);
-static void	move_horizontal(settings_state_t *state, int step);
-static void	move_vertical(settings_state_t *state, int step);
-static void	move_control(settings_state_t *state, int step);
-static void	focus_control_column(settings_state_t *state, int column);
-static settings_action_t	activate_focus(const settings_state_t *state);
+static bool	has_inventory(const t_settings_state *state);
+static int	section_slots(const t_settings_state *state,
+				t_settings_section section);
+static void	enter_inventory(t_settings_state *state,
+				t_settings_section section, int row, bool rightmost);
+static void	move_horizontal(t_settings_state *state, int step);
+static void	move_vertical(t_settings_state *state, int step);
+static void	move_control(t_settings_state *state, int step);
+static void	focus_control_column(t_settings_state *state, int column);
+static t_settings_action	activate_focus(const t_settings_state *state);
 static int	clamp_int(int value, int low, int high);
 static int	min_int(int left, int right);
 
@@ -20,7 +20,7 @@ static int	min_int(int left, int right);
  * clamped against them: the grids are navigated by drawn slot, not by
  * catalogue index, so focus can never land on an item the panels do not show.
  */
-void	settings_state_init(settings_state_t *state, bool signed_in,
+void	settings_state_init(t_settings_state *state, bool signed_in,
 	int character_slots, int theme_slots)
 {
 	if (state == NULL)
@@ -47,8 +47,8 @@ void	settings_state_init(settings_state_t *state, bool signed_in,
  * The screen repaints on this rather than on "any key arrived", so a burst of
  * repeats that lands back on the same slot costs no bitmap work at all.
  */
-bool	settings_state_view_changed(const settings_state_t *before,
-	const settings_state_t *after)
+bool	settings_state_view_changed(const t_settings_state *before,
+	const t_settings_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -89,7 +89,7 @@ bool	settings_navigation_keys_coalesce(uint32_t active_key,
  * @param action Semantic Settings action.
  * @return true when Settings will no longer own input after the action.
  */
-bool	settings_action_leaves_screen(settings_action_t action)
+bool	settings_action_leaves_screen(t_settings_action action)
 {
 	return (action == SETTINGS_ACTION_BACK
 		|| action == SETTINGS_ACTION_MARKETPLACE
@@ -110,7 +110,7 @@ int	settings_slot_rows(int slots)
 /**
  * @brief Counts the owned entries a panel will actually draw.
  */
-int	settings_owned_count(const app_catalogue_view_model_t *catalogue, int limit)
+int	settings_owned_count(const t_app_catalogue_view_model *catalogue, int limit)
 {
 	int	owned;
 	int	index;
@@ -135,7 +135,7 @@ int	settings_owned_count(const app_catalogue_view_model_t *catalogue, int limit)
  * Ownership is intentionally not considered: locked preview entries remain
  * visible and navigable so the user can inspect what the Marketplace offers.
  */
-int	settings_catalogue_count(const app_catalogue_view_model_t *catalogue,
+int	settings_catalogue_count(const t_app_catalogue_view_model *catalogue,
 	int limit)
 {
 	if (catalogue == NULL || limit <= 0 || catalogue->count <= 0)
@@ -149,7 +149,7 @@ int	settings_catalogue_count(const app_catalogue_view_model_t *catalogue,
  * Tab remains a single linear escape hatch so the whole screen is reachable
  * without knowing the grid shape.
  */
-void	settings_state_focus_next(settings_state_t *state)
+void	settings_state_focus_next(t_settings_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -182,7 +182,7 @@ void	settings_state_focus_next(settings_state_t *state)
 /**
  * @brief Steps backwards through the same order Tab advances through.
  */
-void	settings_state_focus_previous(settings_state_t *state)
+void	settings_state_focus_previous(t_settings_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -222,7 +222,7 @@ void	settings_state_focus_previous(settings_state_t *state)
 /**
  * @brief Converts Settings keyboard input into semantic actions.
  */
-settings_action_t	settings_handle_key(settings_state_t *state, uint32_t key)
+t_settings_action	settings_handle_key(t_settings_state *state, uint32_t key)
 {
 	if (state == NULL)
 		return (SETTINGS_ACTION_NONE);
@@ -270,7 +270,7 @@ settings_action_t	settings_handle_key(settings_state_t *state, uint32_t key)
 	return (activate_focus(state));
 }
 
-static settings_action_t	activate_focus(const settings_state_t *state)
+static t_settings_action	activate_focus(const t_settings_state *state)
 {
 	if (state->section == SETTINGS_SECTION_CHARACTERS)
 		return (SETTINGS_ACTION_EQUIP_CHARACTER);
@@ -294,7 +294,7 @@ static settings_action_t	activate_focus(const settings_state_t *state)
  * inventory grids do not, because their outer edges are where the crossing to
  * the neighbouring panel has to happen.
  */
-static void	move_horizontal(settings_state_t *state, int step)
+static void	move_horizontal(t_settings_state *state, int step)
 {
 	int	slots;
 	int	*slot;
@@ -327,7 +327,7 @@ static void	move_horizontal(settings_state_t *state, int step)
 /**
  * @brief Steps between grid rows, falling through to the control row.
  */
-static void	move_vertical(settings_state_t *state, int step)
+static void	move_vertical(t_settings_state *state, int step)
 {
 	int	slots;
 	int	*slot;
@@ -377,20 +377,20 @@ static void	move_vertical(settings_state_t *state, int step)
  * grid can land on the button directly below rather than on whichever button
  * happened to be focused before the panels were entered.
  */
-static void	focus_control_column(settings_state_t *state, int column)
+static void	focus_control_column(t_settings_state *state, int column)
 {
 	int	focus;
 
 	focus = clamp_int(column, 0, SETTINGS_BUTTON_COUNT - 1);
 	if (focus == (int)SETTINGS_FOCUS_MARKETPLACE && !state->signed_in)
 		focus = (int)SETTINGS_FOCUS_BACK;
-	state->focus = (settings_focus_t)focus;
+	state->focus = (t_settings_focus)focus;
 }
 
 /**
  * @brief Cycles the four control buttons, skipping Marketplace when offline.
  */
-static void	move_control(settings_state_t *state, int step)
+static void	move_control(t_settings_state *state, int step)
 {
 	int	focus;
 
@@ -400,14 +400,14 @@ static void	move_control(settings_state_t *state, int step)
 	if (focus == (int)SETTINGS_FOCUS_MARKETPLACE && !state->signed_in)
 		focus = (focus + (step > 0 ? 1 : SETTINGS_BUTTON_COUNT - 1))
 			% SETTINGS_BUTTON_COUNT;
-	state->focus = (settings_focus_t)focus;
+	state->focus = (t_settings_focus)focus;
 }
 
 /**
  * @brief Focuses a panel at the requested row, clamped to what it draws.
  */
-static void	enter_inventory(settings_state_t *state,
-	settings_section_t section, int row, bool rightmost)
+static void	enter_inventory(t_settings_state *state,
+	t_settings_section section, int row, bool rightmost)
 {
 	int	slots;
 	int	rows;
@@ -429,8 +429,8 @@ static void	enter_inventory(settings_state_t *state,
 		state->theme_slot = slot;
 }
 
-static int	section_slots(const settings_state_t *state,
-	settings_section_t section)
+static int	section_slots(const t_settings_state *state,
+	t_settings_section section)
 {
 	if (section == SETTINGS_SECTION_CHARACTERS)
 		return (state->character_slots);
@@ -439,7 +439,7 @@ static int	section_slots(const settings_state_t *state,
 	return (SETTINGS_BUTTON_COUNT);
 }
 
-static bool	has_inventory(const settings_state_t *state)
+static bool	has_inventory(const t_settings_state *state)
 {
 	return (state->character_slots > 0 || state->theme_slots > 0);
 }
@@ -463,10 +463,10 @@ static int	min_int(int left, int right)
 /**
  * @brief Cycles through owned character fixtures and equips the selection.
  */
-bool	settings_select_character(app_settings_view_model_t *settings,
+bool	settings_select_character(t_app_settings_view_model *settings,
 	int direction)
 {
-	app_catalogue_view_model_t	*catalogue;
+	t_app_catalogue_view_model	*catalogue;
 	int					current;
 	int					candidate;
 	int					visited;
@@ -511,7 +511,7 @@ bool	settings_select_character(app_settings_view_model_t *settings,
 /**
  * @brief Resolves a visible panel slot back to its catalogue entry.
  */
-static int	slot_to_index(const app_catalogue_view_model_t *catalogue, int slot)
+static int	slot_to_index(const t_app_catalogue_view_model *catalogue, int slot)
 {
 	if (catalogue == NULL || slot < 0 || slot >= catalogue->count
 		|| slot >= APP_CATALOGUE_MAX_ITEMS)
@@ -527,8 +527,8 @@ static int	slot_to_index(const app_catalogue_view_model_t *catalogue, int slot)
  * else the card falls back to whatever is equipped, which is what the I key
  * has always shown.
  */
-const app_catalogue_item_view_model_t	*settings_card_character(
-	const app_settings_view_model_t *settings, const settings_state_t *state)
+const t_app_catalogue_item_view_model	*settings_card_character(
+	const t_app_settings_view_model *settings, const t_settings_state *state)
 {
 	int	index;
 
@@ -554,7 +554,7 @@ const app_catalogue_item_view_model_t	*settings_card_character(
 /**
  * @brief Reports whether the powers card should be on screen at all.
  */
-bool	settings_card_visible(const settings_state_t *state)
+bool	settings_card_visible(const t_settings_state *state)
 {
 	if (state == NULL)
 		return (false);
@@ -567,11 +567,11 @@ bool	settings_card_visible(const settings_state_t *state)
  *
  * @return Changed, unchanged, locked, or invalid selection result.
  */
-settings_equip_result_t	settings_equip_character_slot(
-	app_settings_view_model_t *settings,
+t_settings_equip_result	settings_equip_character_slot(
+	t_app_settings_view_model *settings,
 	int slot)
 {
-	app_catalogue_view_model_t	*catalogue;
+	t_app_catalogue_view_model	*catalogue;
 	int					target;
 	int					index;
 
@@ -605,10 +605,10 @@ settings_equip_result_t	settings_equip_character_slot(
  *
  * @return Changed, unchanged, locked, or invalid selection result.
  */
-settings_equip_result_t	settings_equip_theme_slot(
-	app_settings_view_model_t *settings, int slot)
+t_settings_equip_result	settings_equip_theme_slot(
+	t_app_settings_view_model *settings, int slot)
 {
-	app_catalogue_view_model_t	*catalogue;
+	t_app_catalogue_view_model	*catalogue;
 	int					target;
 	int					index;
 

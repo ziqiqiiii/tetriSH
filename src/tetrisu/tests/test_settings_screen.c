@@ -81,7 +81,7 @@ static void	test_theme_preview_asset_contract(void)
 /**
  * @brief Expands a region to whole cells the way the renderer's planes do.
  */
-static void	cell_span(const settings_rect_t *rect, int cell_px_x,
+static void	cell_span(const t_settings_rect *rect, int cell_px_x,
 	int cell_px_y, int *x0, int *y0, int *x1, int *y1)
 {
 	*x0 = rect->x / cell_px_x;
@@ -101,8 +101,8 @@ static void	cell_span(const settings_rect_t *rect, int cell_px_x,
  */
 static void	test_region_planes_never_overlap(void)
 {
-	settings_layout_t	layout;
-	settings_rect_t		regions[5];
+	t_settings_layout	layout;
+	t_settings_rect		regions[5];
 	int					bounds[5][4];
 	int					cols;
 	int					rows;
@@ -172,7 +172,7 @@ static void	test_region_planes_never_overlap(void)
  */
 static void	test_backwards_focus_reaches_the_last_slot(void)
 {
-	settings_state_t	state;
+	t_settings_state	state;
 
 	settings_state_init(&state, true, 4, 7);
 	assert(state.section == SETTINGS_SECTION_CONTROLS);
@@ -202,7 +202,7 @@ static void	test_backwards_focus_reaches_the_last_slot(void)
  */
 static void	test_leaving_a_grid_focuses_the_button_below(void)
 {
-	settings_state_t	state;
+	t_settings_state	state;
 
 	settings_state_init(&state, true, 4, 7);
 	(void)settings_handle_key(&state, NCKEY_UP);
@@ -247,8 +247,8 @@ static void	test_fixture_settings_model(void)
 	static const bool	theme_owned[] = {
 		true, true, true, false, true, true, false
 	};
-	app_data_provider_t	provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider	provider;
+	t_app_screen_view_model	view;
 	int				index;
 
 	app_fixture_provider_init(&provider);
@@ -316,8 +316,8 @@ static void	test_fixture_settings_model(void)
 
 static void	test_offline_settings_are_account_free(void)
 {
-	app_data_provider_t	provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider	provider;
+	t_app_screen_view_model	view;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
@@ -341,8 +341,8 @@ static void	test_offline_settings_are_account_free(void)
 
 static void	test_settings_focus_and_actions(void)
 {
-	settings_state_t	state;
-	app_navigation_t	navigation;
+	t_settings_state	state;
+	t_app_navigation	navigation;
 
 	settings_state_init(&state, true, 4, 7);
 	assert(state.section == SETTINGS_SECTION_CONTROLS);
@@ -392,10 +392,10 @@ static void	test_settings_focus_and_actions(void)
 
 static void	test_preview_gate_and_navigation(void)
 {
-	app_auth_view_model_t	view;
-	app_data_provider_t	provider;
-	auth_form_t		form;
-	app_navigation_t	navigation;
+	t_app_auth_view_model	view;
+	t_app_data_provider	provider;
+	t_auth_form		form;
+	t_app_navigation	navigation;
 
 	app_fixture_provider_init(&provider);
 	(void)unsetenv("TETRISU_UI_PREVIEW");
@@ -430,7 +430,7 @@ static void	test_preview_gate_and_navigation(void)
 
 static void	test_settings_layout_contract(void)
 {
-	settings_layout_t	layout;
+	t_settings_layout	layout;
 	int				index;
 
 	settings_layout_build(3, 5, 54, 144, 16, 8, &layout);
@@ -458,8 +458,8 @@ static void	test_settings_layout_contract(void)
 
 static void	test_character_selection(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
@@ -477,7 +477,7 @@ static void	test_character_selection(void)
 /* The fixture uses four columns: one full character row and a partial theme row. */
 static void	test_inventory_grid_navigation(void)
 {
-	settings_state_t	state;
+	t_settings_state	state;
 	int				index;
 
 	settings_state_init(&state, true, 4, 7);
@@ -539,8 +539,8 @@ static void	test_inventory_grid_navigation(void)
 
 static void	test_slot_equipping(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,
@@ -585,10 +585,10 @@ static void	test_slot_equipping(void)
  */
 static void	test_powers_card_follows_focus(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
-	settings_state_t		state;
-	const app_catalogue_item_view_model_t	*card;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
+	t_settings_state		state;
+	const t_app_catalogue_item_view_model	*card;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_SETTINGS,

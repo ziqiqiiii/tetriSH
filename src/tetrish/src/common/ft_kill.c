@@ -1,5 +1,4 @@
 #include "common.h"
-#include <sys/wait.h>
 
 extern int	g_exit_status;
 

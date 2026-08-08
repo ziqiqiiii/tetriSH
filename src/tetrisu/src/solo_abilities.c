@@ -5,19 +5,19 @@ typedef struct s_solo_ability_definition
 	const char	*name;
 	const char	*description;
 	int			cost;
-}	solo_ability_definition_t;
+}	t_solo_ability_definition;
 
-static const solo_ability_definition_t	g_abilities[SOLO_ABILITY_COUNT] = {
+static const t_solo_ability_definition	g_abilities[SOLO_ABILITY_COUNT] = {
 	{"MIRURUN", "REMOVE BOTTOM FOUR ROWS", 2},
 	{"INVERSION", "INVERT NEXT 3 CONTROLS", 4},
 	{"PENTARIS", "SEND 5 GARBAGE LINES", 6},
 	{"SIRTET", "INVERT OCCUPIED ROWS", 8}
 };
 
-static bool	ability_is_valid(solo_ability_t ability);
-static solo_ability_result_t	remember_ability_result(solo_game_t *game,
-									solo_ability_t ability,
-									solo_ability_result_t result);
+static bool	ability_is_valid(t_solo_ability ability);
+static t_solo_ability_result	remember_ability_result(t_solo_game *game,
+									t_solo_ability ability,
+									t_solo_ability_result result);
 static int	mouse_subpixel(int event_pixel, int cell_pixels);
 
 /**
@@ -26,7 +26,7 @@ static int	mouse_subpixel(int event_pixel, int cell_pixels);
  * @param ability Ability level to inspect.
  * @return Crystal cost, or -1 for an invalid ability.
  */
-int	solo_ability_cost(solo_ability_t ability)
+int	solo_ability_cost(t_solo_ability ability)
 {
 	if (!ability_is_valid(ability))
 		return (-1);
@@ -39,7 +39,7 @@ int	solo_ability_cost(solo_ability_t ability)
  * @param ability Ability level to inspect.
  * @return Static display name, or an empty string for an invalid ability.
  */
-const char	*solo_ability_name(solo_ability_t ability)
+const char	*solo_ability_name(t_solo_ability ability)
 {
 	if (!ability_is_valid(ability))
 		return ("");
@@ -52,7 +52,7 @@ const char	*solo_ability_name(solo_ability_t ability)
  * @param ability Ability level to inspect.
  * @return Static description, or an empty string for an invalid ability.
  */
-const char	*solo_ability_description(solo_ability_t ability)
+const char	*solo_ability_description(t_solo_ability ability)
 {
 	if (!ability_is_valid(ability))
 		return ("");
@@ -68,7 +68,7 @@ const char	*solo_ability_description(solo_ability_t ability)
  * @param ability Ability level to position.
  * @return Authored canvas y coordinate, or -1 for an invalid ability.
  */
-int	solo_ability_center_y(solo_ability_t ability)
+int	solo_ability_center_y(t_solo_ability ability)
 {
 	int	cost;
 
@@ -89,9 +89,9 @@ int	solo_ability_center_y(solo_ability_t ability)
  * @param y Authored 512x384 canvas y coordinate.
  * @return Hit ability, or SOLO_ABILITY_NONE outside every target.
  */
-solo_ability_t	solo_ability_at_canvas(int x, int y)
+t_solo_ability	solo_ability_at_canvas(int x, int y)
 {
-	solo_ability_t	ability;
+	t_solo_ability	ability;
 	int				center_x;
 	int				center_y;
 
@@ -122,8 +122,8 @@ solo_ability_t	solo_ability_at_canvas(int x, int y)
  * @param canvas_y Output authored y coordinate.
  * @return true inside the fitted canvas, otherwise false.
  */
-bool	solo_mouse_canvas_position(const render_ctx_t *ctx,
-	const solo_render_t *solo, const ncinput *input,
+bool	solo_mouse_canvas_position(const t_render_ctx *ctx,
+	const t_solo_render *solo, const ncinput *input,
 	int *canvas_x, int *canvas_y)
 {
 	int64_t	physical_x;
@@ -163,8 +163,8 @@ bool	solo_mouse_canvas_position(const render_ctx_t *ctx,
  * @param ability Ability level selected by key or mouse.
  * @return Activation or rejection result also stored for HUD feedback.
  */
-solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
-	solo_ability_t ability)
+t_solo_ability_result	solo_game_activate_ability(t_solo_game *game,
+	t_solo_ability ability)
 {
 	t_board	transformed;
 	int		cost;
@@ -199,7 +199,7 @@ solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
  * @param ability Ability identifier to validate.
  * @return true only for levels one through four.
  */
-static bool	ability_is_valid(solo_ability_t ability)
+static bool	ability_is_valid(t_solo_ability ability)
 {
 	return (ability >= SOLO_ABILITY_MIRURUN
 		&& ability <= SOLO_ABILITY_SIRTET);
@@ -213,8 +213,8 @@ static bool	ability_is_valid(solo_ability_t ability)
  * @param result Activation result to display.
  * @return The supplied result.
  */
-static solo_ability_result_t	remember_ability_result(solo_game_t *game,
-	solo_ability_t ability, solo_ability_result_t result)
+static t_solo_ability_result	remember_ability_result(t_solo_game *game,
+	t_solo_ability ability, t_solo_ability_result result)
 {
 	game->last_ability = ability;
 	game->ability_result = result;

@@ -16,8 +16,7 @@
 
 NAME		:= tetrisu
 CC			:= gcc
-BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic \
-			   -D_POSIX_C_SOURCE=200809L
+BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS				:= 1
@@ -109,9 +108,9 @@ all: check-dependencies brain $(NAME_PATH)
 # owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
-		$(MAKE) --no-print-directory -C ../.. deps; \
+		$(MAKE) --no-print-directory -s -C ../.. deps; \
 	fi
-	@ $(MAKE) --no-print-directory deps
+	@ $(MAKE) --no-print-directory -s deps
 
 # --- object rule (header stays at the tetrisu root, reached via -I.) ---------
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) $(BRAIN_HEADER) | check-dependencies brain
@@ -157,7 +156,7 @@ install-notcurses-from-source:
 		bash ./scripts/install_notcurses.sh
 
 brain:
-	@ $(MAKE) --no-print-directory -C $(BRAIN_DIR)
+	@ $(MAKE) --no-print-directory -s -C $(BRAIN_DIR)
 
 # Compile/link probing is a shell responsibility; the script checks the actual
 # headers and libraries rather than trusting package-manager state.

@@ -4,6 +4,7 @@
 # include <assert.h>
 # include <ctype.h>
 # include <errno.h>
+# include <fcntl.h>
 # include <inttypes.h>
 # include <limits.h>
 # include <poll.h>
@@ -16,6 +17,7 @@
 # include <sys/wait.h>
 # include <sys/select.h>
 # include <sys/ioctl.h>
+# include <sys/stat.h>
 # include <notcurses/notcurses.h>
 # include "tetrisbrain.h"
 
@@ -767,7 +769,7 @@ typedef enum e_app_screen
 	APP_SCREEN_BATTLE_ROYALE,
 	APP_SCREEN_QUIT,
 	APP_SCREEN_COUNT
-}	app_screen_t;
+}	t_app_screen;
 
 typedef enum e_app_nav_action
 {
@@ -788,7 +790,7 @@ typedef enum e_app_nav_action
 	APP_NAV_START_BATTLE_ROYALE,
 	APP_NAV_BACK,
 	APP_NAV_QUIT
-}	app_nav_action_t;
+}	t_app_nav_action;
 
 typedef enum e_app_data_status
 {
@@ -798,7 +800,7 @@ typedef enum e_app_data_status
 	APP_DATA_EMPTY,
 	APP_DATA_UNAVAILABLE,
 	APP_DATA_ERROR
-}	app_data_status_t;
+}	t_app_data_status;
 
 typedef enum e_app_provider_result
 {
@@ -807,13 +809,13 @@ typedef enum e_app_provider_result
 	APP_PROVIDER_UNAVAILABLE,
 	APP_PROVIDER_INVALID,
 	APP_PROVIDER_ERROR
-}	app_provider_result_t;
+}	t_app_provider_result;
 
 typedef enum e_app_catalogue_kind
 {
 	APP_CATALOGUE_CHARACTERS,
 	APP_CATALOGUE_THEMES
-}	app_catalogue_kind_t;
+}	t_app_catalogue_kind;
 
 typedef enum e_tetrisu_renderer_mode
 {
@@ -821,28 +823,28 @@ typedef enum e_tetrisu_renderer_mode
 	TETRISU_RENDERER_CELL,
 	TETRISU_RENDERER_STATIONARY,
 	TETRISU_RENDERER_PIXEL
-}	tetrisu_renderer_mode_t;
+}	t_tetrisu_renderer_mode;
 
 typedef enum e_app_game_mode
 {
 	APP_GAME_MODE_NONE,
 	APP_GAME_MODE_DOUBLE,
 	APP_GAME_MODE_BATTLE_ROYALE
-}	app_game_mode_t;
+}	t_app_game_mode;
 
 typedef struct s_app_navigation
 {
-	app_screen_t	current;
-	app_screen_t	previous;
+	t_app_screen	current;
+	t_app_screen	previous;
 	bool			offline;
-}	app_navigation_t;
+}	t_app_navigation;
 
 typedef struct s_app_auth_view_model
 {
 	bool	signed_in;
 	char	username[APP_TEXT_MAX];
 	char	message[APP_TEXT_MAX];
-}	app_auth_view_model_t;
+}	t_app_auth_view_model;
 
 typedef struct s_app_profile_view_model
 {
@@ -854,13 +856,13 @@ typedef struct s_app_profile_view_model
 	uint64_t	score;
 	int			wallet_points;
 	int			rank;
-}	app_profile_view_model_t;
+}	t_app_profile_view_model;
 
 typedef struct s_app_character_ability_view_model
 {
 	char	name[APP_TEXT_MAX];
 	char	description[APP_ABILITY_TEXT_MAX];
-}	app_character_ability_view_model_t;
+}	t_app_character_ability_view_model;
 
 typedef struct s_app_catalogue_item_view_model
 {
@@ -870,48 +872,48 @@ typedef struct s_app_catalogue_item_view_model
 	int		price;
 	bool	owned;
 	bool	equipped;
-	app_character_ability_view_model_t	abilities[
+	t_app_character_ability_view_model	abilities[
 		APP_CHARACTER_ABILITY_COUNT];
-}	app_catalogue_item_view_model_t;
+}	t_app_catalogue_item_view_model;
 
 typedef struct s_app_catalogue_view_model
 {
-	app_catalogue_kind_t			kind;
+	t_app_catalogue_kind			kind;
 	int							count;
-	app_catalogue_item_view_model_t	items[APP_CATALOGUE_MAX_ITEMS];
-}	app_catalogue_view_model_t;
+	t_app_catalogue_item_view_model	items[APP_CATALOGUE_MAX_ITEMS];
+}	t_app_catalogue_view_model;
 
 typedef struct s_app_settings_view_model
 {
 	bool					signed_in;
 	bool					offline;
-	app_profile_view_model_t	profile;
-	app_catalogue_view_model_t	characters;
-	app_catalogue_view_model_t	themes;
+	t_app_profile_view_model	profile;
+	t_app_catalogue_view_model	characters;
+	t_app_catalogue_view_model	themes;
 	int					music_volume;
-	tetrisu_renderer_mode_t	renderer_mode;
+	t_tetrisu_renderer_mode	renderer_mode;
 	char					local_status[APP_TEXT_MAX];
-}	app_settings_view_model_t;
+}	t_app_settings_view_model;
 
 typedef struct s_app_leaderboard_entry_view_model
 {
 	int			position;
 	char		username[APP_TEXT_MAX];
 	uint64_t	score;
-}	app_leaderboard_entry_view_model_t;
+}	t_app_leaderboard_entry_view_model;
 
 typedef struct s_app_leaderboard_view_model
 {
 	int								count;
-	app_leaderboard_entry_view_model_t	entries[
+	t_app_leaderboard_entry_view_model	entries[
 		APP_LEADERBOARD_MAX_ENTRIES];
-}	app_leaderboard_view_model_t;
+}	t_app_leaderboard_view_model;
 
 typedef enum e_leaderboard_focus
 {
 	LEADERBOARD_FOCUS_BACK,
 	LEADERBOARD_FOCUS_REFRESH
-}	leaderboard_focus_t;
+}	t_leaderboard_focus;
 
 typedef enum e_leaderboard_action
 {
@@ -919,12 +921,12 @@ typedef enum e_leaderboard_action
 	LEADERBOARD_ACTION_BACK,
 	LEADERBOARD_ACTION_REFRESH,
 	LEADERBOARD_ACTION_QUIT
-}	leaderboard_action_t;
+}	t_leaderboard_action;
 
 typedef struct s_leaderboard_state
 {
-	leaderboard_focus_t	focus;
-}	leaderboard_state_t;
+	t_leaderboard_focus	focus;
+}	t_leaderboard_state;
 
 /*
  * Settings is navigated as three stacked regions rather than one focus ring:
@@ -937,7 +939,7 @@ typedef enum e_settings_section
 	SETTINGS_SECTION_CHARACTERS,
 	SETTINGS_SECTION_THEMES,
 	SETTINGS_SECTION_CONTROLS
-}	settings_section_t;
+}	t_settings_section;
 
 typedef enum e_settings_focus
 {
@@ -945,7 +947,7 @@ typedef enum e_settings_focus
 	SETTINGS_FOCUS_MARKETPLACE,
 	SETTINGS_FOCUS_VOLUME_DOWN,
 	SETTINGS_FOCUS_VOLUME_UP
-}	settings_focus_t;
+}	t_settings_focus;
 
 typedef enum e_settings_action
 {
@@ -959,7 +961,7 @@ typedef enum e_settings_action
 	SETTINGS_ACTION_EQUIP_CHARACTER,
 	SETTINGS_ACTION_EQUIP_THEME,
 	SETTINGS_ACTION_QUIT
-}	settings_action_t;
+}	t_settings_action;
 
 typedef enum e_settings_equip_result
 {
@@ -967,19 +969,19 @@ typedef enum e_settings_equip_result
 	SETTINGS_EQUIP_UNCHANGED,
 	SETTINGS_EQUIP_CHANGED,
 	SETTINGS_EQUIP_LOCKED
-}	settings_equip_result_t;
+}	t_settings_equip_result;
 
 typedef struct s_settings_state
 {
-	settings_section_t	section;
-	settings_focus_t	focus;
+	t_settings_section	section;
+	t_settings_focus	focus;
 	int			character_slot;
 	int			theme_slot;
 	int			character_slots;
 	int			theme_slots;
 	bool			signed_in;
 	bool			ability_info_visible;
-}	settings_state_t;
+}	t_settings_state;
 
 typedef struct s_settings_rect
 {
@@ -987,7 +989,7 @@ typedef struct s_settings_rect
 	int	y;
 	int	width;
 	int	height;
-} settings_rect_t;
+} t_settings_rect;
 
 /* Reference-coordinate geometry shared by bitmap composition and hit tests. */
 typedef struct s_settings_layout
@@ -1001,17 +1003,17 @@ typedef struct s_settings_layout
 	int			cell_px_x;
 	int			cell_px_y;
 	bool			opaque_background;
-	settings_rect_t	portrait;
-	settings_rect_t	profile;
-	settings_rect_t	characters;
-	settings_rect_t	themes;
-	settings_rect_t	stats[3];
-	settings_rect_t	buttons[SETTINGS_BUTTON_COUNT];
-	settings_rect_t	controls;
-	settings_rect_t	card;
-	settings_rect_t	volume;
-	settings_rect_t	volume_offline;
-} settings_layout_t;
+	t_settings_rect	portrait;
+	t_settings_rect	profile;
+	t_settings_rect	characters;
+	t_settings_rect	themes;
+	t_settings_rect	stats[3];
+	t_settings_rect	buttons[SETTINGS_BUTTON_COUNT];
+	t_settings_rect	controls;
+	t_settings_rect	card;
+	t_settings_rect	volume;
+	t_settings_rect	volume_offline;
+} t_settings_layout;
 
 /*
  * The Marketplace needs exactly what Settings needs: the profile the wallet
@@ -1019,7 +1021,7 @@ typedef struct s_settings_layout
  * controls. Aliasing the type keeps one provider path and one set of catalogue
  * helpers instead of two that can drift apart.
  */
-typedef app_settings_view_model_t	app_marketplace_view_model_t;
+typedef t_app_settings_view_model	t_app_marketplace_view_model;
 
 /*
  * The Marketplace is navigated as the same three stacked regions Settings uses
@@ -1032,7 +1034,7 @@ typedef enum e_marketplace_section
 	MARKETPLACE_SECTION_CHARACTERS,
 	MARKETPLACE_SECTION_THEMES,
 	MARKETPLACE_SECTION_CONTROLS
-}	marketplace_section_t;
+}	t_marketplace_section;
 
 typedef enum e_marketplace_focus
 {
@@ -1040,7 +1042,7 @@ typedef enum e_marketplace_focus
 	MARKETPLACE_FOCUS_BUY,
 	MARKETPLACE_FOCUS_VOLUME_DOWN,
 	MARKETPLACE_FOCUS_VOLUME_UP
-}	marketplace_focus_t;
+}	t_marketplace_focus;
 
 typedef enum e_marketplace_action
 {
@@ -1051,7 +1053,7 @@ typedef enum e_marketplace_action
 	MARKETPLACE_ACTION_VOLUME_DOWN,
 	MARKETPLACE_ACTION_VOLUME_UP,
 	MARKETPLACE_ACTION_QUIT
-}	marketplace_action_t;
+}	t_marketplace_action;
 
 /*
  * Marketplace feedback is a line inside the control region, not a floating
@@ -1072,7 +1074,7 @@ typedef enum e_marketplace_feedback
 	MARKETPLACE_FEEDBACK_INSUFFICIENT,
 	MARKETPLACE_FEEDBACK_LOCKED,
 	MARKETPLACE_FEEDBACK_VOLUME
-}	marketplace_feedback_t;
+}	t_marketplace_feedback;
 
 typedef enum e_marketplace_purchase_result
 {
@@ -1080,7 +1082,7 @@ typedef enum e_marketplace_purchase_result
 	MARKETPLACE_PURCHASE_OWNED,
 	MARKETPLACE_PURCHASE_INSUFFICIENT,
 	MARKETPLACE_PURCHASE_BOUGHT
-}	marketplace_purchase_result_t;
+}	t_marketplace_purchase_result;
 
 /*
  * preview records the last inventory panel the cursor visited. The detail card
@@ -1089,17 +1091,17 @@ typedef enum e_marketplace_purchase_result
  */
 typedef struct s_marketplace_state
 {
-	marketplace_section_t	section;
-	marketplace_section_t	preview;
-	marketplace_focus_t		focus;
-	marketplace_feedback_t	feedback;
+	t_marketplace_section	section;
+	t_marketplace_section	preview;
+	t_marketplace_focus		focus;
+	t_marketplace_feedback	feedback;
 	int						feedback_value;
 	int						character_slot;
 	int						theme_slot;
 	int						character_slots;
 	int						theme_slots;
 	bool					signed_in;
-}	marketplace_state_t;
+}	t_marketplace_state;
 
 typedef struct s_marketplace_rect
 {
@@ -1107,7 +1109,7 @@ typedef struct s_marketplace_rect
 	int	y;
 	int	width;
 	int	height;
-}	marketplace_rect_t;
+}	t_marketplace_rect;
 
 /* Reference-coordinate geometry shared by bitmap composition and the tests. */
 typedef struct s_marketplace_layout
@@ -1121,15 +1123,15 @@ typedef struct s_marketplace_layout
 	int					cell_px_x;
 	int					cell_px_y;
 	bool				opaque_background;
-	marketplace_rect_t	title;
-	marketplace_rect_t	wallet_card;
-	marketplace_rect_t	stats[3];
-	marketplace_rect_t	characters;
-	marketplace_rect_t	themes;
-	marketplace_rect_t	detail;
-	marketplace_rect_t	controls;
-	marketplace_rect_t	buttons[MARKETPLACE_BUTTON_COUNT];
-}	marketplace_layout_t;
+	t_marketplace_rect	title;
+	t_marketplace_rect	wallet_card;
+	t_marketplace_rect	stats[3];
+	t_marketplace_rect	characters;
+	t_marketplace_rect	themes;
+	t_marketplace_rect	detail;
+	t_marketplace_rect	controls;
+	t_marketplace_rect	buttons[MARKETPLACE_BUTTON_COUNT];
+}	t_marketplace_layout;
 
 typedef enum e_app_room_state
 {
@@ -1137,17 +1139,17 @@ typedef enum e_app_room_state
 	APP_ROOM_STATE_READY,
 	APP_ROOM_STATE_IN_GAME,
 	APP_ROOM_STATE_FINISHED
-}	app_room_state_t;
+}	t_app_room_state;
 
 typedef struct s_app_room_summary_view_model
 {
 	char				id[APP_TEXT_MAX];
 	char				owner[APP_TEXT_MAX];
-	app_game_mode_t		mode;
-	app_room_state_t	state;
+	t_app_game_mode		mode;
+	t_app_room_state	state;
 	int					players;
 	int					capacity;
-}	app_room_summary_view_model_t;
+}	t_app_room_summary_view_model;
 
 /*
  * The lobby header carries the same username, score and rank the wireframe
@@ -1156,17 +1158,17 @@ typedef struct s_app_room_summary_view_model
  */
 typedef struct s_app_lobby_view_model
 {
-	app_profile_view_model_t		profile;
+	t_app_profile_view_model		profile;
 	int							count;
-	app_room_summary_view_model_t	rooms[APP_LOBBY_MAX_ROOMS];
-}	app_lobby_view_model_t;
+	t_app_room_summary_view_model	rooms[APP_LOBBY_MAX_ROOMS];
+}	t_app_lobby_view_model;
 
 typedef struct s_app_room_player_view_model
 {
 	char	username[APP_TEXT_MAX];
 	bool	owner;
 	bool	ready;
-}	app_room_player_view_model_t;
+}	t_app_room_player_view_model;
 
 /*
  * Chat lives on the room model rather than beside it: the waiting room is the
@@ -1179,29 +1181,29 @@ typedef struct s_app_room_chat_view_model
 	char	author[APP_TEXT_MAX];
 	char	text[APP_ROOM_CHAT_TEXT_MAX];
 	bool	system;
-}	app_room_chat_view_model_t;
+}	t_app_room_chat_view_model;
 
 typedef struct s_app_room_view_model
 {
 	char						id[APP_TEXT_MAX];
-	app_game_mode_t				mode;
-	app_room_state_t			state;
+	t_app_game_mode				mode;
+	t_app_room_state			state;
 	int							required_players;
 	int							capacity;
 	int							player_count;
 	int							local_slot;
-	app_room_player_view_model_t	players[APP_ROOM_MAX_PLAYERS];
+	t_app_room_player_view_model	players[APP_ROOM_MAX_PLAYERS];
 	int							chat_count;
-	app_room_chat_view_model_t	chat[APP_ROOM_CHAT_MAX];
-}	app_room_view_model_t;
+	t_app_room_chat_view_model	chat[APP_ROOM_CHAT_MAX];
+}	t_app_room_view_model;
 
 typedef struct s_app_match_view_model
 {
 	char			room_id[APP_TEXT_MAX];
-	app_game_mode_t	mode;
+	t_app_game_mode	mode;
 	int				player_count;
 	char			status[APP_TEXT_MAX];
-}	app_match_view_model_t;
+}	t_app_match_view_model;
 
 /*
  * Multiplayer mode select. Two cards over the home artwork; the chosen mode
@@ -1212,7 +1214,7 @@ typedef enum e_mp_mode_focus
 {
 	MP_MODE_FOCUS_DOUBLE,
 	MP_MODE_FOCUS_BATTLE_ROYALE
-}	mp_mode_focus_t;
+}	t_mp_mode_focus;
 
 typedef enum e_mp_mode_action
 {
@@ -1222,20 +1224,20 @@ typedef enum e_mp_mode_action
 	MP_MODE_ACTION_VOLUME_DOWN,
 	MP_MODE_ACTION_VOLUME_UP,
 	MP_MODE_ACTION_QUIT
-}	mp_mode_action_t;
+}	t_mp_mode_action;
 
 typedef enum e_mp_mode_feedback
 {
 	MP_MODE_FEEDBACK_NONE,
 	MP_MODE_FEEDBACK_VOLUME
-}	mp_mode_feedback_t;
+}	t_mp_mode_feedback;
 
 typedef struct s_mp_mode_state
 {
-	mp_mode_focus_t		focus;
-	mp_mode_feedback_t	feedback;
+	t_mp_mode_focus		focus;
+	t_mp_mode_feedback	feedback;
 	int					feedback_value;
-}	mp_mode_state_t;
+}	t_mp_mode_state;
 
 /*
  * Create room is its own screen rather than a plane raised over the lobby. A
@@ -1252,14 +1254,14 @@ typedef enum e_create_room_action
 	CREATE_ROOM_ACTION_VOLUME_DOWN,
 	CREATE_ROOM_ACTION_VOLUME_UP,
 	CREATE_ROOM_ACTION_QUIT
-}	create_room_action_t;
+}	t_create_room_action;
 
 typedef struct s_create_room_state
 {
-	app_game_mode_t		mode;
-	mp_mode_feedback_t	feedback;
+	t_app_game_mode		mode;
+	t_mp_mode_feedback	feedback;
 	int					feedback_value;
-}	create_room_state_t;
+}	t_create_room_state;
 
 /*
  * The lobby is navigated as two sections side by side. While the join field
@@ -1271,7 +1273,7 @@ typedef enum e_lobby_section
 {
 	LOBBY_SECTION_ROOMS,
 	LOBBY_SECTION_JOIN
-}	lobby_section_t;
+}	t_lobby_section;
 
 typedef enum e_lobby_feedback
 {
@@ -1285,7 +1287,7 @@ typedef enum e_lobby_feedback
 	LOBBY_FEEDBACK_UNKNOWN_ID,
 	LOBBY_FEEDBACK_INVALID_ROOM,
 	LOBBY_FEEDBACK_FILTER
-}	lobby_feedback_t;
+}	t_lobby_feedback;
 
 typedef enum e_lobby_action
 {
@@ -1298,20 +1300,20 @@ typedef enum e_lobby_action
 	LOBBY_ACTION_VOLUME_DOWN,
 	LOBBY_ACTION_VOLUME_UP,
 	LOBBY_ACTION_QUIT
-}	lobby_action_t;
+}	t_lobby_action;
 
 typedef struct s_lobby_state
 {
-	lobby_section_t		section;
-	lobby_feedback_t	feedback;
+	t_lobby_section		section;
+	t_lobby_feedback	feedback;
 	int					feedback_value;
 	int					selected;
 	int					list_offset;
 	int					visible_count;
-	app_game_mode_t		filter;
+	t_app_game_mode		filter;
 	char				room_id[LOBBY_ROOM_ID_MAX];
 	int					room_id_length;
-}	lobby_state_t;
+}	t_lobby_state;
 
 typedef enum e_room_feedback
 {
@@ -1328,7 +1330,7 @@ typedef enum e_room_feedback
 	ROOM_FEEDBACK_CHAT_EMPTY,
 	ROOM_FEEDBACK_CHAT_FULL,
 	ROOM_FEEDBACK_VOLUME
-}	room_feedback_t;
+}	t_room_feedback;
 
 typedef enum e_room_action
 {
@@ -1341,7 +1343,7 @@ typedef enum e_room_action
 	ROOM_ACTION_VOLUME_DOWN,
 	ROOM_ACTION_VOLUME_UP,
 	ROOM_ACTION_QUIT
-}	room_action_t;
+}	t_room_action;
 
 /*
  * countdown is the only value on this screen that moves without a keystroke, so
@@ -1354,11 +1356,11 @@ typedef struct s_waiting_room_state
 	bool			counting_down;
 	int				countdown;
 	int				roster_offset;
-	room_feedback_t	feedback;
+	t_room_feedback	feedback;
 	int				feedback_value;
 	char			compose[APP_ROOM_CHAT_TEXT_MAX];
 	int				compose_length;
-}	waiting_room_state_t;
+}	t_waiting_room_state;
 
 typedef struct s_mp_rect
 {
@@ -1366,7 +1368,7 @@ typedef struct s_mp_rect
 	int	y;
 	int	width;
 	int	height;
-}	mp_rect_t;
+}	t_mp_rect;
 
 /* Reference-coordinate geometry shared by every multiplayer compositor. */
 typedef struct s_mp_layout
@@ -1380,79 +1382,79 @@ typedef struct s_mp_layout
 	int			cell_px_x;
 	int			cell_px_y;
 	bool		opaque_background;
-	mp_rect_t	panel;
-	mp_rect_t	cards;
-	mp_rect_t	card_slots[MP_MODE_CARD_COUNT];
-	mp_rect_t	rooms_plate;
-	mp_rect_t	list;
-	mp_rect_t	join_plate;
-	mp_rect_t	field;
-	mp_rect_t	status;
-	mp_rect_t	options;
-	mp_rect_t	slots_plate;
-	mp_rect_t	slots;
-	mp_rect_t	chat_plate;
-	mp_rect_t	chat;
-	mp_rect_t	controls;
-}	mp_layout_t;
+	t_mp_rect	panel;
+	t_mp_rect	cards;
+	t_mp_rect	card_slots[MP_MODE_CARD_COUNT];
+	t_mp_rect	rooms_plate;
+	t_mp_rect	list;
+	t_mp_rect	join_plate;
+	t_mp_rect	field;
+	t_mp_rect	status;
+	t_mp_rect	options;
+	t_mp_rect	slots_plate;
+	t_mp_rect	slots;
+	t_mp_rect	chat_plate;
+	t_mp_rect	chat;
+	t_mp_rect	controls;
+}	t_mp_layout;
 
 typedef union u_app_screen_data
 {
-	app_auth_view_model_t			auth;
-	app_profile_view_model_t		profile;
-	app_settings_view_model_t	settings;
-	app_marketplace_view_model_t	marketplace;
-	app_catalogue_view_model_t		catalogue;
-	app_leaderboard_view_model_t	leaderboard;
-	app_lobby_view_model_t			lobby;
-	app_room_view_model_t			room;
-	app_match_view_model_t			match;
-}	app_screen_data_t;
+	t_app_auth_view_model			auth;
+	t_app_profile_view_model		profile;
+	t_app_settings_view_model	settings;
+	t_app_marketplace_view_model	marketplace;
+	t_app_catalogue_view_model		catalogue;
+	t_app_leaderboard_view_model	leaderboard;
+	t_app_lobby_view_model			lobby;
+	t_app_room_view_model			room;
+	t_app_match_view_model			match;
+}	t_app_screen_data;
 
 typedef struct s_app_screen_view_model
 {
-	app_screen_t		screen;
-	app_data_status_t	status;
+	t_app_screen		screen;
+	t_app_data_status	status;
 	bool				local_preview;
 	char				title[APP_TEXT_MAX];
 	char				subtitle[APP_TEXT_MAX];
-	app_screen_data_t	data;
-}	app_screen_view_model_t;
+	t_app_screen_data	data;
+}	t_app_screen_view_model;
 
 typedef struct s_app_data_provider
 {
 	const char	*name;
 	bool		local_fixtures;
 	void		*userdata;
-	app_provider_result_t	(*login)(void *userdata, const char *username,
+	t_app_provider_result	(*login)(void *userdata, const char *username,
 			const char *password, const char *domain,
-			app_auth_view_model_t *view);
-	app_provider_result_t	(*sign_up)(void *userdata, const char *username,
+			t_app_auth_view_model *view);
+	t_app_provider_result	(*sign_up)(void *userdata, const char *username,
 			const char *password, const char *domain,
-			app_auth_view_model_t *view);
-	app_provider_result_t	(*load_profile)(void *userdata,
-			app_profile_view_model_t *view);
-	app_provider_result_t	(*load_settings)(void *userdata,
-			app_settings_view_model_t *view);
-	app_provider_result_t	(*load_catalogue)(void *userdata,
-			app_catalogue_kind_t kind, app_catalogue_view_model_t *view);
-	app_provider_result_t	(*preview_login)(void *userdata,
-			app_auth_view_model_t *view);
-	app_provider_result_t	(*load_leaderboard)(void *userdata,
-			app_leaderboard_view_model_t *view);
-	app_provider_result_t	(*load_lobby)(void *userdata,
-			app_lobby_view_model_t *view);
-	app_provider_result_t	(*load_room)(void *userdata, const char *room_id,
-			app_room_view_model_t *view);
+			t_app_auth_view_model *view);
+	t_app_provider_result	(*load_profile)(void *userdata,
+			t_app_profile_view_model *view);
+	t_app_provider_result	(*load_settings)(void *userdata,
+			t_app_settings_view_model *view);
+	t_app_provider_result	(*load_catalogue)(void *userdata,
+			t_app_catalogue_kind kind, t_app_catalogue_view_model *view);
+	t_app_provider_result	(*preview_login)(void *userdata,
+			t_app_auth_view_model *view);
+	t_app_provider_result	(*load_leaderboard)(void *userdata,
+			t_app_leaderboard_view_model *view);
+	t_app_provider_result	(*load_lobby)(void *userdata,
+			t_app_lobby_view_model *view);
+	t_app_provider_result	(*load_room)(void *userdata, const char *room_id,
+			t_app_room_view_model *view);
 	/*
 	 * Creating and joining are separate calls because the room they produce
 	 * differs: a created room holds its owner alone and cannot start, a joined
 	 * one already has the players the lobby listed. A server will need the same
 	 * split, so the seam is the same shape now as it will be then.
 	 */
-	app_provider_result_t	(*create_room)(void *userdata, app_game_mode_t mode,
-			app_room_view_model_t *view);
-}	app_data_provider_t;
+	t_app_provider_result	(*create_room)(void *userdata, t_app_game_mode mode,
+			t_app_room_view_model *view);
+}	t_app_data_provider;
 
 // How far the terminal can be trusted with bitmap graphics. NONE is the
 // terminal-cell compatibility renderer; STATIONARY draws bitmaps but never
@@ -1462,14 +1464,14 @@ typedef enum e_tetrisu_pixel_policy
 	TETRISU_PIXELS_NONE,
 	TETRISU_PIXELS_STATIONARY,
 	TETRISU_PIXELS_MOVABLE
-}	tetrisu_pixel_policy_t;
+}	t_tetrisu_pixel_policy;
 
 typedef enum e_leaderboard_background_action
 {
 	LEADERBOARD_BACKGROUND_CELL,
 	LEADERBOARD_BACKGROUND_REUSE,
 	LEADERBOARD_BACKGROUND_REPLACE_EXACT
-}	leaderboard_background_action_t;
+}	t_leaderboard_background_action;
 
 typedef struct s_leaderboard_layout
 {
@@ -1478,7 +1480,7 @@ typedef struct s_leaderboard_layout
 	int		rows;
 	int		cols;
 	bool	compact;
-}	leaderboard_layout_t;
+}	t_leaderboard_layout;
 
 typedef struct s_leaderboard_pixel_rect
 {
@@ -1486,7 +1488,7 @@ typedef struct s_leaderboard_pixel_rect
 	int	y;
 	int	width;
 	int	height;
-}	leaderboard_pixel_rect_t;
+}	t_leaderboard_pixel_rect;
 
 typedef struct s_leaderboard_pixel_layout
 {
@@ -1498,20 +1500,20 @@ typedef struct s_leaderboard_pixel_layout
 	int					pixel_height;
 	int					cell_px_x;
 	int					cell_px_y;
-	leaderboard_pixel_rect_t	buttons[LEADERBOARD_PIXEL_BUTTON_COUNT];
-	leaderboard_pixel_rect_t	controls;
-}	leaderboard_pixel_layout_t;
+	t_leaderboard_pixel_rect	buttons[LEADERBOARD_PIXEL_BUTTON_COUNT];
+	t_leaderboard_pixel_rect	controls;
+}	t_leaderboard_pixel_layout;
 
 typedef struct
 {
 	int	selected;
-}	menu_selection_t;
+}	t_menu_selection;
 
 typedef enum e_auth_form_mode
 {
 	AUTH_FORM_LOGIN,
 	AUTH_FORM_SIGN_UP
-}	auth_form_mode_t;
+}	t_auth_form_mode;
 
 typedef enum e_auth_focus
 {
@@ -1523,7 +1525,7 @@ typedef enum e_auth_focus
 	AUTH_FOCUS_SECONDARY,
 	AUTH_FOCUS_PREVIEW,
 	AUTH_FOCUS_OFFLINE
-}	auth_focus_t;
+}	t_auth_focus;
 
 typedef enum e_auth_feedback
 {
@@ -1531,7 +1533,7 @@ typedef enum e_auth_feedback
 	AUTH_FEEDBACK_LOADING,
 	AUTH_FEEDBACK_SUCCESS,
 	AUTH_FEEDBACK_ERROR
-}	auth_feedback_t;
+}	t_auth_feedback;
 
 typedef enum e_auth_server_state
 {
@@ -1539,7 +1541,7 @@ typedef enum e_auth_server_state
 	AUTH_SERVER_CHECKING,
 	AUTH_SERVER_ONLINE,
 	AUTH_SERVER_OFFLINE
-}	auth_server_state_t;
+}	t_auth_server_state;
 
 typedef enum e_auth_action
 {
@@ -1552,20 +1554,20 @@ typedef enum e_auth_action
 	AUTH_ACTION_OPEN_SIGN_UP,
 	AUTH_ACTION_PLAY_OFFLINE,
 	AUTH_ACTION_QUIT
-}	auth_action_t;
+}	t_auth_action;
 
 typedef struct s_auth_form
 {
-	auth_form_mode_t	mode;
-	auth_focus_t		focus;
-	auth_feedback_t	feedback;
-	auth_server_state_t	server_state;
+	t_auth_form_mode	mode;
+	t_auth_focus		focus;
+	t_auth_feedback	feedback;
+	t_auth_server_state	server_state;
 	char				username[AUTH_FIELD_MAX];
 	char				password[AUTH_FIELD_MAX];
 	char				confirm[AUTH_FIELD_MAX];
 	char				domain[AUTH_FIELD_MAX];
 	char				status[AUTH_STATUS_MAX];
-}	auth_form_t;
+}	t_auth_form;
 
 typedef enum e_audio_sfx
 {
@@ -1589,7 +1591,7 @@ typedef enum e_audio_sfx
 	AUDIO_SFX_LEVEL_UP,
 	AUDIO_SFX_PERSONAL_BEST,
 	AUDIO_SFX_COUNT
-}	audio_sfx_t;
+}	t_audio_sfx;
 
 typedef struct
 {
@@ -1604,28 +1606,28 @@ typedef struct
 	void	*game_sfx[AUDIO_SFX_COUNT];
 	char	music_path[AUDIO_PATH_MAX];
 	char	pending_music_path[AUDIO_PATH_MAX];
-}	audio_ctx_t;
+}	t_audio_ctx;
 
 typedef enum e_ui_notification_kind
 {
 	UI_NOTIFICATION_VOLUME,
 	UI_NOTIFICATION_OWNERSHIP
-}	ui_notification_kind_t;
+}	t_ui_notification_kind;
 
 typedef struct s_ui_notification
 {
-	ui_notification_kind_t	kind;
+	t_ui_notification_kind	kind;
 	char		title[UI_NOTIFICATION_TITLE_MAX + 1];
 	char		message[UI_NOTIFICATION_MESSAGE_MAX + 1];
 	int			percent;
 	uint64_t	shown_at_ms;
-}	ui_notification_t;
+}	t_ui_notification;
 
 typedef struct s_ui_notification_stack
 {
-	ui_notification_t	items[UI_NOTIFICATION_STACK_MAX];
+	t_ui_notification	items[UI_NOTIFICATION_STACK_MAX];
 	int					count;
-}	ui_notification_stack_t;
+}	t_ui_notification_stack;
 
 // One decoded RGBA surface held in memory: glyph sheets, card art, thumbnails.
 typedef struct s_pixel_asset
@@ -1633,7 +1635,7 @@ typedef struct s_pixel_asset
 	uint32_t	*pixels;
 	int			width;
 	int			height;
-}	pixel_asset_t;
+}	t_pixel_asset;
 
 /*
  * One retained backdrop. Transferring a full-screen bitmap is the dominant
@@ -1659,7 +1661,7 @@ typedef struct s_backdrop_cache
 	int					rows;
 	int					cols;
 	uint64_t			used;
-}	backdrop_cache_t;
+}	t_backdrop_cache;
 
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
@@ -1675,7 +1677,7 @@ typedef struct
 	 * one is what forces its whole bitmap back down the pty; keeping it lets a
 	 * revisit cost a restack instead of a retransfer.
 	 */
-	backdrop_cache_t	backdrops[BACKDROP_CACHE_MAX];
+	t_backdrop_cache	backdrops[BACKDROP_CACHE_MAX];
 	uint64_t			backdrop_tick;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
@@ -1736,7 +1738,7 @@ typedef struct
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
-	pixel_asset_t		leaderboard_font;
+	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
 	int					leaderboard_pixels_height;
@@ -1744,9 +1746,9 @@ typedef struct
 	struct ncplane		*leaderboard_controls_plane;
 	uint64_t			leaderboard_static_signature;
 	uint64_t			leaderboard_controls_signature;
-	pixel_asset_t		notification_font;
-	pixel_asset_t		confirmation_font;
-	ui_notification_stack_t	notifications;
+	t_pixel_asset		notification_font;
+	t_pixel_asset		confirmation_font;
+	t_ui_notification_stack	notifications;
 	int					bg_row;
 	int					bg_col;
 	int					bg_rows;
@@ -1817,7 +1819,7 @@ typedef struct
 	int					mp_background_rows;
 	int					mp_background_cols;
 	char				mp_background_source[APP_ASSET_PATH_MAX];
-	app_screen_t		mp_screen;
+	t_app_screen		mp_screen;
 	uint64_t			mp_static_signature;
 	uint64_t			mp_cards_signature;
 	uint64_t			mp_list_signature;
@@ -1828,21 +1830,21 @@ typedef struct
 	uint64_t			mp_chat_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
-	tetrisu_pixel_policy_t	pixels;
-}	render_ctx_t;
+	t_tetrisu_pixel_policy	pixels;
+}	t_render_ctx;
 
 typedef struct s_intro_stream
 {
-	render_ctx_t	*ctx;
+	t_render_ctx	*ctx;
 	int				skipped;
-}	intro_stream_t;
+}	t_intro_stream;
 
 typedef struct s_color
 {
 	unsigned	r;
 	unsigned	g;
 	unsigned	b;
-}	color_t;
+}	t_color;
 
 typedef struct s_piece_geometry
 {
@@ -1852,7 +1854,7 @@ typedef struct s_piece_geometry
 	int	max_col;
 	int	min_row;
 	int	max_row;
-}	piece_geometry_t;
+}	t_piece_geometry;
 
 typedef struct s_piece_bounds
 {
@@ -1860,7 +1862,7 @@ typedef struct s_piece_bounds
 	int	max_col;
 	int	min_row;
 	int	max_row;
-}	piece_bounds_t;
+}	t_piece_bounds;
 
 typedef enum e_solo_phase
 {
@@ -1868,7 +1870,7 @@ typedef enum e_solo_phase
 	SOLO_CLEARING,
 	SOLO_TOP_OUT_REVEAL,
 	SOLO_GAME_OVER
-}	solo_phase_t;
+}	t_solo_phase;
 
 typedef enum e_solo_action
 {
@@ -1879,7 +1881,7 @@ typedef enum e_solo_action
 	SOLO_SOFT_DROP,
 	SOLO_HARD_DROP,
 	SOLO_HOLD
-}	solo_action_t;
+}	t_solo_action;
 
 typedef enum e_solo_event
 {
@@ -1902,14 +1904,14 @@ typedef enum e_solo_event
 	SOLO_EVENT_PERSONAL_BEST = 1u << 16,
 	SOLO_EVENT_COUNTDOWN_TICK = 1u << 17,
 	SOLO_EVENT_COUNTDOWN_GO = 1u << 18
-}	solo_event_t;
+}	t_solo_event;
 
 typedef struct s_solo_handling_config
 {
 	int	das_ms;
 	int	arr_ms;
 	int	soft_drop_factor;
-}	solo_handling_config_t;
+}	t_solo_handling_config;
 
 typedef struct s_solo_handling_state
 {
@@ -1922,7 +1924,7 @@ typedef struct s_solo_handling_state
 	bool		left_held;
 	bool		right_held;
 	bool		down_held;
-}	solo_handling_state_t;
+}	t_solo_handling_state;
 
 typedef enum e_solo_ability
 {
@@ -1931,7 +1933,7 @@ typedef enum e_solo_ability
 	SOLO_ABILITY_INVERSION,
 	SOLO_ABILITY_PENTARIS,
 	SOLO_ABILITY_SIRTET
-}	solo_ability_t;
+}	t_solo_ability;
 
 typedef enum e_solo_ability_result
 {
@@ -1941,7 +1943,7 @@ typedef enum e_solo_ability_result
 	SOLO_ABILITY_RESULT_UNAVAILABLE,
 	SOLO_ABILITY_RESULT_BLOCKED,
 	SOLO_ABILITY_RESULT_INVALID
-}	solo_ability_result_t;
+}	t_solo_ability_result;
 
 typedef enum e_solo_popover_phase
 {
@@ -1949,7 +1951,7 @@ typedef enum e_solo_popover_phase
 	SOLO_POPOVER_FADING_IN,
 	SOLO_POPOVER_VISIBLE,
 	SOLO_POPOVER_FADING_OUT
-}	solo_popover_phase_t;
+}	t_solo_popover_phase;
 
 typedef struct s_solo_game
 {
@@ -1961,7 +1963,7 @@ typedef struct s_solo_game
 	t_score_state	scoring;
 	t_score_result	last_score;
 	uint64_t		personal_best;
-	solo_phase_t	phase;
+	t_solo_phase	phase;
 	t_spin_type	pending_spin;
 	t_spin_type	last_spin;
 	int				clear_rows[BRAIN_MAX_CLEAR_LINES];
@@ -1971,8 +1973,8 @@ typedef struct s_solo_game
 	int				level;
 	int				crystal_charge;
 	int				crystal_line_progress;
-	solo_ability_t	last_ability;
-	solo_ability_result_t	ability_result;
+	t_solo_ability	last_ability;
+	t_solo_ability_result	ability_result;
 	int				ability_feedback_elapsed_ms;
 	int				gravity_elapsed_ms;
 	int				lock_elapsed_ms;
@@ -1998,8 +2000,8 @@ typedef struct s_solo_game
 	bool			score_event_active;
 	bool			ability_ready_active;
 	bool			countdown_active;
-	solo_ability_t	ready_ability;
-}	solo_game_t;
+	t_solo_ability	ready_ability;
+}	t_solo_game;
 
 typedef struct s_solo_render
 {
@@ -2049,9 +2051,9 @@ typedef struct s_solo_render
 	uint64_t		active_shape_signature;
 	uint64_t		ghost_shape_signature;
 	int				settled_run_counts[BOARD_HEIGHT];
-	solo_ability_t	hovered_ability;
-	solo_ability_t	popover_ability;
-	solo_popover_phase_t	popover_phase;
+	t_solo_ability	hovered_ability;
+	t_solo_ability	popover_ability;
+	t_solo_popover_phase	popover_phase;
 	int				popover_opacity;
 	int				popover_fade_start_opacity;
 	int				popover_fade_elapsed_ms;
@@ -2064,7 +2066,7 @@ typedef struct s_solo_render
 	bool			cell_board;
 	bool			board_plane_cells;
 	char			asset_error[160];
-}	solo_render_t;
+}	t_solo_render;
 
 /* HOME_ROUTING.C */
 typedef enum e_home_route_action
@@ -2072,16 +2074,16 @@ typedef enum e_home_route_action
 	HOME_ROUTE_NAVIGATE,
 	HOME_ROUTE_SIGN_IN_REQUIRED,
 	HOME_ROUTE_BLOCKED
-}	home_route_action_t;
+}	t_home_route_action;
 
 typedef struct s_home_route
 {
-	home_route_action_t	action;
-	app_nav_action_t	nav_action;
+	t_home_route_action	action;
+	t_app_nav_action	nav_action;
 	const char			*label;
-}	home_route_t;
+}	t_home_route;
 
-home_route_t	home_menu_route(int selected, bool offline);
+t_home_route	home_menu_route(int selected, bool offline);
 void			home_sign_in_body_line1(const char *label, char *line1,
 					size_t size);
 void			home_sign_in_body_line2(char *line2, size_t size);
@@ -2094,22 +2096,22 @@ typedef enum e_sign_in_focus
 {
 	SIGN_IN_FOCUS_DISMISS,
 	SIGN_IN_FOCUS_LOGIN
-}	sign_in_focus_t;
+}	t_sign_in_focus;
 
 typedef struct s_sign_in_modal
 {
 	bool				visible;
-	sign_in_focus_t		focus;
+	t_sign_in_focus		focus;
 	const char			*label;
 	struct ncplane		*text_plane;
-}	sign_in_modal_t;
+}	t_sign_in_modal;
 
 typedef enum e_sign_in_result
 {
 	SIGN_IN_RESULT_NONE,
 	SIGN_IN_RESULT_DISMISS,
 	SIGN_IN_RESULT_LOGIN
-}	sign_in_result_t;
+}	t_sign_in_result;
 
 /* CONFIRMATION.C / RENDER_CONFIRMATION.C */
 # define CONFIRMATION_MODAL_COLS	58
@@ -2120,174 +2122,174 @@ typedef enum e_confirmation_kind
 	CONFIRM_QUIT_APP,
 	CONFIRM_LEAVE_ROOM,
 	CONFIRM_LEAVE_MATCH
-}	confirmation_kind_t;
+}	t_confirmation_kind;
 
 typedef enum e_confirmation_focus
 {
 	CONFIRM_FOCUS_NO,
 	CONFIRM_FOCUS_YES
-}	confirmation_focus_t;
+}	t_confirmation_focus;
 
 typedef enum e_confirmation_result
 {
 	CONFIRM_RESULT_NONE,
 	CONFIRM_RESULT_NO,
 	CONFIRM_RESULT_YES
-}	confirmation_result_t;
+}	t_confirmation_result;
 
 typedef struct s_confirmation_dialog
 {
 	bool				visible;
-	confirmation_kind_t	kind;
-	confirmation_focus_t	focus;
+	t_confirmation_kind	kind;
+	t_confirmation_focus	focus;
 	struct ncplane			*plane;
-}	confirmation_dialog_t;
+}	t_confirmation_dialog;
 
-void			confirmation_dialog_init(confirmation_dialog_t *dialog,
-					confirmation_kind_t kind);
-confirmation_result_t	confirmation_dialog_handle_key(
-					confirmation_dialog_t *dialog, uint32_t key);
-const char		*confirmation_title(confirmation_kind_t kind);
-const char		*confirmation_body(confirmation_kind_t kind);
-bool			confirmation_prompt_run(render_ctx_t *ctx,
-					audio_ctx_t *audio, confirmation_kind_t kind);
-bool			render_confirmation_pixel_show(render_ctx_t *ctx,
-					confirmation_dialog_t *dialog);
-void			render_confirmation_font_release(render_ctx_t *ctx);
+void			confirmation_dialog_init(t_confirmation_dialog *dialog,
+					t_confirmation_kind kind);
+t_confirmation_result	confirmation_dialog_handle_key(
+					t_confirmation_dialog *dialog, uint32_t key);
+const char		*confirmation_title(t_confirmation_kind kind);
+const char		*confirmation_body(t_confirmation_kind kind);
+bool			confirmation_prompt_run(t_render_ctx *ctx,
+					t_audio_ctx *audio, t_confirmation_kind kind);
+bool			render_confirmation_pixel_show(t_render_ctx *ctx,
+					t_confirmation_dialog *dialog);
+void			render_confirmation_font_release(t_render_ctx *ctx);
 
-void			sign_in_modal_init(sign_in_modal_t *modal);
-sign_in_result_t	sign_in_modal_handle_key(sign_in_modal_t *modal,
+void			sign_in_modal_init(t_sign_in_modal *modal);
+t_sign_in_result	sign_in_modal_handle_key(t_sign_in_modal *modal,
 						uint32_t key);
-sign_in_result_t	sign_in_modal_handle_mouse(sign_in_modal_t *modal,
-						const render_ctx_t *ctx, const ncinput *input,
+t_sign_in_result	sign_in_modal_handle_mouse(t_sign_in_modal *modal,
+						const t_render_ctx *ctx, const ncinput *input,
 						uint32_t key);
-bool			render_sign_in_show(render_ctx_t *ctx,
-					sign_in_modal_t *modal);
-bool			render_sign_in_refresh(render_ctx_t *ctx,
-					sign_in_modal_t *modal);
-void			render_sign_in_destroy(render_ctx_t *ctx,
-					sign_in_modal_t *modal);
+bool			render_sign_in_show(t_render_ctx *ctx,
+					t_sign_in_modal *modal);
+bool			render_sign_in_refresh(t_render_ctx *ctx,
+					t_sign_in_modal *modal);
+void			render_sign_in_destroy(t_render_ctx *ctx,
+					t_sign_in_modal *modal);
 
 /* APP_STATE.C */
-void			app_navigation_init(app_navigation_t *navigation,
-					app_screen_t initial);
-bool			app_navigation_dispatch(app_navigation_t *navigation,
-					app_nav_action_t action);
-app_screen_t	app_screen_parent(app_screen_t screen);
-const char		*app_screen_name(app_screen_t screen);
-app_screen_t	app_handle_key(app_screen_t current, uint32_t key);
-void			menu_move_selection(menu_selection_t *m, uint32_t key);
+void			app_navigation_init(t_app_navigation *navigation,
+					t_app_screen initial);
+bool			app_navigation_dispatch(t_app_navigation *navigation,
+					t_app_nav_action action);
+t_app_screen	app_screen_parent(t_app_screen screen);
+const char		*app_screen_name(t_app_screen screen);
+t_app_screen	app_handle_key(t_app_screen current, uint32_t key);
+void			menu_move_selection(t_menu_selection *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
 bool			app_ui_preview_enabled(void);
 
 /* APP_PROVIDER.C */
-void			app_fixture_provider_init(app_data_provider_t *provider);
-app_provider_result_t	app_provider_preview_sign_in(
-					const app_data_provider_t *provider,
-					app_auth_view_model_t *view);
-app_provider_result_t	app_screen_view_load(
-					const app_data_provider_t *provider,
-					app_screen_t screen, app_screen_view_model_t *view);
-app_provider_result_t	app_screen_view_load_for_session(
-					const app_data_provider_t *provider,
-					app_screen_t screen, bool offline,
-					app_screen_view_model_t *view);
+void			app_fixture_provider_init(t_app_data_provider *provider);
+t_app_provider_result	app_provider_preview_sign_in(
+					const t_app_data_provider *provider,
+					t_app_auth_view_model *view);
+t_app_provider_result	app_screen_view_load(
+					const t_app_data_provider *provider,
+					t_app_screen screen, t_app_screen_view_model *view);
+t_app_provider_result	app_screen_view_load_for_session(
+					const t_app_data_provider *provider,
+					t_app_screen screen, bool offline,
+					t_app_screen_view_model *view);
 void			app_settings_apply_local_controls(
-					app_settings_view_model_t *view, int music_volume,
-					tetrisu_renderer_mode_t renderer_mode);
-app_provider_result_t	app_room_view_load(
-					const app_data_provider_t *provider, const char *room_id,
-					app_screen_view_model_t *view);
-app_provider_result_t	app_room_view_create(
-					const app_data_provider_t *provider, app_game_mode_t mode,
-					app_screen_view_model_t *view);
-const char		*app_data_status_name(app_data_status_t status);
-const char		*app_game_mode_name(app_game_mode_t mode);
+					t_app_settings_view_model *view, int music_volume,
+					t_tetrisu_renderer_mode renderer_mode);
+t_app_provider_result	app_room_view_load(
+					const t_app_data_provider *provider, const char *room_id,
+					t_app_screen_view_model *view);
+t_app_provider_result	app_room_view_create(
+					const t_app_data_provider *provider, t_app_game_mode mode,
+					t_app_screen_view_model *view);
+const char		*app_data_status_name(t_app_data_status status);
+const char		*app_game_mode_name(t_app_game_mode mode);
 
 /* AUTH_FORM.C */
-void			auth_form_init(auth_form_t *form, auth_form_mode_t mode);
-void			auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode);
-void			auth_form_focus_next(auth_form_t *form);
-void			auth_form_focus_previous(auth_form_t *form);
-auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key);
-bool			auth_form_begin_server_check(auth_form_t *form);
-void			auth_form_finish_server_check(auth_form_t *form, bool online);
-bool			auth_form_online_enabled(const auth_form_t *form);
-bool			auth_form_validate(auth_form_t *form);
-app_provider_result_t	auth_form_submit(auth_form_t *form,
-					const app_data_provider_t *provider,
-					app_auth_view_model_t *view);
+void			auth_form_init(t_auth_form *form, t_auth_form_mode mode);
+void			auth_form_set_mode(t_auth_form *form, t_auth_form_mode mode);
+void			auth_form_focus_next(t_auth_form *form);
+void			auth_form_focus_previous(t_auth_form *form);
+t_auth_action	auth_form_handle_key(t_auth_form *form, uint32_t key);
+bool			auth_form_begin_server_check(t_auth_form *form);
+void			auth_form_finish_server_check(t_auth_form *form, bool online);
+bool			auth_form_online_enabled(const t_auth_form *form);
+bool			auth_form_validate(t_auth_form *form);
+t_app_provider_result	auth_form_submit(t_auth_form *form,
+					const t_app_data_provider *provider,
+					t_app_auth_view_model *view);
 bool			auth_form_mask_password(const char *password, char *masked,
 					size_t size);
 
 /* UI_NOTIFICATION.C */
-void			ui_notification_stack_init(ui_notification_stack_t *stack);
-bool			ui_notification_show(ui_notification_stack_t *stack,
+void			ui_notification_stack_init(t_ui_notification_stack *stack);
+bool			ui_notification_show(t_ui_notification_stack *stack,
 					const char *title, int percent, uint64_t now_ms);
 bool			ui_notification_show_ownership(
-					ui_notification_stack_t *stack, uint64_t now_ms);
-bool			ui_notification_update(ui_notification_stack_t *stack,
+					t_ui_notification_stack *stack, uint64_t now_ms);
+bool			ui_notification_update(t_ui_notification_stack *stack,
 					uint64_t now_ms);
-int				ui_notification_opacity(const ui_notification_t *notification,
+int				ui_notification_opacity(const t_ui_notification *notification,
 					uint64_t now_ms);
 int				ui_notification_next_wake_ms(
-					const ui_notification_stack_t *stack, uint64_t now_ms);
+					const t_ui_notification_stack *stack, uint64_t now_ms);
 int				ui_notification_next_expiry_ms(
-					const ui_notification_stack_t *stack, uint64_t now_ms);
+					const t_ui_notification_stack *stack, uint64_t now_ms);
 int				ui_notification_volume_percent(int volume);
 uint64_t		ui_notification_now_ms(void);
 
 /* RENDER_BACKGROUND.C */
-render_ctx_t	render_init(const char *image_path);
-uint32_t		render_wait_key(render_ctx_t *ctx);
-uint32_t		render_wait_input(render_ctx_t *ctx, ncinput *input);
-uint32_t		render_wait_input_timeout(render_ctx_t *ctx, ncinput *input,
+t_render_ctx	render_init(const char *image_path);
+uint32_t		render_wait_key(t_render_ctx *ctx);
+uint32_t		render_wait_input(t_render_ctx *ctx, ncinput *input);
+uint32_t		render_wait_input_timeout(t_render_ctx *ctx, ncinput *input,
 					int timeout_ms);
-void			render_teardown(render_ctx_t *ctx);
-int				render_background_replace(render_ctx_t *ctx,
+void			render_teardown(t_render_ctx *ctx);
+int				render_background_replace(t_render_ctx *ctx,
 					const char *image_path, bool stretch);
-int				render_background_replace_exact(render_ctx_t *ctx,
+int				render_background_replace_exact(t_render_ctx *ctx,
 					const char *image_path, bool stretch);
-int				render_background_replace_visual(render_ctx_t *ctx,
+int				render_background_replace_visual(t_render_ctx *ctx,
 					struct ncvisual *ncv, bool stretch);
-void				render_background_destroy(render_ctx_t *ctx);
-void				render_backdrop_forget(render_ctx_t *ctx);
-const uint32_t		*render_backdrop_pixels(const render_ctx_t *ctx,
+void				render_background_destroy(t_render_ctx *ctx);
+void				render_backdrop_forget(t_render_ctx *ctx);
+const uint32_t		*render_backdrop_pixels(const t_render_ctx *ctx,
 					int *width, int *height);
-int				render_geometry_refresh(render_ctx_t *ctx, bool repaint);
-bool				render_terminal_geometry_changed(const render_ctx_t *ctx);
-bool				render_pixel_planes_reliable(const render_ctx_t *ctx);
-bool				render_pixels_available(const render_ctx_t *ctx);
+int				render_geometry_refresh(t_render_ctx *ctx, bool repaint);
+bool				render_terminal_geometry_changed(const t_render_ctx *ctx);
+bool				render_pixel_planes_reliable(const t_render_ctx *ctx);
+bool				render_pixels_available(const t_render_ctx *ctx);
 bool				render_plane_geometry_matches(struct ncplane *plane, int y,
 					int x, unsigned rows, unsigned cols);
-bool				render_plane_blit_rgba(render_ctx_t *ctx,
+bool				render_plane_blit_rgba(t_render_ctx *ctx,
 					struct ncplane *plane, const uint32_t *pixels, int width,
 					int height, int row_stride);
-bool				render_compatibility_mode(const render_ctx_t *ctx);
-void				render_compatibility_badge_refresh(render_ctx_t *ctx);
-void				render_compatibility_badge_hide(render_ctx_t *ctx);
-void				render_notification_show_volume(render_ctx_t *ctx,
+bool				render_compatibility_mode(const t_render_ctx *ctx);
+void				render_compatibility_badge_refresh(t_render_ctx *ctx);
+void				render_compatibility_badge_hide(t_render_ctx *ctx);
+void				render_notification_show_volume(t_render_ctx *ctx,
 					int volume);
-void				render_notification_queue_volume(render_ctx_t *ctx,
+void				render_notification_queue_volume(t_render_ctx *ctx,
 					int volume);
-void				render_notification_queue_ownership(render_ctx_t *ctx);
-void				render_notification_tick(render_ctx_t *ctx);
+void				render_notification_queue_ownership(t_render_ctx *ctx);
+void				render_notification_tick(t_render_ctx *ctx);
 int					render_notification_next_wake_ms(
-					const render_ctx_t *ctx);
-void				render_notification_reflow(render_ctx_t *ctx);
-void				render_notification_raise(render_ctx_t *ctx);
-void				render_notification_destroy(render_ctx_t *ctx);
-tetrisu_pixel_policy_t	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
-					const char *term, tetrisu_renderer_mode_t forced);
+					const t_render_ctx *ctx);
+void				render_notification_reflow(t_render_ctx *ctx);
+void				render_notification_raise(t_render_ctx *ctx);
+void				render_notification_destroy(t_render_ctx *ctx);
+t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
+					const char *term, t_tetrisu_renderer_mode forced);
 bool				tetrisu_pixel_policy_supports_notification_art(
-					tetrisu_pixel_policy_t policy);
+					t_tetrisu_pixel_policy policy);
 bool				tetrisu_pixel_policy_notification_needs_reemit(
-					tetrisu_pixel_policy_t policy);
+					t_tetrisu_pixel_policy policy);
 
 /* RENDERER_POLICY.C */
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_from_value(const char *value);
-tetrisu_renderer_mode_t	tetrisu_renderer_mode_requested(void);
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_from_value(const char *value);
+t_tetrisu_renderer_mode	tetrisu_renderer_mode_requested(void);
 
 /* SOLO_LAYOUT.C */
 int				solo_layout_content_rows(int tile_rows);
@@ -2296,408 +2298,408 @@ bool				solo_layout_terminal_fits(int terminal_rows,
 					int terminal_cols, int tile_rows, int tile_cols);
 
 /* RENDER_MENU.C */
-void			render_menu_create(render_ctx_t *ctx);
-void			render_menu_move_bunny(render_ctx_t *ctx, const menu_selection_t *m);
-bool			render_menu_hit_test(const render_ctx_t *ctx,
+void			render_menu_create(t_render_ctx *ctx);
+void			render_menu_move_bunny(t_render_ctx *ctx, const t_menu_selection *m);
+bool			render_menu_hit_test(const t_render_ctx *ctx,
 					const ncinput *input, int *selected);
-void			render_menu_show_message(render_ctx_t *ctx, const char *msg);
-void			render_menu_destroy(render_ctx_t *ctx);
-struct ncplane	*render_menu_labels_create(render_ctx_t *ctx);
-int				render_menu_label_y(const render_ctx_t *ctx, int index);
-bool			render_font_mask_load(pixel_asset_t *font);
-void			render_font_mask_free(pixel_asset_t *font);
+void			render_menu_show_message(t_render_ctx *ctx, const char *msg);
+void			render_menu_destroy(t_render_ctx *ctx);
+struct ncplane	*render_menu_labels_create(t_render_ctx *ctx);
+int				render_menu_label_y(const t_render_ctx *ctx, int index);
+bool			render_font_mask_load(t_pixel_asset *font);
+void			render_font_mask_free(t_pixel_asset *font);
 
 /* RENDER_SCREEN.C */
-bool			render_screen_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view);
-void			render_screen_destroy(render_ctx_t *ctx);
+bool			render_screen_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view);
+void			render_screen_destroy(t_render_ctx *ctx);
 
 /* LEADERBOARD_SCREEN.C */
-void			leaderboard_state_init(leaderboard_state_t *state);
+void			leaderboard_state_init(t_leaderboard_state *state);
 bool			leaderboard_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			leaderboard_action_leaves_screen(leaderboard_action_t action);
-leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
+bool			leaderboard_action_leaves_screen(t_leaderboard_action action);
+t_leaderboard_action	leaderboard_handle_key(t_leaderboard_state *state,
 					uint32_t key);
-void			leaderboard_set_focus(leaderboard_state_t *state,
-					leaderboard_focus_t focus);
+void			leaderboard_set_focus(t_leaderboard_state *state,
+					t_leaderboard_focus focus);
 
 /* LEADERBOARD_PRESENTATION.C */
-leaderboard_background_action_t	leaderboard_background_action_for(
-					tetrisu_pixel_policy_t pixels, bool rebuild_requested);
+t_leaderboard_background_action	leaderboard_background_action_for(
+					t_tetrisu_pixel_policy pixels, bool rebuild_requested);
 bool			leaderboard_layout_resolve(int terminal_rows,
 					int terminal_cols, bool compatibility,
-					leaderboard_layout_t *layout);
+					t_leaderboard_layout *layout);
 void			leaderboard_pixel_layout_build(int origin_y, int origin_x,
 					int rows, int cols, int cell_px_y, int cell_px_x,
-					leaderboard_pixel_layout_t *layout);
+					t_leaderboard_pixel_layout *layout);
 bool			leaderboard_pixel_hit_test(
-					const leaderboard_pixel_layout_t *layout,
-					int input_y, int input_x, leaderboard_focus_t *focus);
-const app_leaderboard_entry_view_model_t	*leaderboard_entry_for_position(
-					const app_leaderboard_view_model_t *leaderboard,
+					const t_leaderboard_pixel_layout *layout,
+					int input_y, int input_x, t_leaderboard_focus *focus);
+const t_app_leaderboard_entry_view_model	*leaderboard_entry_for_position(
+					const t_app_leaderboard_view_model *leaderboard,
 					int position);
 
 /* SETTINGS_SCREEN.C */
-void			settings_state_init(settings_state_t *state, bool signed_in,
+void			settings_state_init(t_settings_state *state, bool signed_in,
 					int character_slots, int theme_slots);
-void			settings_state_focus_next(settings_state_t *state);
-void			settings_state_focus_previous(settings_state_t *state);
-settings_action_t	settings_handle_key(settings_state_t *state,
+void			settings_state_focus_next(t_settings_state *state);
+void			settings_state_focus_previous(t_settings_state *state);
+t_settings_action	settings_handle_key(t_settings_state *state,
 					uint32_t key);
-bool			settings_state_view_changed(const settings_state_t *before,
-					const settings_state_t *after);
+bool			settings_state_view_changed(const t_settings_state *before,
+					const t_settings_state *after);
 bool			settings_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			settings_action_leaves_screen(settings_action_t action);
+bool			settings_action_leaves_screen(t_settings_action action);
 int				settings_owned_count(
-					const app_catalogue_view_model_t *catalogue, int limit);
+					const t_app_catalogue_view_model *catalogue, int limit);
 int				settings_catalogue_count(
-					const app_catalogue_view_model_t *catalogue, int limit);
+					const t_app_catalogue_view_model *catalogue, int limit);
 int				settings_slot_rows(int slots);
-bool			settings_select_character(app_settings_view_model_t *settings,
+bool			settings_select_character(t_app_settings_view_model *settings,
 					int direction);
-settings_equip_result_t	settings_equip_character_slot(
-					app_settings_view_model_t *settings, int slot);
-settings_equip_result_t	settings_equip_theme_slot(
-					app_settings_view_model_t *settings, int slot);
-const app_catalogue_item_view_model_t	*settings_card_character(
-					const app_settings_view_model_t *settings,
-					const settings_state_t *state);
-bool			settings_card_visible(const settings_state_t *state);
+t_settings_equip_result	settings_equip_character_slot(
+					t_app_settings_view_model *settings, int slot);
+t_settings_equip_result	settings_equip_theme_slot(
+					t_app_settings_view_model *settings, int slot);
+const t_app_catalogue_item_view_model	*settings_card_character(
+					const t_app_settings_view_model *settings,
+					const t_settings_state *state);
+bool			settings_card_visible(const t_settings_state *state);
 void			settings_layout_build(int origin_y, int origin_x, int rows,
 					int cols, int cell_px_y, int cell_px_x,
-					settings_layout_t *layout);
+					t_settings_layout *layout);
 
 /* MARKETPLACE_SCREEN.C */
-void			marketplace_state_init(marketplace_state_t *state,
+void			marketplace_state_init(t_marketplace_state *state,
 					bool signed_in, int character_slots, int theme_slots);
-void			marketplace_state_focus_next(marketplace_state_t *state);
-void			marketplace_state_focus_previous(marketplace_state_t *state);
-marketplace_action_t	marketplace_handle_key(marketplace_state_t *state,
+void			marketplace_state_focus_next(t_marketplace_state *state);
+void			marketplace_state_focus_previous(t_marketplace_state *state);
+t_marketplace_action	marketplace_handle_key(t_marketplace_state *state,
 					uint32_t key);
 bool			marketplace_state_view_changed(
-					const marketplace_state_t *before,
-					const marketplace_state_t *after);
+					const t_marketplace_state *before,
+					const t_marketplace_state *after);
 bool			marketplace_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			marketplace_action_leaves_screen(marketplace_action_t action);
-marketplace_section_t	marketplace_focused_section(
-					const marketplace_state_t *state);
-int				marketplace_focused_slot(const marketplace_state_t *state);
-const app_catalogue_view_model_t	*marketplace_focused_catalogue(
-					const app_marketplace_view_model_t *market,
-					const marketplace_state_t *state);
-const app_catalogue_item_view_model_t	*marketplace_focused_item(
-					const app_marketplace_view_model_t *market,
-					const marketplace_state_t *state);
+bool			marketplace_action_leaves_screen(t_marketplace_action action);
+t_marketplace_section	marketplace_focused_section(
+					const t_marketplace_state *state);
+int				marketplace_focused_slot(const t_marketplace_state *state);
+const t_app_catalogue_view_model	*marketplace_focused_catalogue(
+					const t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
+const t_app_catalogue_item_view_model	*marketplace_focused_item(
+					const t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
 bool			marketplace_focused_is_character(
-					const marketplace_state_t *state);
-marketplace_purchase_result_t	marketplace_buy_focused(
-					app_marketplace_view_model_t *market,
-					const marketplace_state_t *state);
-settings_equip_result_t	marketplace_equip_focused(
-					app_marketplace_view_model_t *market,
-					const marketplace_state_t *state);
+					const t_marketplace_state *state);
+t_marketplace_purchase_result	marketplace_buy_focused(
+					t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
+t_settings_equip_result	marketplace_equip_focused(
+					t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
 bool			marketplace_can_afford(
-					const app_marketplace_view_model_t *market,
-					const app_catalogue_item_view_model_t *item);
-void			marketplace_set_feedback(marketplace_state_t *state,
-					marketplace_feedback_t feedback, int value);
-const char		*marketplace_feedback_text(const marketplace_state_t *state,
+					const t_app_marketplace_view_model *market,
+					const t_app_catalogue_item_view_model *item);
+void			marketplace_set_feedback(t_marketplace_state *state,
+					t_marketplace_feedback feedback, int value);
+const char		*marketplace_feedback_text(const t_marketplace_state *state,
 					char *out, size_t size);
 
 /* MARKETPLACE_LAYOUT.C */
 void			marketplace_layout_build(int origin_y, int origin_x, int rows,
 					int cols, int cell_px_y, int cell_px_x,
-					marketplace_layout_t *layout);
+					t_marketplace_layout *layout);
 
 /* RENDER_MARKETPLACE.C */
-bool			render_marketplace_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const marketplace_state_t *state, bool rebuild_background);
-void			render_marketplace_destroy(render_ctx_t *ctx);
+bool			render_marketplace_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_marketplace_state *state, bool rebuild_background);
+void			render_marketplace_destroy(t_render_ctx *ctx);
 
 /* RENDER_MARKETPLACE_FONT.C */
-bool			render_marketplace_pixel_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const marketplace_state_t *state, bool rebuild_background);
-void			render_marketplace_pixel_destroy(render_ctx_t *ctx);
+bool			render_marketplace_pixel_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_marketplace_state *state, bool rebuild_background);
+void			render_marketplace_pixel_destroy(t_render_ctx *ctx);
 
 /* MULTIPLAYER_SCREEN.C */
-void			mp_mode_state_init(mp_mode_state_t *state);
-mp_mode_action_t	mp_mode_handle_key(mp_mode_state_t *state, uint32_t key);
-bool			mp_mode_state_view_changed(const mp_mode_state_t *before,
-					const mp_mode_state_t *after);
+void			mp_mode_state_init(t_mp_mode_state *state);
+t_mp_mode_action	mp_mode_handle_key(t_mp_mode_state *state, uint32_t key);
+bool			mp_mode_state_view_changed(const t_mp_mode_state *before,
+					const t_mp_mode_state *after);
 bool			mp_mode_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			mp_mode_action_leaves_screen(mp_mode_action_t action);
-app_game_mode_t	mp_mode_focused_mode(const mp_mode_state_t *state);
+bool			mp_mode_action_leaves_screen(t_mp_mode_action action);
+t_app_game_mode	mp_mode_focused_mode(const t_mp_mode_state *state);
 const char		*mp_mode_card_name(int index);
 const char		*mp_mode_card_players(int index);
 const char		*mp_mode_card_line(int index, int line);
-bool			multiplayer_room_capacity_valid(app_game_mode_t mode,
+bool			multiplayer_room_capacity_valid(t_app_game_mode mode,
 					int capacity);
-void			create_room_state_init(create_room_state_t *state,
-					app_game_mode_t mode);
-create_room_action_t	create_room_handle_key(create_room_state_t *state,
+void			create_room_state_init(t_create_room_state *state,
+					t_app_game_mode mode);
+t_create_room_action	create_room_handle_key(t_create_room_state *state,
 					uint32_t key);
 bool			create_room_state_view_changed(
-					const create_room_state_t *before,
-					const create_room_state_t *after);
-bool			create_room_action_leaves_screen(create_room_action_t action);
-int				create_room_focused_index(const create_room_state_t *state);
-const char		*mp_feedback_text(mp_mode_feedback_t feedback, int value,
+					const t_create_room_state *before,
+					const t_create_room_state *after);
+bool			create_room_action_leaves_screen(t_create_room_action action);
+int				create_room_focused_index(const t_create_room_state *state);
+const char		*mp_feedback_text(t_mp_mode_feedback feedback, int value,
 					char *out, size_t size);
 
 /* LOBBY_SCREEN.C */
-void			lobby_state_init(lobby_state_t *state, app_game_mode_t filter,
-					const app_lobby_view_model_t *lobby);
-void			lobby_state_sync(lobby_state_t *state,
-					const app_lobby_view_model_t *lobby);
-lobby_action_t	lobby_handle_key(lobby_state_t *state, uint32_t key);
-bool			lobby_state_view_changed(const lobby_state_t *before,
-					const lobby_state_t *after);
+void			lobby_state_init(t_lobby_state *state, t_app_game_mode filter,
+					const t_app_lobby_view_model *lobby);
+void			lobby_state_sync(t_lobby_state *state,
+					const t_app_lobby_view_model *lobby);
+t_lobby_action	lobby_handle_key(t_lobby_state *state, uint32_t key);
+bool			lobby_state_view_changed(const t_lobby_state *before,
+					const t_lobby_state *after);
 bool			lobby_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			lobby_action_leaves_screen(lobby_action_t action);
-int				lobby_visible_count(const app_lobby_view_model_t *lobby,
-					app_game_mode_t filter);
-const app_room_summary_view_model_t	*lobby_visible_room(
-					const app_lobby_view_model_t *lobby,
-					app_game_mode_t filter, int index);
-const app_room_summary_view_model_t	*lobby_selected_room(
-					const app_lobby_view_model_t *lobby,
-					const lobby_state_t *state);
-const app_room_summary_view_model_t	*lobby_room_by_id(
-					const app_lobby_view_model_t *lobby, const char *id);
-lobby_feedback_t	lobby_join_blocker(
-					const app_room_summary_view_model_t *room);
-const char		*lobby_mode_tag(app_game_mode_t mode);
-const char		*lobby_state_tag(app_room_state_t state);
-const char		*lobby_filter_name(app_game_mode_t filter);
-void			lobby_set_feedback(lobby_state_t *state,
-					lobby_feedback_t feedback, int value);
-const char		*lobby_feedback_text(const lobby_state_t *state, char *out,
+bool			lobby_action_leaves_screen(t_lobby_action action);
+int				lobby_visible_count(const t_app_lobby_view_model *lobby,
+					t_app_game_mode filter);
+const t_app_room_summary_view_model	*lobby_visible_room(
+					const t_app_lobby_view_model *lobby,
+					t_app_game_mode filter, int index);
+const t_app_room_summary_view_model	*lobby_selected_room(
+					const t_app_lobby_view_model *lobby,
+					const t_lobby_state *state);
+const t_app_room_summary_view_model	*lobby_room_by_id(
+					const t_app_lobby_view_model *lobby, const char *id);
+t_lobby_feedback	lobby_join_blocker(
+					const t_app_room_summary_view_model *room);
+const char		*lobby_mode_tag(t_app_game_mode mode);
+const char		*lobby_state_tag(t_app_room_state state);
+const char		*lobby_filter_name(t_app_game_mode filter);
+void			lobby_set_feedback(t_lobby_state *state,
+					t_lobby_feedback feedback, int value);
+const char		*lobby_feedback_text(const t_lobby_state *state, char *out,
 					size_t size);
 
 /* WAITING_ROOM_SCREEN.C */
-void			waiting_room_state_init(waiting_room_state_t *state);
-room_action_t	waiting_room_handle_key(waiting_room_state_t *state,
-					const app_room_view_model_t *room, uint32_t key);
+void			waiting_room_state_init(t_waiting_room_state *state);
+t_room_action	waiting_room_handle_key(t_waiting_room_state *state,
+					const t_app_room_view_model *room, uint32_t key);
 bool			waiting_room_state_view_changed(
-					const waiting_room_state_t *before,
-					const waiting_room_state_t *after);
+					const t_waiting_room_state *before,
+					const t_waiting_room_state *after);
 bool			waiting_room_navigation_keys_coalesce(uint32_t active_key,
 					uint32_t queued_key);
-bool			waiting_room_action_leaves_screen(room_action_t action);
-int				waiting_room_ready_count(const app_room_view_model_t *room);
-int				waiting_room_required_ready(const app_room_view_model_t *room);
-int				waiting_room_slot_count(const app_room_view_model_t *room);
+bool			waiting_room_action_leaves_screen(t_room_action action);
+int				waiting_room_ready_count(const t_app_room_view_model *room);
+int				waiting_room_required_ready(const t_app_room_view_model *room);
+int				waiting_room_slot_count(const t_app_room_view_model *room);
 int				waiting_room_visible_slot_count(
-					const app_room_view_model_t *room);
-bool			waiting_room_can_start(const app_room_view_model_t *room);
+					const t_app_room_view_model *room);
+bool			waiting_room_can_start(const t_app_room_view_model *room);
 bool			waiting_room_auto_start_allowed(
-					const app_room_view_model_t *room);
-bool			waiting_room_sync_state(app_room_view_model_t *room);
-bool			waiting_room_local_is_owner(const app_room_view_model_t *room);
-bool			waiting_room_local_ready(const app_room_view_model_t *room);
-bool			waiting_room_toggle_ready(app_room_view_model_t *room);
-room_feedback_t	waiting_room_start_blocker(const app_room_view_model_t *room);
-bool			waiting_room_begin_countdown(waiting_room_state_t *state);
-bool			waiting_room_cancel_countdown(waiting_room_state_t *state);
-bool			waiting_room_tick(waiting_room_state_t *state);
-bool			waiting_room_append_chat(app_room_view_model_t *room,
+					const t_app_room_view_model *room);
+bool			waiting_room_sync_state(t_app_room_view_model *room);
+bool			waiting_room_local_is_owner(const t_app_room_view_model *room);
+bool			waiting_room_local_ready(const t_app_room_view_model *room);
+bool			waiting_room_toggle_ready(t_app_room_view_model *room);
+t_room_feedback	waiting_room_start_blocker(const t_app_room_view_model *room);
+bool			waiting_room_begin_countdown(t_waiting_room_state *state);
+bool			waiting_room_cancel_countdown(t_waiting_room_state *state);
+bool			waiting_room_tick(t_waiting_room_state *state);
+bool			waiting_room_append_chat(t_app_room_view_model *room,
 					const char *author, const char *text, bool system);
-bool			waiting_room_send_chat(app_room_view_model_t *room,
-					waiting_room_state_t *state);
-const char		*waiting_room_status_text(const app_room_view_model_t *room,
-					const waiting_room_state_t *state, char *out, size_t size);
-const char		*waiting_room_slot_label(const app_room_view_model_t *room,
+bool			waiting_room_send_chat(t_app_room_view_model *room,
+					t_waiting_room_state *state);
+const char		*waiting_room_status_text(const t_app_room_view_model *room,
+					const t_waiting_room_state *state, char *out, size_t size);
+const char		*waiting_room_slot_label(const t_app_room_view_model *room,
 					int index, char *out, size_t size);
-const char		*waiting_room_badge_text(const app_room_view_model_t *room,
+const char		*waiting_room_badge_text(const t_app_room_view_model *room,
 					int index);
-const char		*waiting_room_feedback_text(const waiting_room_state_t *state,
+const char		*waiting_room_feedback_text(const t_waiting_room_state *state,
 					char *out, size_t size);
-app_nav_action_t	waiting_room_launch_action(
-					const app_room_view_model_t *room);
+t_app_nav_action	waiting_room_launch_action(
+					const t_app_room_view_model *room);
 
 /* MULTIPLAYER_LAYOUT.C */
-void			mp_layout_build(app_screen_t screen, int origin_y, int origin_x,
+void			mp_layout_build(t_app_screen screen, int origin_y, int origin_x,
 					int rows, int cols, int cell_px_y, int cell_px_x,
-					mp_layout_t *layout);
+					t_mp_layout *layout);
 
 /* RENDER_MULTIPLAYER.C */
-bool			render_mp_mode_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const mp_mode_state_t *state, bool rebuild_background);
-bool			render_lobby_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const lobby_state_t *state, bool rebuild_background);
-bool			render_create_room_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const create_room_state_t *state, bool rebuild_background);
-bool			render_waiting_room_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const waiting_room_state_t *state, bool rebuild_background);
-void			render_multiplayer_destroy(render_ctx_t *ctx);
+bool			render_mp_mode_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_mp_mode_state *state, bool rebuild_background);
+bool			render_lobby_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_lobby_state *state, bool rebuild_background);
+bool			render_create_room_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_create_room_state *state, bool rebuild_background);
+bool			render_waiting_room_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_waiting_room_state *state, bool rebuild_background);
+void			render_multiplayer_destroy(t_render_ctx *ctx);
 
 /* RENDER_MULTIPLAYER_FONT.C */
-bool			render_mp_pixel_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view, const void *state,
+bool			render_mp_pixel_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view, const void *state,
 					bool rebuild_background);
-void			render_mp_pixel_destroy(render_ctx_t *ctx);
+void			render_mp_pixel_destroy(t_render_ctx *ctx);
 
 /* RENDER_LEADERBOARD.C */
-bool			render_leaderboard_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const leaderboard_state_t *state,
+bool			render_leaderboard_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_leaderboard_state *state,
 					bool rebuild_background);
-bool			render_leaderboard_hit_test(const render_ctx_t *ctx,
-					const ncinput *input, leaderboard_focus_t *focus);
-void			render_leaderboard_destroy(render_ctx_t *ctx);
-bool			render_leaderboard_pixel_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const leaderboard_state_t *state,
+bool			render_leaderboard_hit_test(const t_render_ctx *ctx,
+					const ncinput *input, t_leaderboard_focus *focus);
+void			render_leaderboard_destroy(t_render_ctx *ctx);
+bool			render_leaderboard_pixel_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_leaderboard_state *state,
 					bool rebuild_background);
-void			render_leaderboard_pixel_destroy(render_ctx_t *ctx);
+void			render_leaderboard_pixel_destroy(t_render_ctx *ctx);
 
 /* RENDER_SETTINGS.C */
-bool			render_settings_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const settings_state_t *state,
+bool			render_settings_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_settings_state *state,
 					bool rebuild_background);
-void			render_settings_destroy(render_ctx_t *ctx);
-bool			render_settings_pixel_show(render_ctx_t *ctx,
-					const app_screen_view_model_t *view,
-					const settings_state_t *state, bool rebuild_background);
-void			render_settings_pixel_destroy(render_ctx_t *ctx);
+void			render_settings_destroy(t_render_ctx *ctx);
+bool			render_settings_pixel_show(t_render_ctx *ctx,
+					const t_app_screen_view_model *view,
+					const t_settings_state *state, bool rebuild_background);
+void			render_settings_pixel_destroy(t_render_ctx *ctx);
 
 /* RENDER_AUTH.C */
-bool			render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
+bool			render_auth_show(t_render_ctx *ctx, const t_auth_form *form,
 					bool rebuild_background);
-bool			render_auth_hit_test(const render_ctx_t *ctx,
-					const auth_form_t *form, const ncinput *input,
-					auth_focus_t *focus);
-void			render_auth_destroy(render_ctx_t *ctx);
-bool			render_auth_pixel_background_refresh(render_ctx_t *ctx,
-					const auth_form_t *form, bool force);
-void			render_auth_pixel_background_reset(render_ctx_t *ctx);
-bool			render_auth_pixel_overlay_refresh(render_ctx_t *ctx,
-					const auth_form_t *form);
-void			render_auth_pixel_overlay_destroy(render_ctx_t *ctx);
+bool			render_auth_hit_test(const t_render_ctx *ctx,
+					const t_auth_form *form, const ncinput *input,
+					t_auth_focus *focus);
+void			render_auth_destroy(t_render_ctx *ctx);
+bool			render_auth_pixel_background_refresh(t_render_ctx *ctx,
+					const t_auth_form *form, bool force);
+void			render_auth_pixel_background_reset(t_render_ctx *ctx);
+bool			render_auth_pixel_overlay_refresh(t_render_ctx *ctx,
+					const t_auth_form *form);
+void			render_auth_pixel_overlay_destroy(t_render_ctx *ctx);
 
 /* RENDER_INTRO.C */
-int				render_intro_play(render_ctx_t *ctx, audio_ctx_t *audio,
+int				render_intro_play(t_render_ctx *ctx, t_audio_ctx *audio,
 					const char *video_path, const char *audio_path);
 
 /* AUDIO.C */
-int				audio_init(audio_ctx_t *audio);
-void			audio_play_music(audio_ctx_t *audio, const char *path);
-void			audio_transition_music(audio_ctx_t *audio, const char *path,
+int				audio_init(t_audio_ctx *audio);
+void			audio_play_music(t_audio_ctx *audio, const char *path);
+void			audio_transition_music(t_audio_ctx *audio, const char *path,
 					int duration_ms);
-bool			audio_update(audio_ctx_t *audio, int elapsed_ms);
-int				audio_next_wake_ms(const audio_ctx_t *audio);
-void			audio_play_once(audio_ctx_t *audio, const char *path);
-void			audio_stop_music(audio_ctx_t *audio);
-void			audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
+bool			audio_update(t_audio_ctx *audio, int elapsed_ms);
+int				audio_next_wake_ms(const t_audio_ctx *audio);
+void			audio_play_once(t_audio_ctx *audio, const char *path);
+void			audio_stop_music(t_audio_ctx *audio);
+void			audio_load_menu_sfx(t_audio_ctx *audio, const char *move_path,
 					const char *select_path);
-void			audio_load_game_sfx(audio_ctx_t *audio);
-void			audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx);
-void			audio_play_menu_move(audio_ctx_t *audio);
-void			audio_play_menu_select(audio_ctx_t *audio);
-void			audio_play_room_entry(audio_ctx_t *audio);
-void			audio_set_music_volume(audio_ctx_t *audio, int volume);
-void			audio_apply_effect_volume(audio_ctx_t *audio);
-void			audio_volume_up(audio_ctx_t *audio);
-void			audio_volume_down(audio_ctx_t *audio);
-void			audio_teardown(audio_ctx_t *audio);
+void			audio_load_game_sfx(t_audio_ctx *audio);
+void			audio_play_sfx(t_audio_ctx *audio, t_audio_sfx sfx);
+void			audio_play_menu_move(t_audio_ctx *audio);
+void			audio_play_menu_select(t_audio_ctx *audio);
+void			audio_play_room_entry(t_audio_ctx *audio);
+void			audio_set_music_volume(t_audio_ctx *audio, int volume);
+void			audio_apply_effect_volume(t_audio_ctx *audio);
+void			audio_volume_up(t_audio_ctx *audio);
+void			audio_volume_down(t_audio_ctx *audio);
+void			audio_teardown(t_audio_ctx *audio);
 
 /* SOLO_GAME.C — pure local authority, replaced by tetrisd STATE later */
-void			solo_game_init(solo_game_t *game, uint32_t seed);
-bool			solo_game_apply_action(solo_game_t *game, solo_action_t action);
-bool			solo_game_update(solo_game_t *game, int elapsed_ms);
-bool			solo_game_update_danger(solo_game_t *game, int elapsed_ms);
-unsigned		solo_game_danger_dim(const solo_game_t *game);
-uint32_t		solo_game_take_events(solo_game_t *game);
-void			solo_game_set_personal_best(solo_game_t *game,
+void			solo_game_init(t_solo_game *game, uint32_t seed);
+bool			solo_game_apply_action(t_solo_game *game, t_solo_action action);
+bool			solo_game_update(t_solo_game *game, int elapsed_ms);
+bool			solo_game_update_danger(t_solo_game *game, int elapsed_ms);
+unsigned		solo_game_danger_dim(const t_solo_game *game);
+uint32_t		solo_game_take_events(t_solo_game *game);
+void			solo_game_set_personal_best(t_solo_game *game,
 					uint64_t score);
-bool			solo_game_finish_personal_best(solo_game_t *game);
-unsigned		solo_game_personal_best_opacity(const solo_game_t *game);
-void			solo_game_start_countdown(solo_game_t *game);
-int				solo_game_countdown_value(const solo_game_t *game);
-unsigned		solo_game_countdown_opacity(const solo_game_t *game);
-unsigned		solo_game_score_event_opacity(const solo_game_t *game);
-unsigned		solo_game_ability_ready_opacity(const solo_game_t *game);
-unsigned		solo_game_ability_result_opacity(const solo_game_t *game);
-int				solo_game_next_wake_ms(const solo_game_t *game);
+bool			solo_game_finish_personal_best(t_solo_game *game);
+unsigned		solo_game_personal_best_opacity(const t_solo_game *game);
+void			solo_game_start_countdown(t_solo_game *game);
+int				solo_game_countdown_value(const t_solo_game *game);
+unsigned		solo_game_countdown_opacity(const t_solo_game *game);
+unsigned		solo_game_score_event_opacity(const t_solo_game *game);
+unsigned		solo_game_ability_ready_opacity(const t_solo_game *game);
+unsigned		solo_game_ability_result_opacity(const t_solo_game *game);
+int				solo_game_next_wake_ms(const t_solo_game *game);
 int				solo_clear_duration_ms(int level);
-t_piece			solo_game_ghost(const solo_game_t *game);
-bool			solo_game_row_is_clearing(const solo_game_t *game, int row);
-void			solo_game_toggle_pause(solo_game_t *game);
+t_piece			solo_game_ghost(const t_solo_game *game);
+bool			solo_game_row_is_clearing(const t_solo_game *game, int row);
+void			solo_game_toggle_pause(t_solo_game *game);
 
 /* SOLO_PERSISTENCE.C */
 uint64_t		solo_best_load(void);
 bool			solo_best_store(uint64_t score);
 
 /* SOLO_HANDLING.C — terminal-aware DAS, ARR, and soft-drop timing */
-solo_handling_config_t	solo_handling_default_config(void);
-void			solo_handling_reset(solo_handling_state_t *state);
-bool			solo_handling_event(solo_handling_state_t *state,
-					const solo_handling_config_t *config, uint32_t key,
-					ncintype_e event_type, solo_action_t *action);
-int				solo_handling_update(solo_handling_state_t *state,
-					const solo_handling_config_t *config, int gravity_ms,
-					int elapsed_ms, solo_action_t *actions, int capacity);
+t_solo_handling_config	solo_handling_default_config(void);
+void			solo_handling_reset(t_solo_handling_state *state);
+bool			solo_handling_event(t_solo_handling_state *state,
+					const t_solo_handling_config *config, uint32_t key,
+					ncintype_e event_type, t_solo_action *action);
+int				solo_handling_update(t_solo_handling_state *state,
+					const t_solo_handling_config *config, int gravity_ms,
+					int elapsed_ms, t_solo_action *actions, int capacity);
 int				solo_handling_next_wake_ms(
-					const solo_handling_state_t *state,
-					const solo_handling_config_t *config, int gravity_ms);
+					const t_solo_handling_state *state,
+					const t_solo_handling_config *config, int gravity_ms);
 
 /* SOLO_ABILITIES.C — temporary local ability authority for Solo testing */
-int				solo_ability_cost(solo_ability_t ability);
-const char		*solo_ability_name(solo_ability_t ability);
-const char		*solo_ability_description(solo_ability_t ability);
-int				solo_ability_center_y(solo_ability_t ability);
-solo_ability_t	solo_ability_at_canvas(int x, int y);
-bool				solo_mouse_canvas_position(const render_ctx_t *ctx,
-					const solo_render_t *solo, const ncinput *input,
+int				solo_ability_cost(t_solo_ability ability);
+const char		*solo_ability_name(t_solo_ability ability);
+const char		*solo_ability_description(t_solo_ability ability);
+int				solo_ability_center_y(t_solo_ability ability);
+t_solo_ability	solo_ability_at_canvas(int x, int y);
+bool				solo_mouse_canvas_position(const t_render_ctx *ctx,
+					const t_solo_render *solo, const ncinput *input,
 					int *canvas_x, int *canvas_y);
-solo_ability_result_t	solo_game_activate_ability(solo_game_t *game,
-					solo_ability_t ability);
+t_solo_ability_result	solo_game_activate_ability(t_solo_game *game,
+					t_solo_ability ability);
 
 /* SOLO_POPOVER.C — timed hover presentation shared by every renderer */
-bool			solo_popover_set_hover(solo_render_t *solo,
-					solo_ability_t ability);
-bool			solo_popover_update(solo_render_t *solo,
-					const solo_game_t *game, int elapsed_ms);
-int				solo_popover_next_wake_ms(const solo_render_t *solo);
-solo_ability_t	solo_popover_displayed_ability(const solo_render_t *solo,
-					const solo_game_t *game);
-int				solo_popover_displayed_opacity(const solo_render_t *solo,
-					const solo_game_t *game);
+bool			solo_popover_set_hover(t_solo_render *solo,
+					t_solo_ability ability);
+bool			solo_popover_update(t_solo_render *solo,
+					const t_solo_game *game, int elapsed_ms);
+int				solo_popover_next_wake_ms(const t_solo_render *solo);
+t_solo_ability	solo_popover_displayed_ability(const t_solo_render *solo,
+					const t_solo_game *game);
+int				solo_popover_displayed_opacity(const t_solo_render *solo,
+					const t_solo_game *game);
 
 /* RENDER_SOLO_CANVAS.C */
-bool			solo_canvas_load(solo_render_t *solo);
+bool			solo_canvas_load(t_solo_render *solo);
 int				solo_canvas_piece_tile(t_piece_type type);
 uint32_t		solo_canvas_ghost_tile_pixel(uint32_t pixel, int x, int y);
 bool			solo_canvas_buffer_bytes(int width, int height, size_t *bytes);
-void			solo_canvas_set_error(solo_render_t *solo, const char *message,
+void			solo_canvas_set_error(t_solo_render *solo, const char *message,
 					const char *path);
-void			solo_canvas_compose_hud(solo_render_t *solo,
-					const solo_game_t *game);
-void			solo_canvas_compose_board(solo_render_t *solo,
-					const solo_game_t *game);
-void			solo_canvas_compose_danger_background(solo_render_t *solo,
-					const solo_game_t *game);
+void			solo_canvas_compose_hud(t_solo_render *solo,
+					const t_solo_game *game);
+void			solo_canvas_compose_board(t_solo_render *solo,
+					const t_solo_game *game);
+void			solo_canvas_compose_danger_background(t_solo_render *solo,
+					const t_solo_game *game);
 
 /* RENDER_SOLO.C */
-void			render_solo_create(render_ctx_t *ctx, solo_render_t *solo);
-void			render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
-					const solo_game_t *game);
-void			render_solo_resize(render_ctx_t *ctx, solo_render_t *solo);
-void			render_solo_destroy(solo_render_t *solo);
+void			render_solo_create(t_render_ctx *ctx, t_solo_render *solo);
+void			render_solo_draw(t_render_ctx *ctx, t_solo_render *solo,
+					const t_solo_game *game);
+void			render_solo_resize(t_render_ctx *ctx, t_solo_render *solo);
+void			render_solo_destroy(t_solo_render *solo);
 
 /* SOLO_MODE.C */
-int				solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio);
+int				solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio);
 
 # endif

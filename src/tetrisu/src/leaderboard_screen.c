@@ -3,7 +3,7 @@
 /**
  * @brief Starts the leaderboard with the safe Back action focused.
  */
-void	leaderboard_state_init(leaderboard_state_t *state)
+void	leaderboard_state_init(t_leaderboard_state *state)
 {
 	if (state != NULL)
 		state->focus = LEADERBOARD_FOCUS_BACK;
@@ -35,7 +35,7 @@ bool	leaderboard_navigation_keys_coalesce(uint32_t active_key,
  * @param action Action returned by leaderboard_handle_key().
  * @return true when queued input must be discarded before navigation.
  */
-bool	leaderboard_action_leaves_screen(leaderboard_action_t action)
+bool	leaderboard_action_leaves_screen(t_leaderboard_action action)
 {
 	return (action == LEADERBOARD_ACTION_BACK
 		|| action == LEADERBOARD_ACTION_QUIT);
@@ -44,7 +44,7 @@ bool	leaderboard_action_leaves_screen(leaderboard_action_t action)
 /**
  * @brief Maps keyboard input to semantic leaderboard actions.
  */
-leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
+t_leaderboard_action	leaderboard_handle_key(t_leaderboard_state *state,
 	uint32_t key)
 {
 	if (state == NULL)
@@ -75,8 +75,8 @@ leaderboard_action_t	leaderboard_handle_key(leaderboard_state_t *state,
 /**
  * @brief Applies a validated pointer focus.
  */
-void	leaderboard_set_focus(leaderboard_state_t *state,
-	leaderboard_focus_t focus)
+void	leaderboard_set_focus(t_leaderboard_state *state,
+	t_leaderboard_focus focus)
 {
 	if (state != NULL && (focus == LEADERBOARD_FOCUS_BACK
 			|| focus == LEADERBOARD_FOCUS_REFRESH))

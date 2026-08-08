@@ -4,14 +4,14 @@
 static char	g_stub_buf[64];
 
 // Static Functions
-static bool	navigation_target(const app_navigation_t *navigation,
-				app_nav_action_t action, app_screen_t *target);
+static bool	navigation_target(const t_app_navigation *navigation,
+				t_app_nav_action action, t_app_screen *target);
 
 /**
  * @brief Initializes the application navigation state.
  */
-void	app_navigation_init(app_navigation_t *navigation,
-	app_screen_t initial)
+void	app_navigation_init(t_app_navigation *navigation,
+	t_app_screen initial)
 {
 	if (navigation == NULL)
 		return ;
@@ -29,10 +29,10 @@ void	app_navigation_init(app_navigation_t *navigation,
  * screens. This keeps future renderers and network adapters on the same state
  * graph.
  */
-bool	app_navigation_dispatch(app_navigation_t *navigation,
-	app_nav_action_t action)
+bool	app_navigation_dispatch(t_app_navigation *navigation,
+	t_app_nav_action action)
 {
-	app_screen_t	target;
+	t_app_screen	target;
 
 	if (navigation == NULL
 		|| !navigation_target(navigation, action, &target))
@@ -51,7 +51,7 @@ bool	app_navigation_dispatch(app_navigation_t *navigation,
 /**
  * @brief Returns the deterministic Back destination for one screen.
  */
-app_screen_t	app_screen_parent(app_screen_t screen)
+t_app_screen	app_screen_parent(t_app_screen screen)
 {
 	if (screen == APP_SCREEN_SIGN_UP || screen == APP_SCREEN_HOME)
 		return (APP_SCREEN_LOGIN);
@@ -78,7 +78,7 @@ app_screen_t	app_screen_parent(app_screen_t screen)
 /**
  * @brief Returns the reader-facing name for one application screen.
  */
-const char	*app_screen_name(app_screen_t screen)
+const char	*app_screen_name(t_app_screen screen)
 {
 	static const char	*names[APP_SCREEN_COUNT] = {
 		"Entry",
@@ -106,7 +106,7 @@ const char	*app_screen_name(app_screen_t screen)
 /**
  * @brief Handles universal keyboard navigation without rendering concerns.
  */
-app_screen_t	app_handle_key(app_screen_t current, uint32_t key)
+t_app_screen	app_handle_key(t_app_screen current, uint32_t key)
 {
 	if (key == 'q' || key == 'Q')
 		return (APP_SCREEN_QUIT);
@@ -118,7 +118,7 @@ app_screen_t	app_handle_key(app_screen_t current, uint32_t key)
 /**
  * @brief Moves the menu selection up or down, wrapping at the ends.
  */
-void	menu_move_selection(menu_selection_t *m, uint32_t key)
+void	menu_move_selection(t_menu_selection *m, uint32_t key)
 {
 	if (m == NULL)
 		return ;
@@ -174,10 +174,10 @@ bool	app_ui_preview_enabled(void)
 /**
  * @brief Resolves only routes allowed by the item-15 screen graph.
  */
-static bool	navigation_target(const app_navigation_t *navigation,
-	app_nav_action_t action, app_screen_t *target)
+static bool	navigation_target(const t_app_navigation *navigation,
+	t_app_nav_action action, t_app_screen *target)
 {
-	app_screen_t	current;
+	t_app_screen	current;
 
 	current = navigation->current;
 	if (action == APP_NAV_QUIT && current != APP_SCREEN_QUIT)

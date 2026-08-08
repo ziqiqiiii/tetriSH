@@ -5,7 +5,7 @@
 # define MENU_FONT_BASE_SHADOW	3
 # define MENU_FONT_MIN_GLYPH	8
 
-static const color_t	g_menu_colors[MENU_ITEM_COUNT] =
+static const t_color	g_menu_colors[MENU_ITEM_COUNT] =
 {
 	{116, 235, 92},
 	{244, 142, 219},
@@ -13,33 +13,33 @@ static const color_t	g_menu_colors[MENU_ITEM_COUNT] =
 	{255, 199, 82},
 	{190, 151, 255}
 };
-static const color_t	g_menu_shadow = {18, 5, 24};
+static const t_color	g_menu_shadow = {18, 5, 24};
 
-static bool	compose_menu_pixels(const pixel_asset_t *font,
+static bool	compose_menu_pixels(const t_pixel_asset *font,
 					int width, int height,
 					uint32_t **pixels);
 static void	draw_menu_text(uint32_t *pixels, int canvas_width,
-					int canvas_height, const pixel_asset_t *font,
+					int canvas_height, const t_pixel_asset *font,
 					const char *text, int x, int y, int glyph_size, int spacing,
-					color_t tint, unsigned opacity);
+					t_color tint, unsigned opacity);
 static void	draw_menu_glyph(uint32_t *pixels, int canvas_width,
-					int canvas_height, const pixel_asset_t *font, int glyph,
+					int canvas_height, const t_pixel_asset *font, int glyph,
 					int dest_x, int dest_y, int glyph_size,
-					color_t tint, unsigned opacity);
+					t_color tint, unsigned opacity);
 static void	draw_menu_texel(uint32_t *pixels, int canvas_width,
-					int canvas_height, const pixel_asset_t *font,
+					int canvas_height, const t_pixel_asset *font,
 					int source_y, int source_x, int dest_x, int dest_y,
-					int cell_width, int cell_height, color_t tint,
+					int cell_width, int cell_height, t_color tint,
 					unsigned opacity);
 static int	menu_ink_span(int units, int glyph_size);
 static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
 					int canvas_height, int x, int y,
-					color_t tint, unsigned alpha);
-static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
-					const pixel_asset_t *font);
-static int	selector_crop_cols(const render_ctx_t *ctx, int panel_x,
+					t_color tint, unsigned alpha);
+static struct ncplane	*blit_menu_pixels(t_render_ctx *ctx,
+					const t_pixel_asset *font);
+static int	selector_crop_cols(const t_render_ctx *ctx, int panel_x,
 					int panel_cols);
-static struct ncplane	*create_text_fallback(render_ctx_t *ctx);
+static struct ncplane	*create_text_fallback(t_render_ctx *ctx);
 static void	set_transparent_base(struct ncplane *plane);
 static int	max_int(int left, int right);
 static int	clamp_int(int value, int min, int max);
@@ -55,9 +55,9 @@ static int	clamp_int(int value, int min, int max);
  * @param ctx Active render context with fitted background geometry.
  * @return Owned label plane, or a terminal-text emergency fallback.
  */
-struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
+struct ncplane	*render_menu_labels_create(t_render_ctx *ctx)
 {
-	pixel_asset_t	font;
+	t_pixel_asset	font;
 	struct ncplane	*plane;
 
 	if (!render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc)
@@ -82,7 +82,7 @@ struct ncplane	*render_menu_labels_create(render_ctx_t *ctx)
  * @param index Zero-based menu item index.
  * @return Absolute terminal row for the label baseline.
  */
-int	render_menu_label_y(const render_ctx_t *ctx, int index)
+int	render_menu_label_y(const t_render_ctx *ctx, int index)
 {
 	double	ratio;
 	int		panel_y;
@@ -109,7 +109,7 @@ int	render_menu_label_y(const render_ctx_t *ctx, int index)
  * @param font Receives the decoded RGBA mask; zeroed on failure.
  * @return true when the sheet decoded at its expected size.
  */
-bool	render_font_mask_load(pixel_asset_t *font)
+bool	render_font_mask_load(t_pixel_asset *font)
 {
 	struct ncvisual	*ncv;
 	ncvgeom			geom;
@@ -164,7 +164,7 @@ bool	render_font_mask_load(pixel_asset_t *font)
  *
  * @param font Mask to release; safe to call on an already-empty mask.
  */
-void	render_font_mask_free(pixel_asset_t *font)
+void	render_font_mask_free(t_pixel_asset *font)
 {
 	if (font == NULL)
 		return ;
@@ -175,7 +175,7 @@ void	render_font_mask_free(pixel_asset_t *font)
 /**
  * @brief Composes left-aligned labels at exact destination pixel resolution.
  */
-static bool	compose_menu_pixels(const pixel_asset_t *font,
+static bool	compose_menu_pixels(const t_pixel_asset *font,
 	int width, int height, uint32_t **pixels)
 {
 	const char	*label;
@@ -233,9 +233,9 @@ static bool	compose_menu_pixels(const pixel_asset_t *font,
 }
 
 static void	draw_menu_text(uint32_t *pixels, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, const char *text,
+	int canvas_height, const t_pixel_asset *font, const char *text,
 	int x, int y, int glyph_size, int spacing,
-	color_t tint, unsigned opacity)
+	t_color tint, unsigned opacity)
 {
 	unsigned	codepoint;
 	int			glyph;
@@ -273,9 +273,9 @@ static int	menu_ink_span(int units, int glyph_size)
  * leaving the cap row itself at dest_y, so no existing label shifts.
  */
 static void	draw_menu_glyph(uint32_t *pixels, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, int glyph,
+	int canvas_height, const t_pixel_asset *font, int glyph,
 	int dest_x, int dest_y, int glyph_size,
-	color_t tint, unsigned opacity)
+	t_color tint, unsigned opacity)
 {
 	int	source_y;
 	int	source_x;
@@ -306,9 +306,9 @@ static void	draw_menu_glyph(uint32_t *pixels, int canvas_width,
  * @brief Expands one atlas texel into its destination rectangle.
  */
 static void	draw_menu_texel(uint32_t *pixels, int canvas_width,
-	int canvas_height, const pixel_asset_t *font, int source_y, int source_x,
+	int canvas_height, const t_pixel_asset *font, int source_y, int source_x,
 	int dest_x, int dest_y, int cell_width, int cell_height,
-	color_t tint, unsigned opacity)
+	t_color tint, unsigned opacity)
 {
 	unsigned	alpha;
 	int			y;
@@ -335,7 +335,7 @@ static void	draw_menu_texel(uint32_t *pixels, int canvas_width,
 }
 
 static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
-	int canvas_height, int x, int y, color_t tint, unsigned alpha)
+	int canvas_height, int x, int y, t_color tint, unsigned alpha)
 {
 	uint32_t	pixel;
 
@@ -355,8 +355,8 @@ static void	put_menu_pixel(uint32_t *pixels, int canvas_width,
  * otherwise have to wipe and rebuild the bitmap every time the marker is
  * recreated over it, which is exactly the operation Sixel does not survive.
  */
-static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
-	const pixel_asset_t *font)
+static struct ncplane	*blit_menu_pixels(t_render_ctx *ctx,
+	const t_pixel_asset *font)
 {
 	ncplane_options			opts;
 	struct ncvisual			*ncv;
@@ -429,7 +429,7 @@ static struct ncplane	*blit_menu_pixels(render_ctx_t *ctx,
  * @param panel_cols Panel width in terminal columns.
  * @return Columns to drop from the left of the label plane.
  */
-static int	selector_crop_cols(const render_ctx_t *ctx, int panel_x,
+static int	selector_crop_cols(const t_render_ctx *ctx, int panel_x,
 	int panel_cols)
 {
 	int	crop;
@@ -443,7 +443,7 @@ static int	selector_crop_cols(const render_ctx_t *ctx, int panel_x,
 /**
  * @brief Keeps navigation usable when bitmap text cannot be rendered.
  */
-static struct ncplane	*create_text_fallback(render_ctx_t *ctx)
+static struct ncplane	*create_text_fallback(t_render_ctx *ctx)
 {
 	ncplane_options	opts;
 	struct ncplane	*plane;

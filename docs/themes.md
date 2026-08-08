@@ -27,41 +27,54 @@ preview; Princess and Wolf-man remain visible but locked. See the
 [Tetris Battle Gaiden character list](https://tetris.wiki/Tetris_Battle_Gaiden)
 for the reference source.
 
+A **Target** is the player an offensive ability lands on, as defined in
+[CONTEXT.md](CONTEXT.md): Single mode has no Target and offensive abilities are
+unavailable there; Double implies the one other player; Battle Royale draws one
+per resolution from the room's seeded random source, among players still in the
+game. Every cross-player effect is queued against its Target and applied at that
+player's next piece lock — see
+[ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md).
+
+`docs/use_cases.md` carries a second table of the same abilities, phrased as
+server-enforced effects. The two are kept in step; this one is the source of
+truth for ability text. The Settings fixture in `src/tetrisu/src/app_provider.c`
+carries an abbreviated form of the same descriptions, sized for its card layout.
+
 ### 1. Princess
 
 | Level | Ability | Description |
 |---|---|---|
-| 1 | Sol | Clears 3 adjacent player-field columns, aimable, 3-second auto-fire. |
-| 2 | Mirror | Steals opponent's next crystal power. |
-| 3 | Paralysis | Prevents opponent rotating their next 3 pieces. |
-| 4 | Copy | Replaces the player's field with a copy of the opponent's. |
+| 1 | Sol | Fires a beam of light that clears three adjacent columns off the player's field. Can be directed. Has a 3-second timer before fired automatically. |
+| 2 | Mirror | Steals the next crystal power used against the player. |
+| 3 | Paralysis | Stops the Target from rotating their next 3 pieces. |
+| 4 | Copy | Replaces the player's field with a copy of a Target's. |
 
 ### 2. Halloween
 
 | Level | Ability | Description |
 |---|---|---|
-| 1 | Fry | Fills bottom 3 rows, then clears/sends them after the next piece. |
-| 2 | Dark | Blacks out the opponent field except near the active piece. |
-| 3 | Vampire | Steals opponent crystals. |
-| 4 | Bomb | Destroys random blocks on the opponent field. |
+| 1 | Fry | Fills the bottom 3 rows with blocks. These lines are cleared once the next piece is placed, and the lines are sent to the Target. Crystal blocks are converted into normal blocks and are not collected. |
+| 2 | Dark | Blacks out the Target's playfield, and only a small section under the active piece is visible. |
+| 3 | Vampire | Steals the Target's crystals. |
+| 4 | Bomb | Destroys random blocks on the Target's field. |
 
 ### 3. Wolf-man
 
 | Level | Ability | Description |
 |---|---|---|
-| 1 | Cut | Clears the player's top 4 rows. |
-| 2 | Nue | Prevents the opponent fast-dropping their next 4 pieces. |
-| 3 | Pals | Incoming normal garbage lowers the player's stack briefly; power-raised lines are excluded. |
-| 4 | Thwack | For the next 4 pieces, non-crystal blocks cascade after line clears. |
+| 1 | Cut | Clears the top 4 rows of the player's field. |
+| 2 | Nue | Stops the Target from fast-dropping their next 4 pieces. |
+| 3 | Pals | Lines sent by any opponent will lower the player's stack for a short time. That excludes lines sent through powers. |
+| 4 | Thwack | For the player's next 4 pieces, non-crystal blocks will drop from any line cleared, allowing lower incomplete lines to also be cleared. |
 
 ### 4. Mirurun
 
 | Level | Ability | Description |
 |---|---|---|
-| 1 | Mirurun | Removes the player's bottom 4 rows; they are not sent. |
-| 2 | Inversion | Inverts opponent controls for the next 3 pieces. |
-| 3 | Pentaris | Sends 5 garbage lines. |
-| 4 | Sirtet | Inverts filled/empty normal cells in all occupied opponent rows. |
+| 1 | Mirurun | Removes the bottom 4 rows of the player's field. The lines removed are not sent to a Target. |
+| 2 | Inversion | Inverts the Target's controls for their next 3 pieces. |
+| 3 | Pentaris | Sends five lines of garbage to the Target. |
+| 4 | Sirtet | All rows containing blocks on the Target's field are inverted, so that spaces are converted to blocks and non-crystal blocks are converted to spaces. |
 
 ## Design AI University
 

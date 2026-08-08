@@ -29,119 +29,119 @@ _Static_assert(SOLO_CONTENT_HEIGHT % HUD_TILE_SIZE == 0
 	"Solo content height must end on the authored 16px grid");
 
 // Static Functions
-static void	reset_render_signatures(solo_render_t *solo);
-static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo);
-static void	update_solo_compatibility_badge(render_ctx_t *ctx,
-	solo_render_t *solo);
-static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo);
-static void	set_standard_backdrop(render_ctx_t *ctx);
-static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo);
-static int	update_danger_background(render_ctx_t *ctx, solo_render_t *solo,
-				const solo_game_t *game);
-static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo);
-static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
+static void	reset_render_signatures(t_solo_render *solo);
+static void	calculate_solo_layout(t_render_ctx *ctx, t_solo_render *solo);
+static void	update_solo_compatibility_badge(t_render_ctx *ctx,
+	t_solo_render *solo);
+static bool	create_solo_planes(t_render_ctx *ctx, t_solo_render *solo);
+static void	set_standard_backdrop(t_render_ctx *ctx);
+static bool	create_background_plane(t_render_ctx *ctx, t_solo_render *solo);
+static int	update_danger_background(t_render_ctx *ctx, t_solo_render *solo,
+				const t_solo_game *game);
+static bool	create_controls_plane(t_render_ctx *ctx, t_solo_render *solo);
+static struct ncplane	*create_plane(t_render_ctx *ctx, int y, int x,
 	int rows, int cols);
-static bool	blit_surface(render_ctx_t *ctx, struct ncplane *plane,
+static bool	blit_surface(t_render_ctx *ctx, struct ncplane *plane,
 	const uint32_t *pixels, int width, int height, int row_stride,
 	ncblitter_e blitter);
 static void	destroy_plane(struct ncplane **plane);
-static bool	draw_status_message(render_ctx_t *ctx, solo_render_t *solo,
+static bool	draw_status_message(t_render_ctx *ctx, t_solo_render *solo,
 	const char *message);
 static void	set_transparent_base(struct ncplane *plane);
-static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static struct ncplane	*create_ability_popover_art(render_ctx_t *ctx,
+static int	update_foreground_regions(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static int	update_ability_popover(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static struct ncplane	*create_ability_popover_art(t_render_ctx *ctx,
 	int y, int x, int rows, int cols, int opacity);
 static void	fade_ability_popover_art(struct ncvisual *visual, int opacity);
-static uint64_t	ability_popover_signature(const solo_render_t *solo,
-	const solo_game_t *game);
+static uint64_t	ability_popover_signature(const t_solo_render *solo,
+	const t_solo_game *game);
 static bool	draw_ability_popover(struct ncplane *plane,
-	const solo_render_t *solo, const solo_game_t *game, int opacity,
+	const t_solo_render *solo, const t_solo_game *game, int opacity,
 	int art_cols);
 static bool	popover_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, int opacity, bool bold,
+	const char *text, t_color color, int opacity, bool bold,
 	int region_x, int region_width);
-static color_t	popover_faded_color(color_t color, int opacity);
-static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static bool	update_compatibility_score(render_ctx_t *ctx,
-	solo_render_t *solo, const solo_game_t *game);
-static bool	update_compatibility_overlay(render_ctx_t *ctx,
-	solo_render_t *solo, const solo_game_t *game);
+static t_color	popover_faded_color(t_color color, int opacity);
+static int	update_hud_regions(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static bool	update_compatibility_score(t_render_ctx *ctx,
+	t_solo_render *solo, const t_solo_game *game);
+static bool	update_compatibility_overlay(t_render_ctx *ctx,
+	t_solo_render *solo, const t_solo_game *game);
 static bool	compatibility_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, bool bold);
+	const char *text, t_color color, bool bold);
 static bool	compatibility_put_overlay_line(struct ncplane *plane, int row,
-	const char *text, color_t color, bool bold);
+	const char *text, t_color color, bool bold);
 static bool	compatibility_put_stat(struct ncplane *plane, int row,
 	const char *label, int value);
-static const char	*compatibility_clear_name(const solo_game_t *game);
-static uint64_t	next_frame_signature(const solo_game_t *game);
+static const char	*compatibility_clear_name(const t_solo_game *game);
+static uint64_t	next_frame_signature(const t_solo_game *game);
 static uint64_t	hash_value(uint64_t hash, uint64_t value);
-static uint64_t	meter_frame_signature(const solo_render_t *solo,
-	const solo_game_t *game);
-static uint64_t	score_stats_signature(const solo_game_t *game);
-static uint64_t	score_event_signature(const solo_game_t *game);
-static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+static uint64_t	meter_frame_signature(const t_solo_render *solo,
+	const t_solo_game *game);
+static uint64_t	score_stats_signature(const t_solo_game *game);
+static uint64_t	score_event_signature(const t_solo_game *game);
+static bool	update_pixel_region(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height);
-static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+static bool	update_hud_pixel_region(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height, const char *region_name);
-static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static bool	update_composite_board(render_ctx_t *ctx,
-	solo_render_t *solo, bool use_cells);
-static color_t	sample_board_pixel(const solo_render_t *solo, int x, int y);
-static int	color_distance(color_t first, color_t second);
+static int	update_board_region(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static bool	update_composite_board(t_render_ctx *ctx,
+	t_solo_render *solo, bool use_cells);
+static t_color	sample_board_pixel(const t_solo_render *solo, int x, int y);
+static int	color_distance(t_color first, t_color second);
 static bool	put_quadrant_cell(struct ncplane *plane, int y, int x,
-	const color_t samples[4]);
-static uint64_t	board_overlay_signature(const solo_game_t *game);
-static uint64_t	settled_row_signature(const solo_game_t *game, int row);
-static int	board_tile_index(const solo_game_t *game, int col, int row);
-static void	destroy_board_tiles(solo_render_t *solo);
-static void	destroy_settled_row(solo_render_t *solo, int row);
-static int	update_settled_rows(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static bool	rebuild_settled_row(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game, int row, uint64_t signature);
-static void	copy_tile_pixels(const solo_render_t *solo, int tile_index,
+	const t_color samples[4]);
+static uint64_t	board_overlay_signature(const t_solo_game *game);
+static uint64_t	settled_row_signature(const t_solo_game *game, int row);
+static int	board_tile_index(const t_solo_game *game, int col, int row);
+static void	destroy_board_tiles(t_solo_render *solo);
+static void	destroy_settled_row(t_solo_render *solo, int row);
+static int	update_settled_rows(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static bool	rebuild_settled_row(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game, int row, uint64_t signature);
+static void	copy_tile_pixels(const t_solo_render *solo, int tile_index,
 	uint32_t *destination, int destination_stride, bool ghost);
-static struct ncplane	*create_pixel_plane_at(render_ctx_t *ctx,
-	solo_render_t *solo, const uint32_t *pixels, int width, int height,
+static struct ncplane	*create_pixel_plane_at(t_render_ctx *ctx,
+	t_solo_render *solo, const uint32_t *pixels, int width, int height,
 	int row_stride, int source_x, int source_y);
-static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game);
-static bool	piece_geometry(const t_piece *piece, piece_geometry_t *geometry);
-static bool	piece_rectangles_overlap(const piece_geometry_t *first,
-	const piece_geometry_t *second);
-static int	position_piece_pair(render_ctx_t *ctx, solo_render_t *solo,
+static int	update_piece_planes(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game);
+static bool	piece_geometry(const t_piece *piece, t_piece_geometry *geometry);
+static bool	piece_rectangles_overlap(const t_piece_geometry *first,
+	const t_piece_geometry *second);
+static int	position_piece_pair(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, uint64_t *cached_signature,
-	const piece_geometry_t *active, const piece_geometry_t *ghost,
+	const t_piece_geometry *active, const t_piece_geometry *ghost,
 	int tile_index);
-static void	piece_pair_bounds(const piece_geometry_t *active,
-	const piece_geometry_t *ghost, piece_bounds_t *bounds);
-static uint64_t	piece_pair_signature(const piece_geometry_t *active,
-	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+static void	piece_pair_bounds(const t_piece_geometry *active,
+	const t_piece_geometry *ghost, t_piece_bounds *bounds);
+static uint64_t	piece_pair_signature(const t_piece_geometry *active,
+	const t_piece_geometry *ghost, const t_piece_bounds *bounds,
 	int tile_index);
-static struct ncplane	*create_piece_pair_plane(render_ctx_t *ctx,
-	solo_render_t *solo, const piece_geometry_t *active,
-	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+static struct ncplane	*create_piece_pair_plane(t_render_ctx *ctx,
+	t_solo_render *solo, const t_piece_geometry *active,
+	const t_piece_geometry *ghost, const t_piece_bounds *bounds,
 	int tile_index);
-static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
+static int	position_atomic_piece(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, uint64_t *cached_signature,
-	const piece_geometry_t *geometry, int tile_index, bool ghost);
-static uint64_t	piece_shape_signature(const piece_geometry_t *geometry,
+	const t_piece_geometry *geometry, int tile_index, bool ghost);
+static uint64_t	piece_shape_signature(const t_piece_geometry *geometry,
 	int tile_index, bool ghost);
-static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
-	solo_render_t *solo, const piece_geometry_t *geometry, int tile_index,
+static struct ncplane	*create_atomic_piece_plane(t_render_ctx *ctx,
+	t_solo_render *solo, const t_piece_geometry *geometry, int tile_index,
 	bool ghost);
 static void	compose_atomic_piece_pixels(uint32_t *pixels,
-	const solo_render_t *solo, const piece_geometry_t *geometry,
+	const t_solo_render *solo, const t_piece_geometry *geometry,
 	int tile_index, bool ghost);
-static void	destroy_solo_planes(solo_render_t *solo);
-static void	destroy_board_planes(solo_render_t *solo);
+static void	destroy_solo_planes(t_solo_render *solo);
+static void	destroy_board_planes(t_solo_render *solo);
 
 /**
  * @brief Creates all state required by the Solo renderer.
@@ -152,7 +152,7 @@ static void	destroy_board_planes(solo_render_t *solo);
  * @param ctx Pointer to the active render context.
  * @param solo Pointer to the Solo render state.
  */
-void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
+void	render_solo_create(t_render_ctx *ctx, t_solo_render *solo)
 {
 	memset(solo, 0, sizeof(*solo));
 	reset_render_signatures(solo);
@@ -187,8 +187,8 @@ void	render_solo_create(render_ctx_t *ctx, solo_render_t *solo)
  * @param solo Pointer to the Solo render state.
  * @param game Pointer to the current Solo game state.
  */
-void	render_solo_draw(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+void	render_solo_draw(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	int	changed;
 	int	result;
@@ -272,7 +272,7 @@ render_failure:
  *
  * @param solo Pointer to the Solo render state.
  */
-void	render_solo_destroy(solo_render_t *solo)
+void	render_solo_destroy(t_solo_render *solo)
 {
 	destroy_solo_planes(solo);
 	free(solo->static_pixels);
@@ -293,7 +293,7 @@ void	render_solo_destroy(solo_render_t *solo)
  * @param ctx Pointer to the active render context.
  * @param solo Pointer to the Solo render state.
  */
-void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
+void	render_solo_resize(t_render_ctx *ctx, t_solo_render *solo)
 {
 	destroy_solo_planes(solo);
 	if (render_geometry_refresh(ctx, true) < 0)
@@ -329,7 +329,7 @@ void	render_solo_resize(render_ctx_t *ctx, solo_render_t *solo)
  *
  * @param solo Pointer to the Solo render state.
  */
-static void	reset_render_signatures(solo_render_t *solo)
+static void	reset_render_signatures(t_solo_render *solo)
 {
 	int	row;
 
@@ -362,7 +362,7 @@ static void	reset_render_signatures(solo_render_t *solo)
  * @param ctx Pointer to the active render context.
  * @param solo Pointer to the Solo render state.
  */
-static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
+static void	calculate_solo_layout(t_render_ctx *ctx, t_solo_render *solo)
 {
 	unsigned	std_rows;
 	unsigned	std_cols;
@@ -461,8 +461,8 @@ static void	calculate_solo_layout(render_ctx_t *ctx, solo_render_t *solo)
  * Exact-height layouts reuse the terminal control row for the mode label;
  * larger layouts keep one spare row above the authored content.
  */
-static void	update_solo_compatibility_badge(render_ctx_t *ctx,
-	solo_render_t *solo)
+static void	update_solo_compatibility_badge(t_render_ctx *ctx,
+	t_solo_render *solo)
 {
 	if (render_compatibility_mode(ctx) && solo->layout_valid
 		&& solo->canvas_row == 0)
@@ -481,7 +481,7 @@ static void	update_solo_compatibility_badge(render_ctx_t *ctx,
  * @param solo Pointer to the Solo render state.
  * @return true on success, otherwise false.
  */
-static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo)
+static bool	create_solo_planes(t_render_ctx *ctx, t_solo_render *solo)
 {
 	set_standard_backdrop(ctx);
 	if (!create_background_plane(ctx, solo)
@@ -502,7 +502,7 @@ static bool	create_solo_planes(render_ctx_t *ctx, solo_render_t *solo)
  *
  * @param ctx Pointer to the active render context.
  */
-static void	set_standard_backdrop(render_ctx_t *ctx)
+static void	set_standard_backdrop(t_render_ctx *ctx)
 {
 	uint64_t	channels;
 
@@ -523,7 +523,7 @@ static void	set_standard_backdrop(render_ctx_t *ctx)
  * @param solo Pointer to the Solo render state.
  * @return true on success, otherwise false.
  */
-static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo)
+static bool	create_background_plane(t_render_ctx *ctx, t_solo_render *solo)
 {
 	solo->background_plane = create_plane(ctx, solo->canvas_row,
 		solo->canvas_col, solo->content_rows, solo->canvas_cols);
@@ -545,8 +545,8 @@ static bool	create_background_plane(render_ctx_t *ctx, solo_render_t *solo)
  * The same 4x2 background surface is used in Kitty and compatibility mode;
  * higher foreground planes keep the playfield and live HUD readable.
  */
-static int	update_danger_background(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_danger_background(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	signature;
 
@@ -573,7 +573,7 @@ static int	update_danger_background(render_ctx_t *ctx, solo_render_t *solo,
  * @param solo Pointer to the Solo render state.
  * @return true on success, otherwise false.
  */
-static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
+static bool	create_controls_plane(t_render_ctx *ctx, t_solo_render *solo)
 {
 	const char	*legend;
 	uint64_t	channels;
@@ -615,7 +615,7 @@ static bool	create_controls_plane(render_ctx_t *ctx, solo_render_t *solo)
  * @param cols Plane width in terminal columns.
  * @return Owned child plane, or NULL when geometry or allocation fails.
  */
-static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
+static struct ncplane	*create_plane(t_render_ctx *ctx, int y, int x,
 	int rows, int cols)
 {
 	ncplane_options	opts;
@@ -645,7 +645,7 @@ static struct ncplane	*create_plane(render_ctx_t *ctx, int y, int x,
  * @param blitter Notcurses blitter used for the surface.
  * @return true when Notcurses accepts the surface, otherwise false.
  */
-static bool	blit_surface(render_ctx_t *ctx, struct ncplane *plane,
+static bool	blit_surface(t_render_ctx *ctx, struct ncplane *plane,
 	const uint32_t *pixels, int width, int height, int row_stride,
 	ncblitter_e blitter)
 {
@@ -703,7 +703,7 @@ static void	destroy_plane(struct ncplane **plane)
  * @param message Human-readable fallback message.
  * @return true when the message plane is ready, otherwise false.
  */
-static bool	draw_status_message(render_ctx_t *ctx, solo_render_t *solo,
+static bool	draw_status_message(t_render_ctx *ctx, t_solo_render *solo,
 	const char *message)
 {
 	unsigned	rows;
@@ -760,15 +760,15 @@ static void	set_transparent_base(struct ncplane *plane)
  * 4x2 cell surface. Native glyphs keep every label, value, and event readable
  * while the authored panel and surrounding artwork remain cell-rendered.
  */
-static bool	update_compatibility_score(render_ctx_t *ctx,
-	solo_render_t *solo, const solo_game_t *game)
+static bool	update_compatibility_score(t_render_ctx *ctx,
+	t_solo_render *solo, const t_solo_game *game)
 {
 	char			line[64];
 	const char		*event;
-	color_t			white;
-	color_t			pink;
-	color_t			event_white;
-	color_t			event_pink;
+	t_color			white;
+	t_color			pink;
+	t_color			event_white;
+	t_color			event_pink;
 	unsigned		event_opacity;
 	int				rows;
 	int				cols;
@@ -790,8 +790,8 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 		set_transparent_base(solo->compatibility_score_plane);
 	}
 	ncplane_erase(solo->compatibility_score_plane);
-	white = (color_t){255, 236, 248};
-	pink = (color_t){255, 98, 186};
+	white = (t_color){255, 236, 248};
+	pink = (t_color){255, 98, 186};
 	event_opacity = solo_game_score_event_opacity(game);
 	event_white = popover_faded_color(white, (int)event_opacity);
 	event_pink = popover_faded_color(pink, (int)event_opacity);
@@ -851,14 +851,14 @@ static bool	update_compatibility_score(render_ctx_t *ctx,
 /**
  * @brief Draws pause and top-out instructions as native terminal text.
  */
-static bool	update_compatibility_overlay(render_ctx_t *ctx,
-	solo_render_t *solo, const solo_game_t *game)
+static bool	update_compatibility_overlay(t_render_ctx *ctx,
+	t_solo_render *solo, const t_solo_game *game)
 {
 	char		countdown[12];
 	const char	*title;
 	const char	*action;
-	color_t		white;
-	color_t		pink;
+	t_color		white;
+	t_color		pink;
 	unsigned	best_opacity;
 	unsigned	countdown_opacity;
 	uint64_t	channels;
@@ -893,8 +893,8 @@ static bool	update_compatibility_overlay(render_ctx_t *ctx,
 	(void)ncplane_set_base(solo->compatibility_overlay_plane,
 		" ", 0, channels);
 	ncplane_erase(solo->compatibility_overlay_plane);
-	white = (color_t){255, 236, 248};
-	pink = (color_t){255, 98, 186};
+	white = (t_color){255, 236, 248};
+	pink = (t_color){255, 98, 186};
 	countdown_value = solo_game_countdown_value(game);
 	if (countdown_value >= 0)
 	{
@@ -943,7 +943,7 @@ static bool	update_compatibility_overlay(render_ctx_t *ctx,
  * @brief Writes one clipped and centered terminal string.
  */
 static bool	compatibility_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, bool bold)
+	const char *text, t_color color, bool bold)
 {
 	char		clipped[128];
 	unsigned	rows;
@@ -974,7 +974,7 @@ static bool	compatibility_put_centered(struct ncplane *plane, int row,
  * @brief Writes centered text while retaining the overlay's opaque backdrop.
  */
 static bool	compatibility_put_overlay_line(struct ncplane *plane, int row,
-	const char *text, color_t color, bool bold)
+	const char *text, t_color color, bool bold)
 {
 	char		clipped[128];
 	unsigned	rows;
@@ -1040,7 +1040,7 @@ static bool	compatibility_put_stat(struct ncplane *plane, int row,
 /**
  * @brief Returns a compact native-text name for the last scoring event.
  */
-static const char	*compatibility_clear_name(const solo_game_t *game)
+static const char	*compatibility_clear_name(const t_solo_game *game)
 {
 	if (game->last_perfect_clear)
 		return ("PERFECT CLEAR");
@@ -1070,8 +1070,8 @@ static const char	*compatibility_clear_name(const solo_game_t *game)
  * @param game Pointer to the current Solo game state.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_foreground_regions(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	int	result;
 	int	changed;
@@ -1095,10 +1095,10 @@ static int	update_foreground_regions(render_ctx_t *ctx, solo_render_t *solo,
  * The plane is deliberately shared by pixel and cell renderers. This keeps
  * every label crisp while the board beneath it follows terminal capability.
  */
-static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_ability_popover(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
-	solo_ability_t	ability;
+	t_solo_ability	ability;
 	uint64_t		signature;
 	int				opacity;
 	int				rows;
@@ -1182,7 +1182,7 @@ static int	update_ability_popover(render_ctx_t *ctx, solo_render_t *solo,
  * Only terminals with reliably movable pixel planes use this layer. Cell and
  * stationary renderers fall back to the terminal-drawn card automatically.
  */
-static struct ncplane	*create_ability_popover_art(render_ctx_t *ctx,
+static struct ncplane	*create_ability_popover_art(t_render_ctx *ctx,
 	int y, int x, int rows, int cols, int opacity)
 {
 	struct ncvisual			*visual;
@@ -1254,8 +1254,8 @@ static void	fade_ability_popover_art(struct ncvisual *visual, int opacity)
 /**
  * @brief Hashes every value affecting popover content or fade brightness.
  */
-static uint64_t	ability_popover_signature(const solo_render_t *solo,
-	const solo_game_t *game)
+static uint64_t	ability_popover_signature(const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	hash;
 
@@ -1272,7 +1272,7 @@ static uint64_t	ability_popover_signature(const solo_render_t *solo,
  * @brief Draws a compact dark terminal-font card for help or feedback.
  */
 static bool	draw_ability_popover(struct ncplane *plane,
-	const solo_render_t *solo, const solo_game_t *game, int opacity,
+	const t_solo_render *solo, const t_solo_game *game, int opacity,
 	int art_cols)
 {
 	char			border[SOLO_POPOVER_COLS + 1];
@@ -1281,12 +1281,12 @@ static bool	draw_ability_popover(struct ncplane *plane,
 	char			cost[64];
 	char			detail[64];
 	char			hint[64];
-	solo_ability_t	ability;
-	color_t			pink;
-	color_t			white;
-	color_t			gold;
-	color_t			purple;
-	color_t			dark;
+	t_solo_ability	ability;
+	t_color			pink;
+	t_color			white;
+	t_color			gold;
+	t_color			purple;
+	t_color			dark;
 	nccell			base;
 	unsigned		rows;
 	unsigned		cols;
@@ -1299,11 +1299,11 @@ static bool	draw_ability_popover(struct ncplane *plane,
 	ncplane_dim_yx(plane, &rows, &cols);
 	if (rows < SOLO_POPOVER_ROWS || cols < 18)
 		return (false);
-	pink = (color_t){255, 98, 186};
-	white = (color_t){255, 236, 248};
-	gold = (color_t){255, 206, 92};
-	purple = (color_t){181, 117, 216};
-	dark = popover_faded_color((color_t){24, 11, 32}, opacity);
+	pink = (t_color){255, 98, 186};
+	white = (t_color){255, 236, 248};
+	gold = (t_color){255, 206, 92};
+	purple = (t_color){181, 117, 216};
+	dark = popover_faded_color((t_color){24, 11, 32}, opacity);
 	background_alpha = NCALPHA_OPAQUE;
 	if (art_cols > 0 || opacity < 56)
 		background_alpha = NCALPHA_TRANSPARENT;
@@ -1422,11 +1422,11 @@ static bool	draw_ability_popover(struct ncplane *plane,
  * @brief Centers one clipped popover line using native terminal glyphs.
  */
 static bool	popover_put_centered(struct ncplane *plane, int row,
-	const char *text, color_t color, int opacity, bool bold,
+	const char *text, t_color color, int opacity, bool bold,
 	int region_x, int region_width)
 {
 	char		clipped[SOLO_POPOVER_COLS + 1];
-	color_t		faded;
+	t_color		faded;
 	unsigned	rows;
 	unsigned	cols;
 	int			limit;
@@ -1456,7 +1456,7 @@ static bool	popover_put_centered(struct ncplane *plane, int row,
 /**
  * @brief Scales one true-colour tint toward black for terminal-safe fading.
  */
-static color_t	popover_faded_color(color_t color, int opacity)
+static t_color	popover_faded_color(t_color color, int opacity)
 {
 	color.r = (unsigned char)((int)color.r * opacity / 255);
 	color.g = (unsigned char)((int)color.g * opacity / 255);
@@ -1475,8 +1475,8 @@ static color_t	popover_faded_color(color_t color, int opacity)
  * @param game Pointer to the current Solo game state.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_hud_regions(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	next_signature;
 	uint64_t	meter_signature;
@@ -1588,7 +1588,7 @@ static int	update_hud_regions(render_ctx_t *ctx, solo_render_t *solo,
  * @param game Pointer to the current Solo game state.
  * @return Signature for the preview queue.
  */
-static uint64_t	next_frame_signature(const solo_game_t *game)
+static uint64_t	next_frame_signature(const t_solo_game *game)
 {
 	uint64_t	hash;
 	int			index;
@@ -1637,8 +1637,8 @@ static uint64_t	hash_value(uint64_t hash, uint64_t value)
  * @param game Pointer to the current Solo game state.
  * @return Signature for the complete interactive ability meter.
  */
-static uint64_t	meter_frame_signature(const solo_render_t *solo,
-	const solo_game_t *game)
+static uint64_t	meter_frame_signature(const t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	hash;
 
@@ -1662,7 +1662,7 @@ static uint64_t	meter_frame_signature(const solo_render_t *solo,
  * @param game Pointer to the current Solo game state.
  * @return Signature for level, lines, and combo.
  */
-static uint64_t	score_stats_signature(const solo_game_t *game)
+static uint64_t	score_stats_signature(const t_solo_game *game)
 {
 	uint64_t	hash;
 
@@ -1682,7 +1682,7 @@ static uint64_t	score_stats_signature(const solo_game_t *game)
  * @param game Pointer to the current Solo game state.
  * @return Signature for the last scoring event.
  */
-static uint64_t	score_event_signature(const solo_game_t *game)
+static uint64_t	score_event_signature(const t_solo_game *game)
 {
 	uint64_t	hash;
 
@@ -1711,7 +1711,7 @@ static uint64_t	score_event_signature(const solo_game_t *game)
  * @param source_height Source-region height in pixels.
  * @return true on success, otherwise false.
  */
-static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+static bool	update_pixel_region(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height)
 {
@@ -1764,7 +1764,7 @@ static bool	update_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
  * Keeping the failed region name lets users distinguish an asset-size/backend
  * limit from a board or terminal-presentation failure.
  */
-static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
+static bool	update_hud_pixel_region(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, int source_x, int source_y, int source_width,
 	int source_height, const char *region_name)
 {
@@ -1791,8 +1791,8 @@ static bool	update_hud_pixel_region(render_ctx_t *ctx, solo_render_t *solo,
  * @param game Pointer to the current Solo game state.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_board_region(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	signature;
 	bool		use_cells;
@@ -1854,10 +1854,10 @@ static int	update_board_region(render_ctx_t *ctx, solo_render_t *solo,
  * @param solo Solo renderer with a freshly composed board pixel buffer.
  * @return true when the board cells were accepted.
  */
-static bool	update_composite_board(render_ctx_t *ctx, solo_render_t *solo,
+static bool	update_composite_board(t_render_ctx *ctx, t_solo_render *solo,
 	bool use_cells)
 {
-	color_t	samples[4];
+	t_color	samples[4];
 	int	y;
 	int	x;
 	int	rows;
@@ -1938,9 +1938,9 @@ static bool	update_composite_board(render_ctx_t *ctx, solo_render_t *solo,
  * Coordinates are clamped because terminal-to-source division can produce an
  * empty final interval at extreme geometries.
  */
-static color_t	sample_board_pixel(const solo_render_t *solo, int x, int y)
+static t_color	sample_board_pixel(const t_solo_render *solo, int x, int y)
 {
-	color_t	color;
+	t_color	color;
 	uint32_t	pixel;
 
 	if (x < 0)
@@ -1962,7 +1962,7 @@ static color_t	sample_board_pixel(const solo_render_t *solo, int x, int y)
 /**
  * @brief Returns squared RGB distance without floating-point work.
  */
-static int	color_distance(color_t first, color_t second)
+static int	color_distance(t_color first, t_color second)
 {
 	int	red;
 	int	green;
@@ -1982,13 +1982,13 @@ static int	color_distance(color_t first, color_t second)
  * a terminal image placement, preserving bounded memory on fallback backends.
  */
 static bool	put_quadrant_cell(struct ncplane *plane, int y, int x,
-	const color_t samples[4])
+	const t_color samples[4])
 {
 	static const char	*glyphs[16] = {
 		" ", "▗", "▖", "▄", "▝", "▐", "▞", "▟",
 		"▘", "▚", "▌", "▙", "▀", "▜", "▛", " "
 	};
-	color_t			centres[2];
+	t_color			centres[2];
 	int				sums[2][3];
 	int				counts[2];
 	int				farthest;
@@ -2060,7 +2060,7 @@ static bool	put_quadrant_cell(struct ncplane *plane, int y, int x,
  * @param game Pointer to the current Solo game state.
  * @return Signature for the complete composited board.
  */
-static uint64_t	board_overlay_signature(const solo_game_t *game)
+static uint64_t	board_overlay_signature(const t_solo_game *game)
 {
 	uint64_t	hash;
 	int			row;
@@ -2094,7 +2094,7 @@ static uint64_t	board_overlay_signature(const solo_game_t *game)
  * @param row Board row index.
  * @return Signature for the requested settled row.
  */
-static uint64_t	settled_row_signature(const solo_game_t *game, int row)
+static uint64_t	settled_row_signature(const t_solo_game *game, int row)
 {
 	uint64_t	hash;
 	int			col;
@@ -2121,7 +2121,7 @@ static uint64_t	settled_row_signature(const solo_game_t *game, int row)
  * @param row Board row index.
  * @return Tile-atlas index, or -1 for an empty cell.
  */
-static int	board_tile_index(const solo_game_t *game, int col, int row)
+static int	board_tile_index(const t_solo_game *game, int col, int row)
 {
 	t_cell	cell;
 
@@ -2148,7 +2148,7 @@ static int	board_tile_index(const solo_game_t *game, int col, int row)
  *
  * @param solo Pointer to the Solo render state.
  */
-static void	destroy_board_tiles(solo_render_t *solo)
+static void	destroy_board_tiles(t_solo_render *solo)
 {
 	int	row;
 
@@ -2174,7 +2174,7 @@ static void	destroy_board_tiles(solo_render_t *solo)
  * @param solo Pointer to the Solo render state.
  * @param row Board row index.
  */
-static void	destroy_settled_row(solo_render_t *solo, int row)
+static void	destroy_settled_row(t_solo_render *solo, int row)
 {
 	int	run;
 
@@ -2199,8 +2199,8 @@ static void	destroy_settled_row(solo_render_t *solo, int row)
  * @param game Pointer to the current Solo game state.
  * @return -1 on failure, 0 when unchanged, or 1 when rows changed.
  */
-static int	update_settled_rows(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_settled_rows(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	uint64_t	signature;
 	int			changed;
@@ -2235,8 +2235,8 @@ static int	update_settled_rows(render_ctx_t *ctx, solo_render_t *solo,
  * @param signature Pointer to the cached plane signature.
  * @return true on success, otherwise false.
  */
-static bool	rebuild_settled_row(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game, int row, uint64_t signature)
+static bool	rebuild_settled_row(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game, int row, uint64_t signature)
 {
 	uint32_t	pixels[BOARD_WIDTH * TILE_SOURCE_SIZE * TILE_SOURCE_SIZE];
 	int			tile_indices[BOARD_WIDTH];
@@ -2304,7 +2304,7 @@ static bool	rebuild_settled_row(render_ctx_t *ctx, solo_render_t *solo,
  * @param destination_stride Number of destination pixels per row.
  * @param ghost Whether to render the translucent landing projection.
  */
-static void	copy_tile_pixels(const solo_render_t *solo, int tile_index,
+static void	copy_tile_pixels(const t_solo_render *solo, int tile_index,
 	uint32_t *destination, int destination_stride, bool ghost)
 {
 	uint32_t	pixel;
@@ -2344,8 +2344,8 @@ static void	copy_tile_pixels(const solo_render_t *solo, int tile_index,
  * @param source_y Top edge of the source canvas region.
  * @return Owned pixel plane, or NULL on validation or render failure.
  */
-static struct ncplane	*create_pixel_plane_at(render_ctx_t *ctx,
-	solo_render_t *solo, const uint32_t *pixels, int width, int height,
+static struct ncplane	*create_pixel_plane_at(t_render_ctx *ctx,
+	t_solo_render *solo, const uint32_t *pixels, int width, int height,
 	int row_stride, int source_x, int source_y)
 {
 	struct ncplane	*plane;
@@ -2386,12 +2386,12 @@ static struct ncplane	*create_pixel_plane_at(render_ctx_t *ctx,
  * @param game Pointer to the current Solo game state.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
-	const solo_game_t *game)
+static int	update_piece_planes(t_render_ctx *ctx, t_solo_render *solo,
+	const t_solo_game *game)
 {
 	t_piece			ghost;
-	piece_geometry_t	active_geometry;
-	piece_geometry_t	ghost_geometry;
+	t_piece_geometry	active_geometry;
+	t_piece_geometry	ghost_geometry;
 	bool				overlaps;
 	int				tile_index;
 	int				result;
@@ -2466,7 +2466,7 @@ static int	update_piece_planes(render_ctx_t *ctx, solo_render_t *solo,
  * @param geometry Output occupied-cell geometry and bounding box.
  * @return true for a valid piece, otherwise false.
  */
-static bool	piece_geometry(const t_piece *piece, piece_geometry_t *geometry)
+static bool	piece_geometry(const t_piece *piece, t_piece_geometry *geometry)
 {
 	int	index;
 
@@ -2502,8 +2502,8 @@ static bool	piece_geometry(const t_piece *piece, piece_geometry_t *geometry)
  * @param second Pointer to the second piece geometry.
  * @return true when the rectangles overlap, otherwise false.
  */
-static bool	piece_rectangles_overlap(const piece_geometry_t *first,
-	const piece_geometry_t *second)
+static bool	piece_rectangles_overlap(const t_piece_geometry *first,
+	const t_piece_geometry *second)
 {
 	return (first->min_col <= second->max_col
 		&& first->max_col >= second->min_col
@@ -2525,13 +2525,13 @@ static bool	piece_rectangles_overlap(const piece_geometry_t *first,
  * @param tile_index Tile-atlas entry to copy.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	position_piece_pair(render_ctx_t *ctx, solo_render_t *solo,
+static int	position_piece_pair(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, uint64_t *cached_signature,
-	const piece_geometry_t *active, const piece_geometry_t *ghost,
+	const t_piece_geometry *active, const t_piece_geometry *ghost,
 	int tile_index)
 {
 	uint64_t		signature;
-	piece_bounds_t	bounds;
+	t_piece_bounds	bounds;
 	int				y;
 	int				x;
 	int				old_y;
@@ -2573,8 +2573,8 @@ static int	position_piece_pair(render_ctx_t *ctx, solo_render_t *solo,
  * @param ghost Pointer to ghost-piece geometry.
  * @param bounds Output union bounds for both pieces.
  */
-static void	piece_pair_bounds(const piece_geometry_t *active,
-	const piece_geometry_t *ghost, piece_bounds_t *bounds)
+static void	piece_pair_bounds(const t_piece_geometry *active,
+	const t_piece_geometry *ghost, t_piece_bounds *bounds)
 {
 	bounds->min_col = active->min_col;
 	if (ghost->min_col < bounds->min_col)
@@ -2602,8 +2602,8 @@ static void	piece_pair_bounds(const piece_geometry_t *active,
  * @param tile_index Tile-atlas entry to copy.
  * @return Signature for the combined active and ghost image.
  */
-static uint64_t	piece_pair_signature(const piece_geometry_t *active,
-	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+static uint64_t	piece_pair_signature(const t_piece_geometry *active,
+	const t_piece_geometry *ghost, const t_piece_bounds *bounds,
 	int tile_index)
 {
 	uint64_t	hash;
@@ -2647,9 +2647,9 @@ static uint64_t	piece_pair_signature(const piece_geometry_t *active,
  * @param tile_index Tile-atlas entry to copy.
  * @return Owned combined plane, or NULL on allocation or render failure.
  */
-static struct ncplane	*create_piece_pair_plane(render_ctx_t *ctx,
-	solo_render_t *solo, const piece_geometry_t *active,
-	const piece_geometry_t *ghost, const piece_bounds_t *bounds,
+static struct ncplane	*create_piece_pair_plane(t_render_ctx *ctx,
+	t_solo_render *solo, const t_piece_geometry *active,
+	const t_piece_geometry *ghost, const t_piece_bounds *bounds,
 	int tile_index)
 {
 	struct ncplane	*plane;
@@ -2708,9 +2708,9 @@ static struct ncplane	*create_piece_pair_plane(render_ctx_t *ctx,
  * @param ghost Whether to render the translucent landing projection.
  * @return -1 on failure, 0 when unchanged, or 1 when updated.
  */
-static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
+static int	position_atomic_piece(t_render_ctx *ctx, t_solo_render *solo,
 	struct ncplane **plane, uint64_t *cached_signature,
-	const piece_geometry_t *geometry, int tile_index, bool ghost)
+	const t_piece_geometry *geometry, int tile_index, bool ghost)
 {
 	uint64_t	signature;
 	int			y;
@@ -2762,7 +2762,7 @@ static int	position_atomic_piece(render_ctx_t *ctx, solo_render_t *solo,
  * @param ghost Whether the signature represents a ghost piece.
  * @return Signature for the piece shape and tile.
  */
-static uint64_t	piece_shape_signature(const piece_geometry_t *geometry,
+static uint64_t	piece_shape_signature(const t_piece_geometry *geometry,
 	int tile_index, bool ghost)
 {
 	uint64_t	hash;
@@ -2796,8 +2796,8 @@ static uint64_t	piece_shape_signature(const piece_geometry_t *geometry,
  * @param ghost Whether to render the translucent landing projection.
  * @return Owned piece plane, or NULL on allocation or render failure.
  */
-static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
-	solo_render_t *solo, const piece_geometry_t *geometry, int tile_index,
+static struct ncplane	*create_atomic_piece_plane(t_render_ctx *ctx,
+	t_solo_render *solo, const t_piece_geometry *geometry, int tile_index,
 	bool ghost)
 {
 	uint32_t	pixels[4 * 4 * TILE_SOURCE_SIZE * TILE_SOURCE_SIZE];
@@ -2822,7 +2822,7 @@ static struct ncplane	*create_atomic_piece_plane(render_ctx_t *ctx,
  * @param ghost Whether to draw landing-projection shading.
  */
 static void	compose_atomic_piece_pixels(uint32_t *pixels,
-	const solo_render_t *solo, const piece_geometry_t *geometry,
+	const t_solo_render *solo, const t_piece_geometry *geometry,
 	int tile_index, bool ghost)
 {
 	int	index;
@@ -2852,7 +2852,7 @@ static void	compose_atomic_piece_pixels(uint32_t *pixels,
  *
  * @param solo Pointer to the Solo render state.
  */
-static void	destroy_solo_planes(solo_render_t *solo)
+static void	destroy_solo_planes(t_solo_render *solo)
 {
 	destroy_plane(&solo->status_plane);
 	destroy_board_planes(solo);
@@ -2880,7 +2880,7 @@ static void	destroy_solo_planes(solo_render_t *solo)
  *
  * @param solo Pointer to the Solo render state.
  */
-static void	destroy_board_planes(solo_render_t *solo)
+static void	destroy_board_planes(t_solo_render *solo)
 {
 	destroy_plane(&solo->board_overlay_plane);
 	solo->board_plane_cells = false;

@@ -33,10 +33,10 @@ int	main(void)
  */
 static void	test_releasing_inactive_direction_keeps_timer(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[2];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[2];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -60,7 +60,7 @@ static void	test_releasing_inactive_direction_keeps_timer(void)
  */
 static void	test_default_config(void)
 {
-	solo_handling_config_t	config;
+	t_solo_handling_config	config;
 
 	config = solo_handling_default_config();
 	assert(config.das_ms == 167);
@@ -74,10 +74,10 @@ static void	test_default_config(void)
  */
 static void	test_legacy_events_are_safe_taps(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[4];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[4];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -95,10 +95,10 @@ static void	test_legacy_events_are_safe_taps(void)
  */
 static void	test_das_and_arr_timing(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[4];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[4];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -122,10 +122,10 @@ static void	test_das_and_arr_timing(void)
  */
 static void	test_release_stops_repeat(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[4];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[4];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -143,10 +143,10 @@ static void	test_release_stops_repeat(void)
  */
 static void	test_last_pressed_direction_wins(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[4];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[4];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -173,9 +173,9 @@ static void	test_last_pressed_direction_wins(void)
  */
 static void	test_terminal_repeat_is_ignored(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);
@@ -192,10 +192,10 @@ static void	test_terminal_repeat_is_ignored(void)
  */
 static void	test_soft_drop_uses_gravity_factor(void)
 {
-	solo_handling_config_t	config;
-	solo_handling_state_t	state;
-	solo_action_t			action;
-	solo_action_t			actions[4];
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	t_solo_action			actions[4];
 
 	config = solo_handling_default_config();
 	solo_handling_reset(&state);

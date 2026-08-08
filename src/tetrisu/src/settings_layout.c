@@ -1,12 +1,12 @@
 #include "tetrisu.h"
 
-static settings_rect_t	map_rect(int x, int y, int width, int height,
+static t_settings_rect	map_rect(int x, int y, int width, int height,
 		int pixel_width, int pixel_height);
 
-static settings_rect_t	map_rect(int x, int y, int width, int height,
+static t_settings_rect	map_rect(int x, int y, int width, int height,
 	int pixel_width, int pixel_height)
 {
-	settings_rect_t	mapped;
+	t_settings_rect	mapped;
 
 	mapped.x = x * pixel_width / SETTINGS_REFERENCE_WIDTH;
 	mapped.y = y * pixel_height / SETTINGS_REFERENCE_HEIGHT;
@@ -21,7 +21,7 @@ static settings_rect_t	map_rect(int x, int y, int width, int height,
  * @brief Maps the approved 1448x1086 art contract into fitted pixel space.
  */
 void	settings_layout_build(int origin_y, int origin_x, int rows, int cols,
-	int cell_px_y, int cell_px_x, settings_layout_t *layout)
+	int cell_px_y, int cell_px_x, t_settings_layout *layout)
 {
 	int	pixel_width;
 	int	pixel_height;

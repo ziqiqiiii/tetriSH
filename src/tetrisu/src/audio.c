@@ -4,12 +4,12 @@
 
 // Static Functions
 static void	log_mix_error(const char *context);
-static void	free_music(audio_ctx_t *audio);
-static bool	start_looping_music(audio_ctx_t *audio, const char *path,
+static void	free_music(t_audio_ctx *audio);
+static bool	start_looping_music(t_audio_ctx *audio, const char *path,
 				int fade_ms);
-static const char	*game_sfx_path(audio_sfx_t sfx);
-static int	game_sfx_volume(audio_sfx_t sfx);
-static int	scaled_volume(const audio_ctx_t *audio, int base);
+static const char	*game_sfx_path(t_audio_sfx sfx);
+static int	game_sfx_volume(t_audio_sfx sfx);
+static int	scaled_volume(const t_audio_ctx *audio, int base);
 static void	free_chunk(void **chunk);
 static void	play_chunk(void *chunk);
 
@@ -24,7 +24,7 @@ static void	play_chunk(void *chunk);
  * @param audio Audio context populated by this function.
  * @return 1 when SDL2_mixer is available and opened, 0 for silent fallback.
  */
-int	audio_init(audio_ctx_t *audio)
+int	audio_init(t_audio_ctx *audio)
 {
 	if (audio == NULL)
 		return (0);
@@ -59,7 +59,7 @@ int	audio_init(audio_ctx_t *audio)
  * @param audio Audio context returned by audio_init().
  * @param path Music asset path, preferably .ogg for portability.
  */
-void	audio_play_music(audio_ctx_t *audio, const char *path)
+void	audio_play_music(t_audio_ctx *audio, const char *path)
 {
 	if (audio == NULL || !audio->enabled || path == NULL)
 		return ;
@@ -87,7 +87,7 @@ void	audio_play_music(audio_ctx_t *audio, const char *path)
  * @param path Music asset that should loop after the transition.
  * @param duration_ms Total transition duration in milliseconds.
  */
-void	audio_transition_music(audio_ctx_t *audio, const char *path,
+void	audio_transition_music(t_audio_ctx *audio, const char *path,
 	int duration_ms)
 {
 	if (audio == NULL || !audio->enabled || path == NULL)
@@ -123,7 +123,7 @@ void	audio_transition_music(audio_ctx_t *audio, const char *path,
  * @param elapsed_ms Elapsed monotonic time in milliseconds.
  * @return true when a transition boundary was processed.
  */
-bool	audio_update(audio_ctx_t *audio, int elapsed_ms)
+bool	audio_update(t_audio_ctx *audio, int elapsed_ms)
 {
 #if TETRISU_ENABLE_AUDIO
 	int	midpoint_ms;
@@ -180,7 +180,7 @@ bool	audio_update(audio_ctx_t *audio, int elapsed_ms)
  * @param audio Audio context returned by audio_init().
  * @return Milliseconds until work is due, or -1 when music is stable.
  */
-int	audio_next_wake_ms(const audio_ctx_t *audio)
+int	audio_next_wake_ms(const t_audio_ctx *audio)
 {
 	int	wake_ms;
 
@@ -204,7 +204,7 @@ int	audio_next_wake_ms(const audio_ctx_t *audio)
  * @param audio Audio context returned by audio_init().
  * @param path Music asset path to play once.
  */
-void	audio_play_once(audio_ctx_t *audio, const char *path)
+void	audio_play_once(t_audio_ctx *audio, const char *path)
 {
 	if (audio == NULL || !audio->enabled || path == NULL)
 		return ;
@@ -239,7 +239,7 @@ void	audio_play_once(audio_ctx_t *audio, const char *path)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_stop_music(audio_ctx_t *audio)
+void	audio_stop_music(t_audio_ctx *audio)
 {
 	if (audio == NULL || !audio->enabled)
 		return ;
@@ -260,7 +260,7 @@ void	audio_stop_music(audio_ctx_t *audio)
  * @param move_path Sound played on up/down selection movement.
  * @param select_path Sound played on enter/selection confirmation.
  */
-void	audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
+void	audio_load_menu_sfx(t_audio_ctx *audio, const char *move_path,
 	const char *select_path)
 {
 	if (audio == NULL || !audio->enabled)
@@ -287,7 +287,7 @@ void	audio_load_menu_sfx(audio_ctx_t *audio, const char *move_path,
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_load_game_sfx(audio_ctx_t *audio)
+void	audio_load_game_sfx(t_audio_ctx *audio)
 {
 #if TETRISU_ENABLE_AUDIO
 	const char	*path;
@@ -299,7 +299,7 @@ void	audio_load_game_sfx(audio_ctx_t *audio)
 	while (index < AUDIO_SFX_COUNT)
 	{
 		free_chunk(&audio->game_sfx[index]);
-		path = game_sfx_path((audio_sfx_t)index);
+		path = game_sfx_path((t_audio_sfx)index);
 		if (path != NULL)
 			audio->game_sfx[index] = Mix_LoadWAV(path);
 		index++;
@@ -316,7 +316,7 @@ void	audio_load_game_sfx(audio_ctx_t *audio)
  * @param audio Audio context returned by audio_init().
  * @param sfx Effect identifier to play.
  */
-void	audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx)
+void	audio_play_sfx(t_audio_ctx *audio, t_audio_sfx sfx)
 {
 	if (audio == NULL || !audio->enabled
 		|| sfx < 0 || sfx >= AUDIO_SFX_COUNT)
@@ -331,7 +331,7 @@ void	audio_play_sfx(audio_ctx_t *audio, audio_sfx_t sfx)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_play_menu_move(audio_ctx_t *audio)
+void	audio_play_menu_move(t_audio_ctx *audio)
 {
 	if (audio == NULL || !audio->enabled)
 		return ;
@@ -345,7 +345,7 @@ void	audio_play_menu_move(audio_ctx_t *audio)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_play_menu_select(audio_ctx_t *audio)
+void	audio_play_menu_select(t_audio_ctx *audio)
 {
 	if (audio == NULL || !audio->enabled)
 		return ;
@@ -361,7 +361,7 @@ void	audio_play_menu_select(audio_ctx_t *audio)
  * 48 rather than the normal gameplay level of 72, so the acknowledgement is
  * audible without competing with room chat or music.
  */
-void	audio_play_room_entry(audio_ctx_t *audio)
+void	audio_play_room_entry(t_audio_ctx *audio)
 {
 	audio_play_menu_select(audio);
 }
@@ -372,7 +372,7 @@ void	audio_play_room_entry(audio_ctx_t *audio)
  * @param audio Audio context returned by audio_init().
  * @param volume Target volume; later +/- steps adjust from this level.
  */
-void	audio_set_music_volume(audio_ctx_t *audio, int volume)
+void	audio_set_music_volume(t_audio_ctx *audio, int volume)
 {
 	if (audio == NULL)
 		return ;
@@ -399,7 +399,7 @@ void	audio_set_music_volume(audio_ctx_t *audio, int volume)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_apply_effect_volume(audio_ctx_t *audio)
+void	audio_apply_effect_volume(t_audio_ctx *audio)
 {
 #if TETRISU_ENABLE_AUDIO
 	int	index;
@@ -417,7 +417,7 @@ void	audio_apply_effect_volume(audio_ctx_t *audio)
 	{
 		if (audio->game_sfx[index] != NULL)
 			Mix_VolumeChunk((Mix_Chunk *)audio->game_sfx[index],
-				scaled_volume(audio, game_sfx_volume((audio_sfx_t)index)));
+				scaled_volume(audio, game_sfx_volume((t_audio_sfx)index)));
 		index++;
 	}
 #else
@@ -430,7 +430,7 @@ void	audio_apply_effect_volume(audio_ctx_t *audio)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_volume_up(audio_ctx_t *audio)
+void	audio_volume_up(t_audio_ctx *audio)
 {
 	if (audio == NULL)
 		return ;
@@ -449,7 +449,7 @@ void	audio_volume_up(audio_ctx_t *audio)
  *
  * @param audio Audio context returned by audio_init().
  */
-void	audio_volume_down(audio_ctx_t *audio)
+void	audio_volume_down(t_audio_ctx *audio)
 {
 	if (audio == NULL)
 		return ;
@@ -468,7 +468,7 @@ void	audio_volume_down(audio_ctx_t *audio)
  *
  * @param audio Audio context to tear down.
  */
-void	audio_teardown(audio_ctx_t *audio)
+void	audio_teardown(t_audio_ctx *audio)
 {
 	if (audio == NULL)
 		return ;
@@ -511,7 +511,7 @@ static void	log_mix_error(const char *context)
  *
  * @param audio Audio context whose music pointer is cleared.
  */
-static void	free_music(audio_ctx_t *audio)
+static void	free_music(t_audio_ctx *audio)
 {
 	if (audio->music != NULL)
 	{
@@ -529,7 +529,7 @@ static void	free_music(audio_ctx_t *audio)
  * @param fade_ms Fade-in duration; zero starts immediately.
  * @return true when the stream loaded and started.
  */
-static bool	start_looping_music(audio_ctx_t *audio, const char *path,
+static bool	start_looping_music(t_audio_ctx *audio, const char *path,
 	int fade_ms)
 {
 	int	result;
@@ -561,7 +561,7 @@ static bool	start_looping_music(audio_ctx_t *audio, const char *path,
  * @param sfx Effect identifier.
  * @return Asset path, or NULL for an invalid identifier.
  */
-static const char	*game_sfx_path(audio_sfx_t sfx)
+static const char	*game_sfx_path(t_audio_sfx sfx)
 {
 	static const char	*paths[AUDIO_SFX_COUNT] = {
 		GENERAL_SFX_DIR "/se_game_move.wav",
@@ -602,14 +602,14 @@ static const char	*game_sfx_path(audio_sfx_t sfx)
 /**
  * @brief Scales one mix-balance constant by the current volume setting.
  */
-static int	scaled_volume(const audio_ctx_t *audio, int base)
+static int	scaled_volume(const t_audio_ctx *audio, int base)
 {
 	if (audio == NULL || AUDIO_MAX_VOLUME <= 0)
 		return (0);
 	return (base * audio->music_volume / AUDIO_MAX_VOLUME);
 }
 
-static int	game_sfx_volume(audio_sfx_t sfx)
+static int	game_sfx_volume(t_audio_sfx sfx)
 {
 	if (sfx == AUDIO_SFX_MOVE || sfx == AUDIO_SFX_ROTATE
 		|| sfx == AUDIO_SFX_SOFT_DROP)

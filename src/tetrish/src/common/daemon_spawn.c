@@ -8,6 +8,10 @@
  * from reacquiring a terminal. Closes all open file descriptors except
  * keep_fd, and redirects stdin/stdout/stderr to /dev/null.
  *
+ * /dev/null is the floor, not the policy: a caller that wants to keep what the
+ * daemon says about itself reopens stderr afterwards (dspawn does, onto a file
+ * named for the registry entry).
+ *
  * Emits no output of its own. Anything printed here would run before the
  * first fork() and be flushed once per process when stdout is not a terminal,
  * which is why the old startup banner appeared twice under a pipe. A caller

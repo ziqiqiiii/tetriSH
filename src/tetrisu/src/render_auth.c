@@ -15,11 +15,11 @@ typedef struct s_auth_layout
 	int	button_width;
 	int	footer_row;
 	bool	art;
-}	auth_layout_t;
+}	t_auth_layout;
 
-static bool			auth_art_available(const render_ctx_t *ctx);
-static auth_layout_t	auth_layout(const render_ctx_t *ctx,
-					auth_form_mode_t mode);
+static bool			auth_art_available(const t_render_ctx *ctx);
+static t_auth_layout	auth_layout(const t_render_ctx *ctx,
+					t_auth_form_mode mode);
 static void			set_color(struct ncplane *plane, int red, int green,
 						int blue);
 static void			fill_line(struct ncplane *plane, int row, int x, int width,
@@ -34,27 +34,27 @@ static void			put_left_box_text(struct ncplane *plane, int row, int x,
 						bool placeholder);
 static void			clip_utf8_bytes(const char *text, size_t limit,
 						char *output, size_t capacity);
-static void			draw_field(struct ncplane *plane, const auth_form_t *form,
-						auth_focus_t focus, int row, int x, int width,
+static void			draw_field(struct ncplane *plane, const t_auth_form *form,
+						t_auth_focus focus, int row, int x, int width,
 						const char *label, const char *value,
 						const char *placeholder, bool password);
-static void			draw_status(struct ncplane *plane, const auth_form_t *form,
-						const auth_layout_t *layout);
+static void			draw_status(struct ncplane *plane, const t_auth_form *form,
+						const t_auth_layout *layout);
 static void			draw_native_frame(struct ncplane *plane, int rows,
 						int cols);
-static void			draw_form(struct ncplane *plane, const auth_form_t *form,
-						const auth_layout_t *layout);
+static void			draw_form(struct ncplane *plane, const t_auth_form *form,
+						const t_auth_layout *layout);
 static bool			point_in_row(const ncinput *input, int row, int x,
 						int width);
 
 /**
  * @brief Draws a responsive native-text form over the character-free artwork.
  */
-bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
+bool	render_auth_show(t_render_ctx *ctx, const t_auth_form *form,
 	bool rebuild_background)
 {
 	ncplane_options	options;
-	auth_layout_t	layout;
+	t_auth_layout	layout;
 	uint64_t		channels;
 	unsigned		rows;
 	unsigned		cols;
@@ -139,10 +139,10 @@ bool	render_auth_show(render_ctx_t *ctx, const auth_form_t *form,
 /**
  * @brief Maps a pointer press to the same focus order used by the keyboard.
  */
-bool	render_auth_hit_test(const render_ctx_t *ctx, const auth_form_t *form,
-	const ncinput *input, auth_focus_t *focus)
+bool	render_auth_hit_test(const t_render_ctx *ctx, const t_auth_form *form,
+	const ncinput *input, t_auth_focus *focus)
 {
-	auth_layout_t	layout;
+	t_auth_layout	layout;
 
 	if (ctx == NULL || form == NULL || input == NULL || focus == NULL)
 		return (false);
@@ -182,7 +182,7 @@ bool	render_auth_hit_test(const render_ctx_t *ctx, const auth_form_t *form,
 /**
  * @brief Removes the auth overlay without touching the next screen.
  */
-void	render_auth_destroy(render_ctx_t *ctx)
+void	render_auth_destroy(t_render_ctx *ctx)
 {
 	render_auth_pixel_overlay_destroy(ctx);
 	render_screen_destroy(ctx);
@@ -190,7 +190,7 @@ void	render_auth_destroy(render_ctx_t *ctx)
 	render_compatibility_badge_hide(ctx);
 }
 
-static bool	auth_art_available(const render_ctx_t *ctx)
+static bool	auth_art_available(const t_render_ctx *ctx)
 {
 	unsigned	rows;
 	unsigned	cols;
@@ -201,10 +201,10 @@ static bool	auth_art_available(const render_ctx_t *ctx)
 	return (rows >= 24 && cols >= 64);
 }
 
-static auth_layout_t	auth_layout(const render_ctx_t *ctx,
-	auth_form_mode_t mode)
+static t_auth_layout	auth_layout(const t_render_ctx *ctx,
+	t_auth_form_mode mode)
 {
-	auth_layout_t	layout;
+	t_auth_layout	layout;
 	unsigned		rows;
 	unsigned		cols;
 	int				center;
@@ -392,8 +392,8 @@ static void	clip_utf8_bytes(const char *text, size_t limit, char *output,
 	output[destination] = '\0';
 }
 
-static void	draw_field(struct ncplane *plane, const auth_form_t *form,
-	auth_focus_t focus, int row, int x, int width, const char *label,
+static void	draw_field(struct ncplane *plane, const t_auth_form *form,
+	t_auth_focus focus, int row, int x, int width, const char *label,
 	const char *value, const char *placeholder, bool password)
 {
 	char	display[AUTH_FIELD_MAX];
@@ -415,8 +415,8 @@ static void	draw_field(struct ncplane *plane, const auth_form_t *form,
 		show_placeholder);
 }
 
-static void	draw_status(struct ncplane *plane, const auth_form_t *form,
-	const auth_layout_t *layout)
+static void	draw_status(struct ncplane *plane, const t_auth_form *form,
+	const t_auth_layout *layout)
 {
 	if (form->feedback == AUTH_FEEDBACK_ERROR)
 		set_color(plane, 255, 111, 142);
@@ -455,8 +455,8 @@ static void	draw_native_frame(struct ncplane *plane, int rows, int cols)
 	(void)ncplane_putstr_yx(plane, 2, cols - 7, "+ *");
 }
 
-static void	draw_form(struct ncplane *plane, const auth_form_t *form,
-	const auth_layout_t *layout)
+static void	draw_form(struct ncplane *plane, const t_auth_form *form,
+	const t_auth_layout *layout)
 {
 	const char	*primary;
 	const char	*secondary;
@@ -488,7 +488,7 @@ static void	draw_form(struct ncplane *plane, const auth_form_t *form,
 	}
 	else
 	{
-		auth_layout_t	status_layout;
+		t_auth_layout	status_layout;
 
 		draw_field(plane, form, AUTH_FOCUS_DOMAIN, layout->field_rows[2],
 			layout->field_x, layout->field_width, "DOMAIN / SERVER",

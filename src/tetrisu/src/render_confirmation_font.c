@@ -24,49 +24,49 @@ typedef struct s_confirm_box
 	int	y;
 	int	width;
 	int	height;
-}	confirm_box_t;
+}	t_confirm_box;
 
-static const color_t	g_confirm_title = {255, 112, 190};
-static const color_t	g_confirm_body = {250, 242, 221};
-static const color_t	g_confirm_hint = {180, 148, 205};
-static const color_t	g_confirm_idle = {180, 148, 205};
-static const color_t	g_confirm_focus_ink = {12, 8, 24};
-static const color_t	g_confirm_focus_fill = {255, 203, 102};
-static const color_t	g_confirm_panel = {CONFIRM_PANEL_R, CONFIRM_PANEL_G,
+static const t_color	g_confirm_title = {255, 112, 190};
+static const t_color	g_confirm_body = {250, 242, 221};
+static const t_color	g_confirm_hint = {180, 148, 205};
+static const t_color	g_confirm_idle = {180, 148, 205};
+static const t_color	g_confirm_focus_ink = {12, 8, 24};
+static const t_color	g_confirm_focus_fill = {255, 203, 102};
+static const t_color	g_confirm_panel = {CONFIRM_PANEL_R, CONFIRM_PANEL_G,
 	CONFIRM_PANEL_B};
-static const color_t	g_confirm_border = {CONFIRM_BORDER_R,
+static const t_color	g_confirm_border = {CONFIRM_BORDER_R,
 	CONFIRM_BORDER_G, CONFIRM_BORDER_B};
 
-static uint32_t	*build_dialog_canvas(render_ctx_t *ctx,
-					const confirmation_dialog_t *dialog, int width,
+static uint32_t	*build_dialog_canvas(t_render_ctx *ctx,
+					const t_confirmation_dialog *dialog, int width,
 					int height);
 static void		draw_panel(uint32_t *canvas, int width, int height);
-static void		draw_dialog_text(render_ctx_t *ctx, uint32_t *canvas,
+static void		draw_dialog_text(t_render_ctx *ctx, uint32_t *canvas,
 					int width, int height,
-					const confirmation_dialog_t *dialog);
-static void		draw_buttons(render_ctx_t *ctx, uint32_t *canvas, int width,
-					int height, const confirmation_dialog_t *dialog);
-static void		draw_button(render_ctx_t *ctx, uint32_t *canvas, int width,
-					int height, const confirm_box_t *box, const char *label,
+					const t_confirmation_dialog *dialog);
+static void		draw_buttons(t_render_ctx *ctx, uint32_t *canvas, int width,
+					int height, const t_confirmation_dialog *dialog);
+static void		draw_button(t_render_ctx *ctx, uint32_t *canvas, int width,
+					int height, const t_confirm_box *box, const char *label,
 					bool focused);
-static void		draw_centered(render_ctx_t *ctx, uint32_t *canvas, int width,
+static void		draw_centered(t_render_ctx *ctx, uint32_t *canvas, int width,
 					int height, const char *text, int row, int glyph_size,
-					color_t tint);
+					t_color tint);
 static void		draw_atlas_text(uint32_t *canvas, int width, int height,
-					const pixel_asset_t *font, const char *text,
-					const confirm_box_t *at, color_t tint);
+					const t_pixel_asset *font, const char *text,
+					const t_confirm_box *at, t_color tint);
 static void		draw_atlas_glyph(uint32_t *canvas, int width, int height,
-					const pixel_asset_t *font, int glyph, int x, int y,
-					int glyph_size, color_t tint);
+					const t_pixel_asset *font, int glyph, int x, int y,
+					int glyph_size, t_color tint);
 static void		fill_rect(uint32_t *canvas, int width, int height,
-					const confirm_box_t *box, color_t colour, unsigned alpha);
+					const t_confirm_box *box, t_color colour, unsigned alpha);
 static void		blend_over(uint32_t *dest, unsigned red, unsigned green,
 					unsigned blue, unsigned alpha);
 static int		ink_span(int units, int glyph_size);
 static int		glyph_spacing(int glyph_size);
 static int		text_pixels(const char *text, int glyph_size);
 static int		fit_glyph(const char *text, int box_width, int glyph_size);
-static const pixel_asset_t	*confirmation_font(render_ctx_t *ctx);
+static const t_pixel_asset	*confirmation_font(t_render_ctx *ctx);
 
 /**
  * @brief Draws the dialog as a bitmap plane over whatever the screen holds.
@@ -75,8 +75,8 @@ static const pixel_asset_t	*confirmation_font(render_ctx_t *ctx);
  * @param dialog Dialog whose plane is replaced with a freshly drawn bitmap.
  * @return true when the bitmap dialog is on screen.
  */
-bool	render_confirmation_pixel_show(render_ctx_t *ctx,
-	confirmation_dialog_t *dialog)
+bool	render_confirmation_pixel_show(t_render_ctx *ctx,
+	t_confirmation_dialog *dialog)
 {
 	uint32_t	*canvas;
 	int			width;
@@ -104,7 +104,7 @@ bool	render_confirmation_pixel_show(render_ctx_t *ctx,
 /**
  * @brief Releases the glyph sheet the bitmap dialog samples.
  */
-void	render_confirmation_font_release(render_ctx_t *ctx)
+void	render_confirmation_font_release(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -118,8 +118,8 @@ void	render_confirmation_font_release(render_ctx_t *ctx)
  * has to be readable over whatever it lands on, and an opaque sprixel is also
  * what stops the planes underneath showing through it.
  */
-static uint32_t	*build_dialog_canvas(render_ctx_t *ctx,
-	const confirmation_dialog_t *dialog, int width, int height)
+static uint32_t	*build_dialog_canvas(t_render_ctx *ctx,
+	const t_confirmation_dialog *dialog, int width, int height)
 {
 	uint32_t	*canvas;
 
@@ -140,7 +140,7 @@ static uint32_t	*build_dialog_canvas(render_ctx_t *ctx,
  */
 static void	draw_panel(uint32_t *canvas, int width, int height)
 {
-	confirm_box_t	box;
+	t_confirm_box	box;
 	int				edge;
 
 	box.x = 0;
@@ -166,8 +166,8 @@ static void	draw_panel(uint32_t *canvas, int width, int height)
 /**
  * @brief Places the title, the question and the control hint.
  */
-static void	draw_dialog_text(render_ctx_t *ctx, uint32_t *canvas, int width,
-	int height, const confirmation_dialog_t *dialog)
+static void	draw_dialog_text(t_render_ctx *ctx, uint32_t *canvas, int width,
+	int height, const t_confirmation_dialog *dialog)
 {
 	int	glyph;
 
@@ -186,10 +186,10 @@ static void	draw_dialog_text(render_ctx_t *ctx, uint32_t *canvas, int width,
 /**
  * @brief Lays the two answers out side by side, safe answer first.
  */
-static void	draw_buttons(render_ctx_t *ctx, uint32_t *canvas, int width,
-	int height, const confirmation_dialog_t *dialog)
+static void	draw_buttons(t_render_ctx *ctx, uint32_t *canvas, int width,
+	int height, const t_confirmation_dialog *dialog)
 {
-	confirm_box_t	box;
+	t_confirm_box	box;
 	int				gap;
 
 	box.width = width / 4;
@@ -207,11 +207,11 @@ static void	draw_buttons(render_ctx_t *ctx, uint32_t *canvas, int width,
 /**
  * @brief Draws one answer, filled when it holds focus.
  */
-static void	draw_button(render_ctx_t *ctx, uint32_t *canvas, int width,
-	int height, const confirm_box_t *box, const char *label, bool focused)
+static void	draw_button(t_render_ctx *ctx, uint32_t *canvas, int width,
+	int height, const t_confirm_box *box, const char *label, bool focused)
 {
-	confirm_box_t	at;
-	color_t			ink;
+	t_confirm_box	at;
+	t_color			ink;
 	int				glyph;
 
 	if (focused)
@@ -236,10 +236,10 @@ static void	draw_button(render_ctx_t *ctx, uint32_t *canvas, int width,
 /**
  * @brief Centres one line horizontally, shrinking it until it fits.
  */
-static void	draw_centered(render_ctx_t *ctx, uint32_t *canvas, int width,
-	int height, const char *text, int row, int glyph_size, color_t tint)
+static void	draw_centered(t_render_ctx *ctx, uint32_t *canvas, int width,
+	int height, const char *text, int row, int glyph_size, t_color tint)
 {
-	confirm_box_t	at;
+	t_confirm_box	at;
 
 	if (glyph_size < 3)
 		glyph_size = 3;
@@ -253,8 +253,8 @@ static void	draw_centered(render_ctx_t *ctx, uint32_t *canvas, int width,
 }
 
 static void	draw_atlas_text(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, const char *text, const confirm_box_t *at,
-	color_t tint)
+	const t_pixel_asset *font, const char *text, const t_confirm_box *at,
+	t_color tint)
 {
 	unsigned	codepoint;
 	int			index;
@@ -275,10 +275,10 @@ static void	draw_atlas_text(uint32_t *canvas, int width, int height,
 }
 
 static void	draw_atlas_glyph(uint32_t *canvas, int width, int height,
-	const pixel_asset_t *font, int glyph, int x, int y, int glyph_size,
-	color_t tint)
+	const t_pixel_asset *font, int glyph, int x, int y, int glyph_size,
+	t_color tint)
 {
-	confirm_box_t	cell;
+	t_confirm_box	cell;
 	unsigned		alpha;
 	int				source_y;
 	int				source_x;
@@ -307,7 +307,7 @@ static void	draw_atlas_glyph(uint32_t *canvas, int width, int height,
 }
 
 static void	fill_rect(uint32_t *canvas, int width, int height,
-	const confirm_box_t *box, color_t colour, unsigned alpha)
+	const t_confirm_box *box, t_color colour, unsigned alpha)
 {
 	int	y;
 	int	x;
@@ -388,7 +388,7 @@ static int	fit_glyph(const char *text, int box_width, int glyph_size)
 /**
  * @brief Lazily decodes the shared glyph sheet the dialog letters with.
  */
-static const pixel_asset_t	*confirmation_font(render_ctx_t *ctx)
+static const t_pixel_asset	*confirmation_font(t_render_ctx *ctx)
 {
 	if (ctx->confirmation_font.pixels != NULL)
 		return (&ctx->confirmation_font);

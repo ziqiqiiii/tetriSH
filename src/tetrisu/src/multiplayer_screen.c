@@ -14,7 +14,7 @@ static bool	is_next_key(uint32_t key);
  *
  * @param state Picker state to initialise.
  */
-void	mp_mode_state_init(mp_mode_state_t *state)
+void	mp_mode_state_init(t_mp_mode_state *state)
 {
 	if (state == NULL)
 		return ;
@@ -35,7 +35,7 @@ void	mp_mode_state_init(mp_mode_state_t *state)
  * @param key Key identifier from Notcurses.
  * @return The resolved action, or MP_MODE_ACTION_NONE when focus only moved.
  */
-mp_mode_action_t	mp_mode_handle_key(mp_mode_state_t *state, uint32_t key)
+t_mp_mode_action	mp_mode_handle_key(t_mp_mode_state *state, uint32_t key)
 {
 	if (state == NULL)
 		return (MP_MODE_ACTION_NONE);
@@ -77,8 +77,8 @@ mp_mode_action_t	mp_mode_handle_key(mp_mode_state_t *state, uint32_t key)
  * @param after State after the keystroke.
  * @return true when a repaint is required.
  */
-bool	mp_mode_state_view_changed(const mp_mode_state_t *before,
-	const mp_mode_state_t *after)
+bool	mp_mode_state_view_changed(const t_mp_mode_state *before,
+	const t_mp_mode_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -113,7 +113,7 @@ bool	mp_mode_navigation_keys_coalesce(uint32_t active_key,
  * @param action Action returned by mp_mode_handle_key().
  * @return true when the screen is about to be left.
  */
-bool	mp_mode_action_leaves_screen(mp_mode_action_t action)
+bool	mp_mode_action_leaves_screen(t_mp_mode_action action)
 {
 	return (action == MP_MODE_ACTION_SELECT
 		|| action == MP_MODE_ACTION_BACK
@@ -126,7 +126,7 @@ bool	mp_mode_action_leaves_screen(mp_mode_action_t action)
  * @param state Picker state to read.
  * @return APP_GAME_MODE_DOUBLE or APP_GAME_MODE_BATTLE_ROYALE.
  */
-app_game_mode_t	mp_mode_focused_mode(const mp_mode_state_t *state)
+t_app_game_mode	mp_mode_focused_mode(const t_mp_mode_state *state)
 {
 	if (state == NULL || state->focus == MP_MODE_FOCUS_DOUBLE)
 		return (APP_GAME_MODE_DOUBLE);
@@ -177,7 +177,7 @@ const char	*mp_mode_card_players(int index)
  * Keeping the rule here gives providers, lobby guards, and room policy one
  * authoritative boundary.
  */
-bool	multiplayer_room_capacity_valid(app_game_mode_t mode, int capacity)
+bool	multiplayer_room_capacity_valid(t_app_game_mode mode, int capacity)
 {
 	if (mode == APP_GAME_MODE_DOUBLE)
 		return (capacity == WAITING_ROOM_DOUBLE_PLAYERS);
@@ -225,7 +225,7 @@ const char	*mp_mode_card_line(int index, int line)
  * @param state Panel state to initialise.
  * @param mode Mode to pre-select; anything else falls back to Double.
  */
-void	create_room_state_init(create_room_state_t *state, app_game_mode_t mode)
+void	create_room_state_init(t_create_room_state *state, t_app_game_mode mode)
 {
 	if (state == NULL)
 		return ;
@@ -245,7 +245,7 @@ void	create_room_state_init(create_room_state_t *state, app_game_mode_t mode)
  * @param key Key identifier from Notcurses.
  * @return The resolved action, or CREATE_ROOM_ACTION_NONE when focus moved.
  */
-create_room_action_t	create_room_handle_key(create_room_state_t *state,
+t_create_room_action	create_room_handle_key(t_create_room_state *state,
 	uint32_t key)
 {
 	if (state == NULL)
@@ -287,8 +287,8 @@ create_room_action_t	create_room_handle_key(create_room_state_t *state,
  * @param after State after the keystroke.
  * @return true when a repaint is required.
  */
-bool	create_room_state_view_changed(const create_room_state_t *before,
-	const create_room_state_t *after)
+bool	create_room_state_view_changed(const t_create_room_state *before,
+	const t_create_room_state *after)
 {
 	if (before == NULL || after == NULL)
 		return (false);
@@ -303,7 +303,7 @@ bool	create_room_state_view_changed(const create_room_state_t *before,
  * @param action Action returned by create_room_handle_key().
  * @return true when the screen is about to be left.
  */
-bool	create_room_action_leaves_screen(create_room_action_t action)
+bool	create_room_action_leaves_screen(t_create_room_action action)
 {
 	return (action == CREATE_ROOM_ACTION_CREATE
 		|| action == CREATE_ROOM_ACTION_CANCEL
@@ -316,7 +316,7 @@ bool	create_room_action_leaves_screen(create_room_action_t action)
  * @param state Panel state to read.
  * @return 0 for Double, 1 for Battle Royale.
  */
-int	create_room_focused_index(const create_room_state_t *state)
+int	create_room_focused_index(const t_create_room_state *state)
 {
 	if (state != NULL && state->mode == APP_GAME_MODE_BATTLE_ROYALE)
 		return (1);
@@ -337,7 +337,7 @@ int	create_room_focused_index(const create_room_state_t *state)
  * @param size Capacity of out.
  * @return out, holding "" when there is nothing to report.
  */
-const char	*mp_feedback_text(mp_mode_feedback_t feedback, int value,
+const char	*mp_feedback_text(t_mp_mode_feedback feedback, int value,
 	char *out, size_t size)
 {
 	if (out == NULL || size == 0)

@@ -1,12 +1,12 @@
 #include "tetrisu.h"
 
-static marketplace_rect_t	map_rect(int x, int y, int width, int height,
+static t_marketplace_rect	map_rect(int x, int y, int width, int height,
 				int pixel_width, int pixel_height);
 
-static marketplace_rect_t	map_rect(int x, int y, int width, int height,
+static t_marketplace_rect	map_rect(int x, int y, int width, int height,
 	int pixel_width, int pixel_height)
 {
-	marketplace_rect_t	mapped;
+	t_marketplace_rect	mapped;
 
 	mapped.x = x * pixel_width / MARKETPLACE_REFERENCE_WIDTH;
 	mapped.y = y * pixel_height / MARKETPLACE_REFERENCE_HEIGHT;
@@ -25,7 +25,7 @@ static marketplace_rect_t	map_rect(int x, int y, int width, int height,
  * region plane lands.
  */
 void	marketplace_layout_build(int origin_y, int origin_x, int rows, int cols,
-	int cell_px_y, int cell_px_x, marketplace_layout_t *layout)
+	int cell_px_y, int cell_px_x, t_marketplace_layout *layout)
 {
 	int	pixel_width;
 	int	pixel_height;

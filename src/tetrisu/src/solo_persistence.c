@@ -1,6 +1,4 @@
 #include "tetrisu.h"
-#include <fcntl.h>
-#include <sys/stat.h>
 
 #define SOLO_STATE_PATH_MAX	4096
 #define SOLO_STATE_HEADER	"tetrisu-state-v1\n"

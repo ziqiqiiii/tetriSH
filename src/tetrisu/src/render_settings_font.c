@@ -9,136 +9,136 @@
 # define SETTINGS_FONT_SPACING_REF	4
 # define SETTINGS_FONT_SHADOW_REF	3
 
-static const color_t	g_settings_cream = {250, 242, 221};
-static const color_t	g_settings_gold = {255, 203, 102};
-static const color_t	g_settings_pink = {255, 112, 190};
-static const color_t	g_settings_lavender = {190, 155, 218};
-static const color_t	g_settings_green = {112, 214, 174};
-static const color_t	g_settings_disabled = {105, 99, 120};
-static const color_t	g_settings_shadow = {22, 8, 31};
+static const t_color	g_settings_cream = {250, 242, 221};
+static const t_color	g_settings_gold = {255, 203, 102};
+static const t_color	g_settings_pink = {255, 112, 190};
+static const t_color	g_settings_lavender = {190, 155, 218};
+static const t_color	g_settings_green = {112, 214, 174};
+static const t_color	g_settings_disabled = {105, 99, 120};
+static const t_color	g_settings_shadow = {22, 8, 31};
 
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font);
-static bool	refresh_background(render_ctx_t *ctx, bool force);
-static bool	cache_background(render_ctx_t *ctx);
-static bool	compose_settings(render_ctx_t *ctx,
-		const app_screen_view_model_t *view, const settings_state_t *state,
-		const settings_layout_t *layout, struct ncvisual *font);
-static bool	compose_controls(render_ctx_t *ctx,
-		const app_settings_view_model_t *settings,
-		const settings_state_t *state, const settings_layout_t *layout,
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font);
+static bool	refresh_background(t_render_ctx *ctx, bool force);
+static bool	cache_background(t_render_ctx *ctx);
+static bool	compose_settings(t_render_ctx *ctx,
+		const t_app_screen_view_model *view, const t_settings_state *state,
+		const t_settings_layout *layout, struct ncvisual *font);
+static bool	compose_controls(t_render_ctx *ctx,
+		const t_app_settings_view_model *settings,
+		const t_settings_state *state, const t_settings_layout *layout,
 		struct ncvisual *font);
-static bool	compose_inventory(render_ctx_t *ctx,
-		const app_settings_view_model_t *settings,
-		const settings_state_t *state, const settings_layout_t *layout,
+static bool	compose_inventory(t_render_ctx *ctx,
+		const t_app_settings_view_model *settings,
+		const t_settings_state *state, const t_settings_layout *layout,
 		struct ncvisual *font, bool characters);
-static int	update_static_layer(render_ctx_t *ctx,
-		const app_screen_view_model_t *view, const settings_state_t *state,
-		const settings_layout_t *layout, struct ncvisual *font);
-static int	update_region_layers(render_ctx_t *ctx,
-		const app_screen_view_model_t *view, const settings_state_t *state,
-		const settings_layout_t *layout, struct ncvisual *font);
-static void	restack_settings_planes(render_ctx_t *ctx);
+static int	update_static_layer(t_render_ctx *ctx,
+		const t_app_screen_view_model *view, const t_settings_state *state,
+		const t_settings_layout *layout, struct ncvisual *font);
+static int	update_region_layers(t_render_ctx *ctx,
+		const t_app_screen_view_model *view, const t_settings_state *state,
+		const t_settings_layout *layout, struct ncvisual *font);
+static void	restack_settings_planes(t_render_ctx *ctx);
 static int	settings_region_failed(const char *stage);
-static uint32_t	*region_canvas(render_ctx_t *ctx,
-		const settings_layout_t *layout);
-static bool	compose_volume(render_ctx_t *ctx,
-		const app_settings_view_model_t *settings,
-		const settings_layout_t *layout, struct ncvisual *font);
-static bool	compose_ability(render_ctx_t *ctx,
-		const app_settings_view_model_t *settings,
-		const settings_state_t *state, const settings_layout_t *layout,
+static uint32_t	*region_canvas(t_render_ctx *ctx,
+		const t_settings_layout *layout);
+static bool	compose_volume(t_render_ctx *ctx,
+		const t_app_settings_view_model *settings,
+		const t_settings_layout *layout, struct ncvisual *font);
+static bool	compose_ability(t_render_ctx *ctx,
+		const t_app_settings_view_model *settings,
+		const t_settings_state *state, const t_settings_layout *layout,
 		struct ncvisual *font);
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 		int width, int height);
-static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_settings_plane(t_render_ctx *ctx, uint32_t *pixels,
 		int width, int height);
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-		int width, int height, const settings_rect_t *region,
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+		int width, int height, const t_settings_rect *region,
 		struct ncplane **slot);
 static void	draw_profile(uint32_t *pixels, int width, int height,
-		const app_screen_view_model_t *view, const settings_layout_t *layout,
+		const t_app_screen_view_model *view, const t_settings_layout *layout,
 		struct ncvisual *font);
 static void	draw_inventory(uint32_t *pixels, int width, int height,
-		const app_catalogue_view_model_t *catalogue,
-		const settings_state_t *state, const settings_layout_t *layout,
-		struct ncvisual *font, bool characters, render_ctx_t *ctx);
+		const t_app_catalogue_view_model *catalogue,
+		const t_settings_state *state, const t_settings_layout *layout,
+		struct ncvisual *font, bool characters, t_render_ctx *ctx);
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, int ref_x_value, int ref_y_value,
-		int ref_width, int ref_height, color_t tint, unsigned alpha);
+		const t_settings_layout *layout, int ref_x_value, int ref_y_value,
+		int ref_width, int ref_height, t_color tint, unsigned alpha);
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, int ref_label_x, int ref_label_y,
+		const t_settings_layout *layout, int ref_label_x, int ref_label_y,
 		int ref_slot_width, int ref_slot_height);
 static const char	*inventory_slot_label(
-		const app_catalogue_item_view_model_t *item, bool characters);
+		const t_app_catalogue_item_view_model *item, bool characters);
 static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
-		render_ctx_t *ctx, int cache_slot,
+		const t_settings_layout *layout, struct ncvisual *font,
+		t_render_ctx *ctx, int cache_slot,
 		const char *path, int ref_x_value, int ref_y_value, int ref_width,
 		int ref_height, bool owned);
 static void	draw_stats(uint32_t *pixels, int width, int height,
-		const app_settings_view_model_t *settings,
-		const settings_layout_t *layout, struct ncvisual *font);
+		const t_app_settings_view_model *settings,
+		const t_settings_layout *layout, struct ncvisual *font);
 static void	draw_volume_value(uint32_t *pixels, int width, int height,
-		const app_settings_view_model_t *settings,
-		const settings_layout_t *layout, struct ncvisual *font);
+		const t_app_settings_view_model *settings,
+		const t_settings_layout *layout, struct ncvisual *font);
 static void	draw_buttons(uint32_t *pixels, int width, int height,
-		const app_settings_view_model_t *settings, const settings_state_t *state,
-		const settings_layout_t *layout, struct ncvisual *font);
-static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
-		int height, const settings_layout_t *layout, const char *path);
-static struct ncvisual	*cached_thumbnail(render_ctx_t *ctx, int cache_slot,
+		const t_app_settings_view_model *settings, const t_settings_state *state,
+		const t_settings_layout *layout, struct ncvisual *font);
+static void	draw_portrait(t_render_ctx *ctx, uint32_t *pixels, int width,
+		int height, const t_settings_layout *layout, const char *path);
+static struct ncvisual	*cached_thumbnail(t_render_ctx *ctx, int cache_slot,
 		const char *path);
 static void	draw_ability_card(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
-		const app_catalogue_item_view_model_t *character);
+		const t_settings_layout *layout, struct ncvisual *font,
+		const t_app_catalogue_item_view_model *character);
 static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
+		const t_settings_layout *layout, struct ncvisual *font,
 		const char *text, int ref_x, int ref_y, int ref_width,
-		int ref_glyph, color_t tint, int max_lines);
+		int ref_glyph, t_color tint, int max_lines);
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
+		const t_settings_layout *layout, struct ncvisual *font,
 		const char *text, int ref_x, int ref_y, int ref_width,
-		int ref_glyph, color_t tint, bool centered);
+		int ref_glyph, t_color tint, bool centered);
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-		const settings_layout_t *layout, struct ncvisual *font,
+		const t_settings_layout *layout, struct ncvisual *font,
 		const char *text, int x, int y, int glyph_size, int spacing,
-		color_t tint);
+		t_color tint);
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 		struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-		color_t tint, const settings_layout_t *layout);
+		t_color tint, const t_settings_layout *layout);
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 		struct ncvisual *font, int glyph, int source_x, int source_y,
-		int x, int y, int cell_width, int cell_height, color_t tint,
+		int x, int y, int cell_width, int cell_height, t_color tint,
 		bool opaque);
 static int	ink_span(int units, int glyph_size);
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-		color_t tint, unsigned alpha, bool opaque);
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha);
-static int	ref_x(const settings_layout_t *layout, int value);
-static int	ref_y(const settings_layout_t *layout, int value);
-static int	ref_size(const settings_layout_t *layout, int value);
+		t_color tint, unsigned alpha, bool opaque);
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
+static int	ref_x(const t_settings_layout *layout, int value);
+static int	ref_y(const t_settings_layout *layout, int value);
+static int	ref_size(const t_settings_layout *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
-static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
+static int	fit_glyph_size(const t_settings_layout *layout, const char *text,
 		int ref_width, int ref_glyph, int *spacing);
 static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static const char	*nonempty(const char *text);
-static const char	*status_title(const app_screen_view_model_t *view);
-static const char	*status_detail(const app_screen_view_model_t *view);
-static const char	*renderer_name(tetrisu_renderer_mode_t mode);
+static const char	*status_title(const t_app_screen_view_model *view);
+static const char	*status_detail(const t_app_screen_view_model *view);
+static const char	*renderer_name(t_tetrisu_renderer_mode mode);
 static uint64_t	settings_hash(const void *data, size_t size, uint64_t hash);
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-		const settings_layout_t *layout);
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+		const t_settings_layout *layout);
 static bool	settings_render_failed(const char *stage);
 
 /**
  * @brief Renders the approved Settings/Profile art at exact fitted pixels.
  */
-bool	render_settings_pixel_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
+bool	render_settings_pixel_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state,
 	bool rebuild_background)
 {
-	settings_layout_t	layout;
+	t_settings_layout	layout;
 	struct ncvisual		*font;
 	int					rebuilt;
 	int					changed;
@@ -195,9 +195,9 @@ bool	render_settings_pixel_show(render_ctx_t *ctx,
  *
  * @return 1 when the layer was rebuilt, 0 when it was reused, -1 on failure.
  */
-static int	update_static_layer(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+static int	update_static_layer(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
 	uint64_t	signature;
 
@@ -220,9 +220,9 @@ static int	update_static_layer(render_ctx_t *ctx,
  * @return 1 when at least one region was rewritten, 0 when none were, -1 on
  * failure.
  */
-static int	update_region_layers(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+static int	update_region_layers(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
 	uint64_t	geometry;
 	uint64_t	signature;
@@ -329,7 +329,7 @@ static int	update_region_layers(render_ctx_t *ctx,
  * plane it touches, so a frame that merely rewrote a region leaves the order
  * alone: creation order already puts the regions on top.
  */
-static void	restack_settings_planes(render_ctx_t *ctx)
+static void	restack_settings_planes(t_render_ctx *ctx)
 {
 	ncplane_move_top(ctx->screen_plane);
 	if (ctx->settings_controls_plane != NULL)
@@ -347,7 +347,7 @@ static void	restack_settings_planes(render_ctx_t *ctx)
 /**
  * @brief Releases Settings-only cached artwork while retaining the backdrop.
  */
-void	render_settings_pixel_destroy(render_ctx_t *ctx)
+void	render_settings_pixel_destroy(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -415,7 +415,7 @@ void	render_settings_pixel_destroy(render_ctx_t *ctx)
 	ctx->settings_ability_signature = 0;
 }
 
-static bool	refresh_background(render_ctx_t *ctx, bool force)
+static bool	refresh_background(t_render_ctx *ctx, bool force)
 {
 	bool	geometry_changed;
 
@@ -455,7 +455,7 @@ static bool	refresh_background(render_ctx_t *ctx, bool force)
  * millions of them. Doing that walk once per geometry change and keeping the
  * result turns every later frame prefill into a memcpy.
  */
-static bool	cache_background(render_ctx_t *ctx)
+static bool	cache_background(t_render_ctx *ctx)
 {
 	struct ncvisual	*visual;
 	uint32_t		*buffer;
@@ -507,7 +507,7 @@ static bool	cache_background(render_ctx_t *ctx)
 	return (true);
 }
 
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font)
 {
 	ncvgeom	geom;
 
@@ -532,9 +532,9 @@ static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
 	return (true);
 }
 
-static bool	compose_settings(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+static bool	compose_settings(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
 	uint32_t	*pixels;
 	size_t		count;
@@ -585,8 +585,8 @@ static bool	compose_settings(render_ctx_t *ctx,
  * stationary tier use small planes at all: Sixel cannot write transparency
  * over existing content, but it can overwrite it.
  */
-static uint32_t	*region_canvas(render_ctx_t *ctx,
-	const settings_layout_t *layout)
+static uint32_t	*region_canvas(t_render_ctx *ctx,
+	const t_settings_layout *layout)
 {
 	size_t	count;
 
@@ -610,11 +610,11 @@ static uint32_t	*region_canvas(render_ctx_t *ctx,
 	return (calloc(count, sizeof(uint32_t)));
 }
 
-static bool	compose_controls(render_ctx_t *ctx,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+static bool	compose_controls(t_render_ctx *ctx,
+	const t_app_settings_view_model *settings, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
-	settings_rect_t	region;
+	t_settings_rect	region;
 	uint32_t		*pixels;
 
 	pixels = region_canvas(ctx, layout);
@@ -640,11 +640,11 @@ static bool	compose_controls(render_ctx_t *ctx,
  * because focus moves through them: baking them into the frame would make
  * every arrow key a full-screen recomposition.
  */
-static bool	compose_inventory(render_ctx_t *ctx,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font, bool characters)
+static bool	compose_inventory(t_render_ctx *ctx,
+	const t_app_settings_view_model *settings, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font, bool characters)
 {
-	settings_rect_t	region;
+	t_settings_rect	region;
 	uint32_t		*pixels;
 	struct ncplane	**slot;
 
@@ -679,11 +679,11 @@ static bool	compose_inventory(render_ctx_t *ctx,
 	return (true);
 }
 
-static bool	compose_volume(render_ctx_t *ctx,
-	const app_settings_view_model_t *settings,
-	const settings_layout_t *layout, struct ncvisual *font)
+static bool	compose_volume(t_render_ctx *ctx,
+	const t_app_settings_view_model *settings,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
-	settings_rect_t	region;
+	t_settings_rect	region;
 	uint32_t		*pixels;
 
 	pixels = region_canvas(ctx, layout);
@@ -705,11 +705,11 @@ static bool	compose_volume(render_ctx_t *ctx,
 	return (true);
 }
 
-static bool	compose_ability(render_ctx_t *ctx,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+static bool	compose_ability(t_render_ctx *ctx,
+	const t_app_settings_view_model *settings, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
-	settings_rect_t	region;
+	t_settings_rect	region;
 	uint32_t		*pixels;
 
 	if (!settings_card_visible(state)
@@ -738,7 +738,7 @@ static bool	compose_ability(render_ctx_t *ctx,
 	return (true);
 }
 
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	if (ctx->settings_background_pixels == NULL
@@ -750,7 +750,7 @@ static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
 	return (true);
 }
 
-static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_settings_plane(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	ncplane_options		options;
@@ -798,8 +798,8 @@ static bool	create_settings_plane(render_ctx_t *ctx, uint32_t *pixels,
  * geometry is written in place; only a geometry change replaces it, because
  * destroying a sprixel plane forces the bitmap beneath it to be retransmitted.
  */
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-	int width, int height, const settings_rect_t *region,
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_settings_rect *region,
 	struct ncplane **slot)
 {
 	ncplane_options		options;
@@ -848,10 +848,10 @@ static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
 }
 
 static void	draw_profile(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const settings_layout_t *layout,
+	const t_app_screen_view_model *view, const t_settings_layout *layout,
 	struct ncvisual *font)
 {
-	const app_settings_view_model_t	*settings;
+	const t_app_settings_view_model	*settings;
 
 	settings = &view->data.settings;
 	draw_text_ref(pixels, width, height, layout, font, "SETTINGS / PROFILE",
@@ -928,9 +928,9 @@ static void	draw_profile(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_inventory(uint32_t *pixels, int width, int height,
-	const app_catalogue_view_model_t *catalogue, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font, bool characters,
-	render_ctx_t *ctx)
+	const t_app_catalogue_view_model *catalogue, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font, bool characters,
+	t_render_ctx *ctx)
 {
 	int		visible;
 	int		index;
@@ -1062,10 +1062,10 @@ static void	draw_inventory(uint32_t *pixels, int width, int height,
  * text rather than on the marker.
  */
 static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, int ref_label_x, int ref_label_y,
+	const t_settings_layout *layout, int ref_label_x, int ref_label_y,
 	int ref_slot_width, int ref_slot_height)
 {
-	const color_t	plate = {74, 40, 104};
+	const t_color	plate = {74, 40, 104};
 	int			focus_x;
 	int			focus_y;
 	int			focus_width;
@@ -1097,7 +1097,7 @@ static void	draw_slot_highlight(uint32_t *pixels, int width, int height,
  * compact caption inside a 99-reference-pixel theme slot is shortened.
  */
 static const char	*inventory_slot_label(
-	const app_catalogue_item_view_model_t *item, bool characters)
+	const t_app_catalogue_item_view_model *item, bool characters)
 {
 	if (item == NULL)
 		return ("");
@@ -1122,14 +1122,14 @@ static const char	*inventory_slot_label(
  * when a file is missing or cannot be decoded.
  */
 static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font, render_ctx_t *ctx,
+	const t_settings_layout *layout, struct ncvisual *font, t_render_ctx *ctx,
 	int cache_slot, const char *path, int ref_x_value, int ref_y_value,
 	int ref_width, int ref_height, bool owned)
 {
 	struct ncvisual	*visual;
 	ncvgeom		geom;
 	uint32_t	pixel;
-	color_t		fallback;
+	t_color		fallback;
 	int		draw_width;
 	int		draw_height;
 	int		source_x;
@@ -1142,7 +1142,7 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 
 	ref_width = max_int(1, ref_width);
 	ref_height = max_int(1, ref_height);
-	fallback = (color_t){39, 24, 62};
+	fallback = (t_color){39, 24, 62};
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
 		ref_width, ref_height, fallback, 255u);
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
@@ -1196,7 +1196,7 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 							(unsigned)source_x, &pixel) >= 0
 						&& ncpixel_a(pixel) != 0)
 					{
-						color_t tint;
+						t_color tint;
 
 						tint.r = ncpixel_r(pixel);
 						tint.g = ncpixel_g(pixel);
@@ -1231,7 +1231,7 @@ static bool	draw_thumbnail(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_stats(uint32_t *pixels, int width, int height,
-	const app_settings_view_model_t *settings, const settings_layout_t *layout,
+	const t_app_settings_view_model *settings, const t_settings_layout *layout,
 	struct ncvisual *font)
 {
 	char		value[64];
@@ -1286,8 +1286,8 @@ static void	draw_stats(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_volume_value(uint32_t *pixels, int width, int height,
-	const app_settings_view_model_t *settings,
-	const settings_layout_t *layout, struct ncvisual *font)
+	const t_app_settings_view_model *settings,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
 	char	volume[16];
 
@@ -1304,12 +1304,12 @@ static void	draw_volume_value(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_buttons(uint32_t *pixels, int width, int height,
-	const app_settings_view_model_t *settings, const settings_state_t *state,
-	const settings_layout_t *layout, struct ncvisual *font)
+	const t_app_settings_view_model *settings, const t_settings_state *state,
+	const t_settings_layout *layout, struct ncvisual *font)
 {
 	const char	*labels[SETTINGS_BUTTON_COUNT];
 	const char	*hints[SETTINGS_BUTTON_COUNT];
-	color_t		color;
+	t_color		color;
 	int		index;
 	int		center;
 
@@ -1367,7 +1367,7 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
  * The stationary tier redraws the whole frame per keystroke, so re-reading and
  * re-decoding the PNG each time would put file I/O on the input path.
  */
-static struct ncvisual	*cached_portrait(render_ctx_t *ctx, const char *path)
+static struct ncvisual	*cached_portrait(t_render_ctx *ctx, const char *path)
 {
 	if (path == NULL || path[0] == '\0')
 		return (NULL);
@@ -1390,7 +1390,7 @@ static struct ncvisual	*cached_portrait(render_ctx_t *ctx, const char *path)
 	return (ctx->settings_portrait_visual);
 }
 
-static struct ncvisual	*cached_thumbnail(render_ctx_t *ctx, int cache_slot,
+static struct ncvisual	*cached_thumbnail(t_render_ctx *ctx, int cache_slot,
 	const char *path)
 {
 	struct ncvisual	*visual;
@@ -1422,8 +1422,8 @@ static struct ncvisual	*cached_thumbnail(render_ctx_t *ctx, int cache_slot,
 	return (visual);
 }
 
-static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
-	int height, const settings_layout_t *layout, const char *path)
+static void	draw_portrait(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_settings_layout *layout, const char *path)
 {
 	struct ncvisual	*portrait;
 	ncvgeom			geom;
@@ -1463,7 +1463,7 @@ static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
 					(unsigned)source_x, &pixel) >= 0
 				&& ncpixel_a(pixel) != 0)
 			{
-				color_t	color;
+				t_color	color;
 
 				color.r = ncpixel_r(pixel);
 				color.g = ncpixel_g(pixel);
@@ -1481,8 +1481,8 @@ static void	draw_portrait(render_ctx_t *ctx, uint32_t *pixels, int width,
  * @brief Fills a reference-space rectangle, used for the focus highlight bar.
  */
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height, color_t tint, unsigned alpha)
+	const t_settings_layout *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, t_color tint, unsigned alpha)
 {
 	int	left;
 	int	top;
@@ -1510,10 +1510,10 @@ static void	fill_ref_rect(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_ability_card(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font,
-	const app_catalogue_item_view_model_t *character)
+	const t_settings_layout *layout, struct ncvisual *font,
+	const t_app_catalogue_item_view_model *character)
 {
-	color_t						panel;
+	t_color						panel;
 	char							heading[APP_TEXT_MAX + 32];
 	int							x;
 	int							y;
@@ -1526,7 +1526,7 @@ static void	draw_ability_card(uint32_t *pixels, int width, int height,
 	 * the region around it, so its fill stops short of the gold border instead
 	 * of painting over it. Every row below is measured from the same inset.
 	 */
-	panel = (color_t){24, 10, 38};
+	panel = (t_color){24, 10, 38};
 	y = ref_y(layout, SETTINGS_REF_CARD_Y);
 	while (y < ref_y(layout, SETTINGS_REF_CARD_Y + SETTINGS_REF_CARD_HEIGHT))
 	{
@@ -1562,9 +1562,9 @@ static void	draw_ability_card(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font, const char *text,
+	const t_settings_layout *layout, struct ncvisual *font, const char *text,
 	int ref_x_value, int ref_y_value, int ref_width, int ref_glyph,
-	color_t tint, int max_lines)
+	t_color tint, int max_lines)
 {
 	char	line_text[APP_TEXT_MAX * 2];
 	int	line_start;
@@ -1608,7 +1608,7 @@ static void	draw_wrapped_text_ref(uint32_t *pixels, int width, int height,
  * from the longest one. Sizing each label independently makes them visibly
  * change size as their text changes, which reads as a rendering glitch.
  */
-static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
+static int	fit_glyph_size(const t_settings_layout *layout, const char *text,
 	int ref_width, int ref_glyph, int *spacing)
 {
 	int	glyph_size;
@@ -1626,9 +1626,9 @@ static int	fit_glyph_size(const settings_layout_t *layout, const char *text,
 }
 
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font, const char *text,
+	const t_settings_layout *layout, struct ncvisual *font, const char *text,
 	int ref_x_value, int ref_y_value, int ref_width, int ref_glyph,
-	color_t tint, bool centered)
+	t_color tint, bool centered)
 {
 	char	visible[APP_TEXT_MAX * 2];
 	int	glyph_size;
@@ -1671,8 +1671,8 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
  * @brief Draws a prepared glyph run with the supplied colour and spacing.
  */
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-	const settings_layout_t *layout, struct ncvisual *font,
-	const char *text, int x, int y, int glyph_size, int spacing, color_t tint)
+	const t_settings_layout *layout, struct ncvisual *font,
+	const char *text, int x, int y, int glyph_size, int spacing, t_color tint)
 {
 	int	glyph;
 	int	codepoint;
@@ -1713,7 +1713,7 @@ static int	ink_span(int units, int glyph_size)
  */
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-	color_t tint, const settings_layout_t *layout)
+	t_color tint, const t_settings_layout *layout)
 {
 	int	source_y;
 	int	source_x;
@@ -1744,7 +1744,7 @@ static void	draw_glyph(uint32_t *pixels, int width, int height,
  */
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int source_x, int source_y,
-	int x, int y, int cell_width, int cell_height, color_t tint, bool opaque)
+	int x, int y, int cell_width, int cell_height, t_color tint, bool opaque)
 {
 	uint32_t	source;
 	unsigned	alpha;
@@ -1776,7 +1776,7 @@ static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 }
 
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-	color_t tint, unsigned alpha, bool opaque)
+	t_color tint, unsigned alpha, bool opaque)
 {
 	uint32_t	*pixel;
 
@@ -1792,7 +1792,7 @@ static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 	}
 }
 
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 {
 	unsigned	old_alpha;
 	unsigned	out_alpha;
@@ -1814,17 +1814,17 @@ static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
 	ncpixel_set_a(pixel, out_alpha);
 }
 
-static int	ref_x(const settings_layout_t *layout, int value)
+static int	ref_x(const t_settings_layout *layout, int value)
 {
 	return (value * layout->pixel_width / SETTINGS_REFERENCE_WIDTH);
 }
 
-static int	ref_y(const settings_layout_t *layout, int value)
+static int	ref_y(const t_settings_layout *layout, int value)
 {
 	return (value * layout->pixel_height / SETTINGS_REFERENCE_HEIGHT);
 }
 
-static int	ref_size(const settings_layout_t *layout, int value)
+static int	ref_size(const t_settings_layout *layout, int value)
 {
 	int	x_size;
 	int	y_size;
@@ -1859,7 +1859,7 @@ static const char	*nonempty(const char *text)
 	return (text != NULL && text[0] != '\0' ? text : "-");
 }
 
-static const char	*status_title(const app_screen_view_model_t *view)
+static const char	*status_title(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("LOADING SETTINGS...");
@@ -1870,7 +1870,7 @@ static const char	*status_title(const app_screen_view_model_t *view)
 	return ("SETTINGS UNAVAILABLE");
 }
 
-static const char	*status_detail(const app_screen_view_model_t *view)
+static const char	*status_detail(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("PLEASE WAIT");
@@ -1881,7 +1881,7 @@ static const char	*status_detail(const app_screen_view_model_t *view)
 	return (nonempty(view->subtitle));
 }
 
-static const char	*renderer_name(tetrisu_renderer_mode_t mode)
+static const char	*renderer_name(t_tetrisu_renderer_mode mode)
 {
 	if (mode == TETRISU_RENDERER_CELL)
 		return ("CELL");
@@ -1910,10 +1910,10 @@ static uint64_t	settings_hash(const void *data, size_t size, uint64_t hash)
 	return (hash == 0 ? 1 : hash);
 }
 
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-	const settings_layout_t *layout)
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+	const t_settings_layout *layout)
 {
-	app_settings_view_model_t	settings;
+	t_app_settings_view_model	settings;
 	uint64_t					hash;
 
 	settings = view->data.settings;

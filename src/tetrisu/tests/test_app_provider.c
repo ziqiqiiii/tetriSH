@@ -5,8 +5,8 @@ static void	test_every_screen_has_a_typed_model(void);
 static void	test_fixture_models_are_marked_and_populated(void);
 static void	test_missing_provider_is_unavailable(void);
 static void	test_empty_leaderboard_status(void);
-static app_provider_result_t	empty_leaderboard(void *userdata,
-				app_leaderboard_view_model_t *view);
+static t_app_provider_result	empty_leaderboard(void *userdata,
+				t_app_leaderboard_view_model *view);
 
 int	main(void)
 {
@@ -20,8 +20,8 @@ int	main(void)
 
 static void	test_fixture_provider_contract(void)
 {
-	app_data_provider_t		provider;
-	app_auth_view_model_t	auth;
+	t_app_data_provider		provider;
+	t_app_auth_view_model	auth;
 
 	app_fixture_provider_init(&provider);
 	assert(strcmp(provider.name, "local-fixtures") == 0);
@@ -39,7 +39,7 @@ static void	test_fixture_provider_contract(void)
 	assert(strcmp(auth.username, "PreviewPlayer") == 0);
 	assert(strstr(auth.message, "LOCAL UI PREVIEW") != NULL);
 	{
-		app_room_view_model_t	room;
+		t_app_room_view_model	room;
 
 		assert(provider.load_room(provider.userdata, "arena-88", &room)
 			== APP_PROVIDER_OK);
@@ -65,17 +65,17 @@ static void	test_fixture_provider_contract(void)
 
 static void	test_every_screen_has_a_typed_model(void)
 {
-	app_data_provider_t			provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider			provider;
+	t_app_screen_view_model	view;
 	int							screen;
 
 	app_fixture_provider_init(&provider);
 	screen = APP_SCREEN_ENTRY;
 	while (screen < APP_SCREEN_COUNT)
 	{
-		assert(app_screen_view_load(&provider, (app_screen_t)screen, &view)
+		assert(app_screen_view_load(&provider, (t_app_screen)screen, &view)
 			== APP_PROVIDER_OK);
-		assert(view.screen == (app_screen_t)screen);
+		assert(view.screen == (t_app_screen)screen);
 		assert(view.title[0] != '\0');
 		assert(view.status == APP_DATA_READY);
 		screen++;
@@ -86,8 +86,8 @@ static void	test_every_screen_has_a_typed_model(void)
 
 static void	test_fixture_models_are_marked_and_populated(void)
 {
-	app_data_provider_t			provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider			provider;
+	t_app_screen_view_model	view;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load(&provider, APP_SCREEN_MARKETPLACE, &view)
@@ -128,7 +128,7 @@ static void	test_fixture_models_are_marked_and_populated(void)
 
 static void	test_missing_provider_is_unavailable(void)
 {
-	app_screen_view_model_t	view;
+	t_app_screen_view_model	view;
 
 	assert(app_screen_view_load(NULL, APP_SCREEN_MARKETPLACE, &view)
 		== APP_PROVIDER_UNAVAILABLE);
@@ -144,8 +144,8 @@ static void	test_missing_provider_is_unavailable(void)
 
 static void	test_empty_leaderboard_status(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
 
 	memset(&provider, 0, sizeof(provider));
 	provider.load_leaderboard = empty_leaderboard;
@@ -156,8 +156,8 @@ static void	test_empty_leaderboard_status(void)
 	printf("PASS test_empty_leaderboard_status\n");
 }
 
-static app_provider_result_t	empty_leaderboard(void *userdata,
-	app_leaderboard_view_model_t *view)
+static t_app_provider_result	empty_leaderboard(void *userdata,
+	t_app_leaderboard_view_model *view)
 {
 	(void)userdata;
 	if (view == NULL)

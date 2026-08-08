@@ -10,156 +10,156 @@
 /* The backdrop's decorated frame reaches this far in from each edge. */
 # define MP_BAND_X	96
 
-static const color_t	g_mp_cream = {250, 242, 221};
-static const color_t	g_mp_gold = {255, 203, 102};
-static const color_t	g_mp_pink = {255, 112, 190};
-static const color_t	g_mp_lavender = {190, 155, 218};
-static const color_t	g_mp_green = {112, 214, 174};
-static const color_t	g_mp_amber = {255, 176, 84};
-static const color_t	g_mp_red = {255, 111, 142};
-static const color_t	g_mp_disabled = {105, 99, 120};
-static const color_t	g_mp_shadow = {22, 8, 31};
-static const color_t	g_mp_plate = {26, 12, 42};
-static const color_t	g_mp_focus_plate = {74, 40, 104};
+static const t_color	g_mp_cream = {250, 242, 221};
+static const t_color	g_mp_gold = {255, 203, 102};
+static const t_color	g_mp_pink = {255, 112, 190};
+static const t_color	g_mp_lavender = {190, 155, 218};
+static const t_color	g_mp_green = {112, 214, 174};
+static const t_color	g_mp_amber = {255, 176, 84};
+static const t_color	g_mp_red = {255, 111, 142};
+static const t_color	g_mp_disabled = {105, 99, 120};
+static const t_color	g_mp_shadow = {22, 8, 31};
+static const t_color	g_mp_plate = {26, 12, 42};
+static const t_color	g_mp_focus_plate = {74, 40, 104};
 
 // Static Functions
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font);
-static const char	*background_path(app_screen_t screen);
-static bool	refresh_background(render_ctx_t *ctx, bool force,
-				app_screen_t screen);
-static bool	cache_background(render_ctx_t *ctx, app_screen_t screen);
-static void	forget_regions(render_ctx_t *ctx);
-static int	update_static_layer(render_ctx_t *ctx,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font);
+static const char	*background_path(t_app_screen screen);
+static bool	refresh_background(t_render_ctx *ctx, bool force,
+				t_app_screen screen);
+static bool	cache_background(t_render_ctx *ctx, t_app_screen screen);
+static void	forget_regions(t_render_ctx *ctx);
+static int	update_static_layer(t_render_ctx *ctx,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
-static int	update_region_layers(render_ctx_t *ctx,
-				const app_screen_view_model_t *view, const void *state,
-				const mp_layout_t *layout, struct ncvisual *font);
-static void	restack_mp_planes(render_ctx_t *ctx);
-static bool	compose_static(render_ctx_t *ctx,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+static int	update_region_layers(t_render_ctx *ctx,
+				const t_app_screen_view_model *view, const void *state,
+				const t_mp_layout *layout, struct ncvisual *font);
+static void	restack_mp_planes(t_render_ctx *ctx);
+static bool	compose_static(t_render_ctx *ctx,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
 static void	draw_mode_chrome(uint32_t *pixels, int width, int height,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
 static void	draw_lobby_chrome(uint32_t *pixels, int width, int height,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
 static void	draw_create_chrome(uint32_t *pixels, int width, int height,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
 static void	draw_room_chrome(uint32_t *pixels, int width, int height,
-				const app_screen_view_model_t *view, const mp_layout_t *layout,
+				const t_app_screen_view_model *view, const t_mp_layout *layout,
 				struct ncvisual *font);
-static int	compose_mode_regions(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const mp_mode_state_t *state, const mp_layout_t *layout,
+static int	compose_mode_regions(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_mp_mode_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static int	compose_lobby_regions(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const lobby_state_t *state, const mp_layout_t *layout,
+static int	compose_lobby_regions(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_lobby_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static int	compose_create_regions(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const create_room_state_t *state, const mp_layout_t *layout,
+static int	compose_create_regions(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_create_room_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static int	compose_room_regions(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const waiting_room_state_t *state, const mp_layout_t *layout,
+static int	compose_room_regions(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_waiting_room_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static bool	compose_cards(render_ctx_t *ctx, const mp_mode_state_t *state,
-				const mp_layout_t *layout, struct ncvisual *font);
-static bool	compose_list(render_ctx_t *ctx,
-				const app_lobby_view_model_t *lobby, const lobby_state_t *state,
-				const mp_layout_t *layout, struct ncvisual *font);
-static bool	compose_field(render_ctx_t *ctx, const lobby_state_t *state,
-				const mp_layout_t *layout, struct ncvisual *font);
-static bool	compose_lobby_status(render_ctx_t *ctx,
-				const lobby_state_t *state, const mp_layout_t *layout,
+static bool	compose_cards(t_render_ctx *ctx, const t_mp_mode_state *state,
+				const t_mp_layout *layout, struct ncvisual *font);
+static bool	compose_list(t_render_ctx *ctx,
+				const t_app_lobby_view_model *lobby, const t_lobby_state *state,
+				const t_mp_layout *layout, struct ncvisual *font);
+static bool	compose_field(t_render_ctx *ctx, const t_lobby_state *state,
+				const t_mp_layout *layout, struct ncvisual *font);
+static bool	compose_lobby_status(t_render_ctx *ctx,
+				const t_lobby_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static bool	compose_options(render_ctx_t *ctx,
-				const create_room_state_t *state, const mp_layout_t *layout,
+static bool	compose_options(t_render_ctx *ctx,
+				const t_create_room_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static bool	compose_slots(render_ctx_t *ctx,
-					const app_room_view_model_t *room,
-					const waiting_room_state_t *state,
-					const mp_layout_t *layout, struct ncvisual *font);
-static bool	compose_room_status(render_ctx_t *ctx,
-				const app_room_view_model_t *room,
-				const waiting_room_state_t *state, const mp_layout_t *layout,
+static bool	compose_slots(t_render_ctx *ctx,
+					const t_app_room_view_model *room,
+					const t_waiting_room_state *state,
+					const t_mp_layout *layout, struct ncvisual *font);
+static bool	compose_room_status(t_render_ctx *ctx,
+				const t_app_room_view_model *room,
+				const t_waiting_room_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
-static bool	compose_chat(render_ctx_t *ctx, const app_room_view_model_t *room,
-				const waiting_room_state_t *state, const mp_layout_t *layout,
+static bool	compose_chat(t_render_ctx *ctx, const t_app_room_view_model *room,
+				const t_waiting_room_state *state, const t_mp_layout *layout,
 				struct ncvisual *font);
 static void	draw_list_row(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, struct ncvisual *font,
-				const app_room_summary_view_model_t *room, int row,
+				const t_mp_layout *layout, struct ncvisual *font,
+				const t_app_room_summary_view_model *room, int row,
 				bool focused);
 static void	draw_identity(uint32_t *pixels, int width, int height,
-				const app_profile_view_model_t *profile,
-				const mp_layout_t *layout, struct ncvisual *font);
-static uint32_t	*region_canvas(render_ctx_t *ctx, const mp_layout_t *layout);
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+				const t_app_profile_view_model *profile,
+				const t_mp_layout *layout, struct ncvisual *font);
+static uint32_t	*region_canvas(t_render_ctx *ctx, const t_mp_layout *layout);
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height);
-static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_static_plane(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height);
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-				int width, int height, const mp_rect_t *region,
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+				int width, int height, const t_mp_rect *region,
 				struct ncplane **slot);
 static void	draw_plate(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, const mp_rect_t *ref_rect,
-				color_t edge);
+				const t_mp_layout *layout, const t_mp_rect *ref_rect,
+				t_color edge);
 static void	draw_rule(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, int ref_x_value, int ref_y_value,
-				int ref_width, color_t tint);
+				const t_mp_layout *layout, int ref_x_value, int ref_y_value,
+				int ref_width, t_color tint);
 static void	draw_band(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, int ref_y_value, int ref_height);
+				const t_mp_layout *layout, int ref_y_value, int ref_height);
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, int ref_x_value, int ref_y_value,
-				int ref_width, int ref_height, color_t tint, unsigned alpha);
+				const t_mp_layout *layout, int ref_x_value, int ref_y_value,
+				int ref_width, int ref_height, t_color tint, unsigned alpha);
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, struct ncvisual *font,
+				const t_mp_layout *layout, struct ncvisual *font,
 				const char *text, int ref_x_value, int ref_y_value,
-				int ref_width, int ref_glyph, color_t tint, bool centered);
+				int ref_width, int ref_glyph, t_color tint, bool centered);
 static void	draw_text_fixed(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, struct ncvisual *font,
+				const t_mp_layout *layout, struct ncvisual *font,
 				const char *text, int ref_x_value, int ref_y_value,
-				int ref_width, int glyph_size, int spacing, color_t tint,
+				int ref_width, int glyph_size, int spacing, t_color tint,
 				bool centered);
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-				const mp_layout_t *layout, struct ncvisual *font,
+				const t_mp_layout *layout, struct ncvisual *font,
 				const char *text, int x, int y, int glyph_size, int spacing,
-				color_t tint);
+				t_color tint);
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 				struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-				color_t tint, const mp_layout_t *layout);
+				t_color tint, const t_mp_layout *layout);
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 				struct ncvisual *font, int glyph, int source_x, int source_y,
-				int x, int y, int cell_width, int cell_height, color_t tint,
+				int x, int y, int cell_width, int cell_height, t_color tint,
 				bool opaque);
 static int	ink_span(int units, int glyph_size);
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-				color_t tint, unsigned alpha, bool opaque);
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha);
-static int	ref_x(const mp_layout_t *layout, int value);
-static int	ref_y(const mp_layout_t *layout, int value);
-static int	ref_size(const mp_layout_t *layout, int value);
+				t_color tint, unsigned alpha, bool opaque);
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
+static int	ref_x(const t_mp_layout *layout, int value);
+static int	ref_y(const t_mp_layout *layout, int value);
+static int	ref_size(const t_mp_layout *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
-static int	fit_glyph_size(const mp_layout_t *layout, const char *text,
+static int	fit_glyph_size(const t_mp_layout *layout, const char *text,
 				int ref_width, int ref_glyph, int *spacing);
 static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static const char	*nonempty(const char *text);
-static color_t	room_state_colour(const app_room_summary_view_model_t *room);
+static t_color	room_state_colour(const t_app_room_summary_view_model *room);
 static uint64_t	mp_hash(const void *data, size_t size, uint64_t hash);
 static uint64_t	mp_hash_text(const char *text, uint64_t hash);
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-				const mp_layout_t *layout);
-static uint64_t	model_signature(const app_screen_view_model_t *view,
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+				const t_mp_layout *layout);
+static uint64_t	model_signature(const t_app_screen_view_model *view,
 				uint64_t hash);
-static uint64_t	room_players_signature(const app_room_view_model_t *room,
+static uint64_t	room_players_signature(const t_app_room_view_model *room,
 				uint64_t hash);
-static uint64_t	room_chat_signature(const app_room_view_model_t *room,
+static uint64_t	room_chat_signature(const t_app_room_view_model *room,
 				uint64_t hash);
 static bool	mp_render_failed(const char *stage);
 static int	mp_region_failed(const char *stage);
@@ -178,11 +178,11 @@ static int	mp_region_failed(const char *stage);
  * @param rebuild_background true after a resize or on first entry.
  * @return true when the frame was presented or deliberately skipped.
  */
-bool	render_mp_pixel_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const void *state,
+bool	render_mp_pixel_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const void *state,
 	bool rebuild_background)
 {
-	mp_layout_t		layout;
+	t_mp_layout		layout;
 	struct ncvisual	*font;
 	bool			screen_changed;
 	int				rebuilt;
@@ -229,7 +229,7 @@ bool	render_mp_pixel_show(render_ctx_t *ctx,
  *
  * @param ctx Render context.
  */
-void	render_mp_pixel_destroy(render_ctx_t *ctx)
+void	render_mp_pixel_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -260,7 +260,7 @@ void	render_mp_pixel_destroy(render_ctx_t *ctx)
  * leaving a plane behind when switching screens would strand a region of the
  * previous screen on top of the new one.
  */
-static void	forget_regions(render_ctx_t *ctx)
+static void	forget_regions(t_render_ctx *ctx)
 {
 	struct ncplane	**planes[7];
 	int				index;
@@ -297,7 +297,7 @@ static void	forget_regions(render_ctx_t *ctx)
  * inside the menu rather than as a new place; everything past it moves to the
  * duel hall.
  */
-static const char	*background_path(app_screen_t screen)
+static const char	*background_path(t_app_screen screen)
 {
 	if (screen == APP_SCREEN_MULTIPLAYER_MODE)
 		return (SPLASH_ASSET_PATH);
@@ -307,8 +307,8 @@ static const char	*background_path(app_screen_t screen)
 /**
  * @brief Fits the backdrop, reusing it until the geometry or the screen moves.
  */
-static bool	refresh_background(render_ctx_t *ctx, bool force,
-	app_screen_t screen)
+static bool	refresh_background(t_render_ctx *ctx, bool force,
+	t_app_screen screen)
 {
 	const char	*path;
 	bool		stale;
@@ -355,7 +355,7 @@ static bool	refresh_background(render_ctx_t *ctx, bool force,
  * millions of them. Doing that walk once per geometry change and keeping the
  * result turns every later frame prefill into a memcpy.
  */
-static bool	cache_background(render_ctx_t *ctx, app_screen_t screen)
+static bool	cache_background(t_render_ctx *ctx, t_app_screen screen)
 {
 	struct ncvisual	*visual;
 	uint32_t		*buffer;
@@ -409,7 +409,7 @@ static bool	cache_background(render_ctx_t *ctx, app_screen_t screen)
 	return (true);
 }
 
-static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
+static bool	load_font(t_render_ctx *ctx, struct ncvisual **font)
 {
 	ncvgeom	geom;
 
@@ -439,8 +439,8 @@ static bool	load_font(render_ctx_t *ctx, struct ncvisual **font)
  *
  * @return 1 when the layer was rebuilt, 0 when it was reused, -1 on failure.
  */
-static int	update_static_layer(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+static int	update_static_layer(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	uint64_t	signature;
@@ -464,9 +464,9 @@ static int	update_static_layer(render_ctx_t *ctx,
  * @return 1 when at least one region was rewritten, 0 when none were, -1 on
  * failure.
  */
-static int	update_region_layers(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const void *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static int	update_region_layers(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const void *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
 	if (view->screen == APP_SCREEN_MULTIPLAYER_MODE)
 		return (compose_mode_regions(ctx, view, state, layout, font));
@@ -486,7 +486,7 @@ static int	update_region_layers(render_ctx_t *ctx,
  * plane it touches, so a frame that merely rewrote a region leaves the order
  * alone: creation order already puts the regions on top.
  */
-static void	restack_mp_planes(render_ctx_t *ctx)
+static void	restack_mp_planes(t_render_ctx *ctx)
 {
 	struct ncplane	*planes[7];
 	int				index;
@@ -511,8 +511,8 @@ static void	restack_mp_planes(render_ctx_t *ctx)
 /**
  * @brief Composes the layer nothing the user does on this screen can change.
  */
-static bool	compose_static(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+static bool	compose_static(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	uint32_t	*pixels;
@@ -558,7 +558,7 @@ static bool	compose_static(render_ctx_t *ctx,
  * and sits low where the art is plain.
  */
 static void	draw_mode_chrome(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	(void)view;
@@ -576,7 +576,7 @@ static void	draw_mode_chrome(uint32_t *pixels, int width, int height,
  * @brief Draws the lobby's title strip, identity, plates and standing copy.
  */
 static void	draw_lobby_chrome(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	draw_band(pixels, width, height, layout, LOBBY_REF_BAND_TOP_Y,
@@ -605,7 +605,7 @@ static void	draw_lobby_chrome(uint32_t *pixels, int width, int height,
  * @brief Draws the create-room panel and its standing copy.
  */
 static void	draw_create_chrome(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	(void)view;
@@ -635,10 +635,10 @@ static void	draw_create_chrome(uint32_t *pixels, int width, int height,
  * @brief Draws the waiting room's heading, plates and standing copy.
  */
 static void	draw_room_chrome(uint32_t *pixels, int width, int height,
-	const app_screen_view_model_t *view, const mp_layout_t *layout,
+	const t_app_screen_view_model *view, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
-	const app_room_view_model_t	*room;
+	const t_app_room_view_model	*room;
 	char						line[APP_TEXT_MAX * 2];
 
 	room = &view->data.room;
@@ -673,7 +673,7 @@ static void	draw_room_chrome(uint32_t *pixels, int width, int height,
  * @brief Draws the lobby's username, score and rank across the title row.
  */
 static void	draw_identity(uint32_t *pixels, int width, int height,
-	const app_profile_view_model_t *profile, const mp_layout_t *layout,
+	const t_app_profile_view_model *profile, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
 	char	line[APP_TEXT_MAX];
@@ -694,9 +694,9 @@ static void	draw_identity(uint32_t *pixels, int width, int height,
 /**
  * @brief Refreshes the mode picker's single region when focus moves.
  */
-static int	compose_mode_regions(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const mp_mode_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static int	compose_mode_regions(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_mp_mode_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
 	uint64_t	signature;
 
@@ -721,9 +721,9 @@ static int	compose_mode_regions(render_ctx_t *ctx,
  * the model seed covers a refresh changing the room list without moving the
  * cursor.
  */
-static int	compose_lobby_regions(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const lobby_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static int	compose_lobby_regions(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_lobby_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
 	char		line[APP_TEXT_MAX * 2];
 	uint64_t	base;
@@ -784,9 +784,9 @@ static int	compose_lobby_regions(render_ctx_t *ctx,
 /**
  * @brief Refreshes the create-room panel's single region.
  */
-static int	compose_create_regions(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const create_room_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static int	compose_create_regions(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_create_room_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
 	uint64_t	signature;
 
@@ -808,11 +808,11 @@ static int	compose_create_regions(render_ctx_t *ctx,
 /**
  * @brief Refreshes the waiting room's seats, status and chat column.
  */
-static int	compose_room_regions(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const waiting_room_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static int	compose_room_regions(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_waiting_room_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	const app_room_view_model_t	*room;
+	const t_app_room_view_model	*room;
 	uint64_t					base;
 	uint64_t					signature;
 	int							changed;
@@ -863,13 +863,13 @@ static int	compose_room_regions(render_ctx_t *ctx,
 /**
  * @brief Repaints the two mode cards, the control legend and the result line.
  */
-static bool	compose_cards(render_ctx_t *ctx, const mp_mode_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_cards(t_render_ctx *ctx, const t_mp_mode_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX];
-	color_t		edge;
+	t_color		edge;
 	int			card_x;
 	int			index;
 
@@ -941,12 +941,12 @@ static bool	compose_cards(render_ctx_t *ctx, const mp_mode_state_t *state,
 /**
  * @brief Repaints the room table: its filter heading, columns and rows.
  */
-static bool	compose_list(render_ctx_t *ctx,
-	const app_lobby_view_model_t *lobby, const lobby_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_list(t_render_ctx *ctx,
+	const t_app_lobby_view_model *lobby, const t_lobby_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	const app_room_summary_view_model_t	*room;
-	mp_rect_t							region;
+	const t_app_room_summary_view_model	*room;
+	t_mp_rect							region;
 	uint32_t							*pixels;
 	int									row;
 
@@ -1012,11 +1012,11 @@ static bool	compose_list(render_ctx_t *ctx,
  * @brief Draws one room row, highlighting it when the cursor is on it.
  */
 static void	draw_list_row(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, struct ncvisual *font,
-	const app_room_summary_view_model_t *room, int row, bool focused)
+	const t_mp_layout *layout, struct ncvisual *font,
+	const t_app_room_summary_view_model *room, int row, bool focused)
 {
 	char	cell[APP_TEXT_MAX];
-	color_t	tint;
+	t_color	tint;
 	int		y;
 
 	y = LOBBY_REF_LIST_Y + LOBBY_REF_LIST_FIRST_ROW_Y
@@ -1054,10 +1054,10 @@ static void	draw_list_row(uint32_t *pixels, int width, int height,
 /**
  * @brief Repaints the join-by-id field, showing the caret only when focused.
  */
-static bool	compose_field(render_ctx_t *ctx, const lobby_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_field(t_render_ctx *ctx, const t_lobby_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[LOBBY_ROOM_ID_MAX + 2];
 	bool		focused;
@@ -1119,10 +1119,10 @@ static bool	compose_field(render_ctx_t *ctx, const lobby_state_t *state,
 /**
  * @brief Repaints the lobby's inline result line.
  */
-static bool	compose_lobby_status(render_ctx_t *ctx, const lobby_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_lobby_status(t_render_ctx *ctx, const t_lobby_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX * 2];
 
@@ -1152,10 +1152,10 @@ static bool	compose_lobby_status(render_ctx_t *ctx, const lobby_state_t *state,
 /**
  * @brief Repaints the create-room panel's two option rows.
  */
-static bool	compose_options(render_ctx_t *ctx, const create_room_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_options(t_render_ctx *ctx, const t_create_room_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX];
 	bool		focused;
@@ -1212,11 +1212,11 @@ static bool	compose_options(render_ctx_t *ctx, const create_room_state_t *state,
 /**
  * @brief Repaints the seat list and its ready badges.
  */
-static bool	compose_slots(render_ctx_t *ctx, const app_room_view_model_t *room,
-	const waiting_room_state_t *state, const mp_layout_t *layout,
+static bool	compose_slots(t_render_ctx *ctx, const t_app_room_view_model *room,
+	const t_waiting_room_state *state, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX * 2];
 	const char	*badge;
@@ -1283,14 +1283,14 @@ static bool	compose_slots(render_ctx_t *ctx, const app_room_view_model_t *room,
  * so it lives here alone: one small plane repaints per second and nothing else
  * on the screen is touched.
  */
-static bool	compose_room_status(render_ctx_t *ctx,
-	const app_room_view_model_t *room, const waiting_room_state_t *state,
-	const mp_layout_t *layout, struct ncvisual *font)
+static bool	compose_room_status(t_render_ctx *ctx,
+	const t_app_room_view_model *room, const t_waiting_room_state *state,
+	const t_mp_layout *layout, struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX * 2];
-	color_t		tint;
+	t_color		tint;
 
 	pixels = region_canvas(ctx, layout);
 	if (pixels == NULL)
@@ -1328,11 +1328,11 @@ static bool	compose_room_status(render_ctx_t *ctx,
  * The transcript is drawn bottom-up from the newest message, so the newest line
  * is always visible however long the room has been open.
  */
-static bool	compose_chat(render_ctx_t *ctx, const app_room_view_model_t *room,
-	const waiting_room_state_t *state, const mp_layout_t *layout,
+static bool	compose_chat(t_render_ctx *ctx, const t_app_room_view_model *room,
+	const t_waiting_room_state *state, const t_mp_layout *layout,
 	struct ncvisual *font)
 {
-	mp_rect_t	region;
+	t_mp_rect	region;
 	uint32_t	*pixels;
 	char		line[APP_TEXT_MAX + APP_ROOM_CHAT_TEXT_MAX + 4];
 	int			body_height;
@@ -1399,7 +1399,7 @@ static bool	compose_chat(render_ctx_t *ctx, const app_room_view_model_t *room,
  * stationary tier use small planes at all: Sixel cannot write transparency
  * over existing content, but it can overwrite it.
  */
-static uint32_t	*region_canvas(render_ctx_t *ctx, const mp_layout_t *layout)
+static uint32_t	*region_canvas(t_render_ctx *ctx, const t_mp_layout *layout)
 {
 	uint32_t	*canvas;
 	size_t		count;
@@ -1421,7 +1421,7 @@ static uint32_t	*region_canvas(render_ctx_t *ctx, const mp_layout_t *layout)
 	return (calloc(count, sizeof(uint32_t)));
 }
 
-static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
+static bool	prefill_background(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	if (ctx->mp_background_pixels == NULL
@@ -1433,7 +1433,7 @@ static bool	prefill_background(render_ctx_t *ctx, uint32_t *pixels,
 	return (true);
 }
 
-static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_static_plane(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	ncplane_options	options;
@@ -1481,8 +1481,8 @@ static bool	create_static_plane(render_ctx_t *ctx, uint32_t *pixels,
  * geometry is written in place; only a geometry change replaces it, because
  * destroying a sprixel plane forces the bitmap beneath it to be retransmitted.
  */
-static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
-	int width, int height, const mp_rect_t *region, struct ncplane **slot)
+static bool	create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_rect *region, struct ncplane **slot)
 {
 	ncplane_options	options;
 	struct ncplane	*plane;
@@ -1538,7 +1538,7 @@ static bool	create_region_plane(render_ctx_t *ctx, uint32_t *pixels,
  * cannot write transparency over what is already on the terminal.
  */
 static void	draw_plate(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, const mp_rect_t *ref_rect, color_t edge)
+	const t_mp_layout *layout, const t_mp_rect *ref_rect, t_color edge)
 {
 	int	edge_px;
 	int	y;
@@ -1583,7 +1583,7 @@ static void	draw_plate(uint32_t *pixels, int width, int height,
  * outside them - the title row and the control legend - need this.
  */
 static void	draw_band(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, int ref_y_value, int ref_height)
+	const t_mp_layout *layout, int ref_y_value, int ref_height)
 {
 	fill_ref_rect(pixels, width, height, layout, MP_BAND_X, ref_y_value,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * MP_BAND_X, ref_height, g_mp_plate,
@@ -1594,8 +1594,8 @@ static void	draw_band(uint32_t *pixels, int width, int height,
  * @brief Draws a one-unit horizontal rule in reference space.
  */
 static void	draw_rule(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, int ref_x_value, int ref_y_value, int ref_width,
-	color_t tint)
+	const t_mp_layout *layout, int ref_x_value, int ref_y_value, int ref_width,
+	t_color tint)
 {
 	fill_ref_rect(pixels, width, height, layout, ref_x_value, ref_y_value,
 		ref_width, 3, tint, 190u);
@@ -1605,8 +1605,8 @@ static void	draw_rule(uint32_t *pixels, int width, int height,
  * @brief Fills a reference-space rectangle.
  */
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, int ref_x_value, int ref_y_value, int ref_width,
-	int ref_height, color_t tint, unsigned alpha)
+	const t_mp_layout *layout, int ref_x_value, int ref_y_value, int ref_width,
+	int ref_height, t_color tint, unsigned alpha)
 {
 	int	left;
 	int	top;
@@ -1636,7 +1636,7 @@ static void	fill_ref_rect(uint32_t *pixels, int width, int height,
 /**
  * @brief Shrinks a glyph size until the text fits its reference-space box.
  */
-static int	fit_glyph_size(const mp_layout_t *layout, const char *text,
+static int	fit_glyph_size(const t_mp_layout *layout, const char *text,
 	int ref_width, int ref_glyph, int *spacing)
 {
 	int	glyph_size;
@@ -1654,9 +1654,9 @@ static int	fit_glyph_size(const mp_layout_t *layout, const char *text,
 }
 
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, struct ncvisual *font, const char *text,
+	const t_mp_layout *layout, struct ncvisual *font, const char *text,
 	int ref_x_value, int ref_y_value, int ref_width, int ref_glyph,
-	color_t tint, bool centered)
+	t_color tint, bool centered)
 {
 	int	glyph_size;
 	int	spacing;
@@ -1672,9 +1672,9 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
  * @brief Draws text at a caller-chosen size, clipping it to its box.
  */
 static void	draw_text_fixed(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, struct ncvisual *font, const char *text,
+	const t_mp_layout *layout, struct ncvisual *font, const char *text,
 	int ref_x_value, int ref_y_value, int ref_width, int glyph_size,
-	int spacing, color_t tint, bool centered)
+	int spacing, t_color tint, bool centered)
 {
 	char	visible[APP_TEXT_MAX + APP_ROOM_CHAT_TEXT_MAX + 8];
 	int		max_chars;
@@ -1710,8 +1710,8 @@ static void	draw_text_fixed(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-	const mp_layout_t *layout, struct ncvisual *font, const char *text, int x,
-	int y, int glyph_size, int spacing, color_t tint)
+	const t_mp_layout *layout, struct ncvisual *font, const char *text, int x,
+	int y, int glyph_size, int spacing, t_color tint)
 {
 	int	glyph;
 	int	codepoint;
@@ -1748,7 +1748,7 @@ static int	ink_span(int units, int glyph_size)
  */
 static void	draw_glyph(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int x, int y, int glyph_size,
-	color_t tint, const mp_layout_t *layout)
+	t_color tint, const t_mp_layout *layout)
 {
 	int	source_y;
 	int	source_x;
@@ -1775,7 +1775,7 @@ static void	draw_glyph(uint32_t *pixels, int width, int height,
 
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 	struct ncvisual *font, int glyph, int source_x, int source_y, int x, int y,
-	int cell_width, int cell_height, color_t tint, bool opaque)
+	int cell_width, int cell_height, t_color tint, bool opaque)
 {
 	uint32_t	source;
 	unsigned	alpha;
@@ -1807,7 +1807,7 @@ static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 }
 
 static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
-	color_t tint, unsigned alpha, bool opaque)
+	t_color tint, unsigned alpha, bool opaque)
 {
 	uint32_t	*pixel;
 
@@ -1823,7 +1823,7 @@ static void	put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 	}
 }
 
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 {
 	unsigned	old_alpha;
 	unsigned	out_alpha;
@@ -1845,17 +1845,17 @@ static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
 	ncpixel_set_a(pixel, out_alpha);
 }
 
-static int	ref_x(const mp_layout_t *layout, int value)
+static int	ref_x(const t_mp_layout *layout, int value)
 {
 	return (value * layout->pixel_width / MULTIPLAYER_REFERENCE_WIDTH);
 }
 
-static int	ref_y(const mp_layout_t *layout, int value)
+static int	ref_y(const t_mp_layout *layout, int value)
 {
 	return (value * layout->pixel_height / MULTIPLAYER_REFERENCE_HEIGHT);
 }
 
-static int	ref_size(const mp_layout_t *layout, int value)
+static int	ref_size(const t_mp_layout *layout, int value)
 {
 	int	x_size;
 	int	y_size;
@@ -1890,7 +1890,7 @@ static const char	*nonempty(const char *text)
 	return (text != NULL && text[0] != '\0' ? text : "-");
 }
 
-static color_t	room_state_colour(const app_room_summary_view_model_t *room)
+static t_color	room_state_colour(const t_app_room_summary_view_model *room)
 {
 	if (room->state == APP_ROOM_STATE_IN_GAME
 		|| room->state == APP_ROOM_STATE_FINISHED)
@@ -1949,8 +1949,8 @@ static uint64_t	mp_hash_text(const char *text, uint64_t hash)
  * while the screen is open, and this layer is a full-screen bitmap a stationary
  * protocol would re-emit over every region plane above it.
  */
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-	const mp_layout_t *layout)
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+	const t_mp_layout *layout)
 {
 	uint64_t	hash;
 
@@ -1987,10 +1987,10 @@ static uint64_t	static_signature(const app_screen_view_model_t *view,
  * - so every region seeds from this instead, and a refresh that leaves the
  * cursor alone still repaints the rows underneath it.
  */
-static uint64_t	model_signature(const app_screen_view_model_t *view,
+static uint64_t	model_signature(const t_app_screen_view_model *view,
 	uint64_t hash)
 {
-	const app_room_view_model_t	*room;
+	const t_app_room_view_model	*room;
 	int							index;
 
 	if (view->screen == APP_SCREEN_LOBBY)
@@ -2029,7 +2029,7 @@ static uint64_t	model_signature(const app_screen_view_model_t *view,
  * hash directly - it just must not cover more than that, or every region on the
  * screen repaints whenever any of them changes.
  */
-static uint64_t	room_players_signature(const app_room_view_model_t *room,
+static uint64_t	room_players_signature(const t_app_room_view_model *room,
 	uint64_t hash)
 {
 	int	index;
@@ -2055,7 +2055,7 @@ static uint64_t	room_players_signature(const app_room_view_model_t *room,
 /**
  * @brief Hashes the transcript, for the one region that draws it.
  */
-static uint64_t	room_chat_signature(const app_room_view_model_t *room,
+static uint64_t	room_chat_signature(const t_app_room_view_model *room,
 	uint64_t hash)
 {
 	int	index;

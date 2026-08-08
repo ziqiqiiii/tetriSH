@@ -26,22 +26,22 @@
 # define CLR_BG_G	10
 # define CLR_BG_B	28
 
-static bool	create_modal_plane(render_ctx_t *ctx, sign_in_modal_t *modal);
-static void	draw_modal(sign_in_modal_t *modal);
+static bool	create_modal_plane(t_render_ctx *ctx, t_sign_in_modal *modal);
+static void	draw_modal(t_sign_in_modal *modal);
 static void	draw_frame(struct ncplane *plane, int rows, int cols);
-static void	draw_content(struct ncplane *plane, sign_in_modal_t *modal,
+static void	draw_content(struct ncplane *plane, t_sign_in_modal *modal,
 				int rows, int cols);
 static void	draw_button(struct ncplane *plane, int row, int x,
 				const char *text, bool focused);
-static void	button_geometry(const sign_in_modal_t *modal, int *row,
+static void	button_geometry(const t_sign_in_modal *modal, int *row,
 				int *dismiss_x, int *login_x);
 static void	put_centered_clipped(struct ncplane *plane, int row,
 				const char *text, unsigned cols);
 static bool	button_hit(const ncinput *input, int row, int x, int width,
 				int plane_y, int plane_x);
 
-sign_in_result_t	sign_in_modal_handle_mouse(sign_in_modal_t *modal,
-	const render_ctx_t *ctx, const ncinput *input, uint32_t key)
+t_sign_in_result	sign_in_modal_handle_mouse(t_sign_in_modal *modal,
+	const t_render_ctx *ctx, const ncinput *input, uint32_t key)
 {
 	int	plane_y;
 	int	plane_x;
@@ -73,7 +73,7 @@ sign_in_result_t	sign_in_modal_handle_mouse(sign_in_modal_t *modal,
 	return (SIGN_IN_RESULT_NONE);
 }
 
-bool	render_sign_in_show(render_ctx_t *ctx, sign_in_modal_t *modal)
+bool	render_sign_in_show(t_render_ctx *ctx, t_sign_in_modal *modal)
 {
 	if (ctx == NULL || ctx->std == NULL || modal == NULL)
 		return (false);
@@ -83,7 +83,7 @@ bool	render_sign_in_show(render_ctx_t *ctx, sign_in_modal_t *modal)
 	return (render_sign_in_refresh(ctx, modal));
 }
 
-bool	render_sign_in_refresh(render_ctx_t *ctx, sign_in_modal_t *modal)
+bool	render_sign_in_refresh(t_render_ctx *ctx, t_sign_in_modal *modal)
 {
 	if (ctx == NULL || ctx->nc == NULL || modal == NULL
 		|| modal->text_plane == NULL)
@@ -95,7 +95,7 @@ bool	render_sign_in_refresh(render_ctx_t *ctx, sign_in_modal_t *modal)
 	return (notcurses_render(ctx->nc) == 0);
 }
 
-void	render_sign_in_destroy(render_ctx_t *ctx, sign_in_modal_t *modal)
+void	render_sign_in_destroy(t_render_ctx *ctx, t_sign_in_modal *modal)
 {
 	(void)ctx;
 	if (modal == NULL)
@@ -106,7 +106,7 @@ void	render_sign_in_destroy(render_ctx_t *ctx, sign_in_modal_t *modal)
 	modal->visible = false;
 }
 
-static bool	create_modal_plane(render_ctx_t *ctx, sign_in_modal_t *modal)
+static bool	create_modal_plane(t_render_ctx *ctx, t_sign_in_modal *modal)
 {
 	unsigned		std_rows;
 	unsigned		std_cols;
@@ -132,7 +132,7 @@ static bool	create_modal_plane(render_ctx_t *ctx, sign_in_modal_t *modal)
 	return (modal->text_plane != NULL);
 }
 
-static void	draw_modal(sign_in_modal_t *modal)
+static void	draw_modal(t_sign_in_modal *modal)
 {
 	struct ncplane	*plane;
 	uint64_t		channels;
@@ -178,7 +178,7 @@ static void	draw_frame(struct ncplane *plane, int rows, int cols)
 	}
 }
 
-static void	draw_content(struct ncplane *plane, sign_in_modal_t *modal,
+static void	draw_content(struct ncplane *plane, t_sign_in_modal *modal,
 	int rows, int cols)
 {
 	char	line1[80];
@@ -228,7 +228,7 @@ static void	draw_button(struct ncplane *plane, int row, int x,
 	(void)ncplane_off_styles(plane, NCSTYLE_BOLD);
 }
 
-static void	button_geometry(const sign_in_modal_t *modal, int *row,
+static void	button_geometry(const t_sign_in_modal *modal, int *row,
 	int *dismiss_x, int *login_x)
 {
 	int	rows;

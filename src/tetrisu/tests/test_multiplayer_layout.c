@@ -8,8 +8,8 @@ static void	test_mode_picker_copy_is_bounded(void);
 static void	test_multiplayer_capacity_boundaries(void);
 static void	test_create_room_focus_and_actions(void);
 static void	test_mode_input_batch_boundaries(void);
-static void	region_list(const mp_layout_t *layout, app_screen_t screen,
-				const mp_rect_t **regions, int *count);
+static void	region_list(const t_mp_layout *layout, t_app_screen screen,
+				const t_mp_rect **regions, int *count);
 
 int	main(void)
 {
@@ -31,8 +31,8 @@ int	main(void)
  * other surfaces rather than given planes of their own. Only the entries below
  * become sprixels, so only these have to be disjoint.
  */
-static void	region_list(const mp_layout_t *layout, app_screen_t screen,
-	const mp_rect_t **regions, int *count)
+static void	region_list(const t_mp_layout *layout, t_app_screen screen,
+	const t_mp_rect **regions, int *count)
 {
 	*count = 0;
 	if (screen == APP_SCREEN_MULTIPLAYER_MODE)
@@ -56,7 +56,7 @@ static void	region_list(const mp_layout_t *layout, app_screen_t screen,
 /**
  * @brief Expands a region to whole cells the way the renderer's planes do.
  */
-static void	cell_span(const mp_rect_t *rect, int cell_px_x, int cell_px_y,
+static void	cell_span(const t_mp_rect *rect, int cell_px_x, int cell_px_y,
 	int *x0, int *y0, int *x1, int *y1)
 {
 	*x0 = rect->x / cell_px_x;
@@ -76,14 +76,14 @@ static void	cell_span(const mp_rect_t *rect, int cell_px_x, int cell_px_y,
  */
 static void	test_region_planes_never_overlap(void)
 {
-	static const app_screen_t	screens[] = {
+	static const t_app_screen	screens[] = {
 		APP_SCREEN_MULTIPLAYER_MODE,
 		APP_SCREEN_LOBBY,
 		APP_SCREEN_CREATE_ROOM_MODAL,
 		APP_SCREEN_WAITING_ROOM
 	};
-	mp_layout_t					layout;
-	const mp_rect_t				*regions[4];
+	t_mp_layout					layout;
+	const t_mp_rect				*regions[4];
 	int							bounds[4][4];
 	size_t						screen;
 	int							count;
@@ -147,7 +147,7 @@ static void	test_region_planes_never_overlap(void)
  */
 static void	test_layout_contract(void)
 {
-	mp_layout_t	layout;
+	t_mp_layout	layout;
 	int			index;
 
 	mp_layout_build(APP_SCREEN_MULTIPLAYER_MODE, 3, 5, 54, 144, 16, 8,
@@ -195,7 +195,7 @@ static void	test_layout_contract(void)
  */
 static void	test_unused_rectangles_stay_zero(void)
 {
-	mp_layout_t	layout;
+	t_mp_layout	layout;
 
 	mp_layout_build(APP_SCREEN_MULTIPLAYER_MODE, 0, 0, 54, 144, 16, 8, &layout);
 	assert(layout.list.width == 0 && layout.chat.width == 0);
@@ -217,7 +217,7 @@ static void	test_unused_rectangles_stay_zero(void)
  */
 static void	test_mode_picker_focus_and_actions(void)
 {
-	mp_mode_state_t	state;
+	t_mp_mode_state	state;
 
 	mp_mode_state_init(&state);
 	assert(state.focus == MP_MODE_FOCUS_DOUBLE);
@@ -298,7 +298,7 @@ static void	test_multiplayer_capacity_boundaries(void)
  */
 static void	test_create_room_focus_and_actions(void)
 {
-	create_room_state_t	state;
+	t_create_room_state	state;
 
 	create_room_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE);
 	assert(state.mode == APP_GAME_MODE_BATTLE_ROYALE);

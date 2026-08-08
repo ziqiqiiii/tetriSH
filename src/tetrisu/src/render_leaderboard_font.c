@@ -5,116 +5,116 @@
 # define LB_FONT_SPACING_REF	3
 # define LB_FONT_SHADOW_REF	3
 
-static const color_t	g_lb_panel = {14, 7, 32};
-static const color_t	g_lb_panel_alt = {24, 12, 45};
-static const color_t	g_lb_shadow = {4, 1, 15};
-static const color_t	g_lb_pink = {255, 112, 190};
-static const color_t	g_lb_gold = {255, 203, 102};
-static const color_t	g_lb_silver = {190, 205, 224};
-static const color_t	g_lb_bronze = {219, 145, 91};
-static const color_t	g_lb_cream = {250, 242, 221};
-static const color_t	g_lb_lavender = {190, 155, 218};
-static const color_t	g_lb_green = {112, 214, 174};
+static const t_color	g_lb_panel = {14, 7, 32};
+static const t_color	g_lb_panel_alt = {24, 12, 45};
+static const t_color	g_lb_shadow = {4, 1, 15};
+static const t_color	g_lb_pink = {255, 112, 190};
+static const t_color	g_lb_gold = {255, 203, 102};
+static const t_color	g_lb_silver = {190, 205, 224};
+static const t_color	g_lb_bronze = {219, 145, 91};
+static const t_color	g_lb_cream = {250, 242, 221};
+static const t_color	g_lb_lavender = {190, 155, 218};
+static const t_color	g_lb_green = {112, 214, 174};
 
-static bool	compose_pixels(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const leaderboard_pixel_layout_t *layout, uint32_t **pixels);
-static bool	create_pixel_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	compose_pixels(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_leaderboard_pixel_layout *layout, uint32_t **pixels);
+static bool	create_pixel_plane(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height);
-static int	update_static_layer(render_ctx_t *ctx,
-				const app_screen_view_model_t *view,
-				const leaderboard_pixel_layout_t *layout);
-static int	update_controls_layer(render_ctx_t *ctx,
-				const leaderboard_state_t *state,
-				const leaderboard_pixel_layout_t *layout);
-static bool	create_controls_plane(render_ctx_t *ctx,
+static int	update_static_layer(t_render_ctx *ctx,
+				const t_app_screen_view_model *view,
+				const t_leaderboard_pixel_layout *layout);
+static int	update_controls_layer(t_render_ctx *ctx,
+				const t_leaderboard_state *state,
+				const t_leaderboard_pixel_layout *layout);
+static bool	create_controls_plane(t_render_ctx *ctx,
 				const uint32_t *pixels,
-				const leaderboard_pixel_layout_t *layout);
+				const t_leaderboard_pixel_layout *layout);
 static uint64_t	lb_hash(const void *data, size_t size, uint64_t hash);
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-				const leaderboard_pixel_layout_t *layout);
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+				const t_leaderboard_pixel_layout *layout);
 static void	draw_header(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const app_screen_view_model_t *view, const pixel_asset_t *font);
+				const t_leaderboard_pixel_layout *layout,
+				const t_app_screen_view_model *view, const t_pixel_asset *font);
 static void	draw_ready(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const app_leaderboard_view_model_t *leaderboard,
-				const pixel_asset_t *font);
+				const t_leaderboard_pixel_layout *layout,
+				const t_app_leaderboard_view_model *leaderboard,
+				const t_pixel_asset *font);
 static void	draw_podium_card(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const app_leaderboard_entry_view_model_t *entry,
-				const pixel_asset_t *font, int place, int ref_x_value,
-				int ref_y_value, int ref_width, int ref_height, color_t accent);
+				const t_leaderboard_pixel_layout *layout,
+				const t_app_leaderboard_entry_view_model *entry,
+				const t_pixel_asset *font, int place, int ref_x_value,
+				int ref_y_value, int ref_width, int ref_height, t_color accent);
 static void	draw_rank_rows(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const app_leaderboard_view_model_t *leaderboard,
-				const pixel_asset_t *font);
+				const t_leaderboard_pixel_layout *layout,
+				const t_app_leaderboard_view_model *leaderboard,
+				const t_pixel_asset *font);
 static void	draw_status(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const app_screen_view_model_t *view, const pixel_asset_t *font);
+				const t_leaderboard_pixel_layout *layout,
+				const t_app_screen_view_model *view, const t_pixel_asset *font);
 static void	draw_controls(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const leaderboard_state_t *state, const pixel_asset_t *font);
+				const t_leaderboard_pixel_layout *layout,
+				const t_leaderboard_state *state, const t_pixel_asset *font);
 static void	draw_button(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_rect_t *rect, const pixel_asset_t *font,
+				const t_leaderboard_pixel_rect *rect, const t_pixel_asset *font,
 				const char *label, bool focused);
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout, int ref_x_value,
-				int ref_y_value, int ref_width, int ref_height, color_t tint,
+				const t_leaderboard_pixel_layout *layout, int ref_x_value,
+				int ref_y_value, int ref_width, int ref_height, t_color tint,
 				unsigned alpha);
 static void	stroke_ref_rect(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout, int ref_x_value,
+				const t_leaderboard_pixel_layout *layout, int ref_x_value,
 				int ref_y_value, int ref_width, int ref_height, int ref_thickness,
-				color_t tint, unsigned alpha);
+				t_color tint, unsigned alpha);
 static void	fill_rect(uint32_t *pixels, int width, int height, int x, int y,
-				int rect_width, int rect_height, color_t tint, unsigned alpha);
+				int rect_width, int rect_height, t_color tint, unsigned alpha);
 static void	stroke_rect(uint32_t *pixels, int width, int height, int x,
 				int y, int rect_width, int rect_height, int thickness,
-				color_t tint, unsigned alpha);
+				t_color tint, unsigned alpha);
 static void	draw_diamond_ref(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout, int ref_center_x,
-				int ref_center_y, int ref_radius, color_t tint);
+				const t_leaderboard_pixel_layout *layout, int ref_center_x,
+				int ref_center_y, int ref_radius, t_color tint);
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const pixel_asset_t *font, const char *text, int ref_x_value,
-				int ref_y_value, int ref_width, int ref_glyph, color_t tint,
+				const t_leaderboard_pixel_layout *layout,
+				const t_pixel_asset *font, const char *text, int ref_x_value,
+				int ref_y_value, int ref_width, int ref_glyph, t_color tint,
 				bool centered);
 static void	draw_text_box(uint32_t *pixels, int width, int height,
-				const leaderboard_pixel_layout_t *layout,
-				const pixel_asset_t *font, const char *text, int x, int y,
-				int box_width, int box_height, int ref_glyph, color_t tint);
+				const t_leaderboard_pixel_layout *layout,
+				const t_pixel_asset *font, const char *text, int x, int y,
+				int box_width, int box_height, int ref_glyph, t_color tint);
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-				const pixel_asset_t *font, const char *text, int x, int y,
-				int glyph_size, int spacing, color_t tint, unsigned opacity);
+				const t_pixel_asset *font, const char *text, int x, int y,
+				int glyph_size, int spacing, t_color tint, unsigned opacity);
 static void	draw_glyph(uint32_t *pixels, int width, int height,
-				const pixel_asset_t *font, int glyph, int x, int y,
-				int glyph_size, color_t tint, unsigned opacity);
+				const t_pixel_asset *font, int glyph, int x, int y,
+				int glyph_size, t_color tint, unsigned opacity);
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
-				const pixel_asset_t *font, int glyph, int source_x, int source_y,
-				int x, int y, int cell_width, int cell_height, color_t tint,
+				const t_pixel_asset *font, int glyph, int source_x, int source_y,
+				int x, int y, int cell_width, int cell_height, t_color tint,
 				unsigned opacity);
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha);
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
 static int	ink_span(int units, int glyph_size);
-static int	ref_x(const leaderboard_pixel_layout_t *layout, int value);
-static int	ref_y(const leaderboard_pixel_layout_t *layout, int value);
-static int	ref_size(const leaderboard_pixel_layout_t *layout, int value);
+static int	ref_x(const t_leaderboard_pixel_layout *layout, int value);
+static int	ref_y(const t_leaderboard_pixel_layout *layout, int value);
+static int	ref_size(const t_leaderboard_pixel_layout *layout, int value);
 static int	text_width(const char *text, int glyph_size, int spacing);
-static int	fit_glyph_size(const leaderboard_pixel_layout_t *layout,
+static int	fit_glyph_size(const t_leaderboard_pixel_layout *layout,
 				const char *text, int pixel_width, int ref_glyph, int *spacing);
 static int	min_int(int first, int second);
 static int	max_int(int first, int second);
-static const char	*status_title(const app_screen_view_model_t *view);
-static const char	*status_detail(const app_screen_view_model_t *view);
+static const char	*status_title(const t_app_screen_view_model *view);
+static const char	*status_detail(const t_app_screen_view_model *view);
 
 /**
  * @brief Renders the complete live leaderboard as authored bitmap content.
  */
-bool	render_leaderboard_pixel_show(render_ctx_t *ctx,
-	const app_screen_view_model_t *view, const leaderboard_state_t *state,
+bool	render_leaderboard_pixel_show(t_render_ctx *ctx,
+	const t_app_screen_view_model *view, const t_leaderboard_state *state,
 	bool rebuild_background)
 {
-	leaderboard_background_action_t	action;
-	leaderboard_pixel_layout_t		layout;
+	t_leaderboard_background_action	action;
+	t_leaderboard_pixel_layout		layout;
 	int								rebuilt;
 	int								changed;
 
@@ -172,9 +172,9 @@ bool	render_leaderboard_pixel_show(render_ctx_t *ctx,
  *
  * @return 1 when the layer was rebuilt, 0 when it was reused, -1 on failure.
  */
-static int	update_static_layer(render_ctx_t *ctx,
-	const app_screen_view_model_t *view,
-	const leaderboard_pixel_layout_t *layout)
+static int	update_static_layer(t_render_ctx *ctx,
+	const t_app_screen_view_model *view,
+	const t_leaderboard_pixel_layout *layout)
 {
 	uint64_t	signature;
 	uint32_t	*pixels;
@@ -208,9 +208,9 @@ static int	update_static_layer(render_ctx_t *ctx,
  *
  * @return 1 when the strip was rewritten, 0 when it was reused, -1 on failure.
  */
-static int	update_controls_layer(render_ctx_t *ctx,
-	const leaderboard_state_t *state,
-	const leaderboard_pixel_layout_t *layout)
+static int	update_controls_layer(t_render_ctx *ctx,
+	const t_leaderboard_state *state,
+	const t_leaderboard_pixel_layout *layout)
 {
 	uint64_t	signature;
 	uint32_t	*pixels;
@@ -248,8 +248,8 @@ static int	update_controls_layer(render_ctx_t *ctx,
  * plane at the same geometry is written in place; replacing one would damage
  * the cells it held and force the full-screen bitmap below to be resent.
  */
-static bool	create_controls_plane(render_ctx_t *ctx, const uint32_t *pixels,
-	const leaderboard_pixel_layout_t *layout)
+static bool	create_controls_plane(t_render_ctx *ctx, const uint32_t *pixels,
+	const t_leaderboard_pixel_layout *layout)
 {
 	ncplane_options		options;
 	struct ncplane		*plane;
@@ -304,10 +304,10 @@ static bool	create_controls_plane(render_ctx_t *ctx, const uint32_t *pixels,
  * tail of the entry array, either of which would rebuild the layer on frames
  * that changed nothing.
  */
-static uint64_t	static_signature(const app_screen_view_model_t *view,
-	const leaderboard_pixel_layout_t *layout)
+static uint64_t	static_signature(const t_app_screen_view_model *view,
+	const t_leaderboard_pixel_layout *layout)
 {
-	const app_leaderboard_entry_view_model_t	*entry;
+	const t_app_leaderboard_entry_view_model	*entry;
 	uint64_t									hash;
 	int											index;
 
@@ -352,7 +352,7 @@ static uint64_t	lb_hash(const void *data, size_t size, uint64_t hash)
 /**
  * @brief Releases leaderboard-only font and composite caches.
  */
-void	render_leaderboard_pixel_destroy(render_ctx_t *ctx)
+void	render_leaderboard_pixel_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -374,9 +374,9 @@ void	render_leaderboard_pixel_destroy(render_ctx_t *ctx)
 /**
  * @brief Composes everything except the focus-sensitive control strip.
  */
-static bool	compose_pixels(render_ctx_t *ctx,
-	const app_screen_view_model_t *view,
-	const leaderboard_pixel_layout_t *layout, uint32_t **pixels)
+static bool	compose_pixels(t_render_ctx *ctx,
+	const t_app_screen_view_model *view,
+	const t_leaderboard_pixel_layout *layout, uint32_t **pixels)
 {
 	size_t	count;
 
@@ -413,7 +413,7 @@ static bool	compose_pixels(render_ctx_t *ctx,
 	return (true);
 }
 
-static bool	create_pixel_plane(render_ctx_t *ctx, uint32_t *pixels,
+static bool	create_pixel_plane(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height)
 {
 	ncplane_options		options;
@@ -453,8 +453,8 @@ static bool	create_pixel_plane(render_ctx_t *ctx, uint32_t *pixels,
 }
 
 static void	draw_header(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const app_screen_view_model_t *view, const pixel_asset_t *font)
+	const t_leaderboard_pixel_layout *layout,
+	const t_app_screen_view_model *view, const t_pixel_asset *font)
 {
 	fill_ref_rect(pixels, width, height, layout, 344, 205, 760, 92,
 		g_lb_shadow, 190u);
@@ -469,9 +469,9 @@ static void	draw_header(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_ready(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const app_leaderboard_view_model_t *leaderboard,
-	const pixel_asset_t *font)
+	const t_leaderboard_pixel_layout *layout,
+	const t_app_leaderboard_view_model *leaderboard,
+	const t_pixel_asset *font)
 {
 	draw_podium_card(pixels, width, height, layout,
 		leaderboard_entry_for_position(leaderboard, 2), font, 2,
@@ -486,10 +486,10 @@ static void	draw_ready(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_podium_card(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const app_leaderboard_entry_view_model_t *entry, const pixel_asset_t *font,
+	const t_leaderboard_pixel_layout *layout,
+	const t_app_leaderboard_entry_view_model *entry, const t_pixel_asset *font,
 	int place, int ref_x_value, int ref_y_value, int ref_width, int ref_height,
-	color_t accent)
+	t_color accent)
 {
 	char	place_text[16];
 	char	score[32];
@@ -528,10 +528,10 @@ static void	draw_podium_card(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_rank_rows(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const app_leaderboard_view_model_t *leaderboard, const pixel_asset_t *font)
+	const t_leaderboard_pixel_layout *layout,
+	const t_app_leaderboard_view_model *leaderboard, const t_pixel_asset *font)
 {
-	const app_leaderboard_entry_view_model_t	*entry;
+	const t_app_leaderboard_entry_view_model	*entry;
 	char										position_text[8];
 	char										score[32];
 	int											position;
@@ -570,8 +570,8 @@ static void	draw_rank_rows(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_status(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const app_screen_view_model_t *view, const pixel_asset_t *font)
+	const t_leaderboard_pixel_layout *layout,
+	const t_app_screen_view_model *view, const t_pixel_asset *font)
 {
 	fill_ref_rect(pixels, width, height, layout, 344, 390, 760, 280,
 		g_lb_shadow, 205u);
@@ -585,8 +585,8 @@ static void	draw_status(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_controls(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout,
-	const leaderboard_state_t *state, const pixel_asset_t *font)
+	const t_leaderboard_pixel_layout *layout,
+	const t_leaderboard_state *state, const t_pixel_asset *font)
 {
 	draw_button(pixels, width, height,
 		&layout->buttons[LEADERBOARD_FOCUS_BACK], font, "BACK",
@@ -600,10 +600,10 @@ static void	draw_controls(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_button(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_rect_t *rect, const pixel_asset_t *font,
+	const t_leaderboard_pixel_rect *rect, const t_pixel_asset *font,
 	const char *label, bool focused)
 {
-	color_t	accent;
+	t_color	accent;
 	int		thickness;
 
 	accent = focused ? g_lb_gold : g_lb_lavender;
@@ -621,8 +621,8 @@ static void	draw_button(uint32_t *pixels, int width, int height,
 }
 
 static void	fill_ref_rect(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height, color_t tint, unsigned alpha)
+	const t_leaderboard_pixel_layout *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, t_color tint, unsigned alpha)
 {
 	fill_rect(pixels, width, height, ref_x(layout, ref_x_value),
 		ref_y(layout, ref_y_value), ref_x(layout, ref_width),
@@ -630,8 +630,8 @@ static void	fill_ref_rect(uint32_t *pixels, int width, int height,
 }
 
 static void	stroke_ref_rect(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout, int ref_x_value, int ref_y_value,
-	int ref_width, int ref_height, int ref_thickness, color_t tint,
+	const t_leaderboard_pixel_layout *layout, int ref_x_value, int ref_y_value,
+	int ref_width, int ref_height, int ref_thickness, t_color tint,
 	unsigned alpha)
 {
 	stroke_rect(pixels, width, height, ref_x(layout, ref_x_value),
@@ -641,7 +641,7 @@ static void	stroke_ref_rect(uint32_t *pixels, int width, int height,
 }
 
 static void	fill_rect(uint32_t *pixels, int width, int height, int x, int y,
-	int rect_width, int rect_height, color_t tint, unsigned alpha)
+	int rect_width, int rect_height, t_color tint, unsigned alpha)
 {
 	int	dest_y;
 	int	dest_x;
@@ -661,7 +661,7 @@ static void	fill_rect(uint32_t *pixels, int width, int height, int x, int y,
 }
 
 static void	stroke_rect(uint32_t *pixels, int width, int height, int x,
-	int y, int rect_width, int rect_height, int thickness, color_t tint,
+	int y, int rect_width, int rect_height, int thickness, t_color tint,
 	unsigned alpha)
 {
 	fill_rect(pixels, width, height, x, y, rect_width, thickness, tint, alpha);
@@ -673,8 +673,8 @@ static void	stroke_rect(uint32_t *pixels, int width, int height, int x,
 }
 
 static void	draw_diamond_ref(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout, int ref_center_x,
-	int ref_center_y, int ref_radius, color_t tint)
+	const t_leaderboard_pixel_layout *layout, int ref_center_x,
+	int ref_center_y, int ref_radius, t_color tint)
 {
 	int	center_x;
 	int	center_y;
@@ -703,9 +703,9 @@ static void	draw_diamond_ref(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_text_ref(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout, const pixel_asset_t *font,
+	const t_leaderboard_pixel_layout *layout, const t_pixel_asset *font,
 	const char *text, int ref_x_value, int ref_y_value, int ref_width,
-	int ref_glyph, color_t tint, bool centered)
+	int ref_glyph, t_color tint, bool centered)
 {
 	char	visible[APP_TEXT_MAX + 64];
 	int		glyph_size;
@@ -746,9 +746,9 @@ static void	draw_text_ref(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_text_box(uint32_t *pixels, int width, int height,
-	const leaderboard_pixel_layout_t *layout, const pixel_asset_t *font,
+	const t_leaderboard_pixel_layout *layout, const t_pixel_asset *font,
 	const char *text, int x, int y, int box_width, int box_height,
-	int ref_glyph, color_t tint)
+	int ref_glyph, t_color tint)
 {
 	int	glyph_size;
 	int	spacing;
@@ -772,8 +772,8 @@ static void	draw_text_box(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_text_run(uint32_t *pixels, int width, int height,
-	const pixel_asset_t *font, const char *text, int x, int y, int glyph_size,
-	int spacing, color_t tint, unsigned opacity)
+	const t_pixel_asset *font, const char *text, int x, int y, int glyph_size,
+	int spacing, t_color tint, unsigned opacity)
 {
 	unsigned	codepoint;
 	int			index;
@@ -791,8 +791,8 @@ static void	draw_text_run(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_glyph(uint32_t *pixels, int width, int height,
-	const pixel_asset_t *font, int glyph, int x, int y, int glyph_size,
-	color_t tint, unsigned opacity)
+	const t_pixel_asset *font, int glyph, int x, int y, int glyph_size,
+	t_color tint, unsigned opacity)
 {
 	int	source_y;
 	int	source_x;
@@ -817,8 +817,8 @@ static void	draw_glyph(uint32_t *pixels, int width, int height,
 }
 
 static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
-	const pixel_asset_t *font, int glyph, int source_x, int source_y,
-	int x, int y, int cell_width, int cell_height, color_t tint,
+	const t_pixel_asset *font, int glyph, int source_x, int source_y,
+	int x, int y, int cell_width, int cell_height, t_color tint,
 	unsigned opacity)
 {
 	unsigned	alpha;
@@ -849,7 +849,7 @@ static void	draw_glyph_cell(uint32_t *pixels, int width, int height,
 	}
 }
 
-static void	blend_pixel(uint32_t *pixel, color_t tint, unsigned alpha)
+static void	blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 {
 	unsigned	old_alpha;
 	unsigned	out_alpha;
@@ -879,17 +879,17 @@ static int	ink_span(int units, int glyph_size)
 			/ FONT_INK_HEIGHT));
 }
 
-static int	ref_x(const leaderboard_pixel_layout_t *layout, int value)
+static int	ref_x(const t_leaderboard_pixel_layout *layout, int value)
 {
 	return (value * layout->pixel_width / LB_REF_WIDTH);
 }
 
-static int	ref_y(const leaderboard_pixel_layout_t *layout, int value)
+static int	ref_y(const t_leaderboard_pixel_layout *layout, int value)
 {
 	return (value * layout->pixel_height / LB_REF_HEIGHT);
 }
 
-static int	ref_size(const leaderboard_pixel_layout_t *layout, int value)
+static int	ref_size(const t_leaderboard_pixel_layout *layout, int value)
 {
 	return (min_int(ref_x(layout, value), ref_y(layout, value)));
 }
@@ -904,7 +904,7 @@ static int	text_width(const char *text, int glyph_size, int spacing)
 	return (length * glyph_size + (length - 1) * spacing);
 }
 
-static int	fit_glyph_size(const leaderboard_pixel_layout_t *layout,
+static int	fit_glyph_size(const t_leaderboard_pixel_layout *layout,
 	const char *text, int pixel_width, int ref_glyph, int *spacing)
 {
 	int	glyph_size;
@@ -937,7 +937,7 @@ static int	max_int(int first, int second)
 	return (second);
 }
 
-static const char	*status_title(const app_screen_view_model_t *view)
+static const char	*status_title(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("FETCHING THE LATEST SCORES");
@@ -949,7 +949,7 @@ static const char	*status_title(const app_screen_view_model_t *view)
 	return ("SCORES COULD NOT BE LOADED");
 }
 
-static const char	*status_detail(const app_screen_view_model_t *view)
+static const char	*status_detail(const t_app_screen_view_model *view)
 {
 	if (view->status == APP_DATA_LOADING)
 		return ("PLEASE WAIT");

@@ -10,9 +10,9 @@ static void	test_join_blockers(void);
 static void	test_feedback_copy(void);
 static void	test_input_batch_boundaries(void);
 static void	test_all_rooms_scrolls_the_shared_viewport(void);
-static void	build_lobby(app_lobby_view_model_t *lobby);
-static void	add_room(app_lobby_view_model_t *lobby, const char *id,
-				app_game_mode_t mode, app_room_state_t state, int players,
+static void	build_lobby(t_app_lobby_view_model *lobby);
+static void	add_room(t_app_lobby_view_model *lobby, const char *id,
+				t_app_game_mode mode, t_app_room_state state, int players,
 				int capacity);
 
 int	main(void)
@@ -35,8 +35,8 @@ int	main(void)
  */
 static void	test_all_rooms_scrolls_the_shared_viewport(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 	int						step;
 
 	build_lobby(&lobby);
@@ -61,10 +61,10 @@ static void	test_all_rooms_scrolls_the_shared_viewport(void)
 	printf("PASS test_all_rooms_scrolls_the_shared_viewport\n");
 }
 
-static void	add_room(app_lobby_view_model_t *lobby, const char *id,
-	app_game_mode_t mode, app_room_state_t state, int players, int capacity)
+static void	add_room(t_app_lobby_view_model *lobby, const char *id,
+	t_app_game_mode mode, t_app_room_state state, int players, int capacity)
 {
-	app_room_summary_view_model_t	*room;
+	t_app_room_summary_view_model	*room;
 
 	assert(lobby->count < APP_LOBBY_MAX_ROOMS);
 	room = &lobby->rooms[lobby->count];
@@ -77,7 +77,7 @@ static void	add_room(app_lobby_view_model_t *lobby, const char *id,
 	lobby->count++;
 }
 
-static void	build_lobby(app_lobby_view_model_t *lobby)
+static void	build_lobby(t_app_lobby_view_model *lobby)
 {
 	memset(lobby, 0, sizeof(*lobby));
 	add_room(lobby, "duel-42", APP_GAME_MODE_DOUBLE, APP_ROOM_STATE_WAITING,
@@ -97,8 +97,8 @@ static void	build_lobby(app_lobby_view_model_t *lobby)
  */
 static void	test_filter_selects_the_visible_rooms(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 
 	build_lobby(&lobby);
 	lobby_state_init(&state, APP_GAME_MODE_DOUBLE, &lobby);
@@ -119,8 +119,8 @@ static void	test_filter_selects_the_visible_rooms(void)
  */
 static void	test_cursor_clamps_instead_of_wrapping(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 	int						step;
 
 	build_lobby(&lobby);
@@ -151,8 +151,8 @@ static void	test_cursor_clamps_instead_of_wrapping(void)
  */
 static void	test_filter_cycles_and_resets_the_cursor(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 
 	build_lobby(&lobby);
 	lobby_state_init(&state, APP_GAME_MODE_DOUBLE, &lobby);
@@ -181,8 +181,8 @@ static void	test_filter_cycles_and_resets_the_cursor(void)
  */
 static void	test_sections_read_input_differently(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 
 	build_lobby(&lobby);
 	lobby_state_init(&state, APP_GAME_MODE_DOUBLE, &lobby);
@@ -209,8 +209,8 @@ static void	test_sections_read_input_differently(void)
  */
 static void	test_typing_a_room_id(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 	int						step;
 
 	build_lobby(&lobby);
@@ -246,7 +246,7 @@ static void	test_typing_a_room_id(void)
  */
 static void	test_join_by_id_ignores_the_filter(void)
 {
-	app_lobby_view_model_t	lobby;
+	t_app_lobby_view_model	lobby;
 
 	build_lobby(&lobby);
 	assert(lobby_room_by_id(&lobby, "arena-88") != NULL);
@@ -264,8 +264,8 @@ static void	test_join_by_id_ignores_the_filter(void)
  */
 static void	test_join_blockers(void)
 {
-	app_lobby_view_model_t	lobby;
-	app_room_summary_view_model_t	invalid;
+	t_app_lobby_view_model	lobby;
+	t_app_room_summary_view_model	invalid;
 
 	build_lobby(&lobby);
 	assert(lobby_join_blocker(lobby_room_by_id(&lobby, "duel-42"))
@@ -285,7 +285,7 @@ static void	test_join_blockers(void)
 	assert(lobby_join_blocker(&invalid) == LOBBY_FEEDBACK_NONE);
 	invalid.state = APP_ROOM_STATE_FINISHED;
 	assert(lobby_join_blocker(&invalid) == LOBBY_FEEDBACK_FINISHED);
-	invalid.state = (app_room_state_t)99;
+	invalid.state = (t_app_room_state)99;
 	assert(lobby_join_blocker(&invalid) == LOBBY_FEEDBACK_INVALID_ROOM);
 	assert(lobby_join_blocker(NULL) == LOBBY_FEEDBACK_EMPTY_LIST);
 	printf("PASS test_join_blockers\n");
@@ -296,8 +296,8 @@ static void	test_join_blockers(void)
  */
 static void	test_feedback_copy(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 	char					line[APP_TEXT_MAX * 2];
 	int						feedback;
 
@@ -307,7 +307,7 @@ static void	test_feedback_copy(void)
 	feedback = LOBBY_FEEDBACK_REFRESHED;
 	while (feedback <= LOBBY_FEEDBACK_FILTER)
 	{
-		lobby_set_feedback(&state, (lobby_feedback_t)feedback, 55);
+		lobby_set_feedback(&state, (t_lobby_feedback)feedback, 55);
 		assert(lobby_feedback_text(&state, line, sizeof(line))[0] != '\0');
 		feedback++;
 	}
@@ -325,8 +325,8 @@ static void	test_feedback_copy(void)
  */
 static void	test_input_batch_boundaries(void)
 {
-	app_lobby_view_model_t	lobby;
-	lobby_state_t			state;
+	t_app_lobby_view_model	lobby;
+	t_lobby_state			state;
 
 	assert(lobby_navigation_keys_coalesce(NCKEY_UP, NCKEY_UP));
 	assert(lobby_navigation_keys_coalesce(NCKEY_PGDOWN, NCKEY_PGDOWN));

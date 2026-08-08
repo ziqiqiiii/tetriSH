@@ -1,40 +1,40 @@
 #include "tetrisu.h"
 
 // Static Functions
-static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx);
-static void	refresh_cell_geometry(render_ctx_t *ctx);
-static void	fit_background_to_terminal(render_ctx_t *ctx,
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx);
+static void	refresh_cell_geometry(t_render_ctx *ctx);
+static void	fit_background_to_terminal(t_render_ctx *ctx,
 	int std_rows, int std_cols);
 static int	max_int(int a, int b);
-static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	int rows, int cols);
 static void	set_opaque_backdrop(struct ncplane *plane);
-static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
+static int	replace_visual_scaled(t_render_ctx *ctx, struct ncvisual *ncv,
 				bool stretch, ncscale_e scaling, ncblitter_e blitter,
 				uint64_t flags);
-static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv);
-static void	backdrop_fit(render_ctx_t *ctx, bool stretch);
-static backdrop_cache_t	*backdrop_find(render_ctx_t *ctx, const char *path,
+static void	capture_backdrop(t_render_ctx *ctx, struct ncvisual *ncv);
+static void	backdrop_fit(t_render_ctx *ctx, bool stretch);
+static t_backdrop_cache	*backdrop_find(t_render_ctx *ctx, const char *path,
 				bool exact, bool stretch);
-static bool	backdrop_is_cached(const render_ctx_t *ctx,
+static bool	backdrop_is_cached(const t_render_ctx *ctx,
 				const struct ncplane *plane);
-static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
+static bool	backdrop_restack(t_render_ctx *ctx, const char *path,
 				bool exact, bool stretch);
-static void	backdrop_remember(render_ctx_t *ctx, const char *path,
+static void	backdrop_remember(t_render_ctx *ctx, const char *path,
 				bool exact, bool stretch);
-static backdrop_cache_t	*backdrop_evict(render_ctx_t *ctx);
-static void	backdrop_keep_snapshot(render_ctx_t *ctx,
-				backdrop_cache_t *entry);
-static void	backdrop_restore_snapshot(render_ctx_t *ctx,
-				const backdrop_cache_t *entry);
-static void	backdrop_cache_clear(render_ctx_t *ctx);
-static void	backdrop_park(render_ctx_t *ctx, struct ncplane *plane);
-static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
+static t_backdrop_cache	*backdrop_evict(t_render_ctx *ctx);
+static void	backdrop_keep_snapshot(t_render_ctx *ctx,
+				t_backdrop_cache *entry);
+static void	backdrop_restore_snapshot(t_render_ctx *ctx,
+				const t_backdrop_cache *entry);
+static void	backdrop_cache_clear(t_render_ctx *ctx);
+static void	backdrop_park(t_render_ctx *ctx, struct ncplane *plane);
+static void	read_backdrop_pixels(t_render_ctx *ctx, struct ncvisual *ncv,
 				int width, int height);
-static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event,
+static bool	take_parsed_event(t_render_ctx *ctx, ncinput *event,
 				uint32_t *key);
-static int	next_input_wait_ms(const render_ctx_t *ctx);
-static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms);
+static int	next_input_wait_ms(const t_render_ctx *ctx);
+static int	min_wait_ms(const t_render_ctx *ctx, int deadline_ms);
 
 /**
  * @brief Starts notcurses and renders the initial background image.
@@ -45,9 +45,9 @@ static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms);
  * @param image_path Image rendered behind the home screen.
  * @return Fully initialised render context; exits when setup cannot recover.
  */
-render_ctx_t	render_init(const char *image_path)
+t_render_ctx	render_init(const char *image_path)
 {
-	render_ctx_t		ctx;
+	t_render_ctx		ctx;
 	notcurses_options	opts;
 	const char			*term;
 
@@ -89,7 +89,7 @@ render_ctx_t	render_init(const char *image_path)
  * @param ctx Active render context.
  * @return true when bitmap planes may move, overlap, and restack.
  */
-bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
+bool	render_pixel_planes_reliable(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_MOVABLE);
 }
@@ -100,7 +100,7 @@ bool	render_pixel_planes_reliable(const render_ctx_t *ctx)
  * @param ctx Active render context.
  * @return true for every tier above the terminal-cell renderer.
  */
-bool	render_pixels_available(const render_ctx_t *ctx)
+bool	render_pixels_available(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels != TETRISU_PIXELS_NONE);
 }
@@ -148,7 +148,7 @@ bool	render_plane_geometry_matches(struct ncplane *plane, int y, int x,
  * whenever the surface is a window cut from a larger canvas.
  * @return true when the surface reached the plane.
  */
-bool	render_plane_blit_rgba(render_ctx_t *ctx, struct ncplane *plane,
+bool	render_plane_blit_rgba(t_render_ctx *ctx, struct ncplane *plane,
 	const uint32_t *pixels, int width, int height, int row_stride)
 {
 	struct ncvisual			*ncv;
@@ -181,7 +181,7 @@ bool	render_plane_blit_rgba(render_ctx_t *ctx, struct ncplane *plane,
  * @param ctx Active render context.
  * @return true when all changing UI surfaces must remain terminal cells.
  */
-bool	render_compatibility_mode(const render_ctx_t *ctx)
+bool	render_compatibility_mode(const t_render_ctx *ctx)
 {
 	return (ctx != NULL && ctx->pixels == TETRISU_PIXELS_NONE);
 }
@@ -194,7 +194,7 @@ bool	render_compatibility_mode(const render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_compatibility_badge_refresh(render_ctx_t *ctx)
+void	render_compatibility_badge_refresh(t_render_ctx *ctx)
 {
 	ncplane_options	opts;
 	const char		*text;
@@ -241,7 +241,7 @@ void	render_compatibility_badge_refresh(render_ctx_t *ctx)
  *
  * @param ctx Active render context.
  */
-void	render_compatibility_badge_hide(render_ctx_t *ctx)
+void	render_compatibility_badge_hide(t_render_ctx *ctx)
 {
 	if (ctx != NULL && ctx->compatibility_plane != NULL)
 	{
@@ -257,7 +257,7 @@ void	render_compatibility_badge_hide(render_ctx_t *ctx)
  * @param repaint Whether notcurses must query and repaint the terminal first.
  * @return 0 on success, -1 when notcurses refresh fails.
  */
-int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
+int	render_geometry_refresh(t_render_ctx *ctx, bool repaint)
 {
 	unsigned	rows;
 	unsigned	cols;
@@ -284,7 +284,7 @@ int	render_geometry_refresh(render_ctx_t *ctx, bool repaint)
  * @param ctx Pointer to the render context.
  * @return true when the tty and standard-plane dimensions differ.
  */
-bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
+bool	render_terminal_geometry_changed(const t_render_ctx *ctx)
 {
 	struct winsize	terminal;
 	unsigned		plane_rows;
@@ -310,7 +310,7 @@ bool	render_terminal_geometry_changed(const render_ctx_t *ctx)
  *
  * @param ctx Context whose background pointer is cleared.
  */
-void	render_background_destroy(render_ctx_t *ctx)
+void	render_background_destroy(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -330,7 +330,7 @@ void	render_background_destroy(render_ctx_t *ctx)
  * way; computing them twice is a few divisions against a transfer measured in
  * seconds.
  */
-static void	backdrop_fit(render_ctx_t *ctx, bool stretch)
+static void	backdrop_fit(t_render_ctx *ctx, bool stretch)
 {
 	unsigned	std_rows;
 	unsigned	std_cols;
@@ -351,7 +351,7 @@ static void	backdrop_fit(render_ctx_t *ctx, bool stretch)
 /**
  * @brief Finds the entry holding one artwork built the same way.
  */
-static backdrop_cache_t	*backdrop_find(render_ctx_t *ctx, const char *path,
+static t_backdrop_cache	*backdrop_find(t_render_ctx *ctx, const char *path,
 	bool exact, bool stretch)
 {
 	int	index;
@@ -372,7 +372,7 @@ static backdrop_cache_t	*backdrop_find(render_ctx_t *ctx, const char *path,
 /**
  * @brief Reports whether a plane is retained, and so must not be destroyed.
  */
-static bool	backdrop_is_cached(const render_ctx_t *ctx,
+static bool	backdrop_is_cached(const t_render_ctx *ctx,
 	const struct ncplane *plane)
 {
 	int	index;
@@ -392,10 +392,10 @@ static bool	backdrop_is_cached(const render_ctx_t *ctx,
  *
  * @return true when the screen now shows the wanted artwork.
  */
-static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
+static bool	backdrop_restack(t_render_ctx *ctx, const char *path,
 	bool exact, bool stretch)
 {
-	backdrop_cache_t	*entry;
+	t_backdrop_cache	*entry;
 	struct ncplane		*stale;
 
 	entry = backdrop_find(ctx, path, exact, stretch);
@@ -422,10 +422,10 @@ static bool	backdrop_restack(render_ctx_t *ctx, const char *path,
 /**
  * @brief Retains the freshly built backdrop under its artwork and construction.
  */
-static void	backdrop_remember(render_ctx_t *ctx, const char *path,
+static void	backdrop_remember(t_render_ctx *ctx, const char *path,
 	bool exact, bool stretch)
 {
-	backdrop_cache_t	*entry;
+	t_backdrop_cache	*entry;
 
 	/*
 	 * Retaining a backdrop is only ever worth it because the plane can later be
@@ -471,7 +471,7 @@ static void	backdrop_remember(render_ctx_t *ctx, const char *path,
  * rebuilt to bring it back - the docs are explicit that a sprixel survives
  * being moved.
  */
-static void	backdrop_park(render_ctx_t *ctx, struct ncplane *plane)
+static void	backdrop_park(t_render_ctx *ctx, struct ncplane *plane)
 {
 	if (plane == NULL || !backdrop_is_cached(ctx, plane))
 		return ;
@@ -484,9 +484,9 @@ static void	backdrop_park(render_ctx_t *ctx, struct ncplane *plane)
  * The plane on screen is never evicted: it is the one thing that cannot be
  * rebuilt without the screen going blank first.
  */
-static backdrop_cache_t	*backdrop_evict(render_ctx_t *ctx)
+static t_backdrop_cache	*backdrop_evict(t_render_ctx *ctx)
 {
-	backdrop_cache_t	*oldest;
+	t_backdrop_cache	*oldest;
 	int					index;
 
 	oldest = NULL;
@@ -511,7 +511,7 @@ static backdrop_cache_t	*backdrop_evict(render_ctx_t *ctx)
  * and a restacked screen would otherwise composite its overlays over another
  * screen's art.
  */
-static void	backdrop_keep_snapshot(render_ctx_t *ctx, backdrop_cache_t *entry)
+static void	backdrop_keep_snapshot(t_render_ctx *ctx, t_backdrop_cache *entry)
 {
 	size_t	count;
 
@@ -531,8 +531,8 @@ static void	backdrop_keep_snapshot(render_ctx_t *ctx, backdrop_cache_t *entry)
 /**
  * @brief Puts a retained overlay snapshot back in front of the shared one.
  */
-static void	backdrop_restore_snapshot(render_ctx_t *ctx,
-	const backdrop_cache_t *entry)
+static void	backdrop_restore_snapshot(t_render_ctx *ctx,
+	const t_backdrop_cache *entry)
 {
 	size_t	count;
 
@@ -552,7 +552,7 @@ static void	backdrop_restore_snapshot(render_ctx_t *ctx,
 /**
  * @brief Frees every retained backdrop, leaving the live one to the caller.
  */
-static void	backdrop_cache_clear(render_ctx_t *ctx)
+static void	backdrop_cache_clear(t_render_ctx *ctx)
 {
 	int	index;
 
@@ -583,7 +583,7 @@ static void	backdrop_cache_clear(render_ctx_t *ctx)
  * @param stretch Whether to fill the entire terminal instead of letterboxing.
  * @return 0 on success, -1 when loading, allocation, or rendering fails.
  */
-int	render_background_replace(render_ctx_t *ctx, const char *image_path,
+int	render_background_replace(t_render_ctx *ctx, const char *image_path,
 	bool stretch)
 {
 	struct ncvisual			*ncv;
@@ -613,7 +613,7 @@ int	render_background_replace(render_ctx_t *ctx, const char *image_path,
  *
  * @param ctx Active render context.
  */
-void	render_backdrop_forget(render_ctx_t *ctx)
+void	render_backdrop_forget(t_render_ctx *ctx)
 {
 	if (ctx == NULL)
 		return ;
@@ -636,7 +636,7 @@ void	render_backdrop_forget(render_ctx_t *ctx)
  * @param height Receives the snapshot height in pixels.
  * @return Borrowed pixels, or NULL when no snapshot matches the geometry.
  */
-const uint32_t	*render_backdrop_pixels(const render_ctx_t *ctx,
+const uint32_t	*render_backdrop_pixels(const t_render_ctx *ctx,
 	int *width, int *height)
 {
 	if (ctx == NULL || ctx->cell_px_x <= 0 || ctx->cell_px_y <= 0
@@ -673,7 +673,7 @@ const uint32_t	*render_backdrop_pixels(const render_ctx_t *ctx,
  * @param ctx Active render context.
  * @param ncv Disposable visual holding the new backdrop.
  */
-static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv)
+static void	capture_backdrop(t_render_ctx *ctx, struct ncvisual *ncv)
 {
 	int	width;
 	int	height;
@@ -702,7 +702,7 @@ static void	capture_backdrop(render_ctx_t *ctx, struct ncvisual *ncv)
 /**
  * @brief Copies a fitted visual into the snapshot buffer as opaque pixels.
  */
-static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
+static void	read_backdrop_pixels(t_render_ctx *ctx, struct ncvisual *ncv,
 	int width, int height)
 {
 	uint32_t	pixel;
@@ -740,7 +740,7 @@ static void	read_backdrop_pixels(render_ctx_t *ctx, struct ncvisual *ncv,
  * @param stretch Whether to fill the terminal instead of letterboxing.
  * @return 0 on success, -1 when exact bitmap rendering is unavailable.
  */
-int	render_background_replace_exact(render_ctx_t *ctx,
+int	render_background_replace_exact(t_render_ctx *ctx,
 	const char *image_path, bool stretch)
 {
 	struct ncvisual	*ncv;
@@ -787,7 +787,7 @@ int	render_background_replace_exact(render_ctx_t *ctx,
  * logic here ensures synthesized visuals obey the same exact plane contract as
  * file-backed artwork.
  */
-int	render_background_replace_visual(render_ctx_t *ctx,
+int	render_background_replace_visual(t_render_ctx *ctx,
 	struct ncvisual *ncv, bool stretch)
 {
 	/*
@@ -800,7 +800,7 @@ int	render_background_replace_visual(render_ctx_t *ctx,
 			preferred_blitter(ctx, 0, 0), NCVISUAL_OPTION_NOINTERPOLATE));
 }
 
-static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
+static int	replace_visual_scaled(t_render_ctx *ctx, struct ncvisual *ncv,
 	bool stretch, ncscale_e scaling, ncblitter_e blitter, uint64_t flags)
 {
 	struct ncvisual_options	vopts;
@@ -891,7 +891,7 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
  * @param key Receives the key id when an event is taken.
  * @return true when @p key holds an event the caller must handle.
  */
-static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event, uint32_t *key)
+static bool	take_parsed_event(t_render_ctx *ctx, ncinput *event, uint32_t *key)
 {
 	while (1)
 	{
@@ -920,7 +920,7 @@ static bool	take_parsed_event(render_ctx_t *ctx, ncinput *event, uint32_t *key)
  * @param ctx Pointer to the render context.
  * @return Milliseconds to wait before the next timer-driven repaint.
  */
-static int	next_input_wait_ms(const render_ctx_t *ctx)
+static int	next_input_wait_ms(const t_render_ctx *ctx)
 {
 	int	notification_wait_ms;
 
@@ -938,7 +938,7 @@ static int	next_input_wait_ms(const render_ctx_t *ctx)
  * @return The Unicode codepoint or NCKEY_* constant for the event, or
  * (uint32_t)-1 on input error.
  */
-uint32_t	render_wait_key(render_ctx_t *ctx)
+uint32_t	render_wait_key(t_render_ctx *ctx)
 {
 	return (render_wait_input(ctx, NULL));
 }
@@ -955,7 +955,7 @@ uint32_t	render_wait_key(render_ctx_t *ctx)
  * @return The Unicode codepoint or NCKEY_* constant for the event, or
  * (uint32_t)-1 on input error.
  */
-uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
+uint32_t	render_wait_input(t_render_ctx *ctx, ncinput *input)
 {
 	ncinput		local;
 	ncinput		*event;
@@ -1009,7 +1009,7 @@ uint32_t	render_wait_input(render_ctx_t *ctx, ncinput *input)
  * @param timeout_ms Deadline in milliseconds; negative waits indefinitely.
  * @return The key id, 0 when the deadline elapsed, or (uint32_t)-1 on error.
  */
-uint32_t	render_wait_input_timeout(render_ctx_t *ctx, ncinput *input,
+uint32_t	render_wait_input_timeout(t_render_ctx *ctx, ncinput *input,
 	int timeout_ms)
 {
 	ncinput			local;
@@ -1066,7 +1066,7 @@ uint32_t	render_wait_input_timeout(render_ctx_t *ctx, ncinput *input,
 /**
  * @brief Returns the shorter of the shared poll slice and one caller deadline.
  */
-static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms)
+static int	min_wait_ms(const t_render_ctx *ctx, int deadline_ms)
 {
 	int	wait_ms;
 
@@ -1081,7 +1081,7 @@ static int	min_wait_ms(const render_ctx_t *ctx, int deadline_ms)
  *
  * @param ctx Pointer to the render context to tear down.
  */
-void	render_teardown(render_ctx_t *ctx)
+void	render_teardown(t_render_ctx *ctx)
 {
 	if (ctx->nc != NULL)
 	{
@@ -1119,9 +1119,9 @@ void	render_teardown(render_ctx_t *ctx)
  * @param ctx Render context holding a started notcurses instance.
  * @return The tier every later render decision is derived from.
  */
-static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx)
+static t_tetrisu_pixel_policy	detect_pixel_policy(const t_render_ctx *ctx)
 {
-	tetrisu_pixel_policy_t	policy;
+	t_tetrisu_pixel_policy	policy;
 	char					*term;
 
 	term = notcurses_detected_terminal(ctx->nc);
@@ -1137,7 +1137,7 @@ static tetrisu_pixel_policy_t	detect_pixel_policy(const render_ctx_t *ctx)
  * @param ctx Render context updated with a portable 2:1 fallback when the
  * terminal exposes no bitmap geometry.
  */
-static void	refresh_cell_geometry(render_ctx_t *ctx)
+static void	refresh_cell_geometry(t_render_ctx *ctx)
 {
 	unsigned	cell_px_y;
 	unsigned	cell_px_x;
@@ -1163,7 +1163,7 @@ static void	refresh_cell_geometry(render_ctx_t *ctx)
  * @param std_rows Available terminal rows.
  * @param std_cols Available terminal columns.
  */
-static void	fit_background_to_terminal(render_ctx_t *ctx,
+static void	fit_background_to_terminal(t_render_ctx *ctx,
 	int std_rows, int std_cols)
 {
 	double	image_ratio;
@@ -1209,7 +1209,7 @@ static int	max_int(int a, int b)
  * @param cols Destination column count (unused).
  * @return The 4x2 cell blitter.
  */
-static ncblitter_e	preferred_blitter(const render_ctx_t *ctx,
+static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	int rows, int cols)
 {
 	(void)ctx;

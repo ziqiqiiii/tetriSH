@@ -35,7 +35,7 @@ int	main(void)
 /**
  * @brief Expands a region to whole cells the way the renderer's planes do.
  */
-static void	cell_span(const marketplace_rect_t *rect, int cell_px_x,
+static void	cell_span(const t_marketplace_rect *rect, int cell_px_x,
 	int cell_px_y, int *x0, int *y0, int *x1, int *y1)
 {
 	*x0 = rect->x / cell_px_x;
@@ -55,8 +55,8 @@ static void	cell_span(const marketplace_rect_t *rect, int cell_px_x,
  */
 static void	test_region_planes_never_overlap(void)
 {
-	marketplace_layout_t	layout;
-	marketplace_rect_t		regions[5];
+	t_marketplace_layout	layout;
+	t_marketplace_rect		regions[5];
 	int						bounds[5][4];
 	int						cols;
 	int						rows;
@@ -112,7 +112,7 @@ static void	test_region_planes_never_overlap(void)
 
 static void	test_marketplace_layout_contract(void)
 {
-	marketplace_layout_t	layout;
+	t_marketplace_layout	layout;
 	int						index;
 
 	marketplace_layout_build(3, 5, 54, 144, 16, 8, &layout);
@@ -165,8 +165,8 @@ static void	test_marketplace_layout_contract(void)
 
 static void	test_fixture_marketplace_model(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_MARKETPLACE,
@@ -191,10 +191,10 @@ static void	test_fixture_marketplace_model(void)
  */
 static void	test_offline_marketplace_is_refused(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
-	app_navigation_t		navigation;
-	marketplace_state_t		state;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
+	t_app_navigation		navigation;
+	t_marketplace_state		state;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_MARKETPLACE,
@@ -218,7 +218,7 @@ static void	test_offline_marketplace_is_refused(void)
 
 static void	test_focus_and_actions(void)
 {
-	marketplace_state_t	state;
+	t_marketplace_state	state;
 
 	marketplace_state_init(&state, true, 4, 7);
 	assert(state.section == MARKETPLACE_SECTION_CONTROLS);
@@ -260,7 +260,7 @@ static void	test_focus_and_actions(void)
 /* The fixture uses four columns: one full character row and two theme rows. */
 static void	test_inventory_grid_navigation(void)
 {
-	marketplace_state_t	state;
+	t_marketplace_state	state;
 	int					index;
 
 	marketplace_state_init(&state, true, 4, 7);
@@ -311,10 +311,10 @@ static void	test_inventory_grid_navigation(void)
  */
 static void	test_detail_follows_focus(void)
 {
-	app_data_provider_t						provider;
-	app_screen_view_model_t					view;
-	marketplace_state_t						state;
-	const app_catalogue_item_view_model_t	*item;
+	t_app_data_provider						provider;
+	t_app_screen_view_model					view;
+	t_marketplace_state						state;
+	const t_app_catalogue_item_view_model	*item;
 	int										index;
 
 	app_fixture_provider_init(&provider);
@@ -351,9 +351,9 @@ static void	test_detail_follows_focus(void)
 
 static void	test_buying_debits_the_wallet(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
-	marketplace_state_t		state;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
+	t_marketplace_state		state;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_MARKETPLACE,
@@ -406,9 +406,9 @@ static void	test_buying_debits_the_wallet(void)
  */
 static void	test_buying_never_equips(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
-	marketplace_state_t		state;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
+	t_marketplace_state		state;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_MARKETPLACE,
@@ -427,9 +427,9 @@ static void	test_buying_never_equips(void)
 
 static void	test_equipping_owned_items(void)
 {
-	app_data_provider_t		provider;
-	app_screen_view_model_t	view;
-	marketplace_state_t		state;
+	t_app_data_provider		provider;
+	t_app_screen_view_model	view;
+	t_marketplace_state		state;
 
 	app_fixture_provider_init(&provider);
 	assert(app_screen_view_load_for_session(&provider, APP_SCREEN_MARKETPLACE,
@@ -498,7 +498,7 @@ static void	test_input_batch_boundaries(void)
  */
 static void	test_backwards_focus_reaches_the_last_slot(void)
 {
-	marketplace_state_t	state;
+	t_marketplace_state	state;
 
 	marketplace_state_init(&state, true, 4, 7);
 	marketplace_state_focus_previous(&state);
@@ -531,7 +531,7 @@ static void	test_backwards_focus_reaches_the_last_slot(void)
  */
 static void	test_leaving_a_grid_focuses_the_button_below(void)
 {
-	marketplace_state_t	state;
+	t_marketplace_state	state;
 
 	marketplace_state_init(&state, true, 4, 7);
 	(void)marketplace_handle_key(&state, NCKEY_UP);

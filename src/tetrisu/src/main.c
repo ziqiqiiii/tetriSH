@@ -14,94 +14,94 @@
  */
 typedef struct s_mp_session
 {
-	app_game_mode_t			mode;
+	t_app_game_mode			mode;
 	char					room_id[LOBBY_ROOM_ID_MAX];
 	bool					create_pending;
-	app_screen_view_model_t	room_view;
-	waiting_room_state_t	room_state;
-}	mp_session_t;
+	t_app_screen_view_model	room_view;
+	t_waiting_room_state	room_state;
+}	t_mp_session;
 
 // Static Functions
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu,
+static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 				bool refresh_geometry, bool replace_background);
-static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, auth_form_t *form,
-				const menu_selection_t *menu);
-static auth_action_t	auth_pointer_action(render_ctx_t *ctx,
-				audio_ctx_t *audio, auth_form_t *form,
+static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_auth_form *form,
+				const t_menu_selection *menu);
+static t_auth_action	auth_pointer_action(t_render_ctx *ctx,
+				t_audio_ctx *audio, t_auth_form *form,
 				const ncinput *input, uint32_t key);
-static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, auth_form_t *form,
-				auth_action_t action);
-static int	activate_menu_selection(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_navigation_t *navigation,
-				const menu_selection_t *menu,
-				sign_in_modal_t *modal);
-static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_navigation_t *navigation,
-				const menu_selection_t *menu,
-				sign_in_modal_t *modal);
-static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, const menu_selection_t *menu);
-static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, const menu_selection_t *menu);
-static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, const menu_selection_t *menu);
-static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_screen_view_model_t *view, marketplace_state_t *state);
-static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_screen_view_model_t *view, marketplace_state_t *state);
-static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, mp_session_t *session);
-static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, mp_session_t *session);
-static void	apply_lobby_join(app_screen_view_model_t *view,
-				lobby_state_t *state, app_navigation_t *navigation,
-				mp_session_t *session, bool by_id);
-static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, mp_session_t *session);
-static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, mp_session_t *session);
-static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
-				app_navigation_t *navigation, mp_session_t *session,
-				room_action_t action);
-static bool	load_room_view(const app_data_provider_t *provider,
-				mp_session_t *session);
-static bool	is_multiplayer_screen(app_screen_t screen);
-static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
-				const menu_selection_t *menu);
-static void	discard_queued_input(render_ctx_t *ctx);
-static void	leaderboard_loading_view(const app_data_provider_t *provider,
-				app_screen_view_model_t *view);
-static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
-				const app_data_provider_t *provider,
-				app_navigation_t *navigation, const menu_selection_t *menu);
-static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
+static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_auth_form *form,
+				t_auth_action action);
+static int	activate_menu_selection(t_render_ctx *ctx, t_audio_ctx *audio,
+				t_app_navigation *navigation,
+				const t_menu_selection *menu,
+				t_sign_in_modal *modal);
+static int	run_sign_in_modal(t_render_ctx *ctx, t_audio_ctx *audio,
+				t_app_navigation *navigation,
+				const t_menu_selection *menu,
+				t_sign_in_modal *modal);
+static int	run_leaderboard_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, const t_menu_selection *menu);
+static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, const t_menu_selection *menu);
+static int	run_marketplace_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, const t_menu_selection *menu);
+static bool	apply_marketplace_purchase(t_render_ctx *ctx, t_audio_ctx *audio,
+				t_app_screen_view_model *view, t_marketplace_state *state);
+static bool	apply_marketplace_equip(t_render_ctx *ctx, t_audio_ctx *audio,
+				t_app_screen_view_model *view, t_marketplace_state *state);
+static int	run_multiplayer_mode_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_mp_session *session);
+static int	run_lobby_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_mp_session *session);
+static void	apply_lobby_join(t_app_screen_view_model *view,
+				t_lobby_state *state, t_app_navigation *navigation,
+				t_mp_session *session, bool by_id);
+static int	run_create_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_mp_session *session);
+static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, t_mp_session *session);
+static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
+				t_app_navigation *navigation, t_mp_session *session,
+				t_room_action action);
+static bool	load_room_view(const t_app_data_provider *provider,
+				t_mp_session *session);
+static bool	is_multiplayer_screen(t_app_screen screen);
+static int	leave_multiplayer(t_render_ctx *ctx, t_app_navigation *navigation,
+				const t_menu_selection *menu);
+static void	discard_queued_input(t_render_ctx *ctx);
+static void	leaderboard_loading_view(const t_app_data_provider *provider,
+				t_app_screen_view_model *view);
+static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider,
+				t_app_navigation *navigation, const t_menu_selection *menu);
+static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 				uint32_t key);
-static void	enable_home_mouse(render_ctx_t *ctx);
+static void	enable_home_mouse(t_render_ctx *ctx);
 
 /**
  * @brief Entry point for the screen-navigation and rendering loop.
  */
 int	main(void)
 {
-	app_navigation_t	navigation;
-	app_data_provider_t	provider;
-	menu_selection_t	menu;
-	auth_form_t		auth_form;
-	sign_in_modal_t	sign_in;
-	mp_session_t		mp_session;
-	render_ctx_t		ctx;
-	audio_ctx_t			audio;
+	t_app_navigation	navigation;
+	t_app_data_provider	provider;
+	t_menu_selection	menu;
+	t_auth_form		auth_form;
+	t_sign_in_modal	sign_in;
+	t_mp_session		mp_session;
+	t_render_ctx		ctx;
+	t_audio_ctx			audio;
 	ncinput				input;
 	uint32_t			key;
 	int					hovered;
@@ -285,13 +285,13 @@ int	main(void)
 /**
  * @brief Runs the complete login/sign-up/offline entry experience.
  */
-static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	auth_form_t *form, const menu_selection_t *menu)
+static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_auth_form *form, const t_menu_selection *menu)
 {
 	ncinput			input;
 	uint32_t		key;
-	auth_action_t	action;
+	t_auth_action	action;
 	bool			rebuild;
 	int				drained;
 
@@ -378,10 +378,10 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Turns pointer hover and click into the shared form focus/action path.
  */
-static auth_action_t	auth_pointer_action(render_ctx_t *ctx,
-	audio_ctx_t *audio, auth_form_t *form, const ncinput *input, uint32_t key)
+static t_auth_action	auth_pointer_action(t_render_ctx *ctx,
+	t_audio_ctx *audio, t_auth_form *form, const ncinput *input, uint32_t key)
 {
-	auth_focus_t	focus;
+	t_auth_focus	focus;
 
 	if (!render_auth_hit_test(ctx, form, input, &focus))
 		return (AUTH_ACTION_NONE);
@@ -399,12 +399,12 @@ static auth_action_t	auth_pointer_action(render_ctx_t *ctx,
 /**
  * @brief Applies one semantic auth action to providers and screen navigation.
  */
-static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	auth_form_t *form, auth_action_t action)
+static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_auth_form *form, t_auth_action action)
 {
-	app_auth_view_model_t	view;
-	app_provider_result_t	result;
+	t_app_auth_view_model	view;
+	t_app_provider_result	result;
 
 	if (action == AUTH_ACTION_CHECK_SERVER)
 	{
@@ -493,11 +493,11 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
  * When the route is HOME_ROUTE_SIGN_IN_REQUIRED the sign-in modal loop runs
  * blocking until the user dismisses or goes to Login.
  */
-static int	activate_menu_selection(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_navigation_t *navigation, const menu_selection_t *menu,
-	sign_in_modal_t *modal)
+static int	activate_menu_selection(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_navigation *navigation, const t_menu_selection *menu,
+	t_sign_in_modal *modal)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	if (navigation == NULL || menu == NULL)
 		return (0);
@@ -523,14 +523,14 @@ static int	activate_menu_selection(render_ctx_t *ctx, audio_ctx_t *audio,
  * resize by destroying and recreating modal planes. Returns 0 on normal
  * exit, -1 on fatal error.
  */
-static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_navigation_t *navigation, const menu_selection_t *menu,
-	sign_in_modal_t *modal)
+static int	run_sign_in_modal(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_navigation *navigation, const t_menu_selection *menu,
+	t_sign_in_modal *modal)
 {
 	ncinput			input;
 	uint32_t		key;
-	sign_in_result_t	result;
-	sign_in_focus_t		old_focus;
+	t_sign_in_result	result;
+	t_sign_in_focus		old_focus;
 
 	if (!render_sign_in_show(ctx, modal))
 		return (-1);
@@ -593,16 +593,16 @@ static int	run_sign_in_modal(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Runs the dedicated leaderboard, including refresh and pointer input.
  */
-static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	run_leaderboard_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
-	app_screen_view_model_t	view;
-	leaderboard_state_t		state;
-	leaderboard_focus_t		hovered;
-	leaderboard_focus_t		old_focus;
-	leaderboard_action_t	action;
-	app_provider_result_t	result;
+	t_app_screen_view_model	view;
+	t_leaderboard_state		state;
+	t_leaderboard_focus		hovered;
+	t_leaderboard_focus		old_focus;
+	t_leaderboard_action	action;
+	t_app_provider_result	result;
 	ncinput					input;
 	ncinput					queued_input;
 	ncinput					pending_input;
@@ -740,8 +740,8 @@ static int	run_leaderboard_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Creates the visible loading model before a provider refresh.
  */
-static void	leaderboard_loading_view(const app_data_provider_t *provider,
-	app_screen_view_model_t *view)
+static void	leaderboard_loading_view(const t_app_data_provider *provider,
+	t_app_screen_view_model *view)
 {
 	memset(view, 0, sizeof(*view));
 	view->screen = APP_SCREEN_LEADERBOARD;
@@ -755,16 +755,16 @@ static void	leaderboard_loading_view(const app_data_provider_t *provider,
 /**
  * @brief Runs the responsive Settings/Profile surface and local controls.
  */
-static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
-	app_screen_view_model_t	view;
-	settings_state_t		state;
-	settings_state_t		previous;
-	settings_action_t		action;
-	settings_equip_result_t	equip_result;
-	app_provider_result_t	result;
+	t_app_screen_view_model	view;
+	t_settings_state		state;
+	t_settings_state		previous;
+	t_settings_action		action;
+	t_settings_equip_result	equip_result;
+	t_app_provider_result	result;
 	ncinput				input;
 	ncinput				queued_input;
 	ncinput				pending_input;
@@ -941,15 +941,15 @@ static int	run_settings_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Runs the Marketplace: browse the shelves, spend points, equip stock.
  */
-static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	run_marketplace_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
-	app_screen_view_model_t	view;
-	marketplace_state_t		state;
-	marketplace_state_t		previous;
-	marketplace_action_t	action;
-	app_provider_result_t	result;
+	t_app_screen_view_model	view;
+	t_marketplace_state		state;
+	t_marketplace_state		previous;
+	t_marketplace_action	action;
+	t_app_provider_result	result;
 	ncinput					input;
 	ncinput					queued_input;
 	ncinput					pending_input;
@@ -1095,11 +1095,11 @@ static int	run_marketplace_screen(render_ctx_t *ctx, audio_ctx_t *audio,
  * equipped rather than refused: that is what the shelf tile and the Buy button
  * caption both promise.
  */
-static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_screen_view_model_t *view, marketplace_state_t *state)
+static bool	apply_marketplace_purchase(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_screen_view_model *view, t_marketplace_state *state)
 {
-	const app_catalogue_item_view_model_t	*item;
-	marketplace_purchase_result_t			result;
+	const t_app_catalogue_item_view_model	*item;
+	t_marketplace_purchase_result			result;
 
 	item = marketplace_focused_item(&view->data.marketplace, state);
 	if (item == NULL)
@@ -1122,10 +1122,10 @@ static bool	apply_marketplace_purchase(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Equips the focused item when it is owned, or explains why it is not.
  */
-static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_screen_view_model_t *view, marketplace_state_t *state)
+static bool	apply_marketplace_equip(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_screen_view_model *view, t_marketplace_state *state)
 {
-	settings_equip_result_t	result;
+	t_settings_equip_result	result;
 
 	if (marketplace_focused_item(&view->data.marketplace, state) == NULL)
 		return (true);
@@ -1146,14 +1146,14 @@ static bool	apply_marketplace_equip(render_ctx_t *ctx, audio_ctx_t *audio,
  * The chosen mode becomes the lobby's list filter rather than a restriction, so
  * this screen narrows the browser without closing anything off.
  */
-static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	mp_session_t *session)
+static int	run_multiplayer_mode_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
 {
-	app_screen_view_model_t	view;
-	mp_mode_state_t			state;
-	mp_mode_state_t			previous;
-	mp_mode_action_t		action;
+	t_app_screen_view_model	view;
+	t_mp_mode_state			state;
+	t_mp_mode_state			previous;
+	t_mp_mode_action		action;
 	ncinput					input;
 	ncinput					queued_input;
 	ncinput					pending_input;
@@ -1271,14 +1271,14 @@ static int	run_multiplayer_mode_screen(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Runs the room browser: pick a room, type an id, or open a new one.
  */
-static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	mp_session_t *session)
+static int	run_lobby_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
 {
-	app_screen_view_model_t	view;
-	lobby_state_t			state;
-	lobby_state_t			previous;
-	lobby_action_t			action;
+	t_app_screen_view_model	view;
+	t_lobby_state			state;
+	t_lobby_state			previous;
+	t_lobby_action			action;
 	ncinput					input;
 	ncinput					queued_input;
 	ncinput					pending_input;
@@ -1414,12 +1414,12 @@ static int	run_lobby_screen(render_ctx_t *ctx, audio_ctx_t *audio,
  * shares a room, and a filter the player happens to have set must not hide the
  * room they were invited to.
  */
-static void	apply_lobby_join(app_screen_view_model_t *view,
-	lobby_state_t *state, app_navigation_t *navigation, mp_session_t *session,
+static void	apply_lobby_join(t_app_screen_view_model *view,
+	t_lobby_state *state, t_app_navigation *navigation, t_mp_session *session,
 	bool by_id)
 {
-	const app_room_summary_view_model_t	*room;
-	lobby_feedback_t					blocker;
+	const t_app_room_summary_view_model	*room;
+	t_lobby_feedback					blocker;
 
 	if (by_id)
 	{
@@ -1458,14 +1458,14 @@ static void	apply_lobby_join(app_screen_view_model_t *view,
 /**
  * @brief Runs the create-room panel and hands the chosen mode to the room.
  */
-static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	mp_session_t *session)
+static int	run_create_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
 {
-	app_screen_view_model_t	view;
-	create_room_state_t		state;
-	create_room_state_t		previous;
-	create_room_action_t	action;
+	t_app_screen_view_model	view;
+	t_create_room_state		state;
+	t_create_room_state		previous;
+	t_create_room_action	action;
 	ncinput					input;
 	uint32_t				key;
 
@@ -1546,12 +1546,12 @@ static int	run_create_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
  * repaints the status region alone once a second; everything else on the screen
  * is left untouched.
  */
-static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	mp_session_t *session)
+static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
 {
-	waiting_room_state_t	previous;
-	room_action_t			action;
+	t_waiting_room_state	previous;
+	t_room_action			action;
 	ncinput					input;
 	uint32_t				key;
 	uint64_t				deadline;
@@ -1653,11 +1653,11 @@ static int	run_waiting_room_screen(render_ctx_t *ctx, audio_ctx_t *audio,
  * both go through the same policy helpers a server-driven build will call, so
  * only the source of the room snapshot changes later.
  */
-static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
-	app_navigation_t *navigation, mp_session_t *session, room_action_t action)
+static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_navigation *navigation, t_mp_session *session, t_room_action action)
 {
-	app_room_view_model_t	*room;
-	room_feedback_t			blocker;
+	t_app_room_view_model	*room;
+	t_room_feedback			blocker;
 
 	room = &session->room_view.data.room;
 	if (action == ROOM_ACTION_TOGGLE_READY)
@@ -1723,10 +1723,10 @@ static bool	apply_room_action(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Loads the room the previous screen chose, creating it when asked to.
  */
-static bool	load_room_view(const app_data_provider_t *provider,
-	mp_session_t *session)
+static bool	load_room_view(const t_app_data_provider *provider,
+	t_mp_session *session)
 {
-	app_provider_result_t	result;
+	t_app_provider_result	result;
 
 	if (session->create_pending)
 		result = app_room_view_create(provider, session->mode,
@@ -1749,7 +1749,7 @@ static bool	load_room_view(const app_data_provider_t *provider,
  * teardown that frees them only runs when the whole group is left rather than
  * on every step between them.
  */
-static bool	is_multiplayer_screen(app_screen_t screen)
+static bool	is_multiplayer_screen(t_app_screen screen)
 {
 	return (screen == APP_SCREEN_MULTIPLAYER_MODE
 		|| screen == APP_SCREEN_LOBBY
@@ -1760,8 +1760,8 @@ static bool	is_multiplayer_screen(app_screen_t screen)
 /**
  * @brief Releases the multiplayer planes once the group is actually left.
  */
-static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	leave_multiplayer(t_render_ctx *ctx, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
 	if (is_multiplayer_screen(navigation->current))
 		return (0);
@@ -1777,7 +1777,7 @@ static int	leave_multiplayer(render_ctx_t *ctx, app_navigation_t *navigation,
 /**
  * @brief Drops Settings input already buffered across a screen transition.
  */
-static void	discard_queued_input(render_ctx_t *ctx)
+static void	discard_queued_input(t_render_ctx *ctx)
 {
 	ncinput		input;
 	uint32_t	key;
@@ -1797,12 +1797,12 @@ static void	discard_queued_input(render_ctx_t *ctx)
 /**
  * @brief Presents and advances one scaffolded item-15 screen.
  */
-static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
-	const app_data_provider_t *provider, app_navigation_t *navigation,
-	const menu_selection_t *menu)
+static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	const t_menu_selection *menu)
 {
-	app_screen_view_model_t	view;
-	app_nav_action_t		action;
+	t_app_screen_view_model	view;
+	t_app_nav_action		action;
 	ncinput					input;
 	uint32_t				key;
 
@@ -1854,7 +1854,7 @@ static int	run_scaffold_step(render_ctx_t *ctx, audio_ctx_t *audio,
 /**
  * @brief Maps temporary scaffold controls to the validated state graph.
  */
-static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
+static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 	uint32_t key)
 {
 	if (key == 'q' || key == 'Q')
@@ -1886,7 +1886,7 @@ static app_nav_action_t	scaffold_navigation_action(app_screen_t screen,
 /**
  * @brief Enables pointer movement and click reporting for the home menu.
  */
-static void	enable_home_mouse(render_ctx_t *ctx)
+static void	enable_home_mouse(t_render_ctx *ctx)
 {
 	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
 }
@@ -1894,7 +1894,7 @@ static void	enable_home_mouse(render_ctx_t *ctx)
 /**
  * @brief Rebuilds the home screen after resize or scaffold navigation.
  */
-static int	reflow_home(render_ctx_t *ctx, const menu_selection_t *menu,
+static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	bool refresh_geometry, bool replace_background)
 {
 	render_screen_destroy(ctx);

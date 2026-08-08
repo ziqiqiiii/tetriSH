@@ -42,7 +42,7 @@ int	main(void)
 
 static void	test_single_player_always_navigates(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(0, true);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
@@ -55,7 +55,7 @@ static void	test_single_player_always_navigates(void)
 
 static void	test_settings_always_navigates(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(4, true);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
@@ -68,7 +68,7 @@ static void	test_settings_always_navigates(void)
 
 static void	test_multiplayer_offline_requires_sign_in(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(1, true);
 	assert(route.action == HOME_ROUTE_SIGN_IN_REQUIRED);
@@ -78,7 +78,7 @@ static void	test_multiplayer_offline_requires_sign_in(void)
 
 static void	test_marketplace_offline_requires_sign_in(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(2, true);
 	assert(route.action == HOME_ROUTE_SIGN_IN_REQUIRED);
@@ -88,7 +88,7 @@ static void	test_marketplace_offline_requires_sign_in(void)
 
 static void	test_leaderboard_offline_requires_sign_in(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(3, true);
 	assert(route.action == HOME_ROUTE_SIGN_IN_REQUIRED);
@@ -98,7 +98,7 @@ static void	test_leaderboard_offline_requires_sign_in(void)
 
 static void	test_multiplayer_fixture_navigates(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(1, false);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
@@ -108,7 +108,7 @@ static void	test_multiplayer_fixture_navigates(void)
 
 static void	test_marketplace_fixture_navigates(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(2, false);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
@@ -118,7 +118,7 @@ static void	test_marketplace_fixture_navigates(void)
 
 static void	test_leaderboard_fixture_navigates(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(3, false);
 	assert(route.action == HOME_ROUTE_NAVIGATE);
@@ -128,7 +128,7 @@ static void	test_leaderboard_fixture_navigates(void)
 
 static void	test_invalid_index_blocked(void)
 {
-	home_route_t	route;
+	t_home_route	route;
 
 	route = home_menu_route(-1, false);
 	assert(route.action == HOME_ROUTE_BLOCKED);
@@ -160,8 +160,8 @@ static void	test_sign_in_body_message(void)
 
 static void	test_modal_escape_dismisses(void)
 {
-	sign_in_modal_t		modal;
-	sign_in_result_t	result;
+	t_sign_in_modal		modal;
+	t_sign_in_result	result;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;
@@ -173,8 +173,8 @@ static void	test_modal_escape_dismisses(void)
 
 static void	test_modal_enter_dismiss_focus(void)
 {
-	sign_in_modal_t		modal;
-	sign_in_result_t	result;
+	t_sign_in_modal		modal;
+	t_sign_in_result	result;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;
@@ -187,8 +187,8 @@ static void	test_modal_enter_dismiss_focus(void)
 
 static void	test_modal_enter_login_focus(void)
 {
-	sign_in_modal_t		modal;
-	sign_in_result_t	result;
+	t_sign_in_modal		modal;
+	t_sign_in_result	result;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;
@@ -201,8 +201,8 @@ static void	test_modal_enter_login_focus(void)
 
 static void	test_modal_carriage_return_confirms(void)
 {
-	sign_in_modal_t		modal;
-	sign_in_result_t	result;
+	t_sign_in_modal		modal;
+	t_sign_in_result	result;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;
@@ -215,7 +215,7 @@ static void	test_modal_carriage_return_confirms(void)
 
 static void	test_modal_tab_toggles_focus(void)
 {
-	sign_in_modal_t	modal;
+	t_sign_in_modal	modal;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;
@@ -230,7 +230,7 @@ static void	test_modal_tab_toggles_focus(void)
 
 static void	test_modal_arrows_toggle_focus(void)
 {
-	sign_in_modal_t	modal;
+	t_sign_in_modal	modal;
 
 	sign_in_modal_init(&modal);
 	modal.visible = true;

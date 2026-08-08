@@ -40,6 +40,35 @@ void	test_signup_and_login(void)
 	printf("PASS test_signup_and_login\n");
 }
 
+// get_salt returns the salt stored at signup so a caller can hash a login
+// attempt; it rejects an undersized buffer rather than truncating, and reports
+// an unknown username distinguishably (hiding that is the caller's job).
+void	test_get_salt(void)
+{
+	t_db		*db;
+	t_player_id	id;
+	char		salt[DB_SALT_LEN];
+	char		again[DB_SALT_LEN];
+	char		small[DB_SALT_LEN - 1];
+
+	db = fresh_db();
+	assert(db_signup(db, "amber", "hashAAA", "saltAAA", &id) == DB_OK);
+	assert(db_get_salt(db, "amber", salt, sizeof(salt)) == DB_OK);
+	assert(memcmp(salt, "saltAAA", strlen("saltAAA")) == 0);
+	// Unknown user is reported, not folded into a credentials failure.
+	assert(db_get_salt(db, "ghost", salt, sizeof(salt)) == DB_NOT_FOUND);
+	// A short buffer would yield a wrong hash and an unexplainable 401.
+	assert(db_get_salt(db, "amber", small, sizeof(small)) == DB_INVALID);
+	assert(db_get_salt(NULL, "amber", salt, sizeof(salt)) == DB_INVALID);
+	assert(db_get_salt(db, NULL, salt, sizeof(salt)) == DB_INVALID);
+	assert(db_get_salt(db, "amber", NULL, sizeof(salt)) == DB_INVALID);
+	// The read leaves the record intact: same salt, login still works.
+	assert(db_get_salt(db, "amber", again, sizeof(again)) == DB_OK);
+	assert(memcmp(salt, again, DB_SALT_LEN) == 0);
+	db_close(db);
+	printf("PASS test_get_salt\n");
+}
+
 // buy charges the wallet, rejects re-purchase / insufficient funds, and equip
 // requires ownership.
 void	test_buy_and_equip(void)
@@ -56,8 +85,11 @@ void	test_buy_and_equip(void)
 	assert(db_buy_character(db, id, 2) == DB_EXISTS);
 	assert(db_equip_character(db, id, 2) == DB_OK);
 	assert(db_equip_character(db, id, 3) == DB_NOT_OWNED);
-	assert(db_player_owns_character(db, id, 2) == true);
-	assert(db_player_owns_character(db, id, 3) == false);
+	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
+	assert(db_player_owns_character(db, id, 3) == DB_FALSE);
+	// A NULL handle is undeterminable, not a plain "does not own".
+	assert(db_player_owns_character(NULL, id, 2) == DB_UNKNOWN);
+	assert(db_player_owns_theme(NULL, id, 1) == DB_UNKNOWN);
 	db_close(db);
 	printf("PASS test_buy_and_equip\n");
 }
@@ -110,7 +142,7 @@ void	test_durability_roundtrip(void)
 	assert(out.leaderboard_score == 250);
 	assert(out.wallet_points == 1000 - 10);
 	assert(out.current_equipped_character == 2);
-	assert(db_player_owns_character(db, id, 2) == true);
+	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
 	assert(db_rank(db, id, &rank) == DB_OK && rank == 1);
 	db_close(db);
 	printf("PASS test_durability_roundtrip\n");
@@ -136,6 +168,7 @@ void	test_catalogue_passthrough(void)
 int	main(void)
 {
 	test_signup_and_login();
+	test_get_salt();
 	test_buy_and_equip();
 	test_leaderboard_and_rank();
 	test_durability_roundtrip();

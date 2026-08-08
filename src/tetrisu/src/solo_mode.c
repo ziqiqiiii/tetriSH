@@ -1,28 +1,28 @@
 #include "tetrisu.h"
 
 // Static Functions
-static int	restore_home(render_ctx_t *ctx);
+static int	restore_home(t_render_ctx *ctx);
 static uint32_t	new_game_seed(void);
 static uint64_t	monotonic_ms(void);
 static int	milliseconds_until_render(uint64_t now_ms,
 	uint64_t last_render_ms);
-static bool	solo_display_ready(const solo_render_t *solo);
-static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
+static bool	solo_display_ready(const t_solo_render *solo);
+static uint32_t	wait_solo_input(t_render_ctx *ctx, int timeout_ms,
 	ncinput *input, int *input_errno);
-static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
-	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
+static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
+	t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed,
-	solo_handling_state_t *handling,
-	const solo_handling_config_t *handling_config);
-static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
-	solo_game_t *game, uint32_t key, const ncinput *input,
+	t_solo_handling_state *handling,
+	const t_solo_handling_config *handling_config);
+static bool	handle_solo_mouse(t_render_ctx *ctx, t_solo_render *solo,
+	t_solo_game *game, uint32_t key, const ncinput *input,
 	bool display_ready, bool resize_pending, bool *state_changed);
-static bool	dispatch_game_key(solo_game_t *game, uint32_t key);
-static bool	apply_handling_actions(solo_game_t *game,
-				solo_handling_state_t *handling,
-				const solo_handling_config_t *config, int elapsed_ms);
-static void	play_solo_events(audio_ctx_t *audio, uint32_t events);
+static bool	dispatch_game_key(t_solo_game *game, uint32_t key);
+static bool	apply_handling_actions(t_solo_game *game,
+				t_solo_handling_state *handling,
+				const t_solo_handling_config *config, int elapsed_ms);
+static void	play_solo_events(t_audio_ctx *audio, uint32_t events);
 
 /**
  * @brief Runs the temporary local-authority Solo game loop.
@@ -35,12 +35,12 @@ static void	play_solo_events(audio_ctx_t *audio, uint32_t events);
  * @param audio Pointer to the initialized audio context.
  * @return 0 after restoring the home screen, or -1 when restoration fails.
  */
-int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
+int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 {
-	solo_game_t	game;
-	solo_render_t	solo;
-	solo_handling_config_t	handling_config;
-	solo_handling_state_t	handling;
+	t_solo_game	game;
+	t_solo_render	solo;
+	t_solo_handling_config	handling_config;
+	t_solo_handling_state	handling;
 	ncinput			input;
 	uint32_t		key;
 	uint64_t		previous_ms;
@@ -239,7 +239,7 @@ int	solo_mode_run(render_ctx_t *ctx, audio_ctx_t *audio)
  * @param ctx Pointer to the render context.
  * @return 0 on success, or -1 when the homepage image cannot be restored.
  */
-static int	restore_home(render_ctx_t *ctx)
+static int	restore_home(t_render_ctx *ctx)
 {
 	ncplane_erase(ctx->std);
 	if (render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
@@ -301,7 +301,7 @@ static int	milliseconds_until_render(uint64_t now_ms,
  * @param solo Pointer to the Solo render state.
  * @return true when layout, assets, and planes are ready.
  */
-static bool	solo_display_ready(const solo_render_t *solo)
+static bool	solo_display_ready(const t_solo_render *solo)
 {
 	return (solo->layout_valid && solo->assets_ready && solo->planes_ready);
 }
@@ -319,7 +319,7 @@ static bool	solo_display_ready(const solo_render_t *solo)
  * @param input_errno Output errno captured beside the result.
  * @return A key code, 0 on timeout, or `(uint32_t)-1` on failure.
  */
-static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
+static uint32_t	wait_solo_input(t_render_ctx *ctx, int timeout_ms,
 	ncinput *input, int *input_errno)
 {
 	struct pollfd	poll_fd;
@@ -366,14 +366,14 @@ static uint32_t	wait_solo_input(render_ctx_t *ctx, int timeout_ms,
  * @param state_changed In/out redraw request flag.
  * @return true when the Solo loop should return to the home screen.
  */
-static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
-	render_ctx_t *ctx, solo_render_t *solo, uint32_t key,
+static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
+	t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed,
-	solo_handling_state_t *handling,
-	const solo_handling_config_t *handling_config)
+	t_solo_handling_state *handling,
+	const t_solo_handling_config *handling_config)
 {
-	solo_action_t	action;
+	t_solo_action	action;
 
 	if (nckey_mouse_p(key))
 		return (handle_solo_mouse(ctx, solo, game, key, input,
@@ -466,12 +466,12 @@ static bool	handle_solo_key(solo_game_t *game, audio_ctx_t *audio,
  * @param state_changed In/out redraw request flag.
  * @return false; mouse input never exits Solo mode.
  */
-static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
-	solo_game_t *game, uint32_t key, const ncinput *input,
+static bool	handle_solo_mouse(t_render_ctx *ctx, t_solo_render *solo,
+	t_solo_game *game, uint32_t key, const ncinput *input,
 	bool display_ready, bool resize_pending, bool *state_changed)
 {
-	solo_ability_result_t	result;
-	solo_ability_t			ability;
+	t_solo_ability_result	result;
+	t_solo_ability			ability;
 	int						canvas_x;
 	int						canvas_y;
 
@@ -500,16 +500,16 @@ static bool	handle_solo_mouse(render_ctx_t *ctx, solo_render_t *solo,
  * @param key Notcurses key code or Unicode code point.
  * @return true when the action changed the game state, otherwise false.
  */
-static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
+static bool	dispatch_game_key(t_solo_game *game, uint32_t key)
 {
-	solo_ability_result_t	result;
+	t_solo_ability_result	result;
 
 	if (game->countdown_active)
 		return (false);
 	if (key >= '1' && key <= '4')
 	{
 		result = solo_game_activate_ability(game,
-			(solo_ability_t)(SOLO_ABILITY_MIRURUN + key - '1'));
+			(t_solo_ability)(SOLO_ABILITY_MIRURUN + key - '1'));
 		return (result != SOLO_ABILITY_RESULT_INVALID);
 	}
 	if (key == NCKEY_UP || key == 'x' || key == 'X')
@@ -532,11 +532,11 @@ static bool	dispatch_game_key(solo_game_t *game, uint32_t key)
  * @param elapsed_ms Elapsed monotonic time.
  * @return true when at least one action changed visible game state.
  */
-static bool	apply_handling_actions(solo_game_t *game,
-	solo_handling_state_t *handling,
-	const solo_handling_config_t *config, int elapsed_ms)
+static bool	apply_handling_actions(t_solo_game *game,
+	t_solo_handling_state *handling,
+	const t_solo_handling_config *config, int elapsed_ms)
 {
-	solo_action_t	actions[SOLO_HANDLING_ACTION_CAP];
+	t_solo_action	actions[SOLO_HANDLING_ACTION_CAP];
 	int				count;
 	int				index;
 	bool			changed;
@@ -561,9 +561,9 @@ static bool	apply_handling_actions(solo_game_t *game,
  * suppress the ordinary line-count clip, keeping layered feedback readable.
  *
  * @param audio Active audio context.
- * @param events Bitmask of solo_event_t values.
+ * @param events Bitmask of t_solo_event values.
  */
-static void	play_solo_events(audio_ctx_t *audio, uint32_t events)
+static void	play_solo_events(t_audio_ctx *audio, uint32_t events)
 {
 	if ((events & SOLO_EVENT_MOVE) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_MOVE);

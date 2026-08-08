@@ -23,7 +23,7 @@ int	main(void)
 
 static void	test_login_focus_order(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 
 	auth_form_init(&form, AUTH_FORM_LOGIN);
 	assert(form.focus == AUTH_FOCUS_USERNAME);
@@ -46,7 +46,7 @@ static void	test_login_focus_order(void)
 
 static void	test_sign_up_focus_order(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 
 	auth_form_init(&form, AUTH_FORM_SIGN_UP);
 	auth_form_focus_next(&form);
@@ -61,7 +61,7 @@ static void	test_sign_up_focus_order(void)
 
 static void	test_utf8_editing_and_masking(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 	char		masked[AUTH_FIELD_MAX];
 
 	auth_form_init(&form, AUTH_FORM_LOGIN);
@@ -82,7 +82,7 @@ static void	test_utf8_editing_and_masking(void)
 
 static void	test_server_check_state(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 
 	auth_form_init(&form, AUTH_FORM_LOGIN);
 	assert(form.server_state == AUTH_SERVER_UNVERIFIED);
@@ -116,7 +116,7 @@ static void	test_server_check_state(void)
  */
 static void	test_refused_primary_explains_itself(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 
 	auth_form_init(&form, AUTH_FORM_LOGIN);
 	snprintf(form.username, sizeof(form.username), "PixelPlayer");
@@ -141,9 +141,9 @@ static void	test_refused_primary_explains_itself(void)
 
 static void	test_validation_and_submission(void)
 {
-	app_data_provider_t		provider;
-	app_auth_view_model_t	view;
-	auth_form_t				form;
+	t_app_data_provider		provider;
+	t_app_auth_view_model	view;
+	t_auth_form				form;
 
 	auth_form_init(&form, AUTH_FORM_SIGN_UP);
 	snprintf(form.username, sizeof(form.username), "PixelPlayer");
@@ -172,7 +172,7 @@ static void	test_validation_and_submission(void)
 
 static void	test_secondary_actions(void)
 {
-	auth_form_t	form;
+	t_auth_form	form;
 
 	auth_form_init(&form, AUTH_FORM_LOGIN);
 	form.focus = AUTH_FOCUS_SECONDARY;

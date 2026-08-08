@@ -1,6 +1,6 @@
 #include "tetrisu.h"
 
-static char			*focused_buffer(auth_form_t *form);
+static char			*focused_buffer(t_auth_form *form);
 static bool			append_codepoint(char *text, size_t capacity,
 						uint32_t codepoint);
 static void			remove_codepoint(char *text);
@@ -9,16 +9,16 @@ static bool			domain_is_valid(const char *domain);
 static bool			next_codepoint(const unsigned char **cursor,
 						uint32_t *codepoint);
 static bool			codepoint_is_space(uint32_t codepoint);
-static auth_action_t	activate_focus(auth_form_t *form);
-static void			reset_server_state(auth_form_t *form);
-static void			restore_server_status(auth_form_t *form);
-static void			set_status(auth_form_t *form, auth_feedback_t feedback,
+static t_auth_action	activate_focus(t_auth_form *form);
+static void			reset_server_state(t_auth_form *form);
+static void			restore_server_status(t_auth_form *form);
+static void			set_status(t_auth_form *form, t_auth_feedback feedback,
 						const char *message);
 
 /**
  * @brief Initializes one login or sign-up form.
  */
-void	auth_form_init(auth_form_t *form, auth_form_mode_t mode)
+void	auth_form_init(t_auth_form *form, t_auth_form_mode mode)
 {
 	if (form == NULL)
 		return ;
@@ -31,7 +31,7 @@ void	auth_form_init(auth_form_t *form, auth_form_mode_t mode)
 /**
  * @brief Changes form mode while preserving reusable username/domain values.
  */
-void	auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode)
+void	auth_form_set_mode(t_auth_form *form, t_auth_form_mode mode)
 {
 	if (form == NULL)
 		return ;
@@ -45,7 +45,7 @@ void	auth_form_set_mode(auth_form_t *form, auth_form_mode_t mode)
 /**
  * @brief Advances through the accessible visual focus order.
  */
-void	auth_form_focus_next(auth_form_t *form)
+void	auth_form_focus_next(t_auth_form *form)
 {
 	if (form == NULL)
 		return ;
@@ -77,7 +77,7 @@ void	auth_form_focus_next(auth_form_t *form)
 /**
  * @brief Moves backwards through the accessible visual focus order.
  */
-void	auth_form_focus_previous(auth_form_t *form)
+void	auth_form_focus_previous(t_auth_form *form)
 {
 	if (form == NULL)
 		return ;
@@ -110,7 +110,7 @@ void	auth_form_focus_previous(auth_form_t *form)
 /**
  * @brief Applies one keyboard event and returns any requested screen action.
  */
-auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key)
+t_auth_action	auth_form_handle_key(t_auth_form *form, uint32_t key)
 {
 	char	*buffer;
 
@@ -156,7 +156,7 @@ auth_action_t	auth_form_handle_key(auth_form_t *form, uint32_t key)
 /**
  * @brief Starts a server availability check for the entered domain.
  */
-bool	auth_form_begin_server_check(auth_form_t *form)
+bool	auth_form_begin_server_check(t_auth_form *form)
 {
 	if (form == NULL)
 		return (false);
@@ -174,7 +174,7 @@ bool	auth_form_begin_server_check(auth_form_t *form)
 /**
  * @brief Completes the server availability check.
  */
-void	auth_form_finish_server_check(auth_form_t *form, bool online)
+void	auth_form_finish_server_check(t_auth_form *form, bool online)
 {
 	if (form == NULL || form->server_state != AUTH_SERVER_CHECKING)
 		return ;
@@ -194,7 +194,7 @@ void	auth_form_finish_server_check(auth_form_t *form, bool online)
 /**
  * @brief Reports whether server-backed primary actions may be selected.
  */
-bool	auth_form_online_enabled(const auth_form_t *form)
+bool	auth_form_online_enabled(const t_auth_form *form)
 {
 	return (form != NULL && form->server_state == AUTH_SERVER_ONLINE);
 }
@@ -202,7 +202,7 @@ bool	auth_form_online_enabled(const auth_form_t *form)
 /**
  * @brief Validates the active form and exposes a concise reader-facing error.
  */
-bool	auth_form_validate(auth_form_t *form)
+bool	auth_form_validate(t_auth_form *form)
 {
 	if (form == NULL)
 		return (false);
@@ -244,10 +244,10 @@ bool	auth_form_validate(auth_form_t *form)
 /**
  * @brief Resolves validated credentials through the selected provider.
  */
-app_provider_result_t	auth_form_submit(auth_form_t *form,
-	const app_data_provider_t *provider, app_auth_view_model_t *view)
+t_app_provider_result	auth_form_submit(t_auth_form *form,
+	const t_app_data_provider *provider, t_app_auth_view_model *view)
 {
-	app_provider_result_t	result;
+	t_app_provider_result	result;
 
 	if (form == NULL || view == NULL)
 		return (APP_PROVIDER_INVALID);
@@ -298,7 +298,7 @@ bool	auth_form_mask_password(const char *password, char *masked, size_t size)
 	return (true);
 }
 
-static char	*focused_buffer(auth_form_t *form)
+static char	*focused_buffer(t_auth_form *form)
 {
 	if (form->focus == AUTH_FOCUS_USERNAME)
 		return (form->username);
@@ -455,7 +455,7 @@ static bool	codepoint_is_space(uint32_t codepoint)
 		|| codepoint == 0x3000u);
 }
 
-static auth_action_t	activate_focus(auth_form_t *form)
+static t_auth_action	activate_focus(t_auth_form *form)
 {
 	if (form->focus == AUTH_FOCUS_DOMAIN)
 	{
@@ -492,13 +492,13 @@ static auth_action_t	activate_focus(auth_form_t *form)
 	return (AUTH_ACTION_NONE);
 }
 
-static void	reset_server_state(auth_form_t *form)
+static void	reset_server_state(t_auth_form *form)
 {
 	form->server_state = AUTH_SERVER_UNVERIFIED;
 	set_status(form, AUTH_FEEDBACK_IDLE, "ENTER SERVER ID TO CHECK");
 }
 
-static void	restore_server_status(auth_form_t *form)
+static void	restore_server_status(t_auth_form *form)
 {
 	if (form->server_state == AUTH_SERVER_CHECKING)
 		set_status(form, AUTH_FEEDBACK_LOADING, "CHECKING SERVER...");
@@ -511,7 +511,7 @@ static void	restore_server_status(auth_form_t *form)
 		set_status(form, AUTH_FEEDBACK_IDLE, "ENTER SERVER ID TO CHECK");
 }
 
-static void	set_status(auth_form_t *form, auth_feedback_t feedback,
+static void	set_status(t_auth_form *form, t_auth_feedback feedback,
 	const char *message)
 {
 	form->feedback = feedback;
