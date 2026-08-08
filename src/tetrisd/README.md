@@ -29,7 +29,7 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 - Inputs are rate limited per connection with a token bucket, answering `429` with `Retry-After`; passwords are salted and SHA-256 hashed here, so the plaintext never reaches the store
 - Detaches itself, holds a locked pidfile, and reports its boot over a readiness pipe
 
-Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue. Double and Battle Royale are designed but unbuilt, and with them the twelve abilities that need a Target.
+Single mode is served end to enSingle mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue. Double and Battle Royale are designed but unbuilt, and with them the twelve abilities that need a Target.
 
 ---
 
@@ -261,13 +261,7 @@ src/tetrisd/
 ## Testing
 
 Ten suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
-
-```bash
-make -C src/tetrisd test
-make -C src/tetrisd test FILTER=game    # only suites matching "game"
-```
-
-`main.o` is excluded from the test link so each suite provides its own `main()` — which is also why the double-fork may never move behind `server_start`.
+ behind `server_start`.
 
 Valgrind is expected to be clean:
 
@@ -283,3 +277,4 @@ valgrind --leak-check=full --error-exitcode=1 src/tetrisd/tests/bin/test_game
 - [Concurrent Servers Design](https://eli.thegreenplace.net/2017/concurrent-servers-part-1-introduction/)
 - [Building a Multiplayer FPS](https://codersblock.org/multiplayer-fps/part1/)
 - [Reactive Programming](https://medium.com/@anju.elias_67491/reactive-programming-a58693a08c27)
+- [Garuna War — a single-threaded C++ UDP game server](https://github.com/eubrunomiguel/garuna)
