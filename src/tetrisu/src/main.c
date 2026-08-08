@@ -363,6 +363,13 @@ static int	run_auth_flow(render_ctx_t *ctx, audio_ctx_t *audio,
 	{
 		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
+		/*
+		 * Signing in is the one transition a player waits on, so it is also the
+		 * one they are most likely to have typed into. Anything queued was
+		 * aimed at the form, not at the menu that replaces it; delivering it
+		 * would open whatever Home item happened to be selected.
+		 */
+		discard_queued_input(ctx);
 		enable_home_mouse(ctx);
 	}
 	return (0);
@@ -416,6 +423,16 @@ static bool	apply_auth_action(render_ctx_t *ctx, audio_ctx_t *audio,
 		|| action == AUTH_ACTION_SUBMIT_SIGN_UP)
 	{
 		audio_play_menu_select(audio);
+		/*
+		 * Validating here rather than inside the submit is what makes the
+		 * in-progress status visible: it is auth_form_validate() that sets
+		 * "SIGNING IN...", and the only paint before the provider call happens
+		 * on this side of it. Submitting first left the message written to a
+		 * form nobody drew again until the call had already returned. The
+		 * submit skips its own validation while the form reads as loading.
+		 */
+		if (!auth_form_validate(form))
+			return (render_auth_show(ctx, form, false));
 		if (!render_auth_show(ctx, form, false))
 			return (false);
 		memset(&view, 0, sizeof(view));

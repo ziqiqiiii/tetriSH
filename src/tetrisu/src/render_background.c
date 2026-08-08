@@ -830,29 +830,37 @@ static int	replace_visual_scaled(render_ctx_t *ctx, struct ncvisual *ncv,
 		return (-1);
 	}
 	old_plane = ctx->bg_plane;
-	if (old_plane != NULL)
-		(void)ncplane_move_above(new_plane, old_plane);
-	else
-		(void)ncplane_move_above(new_plane, ctx->std);
+	(void)ncplane_move_above(new_plane, ctx->std);
 	set_opaque_backdrop(ctx->std);
+	/*
+	 * The outgoing backdrop has to leave the rendered area before the frame is
+	 * drawn, not after. Stacking the new plane over it and rendering costs the
+	 * whole of the old bitmap again: a covered sprixel is torn down and
+	 * re-sent, and a cell plane cannot occlude one however high it sits. That
+	 * single misordered render was 31 s of the first sign-in, because the
+	 * bitmap it re-sent was the full-screen login artwork.
+	 *
+	 * A retained backdrop is parked rather than destroyed so its sprixel
+	 * survives for the screen that will reclaim it; one nobody kept is dropped
+	 * here, since leaving it to be destroyed after the render would still have
+	 * paid to transmit it. If the render then fails the frame is left showing
+	 * the opaque standard plane, which is the honest outcome on a path whose
+	 * only caller treats the failure as fatal.
+	 */
+	if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
+	{
+		ncplane_destroy(old_plane);
+		ctx->bg_plane = NULL;
+	}
+	else
+		backdrop_park(ctx, old_plane);
 	if (notcurses_render(ctx->nc) != 0)
 	{
 		ncplane_destroy(new_plane);
-		if (old_plane != NULL)
-			(void)notcurses_render(ctx->nc);
+		(void)notcurses_render(ctx->nc);
 		return (-1);
 	}
 	ctx->bg_plane = new_plane;
-	/*
-	 * A retained backdrop is deliberately outlived by the screen drawn over it.
-	 * Destroying it here would drop its sprixel and make the next visit pay for
-	 * the whole bitmap again, which is the cost the cache exists to avoid; it
-	 * stays parked below the new plane until its screen reclaims it.
-	 */
-	if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
-		ncplane_destroy(old_plane);
-	else
-		backdrop_park(ctx, old_plane);
 	return (0);
 }
 
