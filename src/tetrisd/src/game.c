@@ -41,6 +41,8 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 	charge_state_init(&g->charge);
 	effect_state_init(&g->effects);
 	g->player_id = pid;
+	g->seed = seed;
+	g->hold = BODY_HOLD_EMPTY;
 	g->lines = 0;
 	g->level = level_from_lines(0);
 	g->seq = 1;
@@ -61,6 +63,10 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
  * than assuming one tick equals one row, so a late tick catches up
  * instead of slowing the game down.
  *
+ * A paused game returns before the accumulator is touched, so time spent
+ * paused is not owed back to it - resuming must not drop the piece four rows
+ * to make up for the pause.
+ *
  * @param g Game to advance.
  * @param elapsed_ms Milliseconds since this game was last advanced.
  * @return true when the board or piece changed and a snapshot is due.
@@ -69,7 +75,7 @@ bool	game_gravity(t_game *g, int elapsed_ms)
 {
 	bool	changed;
 
-	if (g == NULL || !g->active || elapsed_ms <= 0)
+	if (g == NULL || !g->active || g->paused || elapsed_ms <= 0)
 		return (false);
 	changed = false;
 	g->accum_ms += elapsed_ms;
@@ -92,7 +98,7 @@ bool	game_gravity(t_game *g, int elapsed_ms)
  */
 bool	game_move(t_game *g, int dcol)
 {
-	if (g == NULL || !g->active)
+	if (g == NULL || !g->active || g->paused)
 		return (false);
 	if (effect_controls_inverted(&g->effects))
 		dcol = -dcol;
@@ -110,7 +116,8 @@ bool	game_rotate(t_game *g, int dir)
 {
 	int	kick;
 
-	if (g == NULL || !g->active || effect_rotation_blocked(&g->effects))
+	if (g == NULL || !g->active || g->paused
+		|| effect_rotation_blocked(&g->effects))
 		return (false);
 	kick = 0;
 	return (piece_rotate_with_kick(&g->board, &g->piece, dir, &kick)
@@ -131,7 +138,8 @@ bool	game_drop(t_game *g, bool hard)
 {
 	int	distance;
 
-	if (g == NULL || !g->active || effect_fastdrop_blocked(&g->effects))
+	if (g == NULL || !g->active || g->paused
+		|| effect_fastdrop_blocked(&g->effects))
 		return (false);
 	if (hard)
 	{
@@ -148,6 +156,93 @@ bool	game_drop(t_game *g, bool hard)
 		return (true);
 	}
 	lock_piece(g);
+	return (true);
+}
+
+/**
+ * @brief Swaps the falling piece with the hold slot.
+ *
+ * The first hold of a game has nothing to swap with, so it takes the head of
+ * the next queue instead - which is why the queue is refilled here and not
+ * only on a lock. Either way the incoming piece is spawned fresh rather than
+ * keeping the outgoing one's position, so holding cannot be used to teleport
+ * a piece across the board.
+ *
+ * One hold per piece is the rule that makes this a swap and not a shuffle: a
+ * player who could hold repeatedly would never have to place anything.
+ *
+ * @param g Game to act on.
+ * @return true when the swap happened, false when it was refused.
+ */
+bool	game_hold(t_game *g)
+{
+	int	outgoing;
+
+	if (g == NULL || !g->active || g->paused || g->hold_used)
+		return (false);
+	outgoing = (int)g->piece.type;
+	g->hold_used = true;
+	g->accum_ms = 0;
+	g->seq++;
+	if (!g->has_hold)
+	{
+		g->hold = outgoing;
+		g->has_hold = true;
+		spawn_next(g);
+		return (true);
+	}
+	g->piece = piece_spawn((t_piece_type)g->hold);
+	g->hold = outgoing;
+	if (!piece_is_valid(&g->board, &g->piece))
+	{
+		g->topped_out = true;
+		g->active = false;
+	}
+	return (true);
+}
+
+/**
+ * @brief Pauses or resumes a game.
+ *
+ * Pausing leaves `active` alone: a paused game is still being played, and a
+ * room that read it as finished would record the score and evict the player.
+ * Gravity is what stops, and it stops without owing the piece the time.
+ *
+ * @param g Game to act on.
+ * @param paused true to pause, false to resume.
+ * @return true when the state changed, false when it was already there.
+ */
+bool	game_pause(t_game *g, bool paused)
+{
+	if (g == NULL || !g->active || g->paused == paused)
+		return (false);
+	g->paused = paused;
+	g->accum_ms = 0;
+	g->seq++;
+	return (true);
+}
+
+/**
+ * @brief Deals the same player a fresh game in the same slot.
+ *
+ * The seed is advanced rather than reused, so a restart is a new game and not
+ * a replay of the one just abandoned. The score of the abandoned game is not
+ * recorded: restarting is the player choosing that it did not happen, and the
+ * room records what a player finishes or forfeits, not what they discard.
+ *
+ * @param g Game to restart.
+ * @return true when a new game was dealt.
+ */
+bool	game_restart(t_game *g)
+{
+	t_player_id	pid;
+	uint32_t	seed;
+
+	if (g == NULL || g->player_id == 0)
+		return (false);
+	pid = g->player_id;
+	seed = g->seed * 1664525u + 1013904223u;
+	game_start(g, pid, seed);
 	return (true);
 }
 
@@ -174,7 +269,7 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 	out->phase = BODY_PHASE_ACTIVE;
 	if (g->topped_out)
 		out->phase = BODY_PHASE_TOP_OUT;
-	else if (!g->active)
+	else if (g->paused)
 		out->phase = BODY_PHASE_PAUSED;
 	row = 0;
 	while (row < BODY_BOARD_ROWS)
@@ -196,6 +291,10 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 	out->next[0] = g->next[0];
 	out->next[1] = g->next[1];
 	out->next[2] = g->next[2];
+	out->hold = BODY_HOLD_EMPTY;
+	if (g->has_hold)
+		out->hold = g->hold;
+	out->hold_used = g->hold_used;
 	out->score = g->score.total;
 	out->lines = g->lines;
 	out->level = g->level;
@@ -206,6 +305,7 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 	out->charge = g->charge.charges;
 	if (out->charge > BODY_CHARGE_MAX)
 		out->charge = BODY_CHARGE_MAX;
+	out->last_ability = g->last_ability;
 	out->last_clear = g->last_clear;
 }
 
@@ -240,6 +340,17 @@ static void	spawn_next(t_game *g)
 /**
  * @brief Locks the falling piece: stamp, clear lines, score, spawn the next.
  *
+ * Thwack and Fry are applied here rather than inside board_clear_lines,
+ * because they are status effects on a player and the brain's line clear is a
+ * fact about a board. With Thwack active, non-crystal blocks fall out of the
+ * rows above and whatever that completes clears too; Fry's three filled rows
+ * burn off now, one piece after they went in (docs/themes.md, Wolf-man L4 and
+ * Halloween L1). Both are read before effect_on_piece_lock, which is what
+ * consumes the counters.
+ *
+ * Locking is also the one thing that gives the hold slot back - one hold per
+ * piece, counted from the piece that just landed.
+ *
  * @param g Game whose piece has landed.
  */
 static void	lock_piece(t_game *g)
@@ -249,6 +360,9 @@ static void	lock_piece(t_game *g)
 
 	piece_stamp(&g->board, &g->piece);
 	cleared = board_clear_lines(&g->board);
+	if (cleared > 0 && effect_thwack_active(&g->effects))
+		cleared += board_cascade_clear(&g->board);
+	board_cut_bottom(&g->board, effect_fry_rows(&g->effects));
 	perfect = cleared > 0 && board_is_empty(&g->board);
 	score_apply_clear(&g->score, cleared, g->level, T_SPIN_NONE, perfect);
 	if (cleared > 0)
@@ -259,6 +373,7 @@ static void	lock_piece(t_game *g)
 	}
 	g->last_clear = clear_label(cleared, perfect);
 	effect_on_piece_lock(&g->effects);
+	g->hold_used = false;
 	g->accum_ms = 0;
 	g->seq++;
 	spawn_next(g);

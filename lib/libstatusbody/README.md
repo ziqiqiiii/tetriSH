@@ -91,7 +91,7 @@ All bodies are plaintext `key value` lines. Single public header,
 
 | Function | Description |
 |---|---|
-| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4 and cell type/color nibbles before writing |
+| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15 and cell type/color nibbles before writing |
 | `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
 
 Fixed key order, exactly as encoded:
@@ -101,6 +101,7 @@ seq 42
 phase active
 piece 3 1 4 0
 next 0 1 2
+hold 5 1
 score 1200
 lines 14
 level 2
@@ -119,6 +120,7 @@ board
 |---|---|
 | `piece` | `<type> <rotation> <col> <row>` |
 | `next` | `<t0> <t1> <t2>` (`BODY_NEXT_COUNT` = 3) |
+| `hold` | `<type\|-1> <0\|1>` — held piece and whether the hold is already spent on the falling one; `BODY_HOLD_EMPTY` (`-1`) = holding nothing |
 | `ability` | `<level> <0\|1>` — last activation; level `0` = none |
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |

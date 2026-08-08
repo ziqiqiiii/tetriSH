@@ -36,6 +36,8 @@
 # define BODY_CLEARING_MAX	4
 # define BODY_CHARGE_MAX		10
 # define BODY_COLOR_MAX		15
+/* what t_body_state.hold reads when the player is holding nothing */
+# define BODY_HOLD_EMPTY		(-1)
 
 typedef enum e_body_phase
 {
@@ -100,6 +102,7 @@ typedef struct s_body_ability
 **   phase <active|clearing|paused|topout>
 **   piece <type> <rotation> <col> <row>
 **   next <t0> <t1> <t2>
+**   hold <type|-1> <0|1>
 **   score <u64>
 **   lines <n>  level <n>  combo <n>  b2b <0|1>  charge <0-10>
 **   ability <level> <0|1>
@@ -107,6 +110,11 @@ typedef struct s_body_ability
 **   clearing <count> <ms> [<rows>...]
 **   board            (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
+**
+** `hold` is BODY_HOLD_EMPTY until the player has held something. Its second
+** field says the hold has already been spent on the falling piece, which is
+** what stops a player swapping back and forth forever; it is the server's
+** answer, not a request the client can make.
 */
 typedef struct s_body_state
 {
@@ -115,6 +123,8 @@ typedef struct s_body_state
 	t_body_cell			cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
 	t_body_piece			piece;
 	int					next[BODY_NEXT_COUNT];
+	int					hold;
+	bool				hold_used;
 	uint64_t			score;
 	int					lines;
 	int					level;
