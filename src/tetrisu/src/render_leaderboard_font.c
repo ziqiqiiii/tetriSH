@@ -127,8 +127,8 @@ bool	render_leaderboard_pixel_show(t_render_ctx *ctx,
 		return (false);
 	if ((action == LEADERBOARD_BACKGROUND_REPLACE_EXACT
 			|| ctx->bg_plane == NULL)
-		&& render_background_replace_exact(ctx, LEADERBOARD_BACKGROUND_PATH,
-			false) < 0)
+		&& render_background_replace_exact(ctx,
+			ctx->theme_assets.leaderboard_background, false) < 0)
 		return (false);
 	leaderboard_pixel_layout_build(ctx->bg_row, ctx->bg_col, ctx->bg_rows,
 		ctx->bg_cols, ctx->cell_px_y, ctx->cell_px_x, &layout);

@@ -24,7 +24,8 @@ static const t_color	g_mp_focus_plate = {74, 40, 104};
 
 // Static Functions
 static bool	load_font(t_render_ctx *ctx, struct ncvisual **font);
-static const char	*background_path(t_app_screen screen);
+static const char	*background_path(const t_render_ctx *ctx,
+				t_app_screen screen);
 static bool	refresh_background(t_render_ctx *ctx, bool force,
 				t_app_screen screen);
 static bool	cache_background(t_render_ctx *ctx, t_app_screen screen);
@@ -293,15 +294,15 @@ static void	forget_regions(t_render_ctx *ctx)
 /**
  * @brief Returns the backdrop each multiplayer screen is drawn over.
  *
- * The mode picker keeps the home artwork so choosing a mode reads as a step
- * inside the menu rather than as a new place; everything past it moves to the
- * duel hall.
+ * Every multiplayer surface uses the selected theme's multiplayer artwork.
+ * The homepage is reserved for the actual home screen and remains only the
+ * fallback when a themed multiplayer asset cannot be loaded.
  */
-static const char	*background_path(t_app_screen screen)
+static const char	*background_path(const t_render_ctx *ctx,
+	t_app_screen screen)
 {
-	if (screen == APP_SCREEN_MULTIPLAYER_MODE)
-		return (SPLASH_ASSET_PATH);
-	return (MULTIPLAYER_ASSET_PATH);
+	(void)screen;
+	return (ctx->theme_assets.multiplayer_background);
 }
 
 /**
@@ -313,7 +314,7 @@ static bool	refresh_background(t_render_ctx *ctx, bool force,
 	const char	*path;
 	bool		stale;
 
-	path = background_path(screen);
+	path = background_path(ctx, screen);
 	stale = !ctx->mp_background_ready
 		|| ctx->mp_background_rows != ctx->bg_rows
 		|| ctx->mp_background_cols != ctx->bg_cols
@@ -322,7 +323,8 @@ static bool	refresh_background(t_render_ctx *ctx, bool force,
 	if (!force && !stale && ctx->bg_plane != NULL)
 		return (true);
 	if (render_background_replace_exact(ctx, path, false) < 0
-		&& render_background_replace_exact(ctx, SPLASH_ASSET_PATH, false) < 0)
+		&& render_background_replace_exact(ctx,
+			ctx->theme_assets.homepage, false) < 0)
 		return (false);
 	/*
 	 * Both caches are sized by the fitted geometry, so a resize invalidates
@@ -374,9 +376,9 @@ static bool	cache_background(t_render_ctx *ctx, t_app_screen screen)
 	if (width <= 0 || height <= 0
 		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
 		return (false);
-	visual = ncvisual_from_file(background_path(screen));
+	visual = ncvisual_from_file(background_path(ctx, screen));
 	if (visual == NULL)
-		visual = ncvisual_from_file(SPLASH_ASSET_PATH);
+		visual = ncvisual_from_file(ctx->theme_assets.homepage);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
 		if (visual != NULL)

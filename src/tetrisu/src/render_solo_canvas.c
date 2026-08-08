@@ -118,10 +118,10 @@ bool	solo_canvas_load(t_solo_render *solo)
 	memset(&tiles, 0, sizeof(tiles));
 	memset(&font, 0, sizeof(font));
 	memset(&numbers, 0, sizeof(numbers));
-	loaded = pixel_asset_load(SOLO_BACKGROUND_PATH, &background);
+	loaded = pixel_asset_load(solo->background_path, &background);
 	if (!loaded)
 		solo_canvas_set_error(solo, "Could not load Solo background",
-			SOLO_BACKGROUND_PATH);
+			solo->background_path);
 	if (loaded)
 		repair_background_alpha(&background);
 	if (loaded && !pixel_asset_load(DEFAULT_HUD_PATH, &hud))
@@ -135,11 +135,11 @@ bool	solo_canvas_load(t_solo_render *solo)
 		loaded = false;
 		solo_canvas_set_error(solo, "HUD must be 512x384", DEFAULT_HUD_PATH);
 	}
-	if (loaded && !pixel_asset_load(DEFAULT_MIRURUN_PATH, &mirurun))
+	if (loaded && !pixel_asset_load(solo->character_path, &mirurun))
 	{
 		loaded = false;
 		solo_canvas_set_error(solo, "Could not load Mirurun",
-			DEFAULT_MIRURUN_PATH);
+			solo->character_path);
 	}
 	if (loaded && !pixel_asset_load(DEFAULT_TILE_PATH, &tiles))
 	{

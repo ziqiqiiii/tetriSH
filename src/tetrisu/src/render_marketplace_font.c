@@ -469,9 +469,10 @@ static bool	refresh_background(t_render_ctx *ctx, bool force)
 		|| ctx->marketplace_background_cols != ctx->bg_cols;
 	if (!force && !geometry_changed && ctx->bg_plane != NULL)
 		return (true);
-	if (render_background_replace_exact(ctx, MARKETPLACE_BACKGROUND_PATH,
-			false) < 0 && render_background_replace_exact(ctx,
-			SETTINGS_BACKGROUND_PATH, false) < 0)
+	if (render_background_replace_exact(ctx,
+			ctx->theme_assets.marketplace_background, false) < 0
+		&& render_background_replace_exact(ctx,
+			ctx->theme_assets.settings_background, false) < 0)
 		return (false);
 	/*
 	 * Both caches are sized by the fitted geometry, so a resize invalidates
@@ -520,9 +521,9 @@ static bool	cache_background(t_render_ctx *ctx)
 	if (width <= 0 || height <= 0
 		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
 		return (false);
-	visual = ncvisual_from_file(MARKETPLACE_BACKGROUND_PATH);
+	visual = ncvisual_from_file(ctx->theme_assets.marketplace_background);
 	if (visual == NULL)
-		visual = ncvisual_from_file(SETTINGS_BACKGROUND_PATH);
+		visual = ncvisual_from_file(ctx->theme_assets.settings_background);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
 		if (visual != NULL)

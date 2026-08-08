@@ -117,7 +117,7 @@ int	main(void)
 	audio_init(&audio);
 	render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
 	audio_set_music_volume(&audio, HOME_BGM_START_VOLUME);
-	audio_play_music(&audio, HOME_BGM_PATH);
+	audio_play_music(&audio, ctx.theme_assets.music);
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
 	audio_load_game_sfx(&audio);
 	if (getenv("TETRISU_NET") != NULL && getenv("TETRISU_NET")[0] != '\0')
@@ -840,6 +840,8 @@ static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		return (-1);
 	app_settings_apply_local_controls(&view.data.settings,
 		audio->music_volume, tetrisu_renderer_mode_requested());
+	tetrisu_visual_selection_sync(ctx, &view.data.settings);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
 	settings_state_init(&state, view.data.settings.signed_in,
 		settings_catalogue_count(&view.data.settings.characters,
 			SETTINGS_CHARACTER_SLOTS),
@@ -942,15 +944,26 @@ static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		{
 			audio_play_menu_select(audio);
 			if (settings_select_character(&view.data.settings,
-					action == SETTINGS_ACTION_CHARACTER_NEXT ? 1 : -1)
-				&& !render_settings_show(ctx, &view, &state, false))
-				return (-1);
+				action == SETTINGS_ACTION_CHARACTER_NEXT ? 1 : -1))
+			{
+				tetrisu_character_apply(ctx,
+					view.data.settings.profile.character);
+				tetrisu_visual_selection_sync(ctx, &view.data.settings);
+				if (!render_settings_show(ctx, &view, &state, false))
+					return (-1);
+			}
 		}
 		else if (action == SETTINGS_ACTION_EQUIP_CHARACTER)
 		{
 			audio_play_menu_select(audio);
 			equip_result = settings_equip_character_slot(&view.data.settings,
 					state.character_slot);
+			if (equip_result == SETTINGS_EQUIP_CHANGED)
+			{
+				tetrisu_character_apply(ctx,
+					view.data.settings.profile.character);
+				tetrisu_visual_selection_sync(ctx, &view.data.settings);
+			}
 			if (equip_result == SETTINGS_EQUIP_LOCKED)
 				render_notification_queue_ownership(ctx);
 			if ((equip_result == SETTINGS_EQUIP_CHANGED
@@ -963,11 +976,19 @@ static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			audio_play_menu_select(audio);
 			equip_result = settings_equip_theme_slot(&view.data.settings,
 					state.theme_slot);
+			if (equip_result == SETTINGS_EQUIP_CHANGED)
+			{
+				tetrisu_theme_apply(ctx, view.data.settings.profile.theme);
+				render_background_cache_reset(ctx);
+				tetrisu_visual_selection_sync(ctx, &view.data.settings);
+				audio_transition_music(audio, ctx->theme_assets.music, 0);
+			}
 			if (equip_result == SETTINGS_EQUIP_LOCKED)
 				render_notification_queue_ownership(ctx);
 			if ((equip_result == SETTINGS_EQUIP_CHANGED
 					|| equip_result == SETTINGS_EQUIP_LOCKED)
-				&& !render_settings_show(ctx, &view, &state, false))
+				&& !render_settings_show(ctx, &view, &state,
+					equip_result == SETTINGS_EQUIP_CHANGED))
 				return (-1);
 		}
 		else if (action == SETTINGS_ACTION_BACK)
@@ -1022,6 +1043,8 @@ static int	run_marketplace_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			navigation->offline, &view);
 	if (result == APP_PROVIDER_INVALID)
 		return (-1);
+	tetrisu_visual_selection_sync(ctx, &view.data.marketplace);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
 	marketplace_state_init(&state, view.data.marketplace.signed_in
 		&& !view.data.marketplace.offline,
 		settings_catalogue_count(&view.data.marketplace.characters,
@@ -1184,18 +1207,34 @@ static bool	apply_marketplace_equip(t_render_ctx *ctx, t_audio_ctx *audio,
 	t_app_screen_view_model *view, t_marketplace_state *state)
 {
 	t_settings_equip_result	result;
+	bool					theme_changed;
 
+	theme_changed = false;
 	if (marketplace_focused_item(&view->data.marketplace, state) == NULL)
 		return (true);
 	result = marketplace_equip_focused(&view->data.marketplace, state);
 	if (result != SETTINGS_EQUIP_CHANGED && result != SETTINGS_EQUIP_LOCKED)
 		return (true);
+	if (result == SETTINGS_EQUIP_CHANGED)
+	{
+		if (marketplace_focused_is_character(state))
+			tetrisu_character_apply(ctx,
+				view->data.marketplace.profile.character);
+		else
+		{
+			tetrisu_theme_apply(ctx, view->data.marketplace.profile.theme);
+			render_background_cache_reset(ctx);
+			audio_transition_music(audio, ctx->theme_assets.music, 0);
+			theme_changed = true;
+		}
+		tetrisu_visual_selection_sync(ctx, &view->data.marketplace);
+	}
 	audio_play_menu_select(audio);
 	if (result == SETTINGS_EQUIP_CHANGED)
 		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_EQUIPPED, 0);
 	else
 		marketplace_set_feedback(state, MARKETPLACE_FEEDBACK_LOCKED, 0);
-	return (render_marketplace_show(ctx, view, state, false));
+	return (render_marketplace_show(ctx, view, state, theme_changed));
 }
 
 /**
@@ -1959,7 +1998,7 @@ static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	render_menu_destroy(ctx);
 	if ((refresh_geometry && render_geometry_refresh(ctx, true) < 0)
 		|| (replace_background && render_background_replace(ctx,
-				SPLASH_ASSET_PATH, false) < 0))
+				ctx->theme_assets.homepage, false) < 0))
 		return (-1);
 	render_menu_create(ctx);
 	render_menu_move_bunny(ctx, menu);

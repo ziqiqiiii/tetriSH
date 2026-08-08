@@ -154,7 +154,17 @@ static void	destroy_board_planes(t_solo_render *solo);
  */
 void	render_solo_create(t_render_ctx *ctx, t_solo_render *solo)
 {
+	const char	*character_path;
+
 	memset(solo, 0, sizeof(*solo));
+	snprintf(solo->background_path, sizeof(solo->background_path), "%s",
+		ctx->theme_assets.solo_background);
+	character_path = tetrisu_theme_character_path(&ctx->theme_assets,
+		ctx->active_character);
+	if (character_path == NULL)
+		character_path = DEFAULT_MIRURUN_PATH;
+	snprintf(solo->character_path, sizeof(solo->character_path), "%s",
+		character_path);
 	reset_render_signatures(solo);
 	calculate_solo_layout(ctx, solo);
 	update_solo_compatibility_badge(ctx, solo);

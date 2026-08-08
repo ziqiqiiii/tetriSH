@@ -45,7 +45,7 @@
 # define TETRISU_BIN_PATH	"./bin/tetrisu"
 # endif
 
-# define SPLASH_ASSET_PATH	ASSET_DIR "/updated_homepage.png"
+# define SPLASH_ASSET_PATH	ASSET_DIR "/default_theme/default_homepage.png"
 # define LEADERBOARD_BACKGROUND_PATH \
 	ASSET_DIR "/default_theme/leaderboard_background.png"
 # define SETTINGS_BACKGROUND_PATH \
@@ -1645,6 +1645,29 @@ typedef struct s_pixel_asset
 }	t_pixel_asset;
 
 /*
+ * Every selectable theme ships the same presentation contract: screen
+ * backdrops, normal/danger music, and one portrait for each character. Keeping
+ * the resolved paths together lets renderers and audio share the selected
+ * theme without knowing its directory name.
+ */
+typedef struct s_theme_assets
+{
+	char	name[APP_TEXT_MAX];
+	char	homepage[APP_ASSET_PATH_MAX];
+	char	solo_background[APP_ASSET_PATH_MAX];
+	char	settings_background[APP_ASSET_PATH_MAX];
+	char	marketplace_background[APP_ASSET_PATH_MAX];
+	char	leaderboard_background[APP_ASSET_PATH_MAX];
+	char	multiplayer_background[APP_ASSET_PATH_MAX];
+	char	music[APP_ASSET_PATH_MAX];
+	char	danger_music[APP_ASSET_PATH_MAX];
+	char	mirurun[APP_ASSET_PATH_MAX];
+	char	halloween[APP_ASSET_PATH_MAX];
+	char	princess[APP_ASSET_PATH_MAX];
+	char	wolfman[APP_ASSET_PATH_MAX];
+}	t_theme_assets;
+
+/*
  * One retained backdrop. Transferring a full-screen bitmap is the dominant
  * cost of a screen change - tens of seconds through a macOS pty at a large
  * window - so each backdrop's plane is kept and restacked on revisit. Entries
@@ -1716,6 +1739,9 @@ typedef struct
 	struct ncplane		*auth_overlay_planes[AUTH_OVERLAY_PLANE_MAX];
 	struct ncplane		*bunny_plane;
 	struct ncvisual		*bunny_visual;
+	t_theme_assets		theme_assets;
+	char				active_character[APP_TEXT_MAX];
+	bool				visual_selection_initialized;
 	struct ncvisual		*auth_background_visual;
 	struct ncvisual		*auth_font_visual;
 	struct ncvisual		*settings_font_visual;
@@ -2093,6 +2119,8 @@ typedef struct s_solo_render
 	bool			composite_board;
 	bool			cell_board;
 	bool			board_plane_cells;
+	char			background_path[APP_ASSET_PATH_MAX];
+	char			character_path[APP_ASSET_PATH_MAX];
 	char			asset_error[160];
 }	t_solo_render;
 
@@ -2237,6 +2265,17 @@ t_app_provider_result	app_room_view_create(
 const char		*app_data_status_name(t_app_data_status status);
 const char		*app_game_mode_name(t_app_game_mode mode);
 
+/* THEME_ASSETS.C */
+void			tetrisu_theme_assets_build(t_theme_assets *assets,
+					const char *theme_name);
+const char		*tetrisu_theme_character_path(
+					const t_theme_assets *assets, const char *character_name);
+void			tetrisu_theme_apply(t_render_ctx *ctx, const char *theme_name);
+void			tetrisu_character_apply(t_render_ctx *ctx,
+					const char *character_name);
+void			tetrisu_visual_selection_sync(t_render_ctx *ctx,
+					t_app_settings_view_model *settings);
+
 /* AUTH_FORM.C */
 void			auth_form_init(t_auth_form *form, t_auth_form_mode mode);
 void			auth_form_set_mode(t_auth_form *form, t_auth_form_mode mode);
@@ -2284,6 +2323,7 @@ int				render_background_replace_exact(t_render_ctx *ctx,
 int				render_background_replace_visual(t_render_ctx *ctx,
 					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(t_render_ctx *ctx);
+void				render_background_cache_reset(t_render_ctx *ctx);
 void				render_backdrop_forget(t_render_ctx *ctx);
 const uint32_t		*render_backdrop_pixels(const t_render_ctx *ctx,
 					int *width, int *height);

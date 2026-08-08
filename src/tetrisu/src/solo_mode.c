@@ -166,10 +166,10 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 		if (display_ready && solo_game_update_danger(&game, elapsed_ms))
 		{
 			if (game.danger_active)
-				audio_transition_music(audio, DANGER_BGM_PATH,
+				audio_transition_music(audio, ctx->theme_assets.danger_music,
 					AUDIO_MUSIC_TRANSITION_MS);
 			else
-				audio_transition_music(audio, HOME_BGM_PATH,
+				audio_transition_music(audio, ctx->theme_assets.music,
 					AUDIO_MUSIC_TRANSITION_MS);
 			needs_draw = true;
 		}
@@ -242,7 +242,7 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 		(void)notcurses_mice_disable(ctx->nc);
 	solo_authority_close(&authority);
 	render_solo_destroy(&solo);
-	audio_transition_music(audio, HOME_BGM_PATH, 0);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
 	return (restore_home(ctx));
 }
 
@@ -255,7 +255,7 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 static int	restore_home(t_render_ctx *ctx)
 {
 	ncplane_erase(ctx->std);
-	if (render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+	if (render_background_replace(ctx, ctx->theme_assets.homepage, false) < 0)
 		return (-1);
 	render_menu_create(ctx);
 	return (0);
@@ -443,7 +443,7 @@ static bool	handle_solo_key(t_solo_authority *authority, t_solo_game *game,
 	{
 		*state_changed = solo_authority_restart(authority, game,
 				new_game_seed()) || *state_changed;
-		audio_transition_music(audio, HOME_BGM_PATH,
+		audio_transition_music(audio, ctx->theme_assets.music,
 			AUDIO_MUSIC_TRANSITION_MS);
 		solo_handling_reset(handling);
 		return (false);

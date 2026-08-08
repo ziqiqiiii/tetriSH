@@ -424,7 +424,8 @@ static bool	refresh_background(t_render_ctx *ctx, bool force)
 		|| ctx->settings_background_cols != ctx->bg_cols;
 	if (!force && !geometry_changed && ctx->bg_plane != NULL)
 		return (true);
-	if (render_background_replace_exact(ctx, SETTINGS_BACKGROUND_PATH, false)
+	if (render_background_replace_exact(ctx,
+		ctx->theme_assets.settings_background, false)
 		< 0)
 		return (false);
 	/*
@@ -474,7 +475,7 @@ static bool	cache_background(t_render_ctx *ctx)
 	if (width <= 0 || height <= 0
 		|| (size_t)width > SIZE_MAX / (size_t)height / sizeof(*buffer))
 		return (false);
-	visual = ncvisual_from_file(SETTINGS_BACKGROUND_PATH);
+	visual = ncvisual_from_file(ctx->theme_assets.settings_background);
 	if (visual == NULL || ncvisual_resize(visual, height, width) != 0)
 	{
 		if (visual != NULL)

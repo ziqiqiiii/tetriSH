@@ -64,13 +64,11 @@ void	audio_play_music(t_audio_ctx *audio, const char *path)
 	if (audio == NULL || !audio->enabled || path == NULL)
 		return ;
 #if TETRISU_ENABLE_AUDIO
-	free_music(audio);
 	audio->music_transition_phase = 0;
 	audio->music_transition_elapsed_ms = 0;
 	audio->music_transition_duration_ms = 0;
 	audio->pending_music_path[0] = '\0';
-	if (!start_looping_music(audio, path, 0))
-		audio->music_path[0] = '\0';
+	(void)start_looping_music(audio, path, 0);
 #else
 	(void)path;
 #endif
@@ -142,7 +140,6 @@ bool	audio_update(t_audio_ctx *audio, int elapsed_ms)
 	if (audio->music_transition_phase == 1
 		&& audio->music_transition_elapsed_ms >= midpoint_ms)
 	{
-		free_music(audio);
 		fade_in_ms = audio->music_transition_duration_ms - midpoint_ms;
 		if (!start_looping_music(audio,
 				audio->pending_music_path, fade_in_ms))
@@ -532,25 +529,37 @@ static void	free_music(t_audio_ctx *audio)
 static bool	start_looping_music(t_audio_ctx *audio, const char *path,
 	int fade_ms)
 {
-	int	result;
+	Mix_Music	*next;
+	Mix_Music	*previous;
+	int			result;
 
-	audio->music = Mix_LoadMUS(path);
-	if (audio->music == NULL)
+	next = Mix_LoadMUS(path);
+	if (next == NULL)
 	{
 		log_mix_error("Mix_LoadMUS failed");
+		if (audio->music != NULL && Mix_PlayingMusic() == 0
+			&& Mix_PlayMusic((Mix_Music *)audio->music, -1) != 0)
+			log_mix_error("Mix_PlayMusic restore failed");
 		return (false);
 	}
+	previous = (Mix_Music *)audio->music;
+	Mix_HaltMusic();
 	Mix_VolumeMusic(audio->music_volume);
 	if (fade_ms > 0)
-		result = Mix_FadeInMusic((Mix_Music *)audio->music, -1, fade_ms);
+		result = Mix_FadeInMusic(next, -1, fade_ms);
 	else
-		result = Mix_PlayMusic((Mix_Music *)audio->music, -1);
+		result = Mix_PlayMusic(next, -1);
 	if (result != 0)
 	{
 		log_mix_error("Mix_PlayMusic failed");
-		free_music(audio);
+		Mix_FreeMusic(next);
+		if (previous != NULL && Mix_PlayMusic(previous, -1) != 0)
+			log_mix_error("Mix_PlayMusic restore failed");
 		return (false);
 	}
+	audio->music = next;
+	if (previous != NULL)
+		Mix_FreeMusic(previous);
 	snprintf(audio->music_path, sizeof(audio->music_path), "%s", path);
 	return (true);
 }

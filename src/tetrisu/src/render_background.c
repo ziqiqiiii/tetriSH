@@ -53,6 +53,9 @@ t_render_ctx	render_init(const char *image_path)
 
 	memset(&ctx, 0, sizeof(ctx));
 	memset(&opts, 0, sizeof(opts));
+	tetrisu_theme_apply(&ctx, "Classic");
+	tetrisu_character_apply(&ctx, "Mirurun");
+	ctx.visual_selection_initialized = false;
 	ctx.nc = notcurses_init(&opts, NULL);
 	if (ctx.nc == NULL)
 	{
@@ -320,6 +323,23 @@ void	render_background_destroy(t_render_ctx *ctx)
 		ncplane_destroy(ctx->bg_plane);
 		ctx->bg_plane = NULL;
 	}
+}
+
+/**
+ * @brief Drops retained screen variants while preserving the live backdrop.
+ *
+ * A theme change gives every screen a new asset path. Keeping planes from the
+ * previous theme wastes the bounded cache and eventually forces unsafe
+ * eviction churn in bitmap terminals, so theme equip calls reset it first.
+ *
+ * @param ctx Context whose inactive backdrop planes are released.
+ */
+void	render_background_cache_reset(t_render_ctx *ctx)
+{
+	if (ctx == NULL)
+		return ;
+	backdrop_cache_clear(ctx);
+	ctx->backdrop_tick = 0;
 }
 
 /**
