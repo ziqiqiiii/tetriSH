@@ -98,6 +98,16 @@ typedef struct s_net_client
 	char			error[NET_REASON_MAX];
 }	t_net_client;
 
+typedef struct s_app_net_session
+{
+	t_net_config	cfg;
+	t_net_client	net;
+	bool		connected;
+	char		username[NET_USER_MAX];
+	int64_t		score;
+	int64_t		wallet;
+}	t_app_net_session;
+
 /* NET_CLIENT.C */
 void	net_config_load(t_net_config *cfg);
 int		net_connect(t_net_client *net, const t_net_config *cfg);

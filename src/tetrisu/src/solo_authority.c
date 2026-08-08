@@ -76,7 +76,6 @@ void	solo_authority_close(t_solo_authority *authority)
 	if (authority == NULL || !authority->online)
 		return ;
 	net_solo_leave(authority->net);
-	net_disconnect(authority->net);
 	authority->online = false;
 }
 

@@ -389,14 +389,24 @@ static bool	domain_is_valid(const char *domain)
 {
 	const unsigned char	*cursor;
 	uint32_t			codepoint;
+	bool				saw_colon;
 
 	if (domain == NULL || domain[0] == '\0')
 		return (false);
 	cursor = (const unsigned char *)domain;
+	saw_colon = false;
 	while (*cursor != '\0')
 	{
 		if (!next_codepoint(&cursor, &codepoint)
 			|| codepoint_is_space(codepoint))
+			return (false);
+		if (codepoint == ':')
+		{
+			if (saw_colon)
+				return (false);
+			saw_colon = true;
+		}
+		else if (saw_colon && (codepoint < '0' || codepoint > '9'))
 			return (false);
 	}
 	return (true);

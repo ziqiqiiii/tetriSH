@@ -2199,6 +2199,8 @@ bool			app_ui_preview_enabled(void);
 
 /* APP_PROVIDER.C */
 void			app_fixture_provider_init(t_app_data_provider *provider);
+void			app_net_provider_init(t_app_data_provider *provider,
+					t_app_net_session *session);
 t_app_provider_result	app_provider_preview_sign_in(
 					const t_app_data_provider *provider,
 					t_app_auth_view_model *view);

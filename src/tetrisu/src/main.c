@@ -88,6 +88,7 @@ static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
 static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 				uint32_t key);
 static void	enable_home_mouse(t_render_ctx *ctx);
+static void	apply_domain_to_config(t_net_config *cfg, const char *domain);
 
 /**
  * @brief Entry point for the screen-navigation and rendering loop.
@@ -100,6 +101,7 @@ int	main(void)
 	t_auth_form		auth_form;
 	t_sign_in_modal	sign_in;
 	t_mp_session		mp_session;
+	t_app_net_session	net_session;
 	t_render_ctx		ctx;
 	t_audio_ctx			audio;
 	ncinput				input;
@@ -109,6 +111,7 @@ int	main(void)
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
 	memset(&mp_session, 0, sizeof(mp_session));
+	memset(&net_session, 0, sizeof(net_session));
 	mp_session.mode = APP_GAME_MODE_DOUBLE;
 	ctx = render_init(SPLASH_ASSET_PATH);
 	audio_init(&audio);
@@ -117,7 +120,10 @@ int	main(void)
 	audio_play_music(&audio, HOME_BGM_PATH);
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
 	audio_load_game_sfx(&audio);
-	app_fixture_provider_init(&provider);
+	if (getenv("TETRISU_NET") != NULL && getenv("TETRISU_NET")[0] != '\0')
+		app_net_provider_init(&provider, &net_session);
+	else
+		app_fixture_provider_init(&provider);
 	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
 	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
 	while (navigation.current != APP_SCREEN_QUIT)
@@ -137,7 +143,12 @@ int	main(void)
 		}
 		if (navigation.current == APP_SCREEN_SOLO)
 		{
-			if (solo_mode_run(&ctx, &audio, NULL) < 0)
+			t_net_client	*solo_net;
+
+			solo_net = (!provider.local_fixtures && net_session.connected
+					&& net_session.net.state >= NET_AUTHED)
+				? &net_session.net : NULL;
+			if (solo_mode_run(&ctx, &audio, solo_net) < 0)
 			{
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 				continue ;
@@ -279,6 +290,8 @@ int	main(void)
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
 	render_teardown(&ctx);
+	if (net_session.connected)
+		net_disconnect(&net_session.net);
 	return (0);
 }
 
@@ -408,15 +421,30 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 
 	if (action == AUTH_ACTION_CHECK_SERVER)
 	{
+		t_app_net_session	*session;
+
 		audio_play_menu_select(audio);
 		if (!render_auth_show(ctx, form, false))
 			return (false);
-		/*
-		 * The network adapter is intentionally not connected yet. Keeping the
-		 * check as a semantic action lets it become asynchronous later without
-		 * changing the form, focus, or rendering contract.
-		 */
-		auth_form_finish_server_check(form, false);
+		if (provider->local_fixtures || provider->userdata == NULL)
+		{
+			auth_form_finish_server_check(form, false);
+			return (true);
+		}
+		session = (t_app_net_session *)provider->userdata;
+		net_config_load(&session->cfg);
+		if (form->domain[0] != '\0')
+			apply_domain_to_config(&session->cfg, form->domain);
+		if (net_connect(&session->net, &session->cfg) == 0)
+		{
+			session->connected = true;
+			auth_form_finish_server_check(form, true);
+		}
+		else
+		{
+			session->connected = false;
+			auth_form_finish_server_check(form, false);
+		}
 		return (true);
 	}
 	if (action == AUTH_ACTION_SUBMIT_LOGIN
@@ -484,6 +512,36 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	else if (action == AUTH_ACTION_QUIT)
 		return (app_navigation_dispatch(navigation, APP_NAV_QUIT));
 	return (true);
+}
+
+/*
+** Parses the typed auth domain field as "host" or "host:port" and overrides
+** the resolved net config. An empty or whitespace-only value is ignored so
+** env defaults stay in charge.
+*/
+static void	apply_domain_to_config(t_net_config *cfg, const char *domain)
+{
+	const char	*colon;
+	size_t		host_len;
+
+	if (cfg == NULL || domain == NULL || domain[0] == '\0')
+		return ;
+	colon = strchr(domain, ':');
+	if (colon != NULL)
+	{
+		host_len = (size_t)(colon - domain);
+		if (host_len == 0 || host_len >= sizeof(cfg->host))
+			return ;
+		memcpy(cfg->host, domain, host_len);
+		cfg->host[host_len] = '\0';
+		cfg->port = (int)strtol(colon + 1, NULL, 10);
+		if (cfg->port < 1 || cfg->port > 65535)
+			cfg->port = NET_DEFAULT_PORT;
+		return ;
+	}
+	if (strnlen(domain, sizeof(cfg->host)) >= sizeof(cfg->host))
+		return ;
+	snprintf(cfg->host, sizeof(cfg->host), "%s", domain);
 }
 
 /**

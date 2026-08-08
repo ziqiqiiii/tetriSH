@@ -276,11 +276,11 @@ Leaderboard, Settings, and Settings → Marketplace are reachable. Without
 `TETRISU_UI_PREVIEW=1`, the preview action is not rendered or accepted; real
 server sign-in and Play Offline retain their existing behavior.
 
-`LOGIN` and `SIGN UP` need a verified server, and the network adapter is not
-connected yet, so the server check always reports offline and both buttons stay
-refused. Until `tetrisd` lands, the two ways into Home are `PLAY OFFLINE` and
-the preview gate above. A refused button says which of the two applies on the
-status line rather than doing nothing.
+By default the network adapter stays disconnected, so `CHECK SERVER` reports
+offline and `LOGIN`/`SIGN UP` stay refused; `PLAY OFFLINE` and the preview gate
+above are the two ways into Home. A refused button says which case applies on
+the status line rather than doing nothing. Opting into a real `tetrisd` session
+is described in [Network mode](#network-mode) below.
 
 Or build and run in one step:
 
@@ -338,6 +338,35 @@ avoids: watch the process's memory while a game runs before trusting it.
 `tetrisu` requires a real terminal: notcurses queries palette, pixel geometry,
 and graphics-protocol support at startup. It exits with
 `notcurses_core_init failed` when `$TERM` has no usable terminfo entry.
+
+### Network mode
+
+Opt the client into a live `tetrisd` session with `TETRISU_NET=1`:
+
+```bash
+make certs                                 # dev CA + server cert (once)
+make run                                   # tetrish sources .tetrishrc, starts tetrisd
+TETRISU_NET=1 ./bin/tetrisu                # opt into the network provider
+```
+
+`make run` sources `.tetrishrc`, which exports `TETRISU_HOST`, `TETRISU_PORT`,
+and `TETRISU_CA_PATH` and starts `tetrisd` on `4242`; launching tetrisu from
+inside `tetrish` inherits them. Outside `tetrish`, source `.tetrishrc` first
+or export the three keys by hand. The auth screen's `domain` field overrides
+the host (or `host:port`) typed there, falling back to the env defaults when
+blank.
+
+`CHECK SERVER` opens the TCP session and runs the libtetrissh handshake; once
+it reports `SERVER ONLINE`, `SIGN UP` registers a player and `LOGIN` binds the
+connection. Single Player then plays Solo against `tetrisd` — every board
+mutation is server-authoritative and the renderer draws only `STATE` snapshots.
+Multiplayer's lobby, create-room, and join-by-id are driven by `LIST`/`JOIN`
+against the server.
+
+| Screen | Server reach today |
+|---|---|
+| Login / Sign Up, Settings profile, Single Player, Multiplayer lobby & create/join | Driven by `tetrisd` |
+| Marketplace, catalogues, leaderboard, waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
 
 ---
 

@@ -218,6 +218,16 @@ $(TEST_BIN_DIR)/net_smoke: $(TESTS_DIR)/net_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(H
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# The network app data provider driven against a live tetrisd: the acceptance
+# test for the net-mode wiring (CHECK SERVER, SIGN UP, LOGIN, profile, lobby,
+# create/join room). Same link line as net_smoke - it uses the provider vtable
+# which lives in the app archive alongside the network layer.
+$(TEST_BIN_DIR)/net_provider_smoke: $(TESTS_DIR)/net_provider_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
@@ -232,7 +242,7 @@ unit: $(UNIT_BINS)
 	@ echo "\n$(CYAN)==> Running unit tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) unit $(UNIT_BINS)
 
-integration: $(TEST_BIN_DIR)/net_smoke
+integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
