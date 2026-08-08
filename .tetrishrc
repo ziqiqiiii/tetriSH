@@ -108,6 +108,25 @@ export TETRISLOGD_PID_PATH=tmp/tetrislogd/tetrislogd.pid
 export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
 
 ################################################################################
+#                                 tetrisu                                      #
+################################################################################
+#
+# Where the client looks for tetrisd. Nothing is compiled into tetrisu: a
+# client with a hard-coded certificate path could not be pointed at a second
+# server without rebuilding it.
+#
+# TETRISU_PORT must match TETRISD_PORT above, and TETRISU_CA_PATH must be the
+# CA that signed TETRISD_CERT_PATH — the client verifies the server's
+# certificate against it and refuses the session otherwise. `make certs` mints
+# a set where all three agree.
+#
+# With no server reachable, Solo falls back to the local rules and stays
+# playable; every other screen keeps its local preview fixtures.
+export TETRISU_HOST=127.0.0.1
+export TETRISU_PORT=4242
+export TETRISU_CA_PATH=certs/ca.crt
+
+################################################################################
 #                                 daemons                                      #
 ################################################################################
 #

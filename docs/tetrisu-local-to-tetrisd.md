@@ -102,6 +102,34 @@ one-slot `STATE` mailbox rather than delaying anyone's gravity. Social/log
 datagrams triggered by scoring must use `MSG_DONTWAIT` and drop on a full or
 missing destination.
 
+## Where this stands
+
+Steps 1 to 6 are applied, and step 8 is applied as its "explicitly selected
+offline mode" option rather than as a deletion.
+
+- `libhtttp` and the `STATE` schema are finalised and implemented, and `STATE`
+  gained the `hold` field the Solo HUD needs.
+- `tetrisd` owns the server game session, its tick, every action, and the
+  ability route — including `HOLD`, `PAUSE`/`RESTART`, and the four abilities
+  a room with no Target can serve.
+- `src/tetrisu/tetrisu_net.h` plus `net_client.c`, `net_session.c` and
+  `net_solo.c` are the client's network/view-model module. `net_solo_apply`
+  decodes a snapshot into `t_solo_game`, which is what `render_solo.c` already
+  consumed — so the renderer needed no change, and the fields the server has
+  no opinion about (countdown, clear animation, personal best, danger tint,
+  ability popover) stay exactly where this document puts them.
+- `solo_authority.c` is the one place that knows who owns the board.
+  `solo_mode.c` no longer calls `solo_game_apply_action` or
+  `solo_game_update`; it asks the authority, which is either `tetrisd` or the
+  local rules.
+- `tests/integration/test_net_solo.sh` drives the whole path against a real
+  server and checks the acceptance list below.
+
+What is left is step 7's `ABILITY` targeting for Double and Battle Royale
+(which need those modes first), step 9, and one wiring step: the sign-in
+screen still uses its preview fixtures, so nothing hands Solo a session yet
+and it plays offline until it does.
+
 ## Migration sequence
 
 1. Finalise `libhtttp` action and `STATE` schemas with both members reviewing.

@@ -13,7 +13,7 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens; no networking yet, and the match screens are still scaffolds |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules; the sign-in screen still uses its preview fixtures, so nothing hands Solo a session yet and it plays offline. The match screens are still scaffolds |
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |

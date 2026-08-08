@@ -20,6 +20,7 @@
 # include <sys/stat.h>
 # include <notcurses/notcurses.h>
 # include "tetrisbrain.h"
+# include "tetrisu_net.h"
 
 # ifndef TETRISU_ENABLE_AUDIO
 # define TETRISU_ENABLE_AUDIO	0
@@ -2003,6 +2004,19 @@ typedef struct s_solo_game
 	t_solo_ability	ready_ability;
 }	t_solo_game;
 
+/*
+** Who owns the board this Solo game is played on. `net` is the app's session
+** and is borrowed, never opened here; `online` is the answer to the only
+** question the loop asks, and `lost` records that a session went away
+** mid-game so the screen can say so.
+*/
+typedef struct s_solo_authority
+{
+	t_net_client	*net;
+	bool			online;
+	bool			lost;
+}	t_solo_authority;
+
 typedef struct s_solo_render
 {
 	struct ncplane	*background_plane;
@@ -2699,7 +2713,39 @@ void			render_solo_draw(t_render_ctx *ctx, t_solo_render *solo,
 void			render_solo_resize(t_render_ctx *ctx, t_solo_render *solo);
 void			render_solo_destroy(t_solo_render *solo);
 
+/* NET_SOLO.C — Solo played against tetrisd; the server owns every board */
+int				net_solo_start(t_net_client *net, t_net_result *out);
+void			net_solo_leave(t_net_client *net);
+int				net_solo_action(t_net_client *net, t_solo_action action,
+					t_net_result *out);
+int				net_solo_pause(t_net_client *net, bool paused,
+					t_net_result *out);
+int				net_solo_restart(t_net_client *net, t_net_result *out);
+int				net_solo_ability(t_net_client *net, t_solo_ability ability,
+					t_net_result *out);
+void			net_solo_ability_feedback(const t_net_result *result,
+					t_solo_ability ability, t_solo_game *game);
+bool			net_solo_apply(const t_net_client *net, t_solo_game *game);
+
+/* SOLO_AUTHORITY.C — the one place that knows who owns the board */
+void			solo_authority_open(t_solo_authority *authority,
+					t_net_client *net, t_solo_game *game, uint32_t seed);
+bool			solo_authority_is_online(const t_solo_authority *authority);
+void			solo_authority_close(t_solo_authority *authority);
+int				solo_authority_fd(const t_solo_authority *authority);
+bool			solo_authority_action(t_solo_authority *authority,
+					t_solo_game *game, t_solo_action action);
+bool			solo_authority_ability(t_solo_authority *authority,
+					t_solo_game *game, t_solo_ability ability);
+bool			solo_authority_pause(t_solo_authority *authority,
+					t_solo_game *game);
+bool			solo_authority_restart(t_solo_authority *authority,
+					t_solo_game *game, uint32_t seed);
+bool			solo_authority_update(t_solo_authority *authority,
+					t_solo_game *game, int elapsed_ms);
+
 /* SOLO_MODE.C */
-int				solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio);
+int				solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
+					t_net_client *net);
 
 # endif

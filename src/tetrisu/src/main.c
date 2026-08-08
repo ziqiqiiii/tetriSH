@@ -137,7 +137,7 @@ int	main(void)
 		}
 		if (navigation.current == APP_SCREEN_SOLO)
 		{
-			if (solo_mode_run(&ctx, &audio) < 0)
+			if (solo_mode_run(&ctx, &audio, NULL) < 0)
 			{
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 				continue ;
