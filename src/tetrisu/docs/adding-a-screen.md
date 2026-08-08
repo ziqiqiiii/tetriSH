@@ -21,6 +21,7 @@ to get right.
 - [Step 5 — Coalesce held keys](#step-5--coalesce-held-keys)
 - [Step 6 — Skip the render when nothing moved](#step-6--skip-the-render-when-nothing-moved)
 - [Screens that share a plane set](#screens-that-share-a-plane-set)
+- [Backdrops and screen transitions](#backdrops-and-screen-transitions)
 - [Values that move without input](#values-that-move-without-input)
 - [The bugs](#the-bugs)
 - [Text metrics](#text-metrics)
@@ -453,6 +454,84 @@ screen change is not a keystroke. The rules in Step 1 are about what happens
 
 ---
 
+## Backdrops and screen transitions
+
+Everything above is about what happens *within* a screen. Entering and leaving
+one has its own rule, and it is the one that cost the most:
+
+**Never render a frame in which a live sprixel is covered.**
+
+A covered sprixel is torn down and transmitted again when it resurfaces, and it
+is re-rasterised alongside whatever covers it in the meantime. This is not a
+stationary-tier quirk — it bites hardest on Kitty, where the backdrops are
+full-screen `NCBLIT_PIXEL` bitmaps. At 210x71 on a Retina cell one of those is
+~28 MB of RGBA, ~37 MB once base64'd, and a macOS pty drains it at around
+3 MB/s. Linux hides this entirely behind bigger pty buffers and a faster
+reader, so *"it is fine on Linux"* says nothing at all about whether you have
+this bug.
+
+Two ways to break the rule, both of which shipped:
+
+- **Leaving the old backdrop stacked underneath the new one.** Every revisit to
+  a screen paid for its own bitmap again. Marketplace: 15.4 s cold, 9.2 s warm.
+- **Rendering before moving the old one out of the way.** Worse, because it
+  costs the full bitmap on a path that looks like it is only drawing the new
+  screen. `replace_visual_scaled()` stacked the incoming plane above the
+  outgoing one, rendered, and parked afterwards. On the first sign-in the
+  outgoing plane was the full-screen login artwork: 31 s, in one call.
+
+The fix is one shape: an outgoing backdrop leaves the rendered area **before**
+the frame is drawn — parked off-screen if something still wants it, destroyed
+outright if not, because a plane freed *after* the render has already been
+transmitted by it.
+
+```c
+if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
+{
+    ncplane_destroy(old_plane);
+    ctx->bg_plane = NULL;
+}
+else
+    backdrop_park(ctx, old_plane);       /* ncplane_move_yx off the top */
+if (notcurses_render(ctx->nc) != 0)
+    ...
+```
+
+With that, a backdrop swap is 46-56 ms cold and 1-3 ms warm at 210x71.
+
+**Parking is a movable-tier optimisation, and it is gated as one.** The whole
+value of retaining a backdrop is being able to move it back later, which is
+exactly what `TETRISU_PIXELS_STATIONARY` forbids. `backdrop_remember()` refuses
+on any tier where `render_pixel_planes_reliable()` is false, which leaves
+`backdrop_restack()` and `backdrop_park()` inert — they are both predicated on
+cache membership — so sixel, the framebuffer and the cell tier keep the plain
+destroy-and-rebuild behaviour that predates the cache. **If you add a plane
+that survives a screen change, gate it the same way.** A cache that quietly
+moves sprixels on a tier that cannot move them is the failure this rule exists
+to prevent, and it will not show up on your Kitty terminal.
+
+**Do not reach for a cell blitter to make a backdrop cheap.** It works — cell
+blitting the pixel backdrops took a swap from 15,386 ms to 2 ms — and it is not
+acceptable: cell blitters cap at two colours per cell, and A/B screenshots
+showed Settings lose its gilded panel frames, its plate icons and its circular
+buttons. Home's backdrop is `NCBLIT_4x2` because it was authored to survive it;
+the others were not. Fix the transmission, not the fidelity.
+
+**Discard queued input on the way *in*, not just on the way out.** Step 5 says
+to call `discard_queued_input()` on actions that leave a screen. The transition
+*into* Home after signing in needs it just as much and did not have it: keys
+typed at the form arrived at the menu that replaced it, so mashing Enter while
+sign-in was busy opened whichever Home item happened to be selected. Any
+transition a user waits on is a transition they have typed into.
+
+**An in-progress message must be set before the paint, not inside the call.**
+`auth_form_validate()` is what sets `"SIGNING IN..."`, and it used to run inside
+`auth_form_submit()` — after the only render preceding the provider call. The
+status was written to a form nobody drew again until the call had already
+returned, so it never appeared. Validate, paint, *then* block.
+
+---
+
 ## Values that move without input
 
 A countdown, a timer, a server push: anything that changes while the user is not
@@ -526,6 +605,24 @@ draw_plate(pixels, width, height, layout, &layout->panel, g_mp_green);
 It looks identical, it costs one screen change instead of one raised plane, and
 it cannot blank anything. Create Room is built this way.
 
+**A cell plane cannot occlude a sprixel, however high it sits.**
+`ncplane_move_top()` does not help; neither does creation order. This is a
+notcurses rule, not a tier quirk, and it is why the rule above is not only about
+blanking: a cell modal drawn over Solo, Marketplace or Settings is drawn
+*through* by the bitmap planes it is supposed to cover. The confirmation dialog
+hit this — the score panel and the ability rail showed through it — and the fix
+was to stop making it a cell plane: it is composed in RGBA and blitted like any
+other bitmap, lettered from the shared 8x16 mask through the public
+`render_font_mask_load()` (`src/render_confirmation_font.c`). The cell drawing
+stays as the fallback for terminals that have no bitmaps to be occluded by.
+
+Any new overlay meant to cover a bitmap screen needs the same treatment. The
+tempting shortcut — destroy the screen underneath first — is a dead end worth
+recording: calling `render_solo_destroy()` before the prompt makes the dialog
+legible, and Solo never comes back. It returns as *"Game paused - resize the
+terminal"*, because the layout those planes were sized from goes with them, and
+neither `state_changed` nor `resize_pending` rebuilds it.
+
 **Plates round with their regions.** Draw a panel's plate from the *fitted*
 rectangle in the layout struct, not from reference units recomputed at the draw
 site. A plate a pixel short of the region cropped out of it leaves a seam the
@@ -584,6 +681,12 @@ and to the terminal you developed in.
 | A typed letter fires a command, or a command types a letter | one key handler for a screen that has a text field | split the handler by mode; inside a field every printable key is text |
 | A held key drops letters out of a typed field | a coalesce predicate that folds more than movement keys | never coalesce printable characters |
 | A long username or id walks through the cell frame | a cell-mode value drawn without a width clip | route every cell write through one clipping helper |
+| Entering a screen takes seconds, and leaving it takes seconds again | the outgoing backdrop left stacked under the incoming one, so its sprixel is re-sent every visit | park the retained backdrop off the top of the screen |
+| One transition freezes for tens of seconds while others are instant | rendered with the outgoing backdrop still covered, and moved it away afterwards | move or destroy the old plane *before* `notcurses_render()` |
+| A modal is drawn through by the screen it covers | a cell plane over a sprixel; z-order cannot fix it | compose the modal in RGBA and blit it |
+| Keys pressed during a slow transition fire on the next screen | `discard_queued_input()` on exits only, not on entries | discard on any transition the user waits through |
+| A "loading" message never appears | the status is set inside the blocking call, after the last paint | validate, paint, then block |
+| Fine artwork detail disappears on some screens | a cell blitter used to make a backdrop cheap; they cap at two colours per cell | keep `NCBLIT_PIXEL` and fix the transmission instead |
 
 ### The blanking one, in full
 
@@ -674,6 +777,12 @@ Before calling a screen done:
 - [ ] Region seeds are scoped: no region repaints because an unrelated one changed
 - [ ] Screens sharing a plane set destroy every plane and signature on a switch
 - [ ] Anything that ticks without input sits alone on its region
+- [ ] No frame is rendered with a live sprixel covered; the outgoing backdrop leaves first
+- [ ] Anything retained across a screen change is gated on `render_pixel_planes_reliable()`
+- [ ] An overlay meant to cover a bitmap screen is a bitmap itself
+- [ ] Queued input discarded on entering a slow screen as well as leaving one
+- [ ] Any status shown before a blocking call is set before the paint, not inside the call
+- [ ] Entry and exit timed on a real terminal, not just assumed from the region work
 - [ ] One frame of the stationary tier decoded and **looked at**, not just counted
 
 ---
@@ -703,6 +812,31 @@ server. Note the second half of that sentence: `p` typed while a text field
 holds focus is the letter `p`, so a script has to walk focus down to the primary
 button first. Real credentials are not an alternative — `auth_form_submit()`
 refuses until the server check succeeds, and there is no server.
+
+**Time the transitions, not only the keystrokes.** The region work above is
+measured per key; entering and leaving a screen is a different cost with a
+different cause, and nothing in the per-key numbers predicts it. `sample(1)` on
+the live process answers it directly, and the frame you are looking for is
+`notcurses_render → raster_and_write → blocking_write → poll`:
+
+```bash
+sample $(pgrep -x tetrisu) 20 -mayDie -f out.txt
+```
+
+Two traps in that one line. **`pgrep -f bin/tetrisu` matches the terminal too**,
+because the path is in its argv — use `pgrep -x`. And **inlining misattributes
+the hot frame**: a sample once pointed at a function that a `clock_gettime`
+trace proved ran in 1 ms. When the answer matters, confirm it by timing the call
+explicitly rather than trusting the stack alone.
+
+Drive the app from the real terminal rather than a synthetic one wherever you
+can. kitty will do it with two flags, and it is far less work than the pty
+harness below:
+
+```bash
+kitty --listen-on unix:/tmp/tetrisu-kitty -o allow_remote_control=yes -- ./bin/tetrisu
+kitty @ --to unix:/tmp/tetrisu-kitty send-text --match id:1 $'\t\t\tp'
+```
 
 Two limits worth knowing on this hardware:
 

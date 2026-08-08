@@ -427,6 +427,18 @@ static void	backdrop_remember(render_ctx_t *ctx, const char *path,
 {
 	backdrop_cache_t	*entry;
 
+	/*
+	 * Retaining a backdrop is only ever worth it because the plane can later be
+	 * parked and restacked, and that is precisely what the stationary tier
+	 * forbids: sixel and the Linux framebuffer may write a sprixel in place but
+	 * not move one. Refusing to remember anything there leaves every other part
+	 * of the cache inert - restack finds nothing, park skips what it was not
+	 * given - so those tiers keep the plain destroy-and-rebuild behaviour that
+	 * predates the cache. The cell tier has no sprixels to save and no reason
+	 * to hold six full-screen snapshots in memory.
+	 */
+	if (!render_pixel_planes_reliable(ctx))
+		return ;
 	if (ctx->bg_plane == NULL || strlen(path) >= BACKDROP_PATH_MAX)
 		return ;
 	entry = backdrop_find(ctx, path, exact, stretch);
