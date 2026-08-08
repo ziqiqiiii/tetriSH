@@ -210,4 +210,18 @@ bool			effect_controls_inverted(const t_effect_state *state);
 bool			effect_thwack_active(const t_effect_state *state);
 int				effect_fry_rows(const t_effect_state *state);
 
+/* BATTLE ROYALE targeting mode, read by tetrisd to choose which room
+ * receives garbage; defined here so tetrisu sends the same value in an
+ * HTTTP body without duplicating the definition. */
+typedef enum
+{
+	TARGET_RANDOM		= 0,
+	TARGET_ATTACKERS	= 1,
+	TARGET_KO			= 2,
+	TARGET_TOP_SCORE	= 3
+}	t_target_mode;
+
+/* GARBAGE.C */
+int				garbage_lines_from_clear(int lines_cleared);
+
 # endif
