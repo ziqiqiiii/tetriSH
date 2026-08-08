@@ -45,7 +45,7 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 	g->hold = BODY_HOLD_EMPTY;
 	g->lines = 0;
 	g->level = level_from_lines(0);
-	g->seq = 1;
+	g->seq = 0;
 	i = 0;
 	while (i < BODY_NEXT_COUNT)
 	{
@@ -183,7 +183,6 @@ bool	game_hold(t_game *g)
 	outgoing = (int)g->piece.type;
 	g->hold_used = true;
 	g->accum_ms = 0;
-	g->seq++;
 	if (!g->has_hold)
 	{
 		g->hold = outgoing;
@@ -218,7 +217,6 @@ bool	game_pause(t_game *g, bool paused)
 		return (false);
 	g->paused = paused;
 	g->accum_ms = 0;
-	g->seq++;
 	return (true);
 }
 
@@ -375,7 +373,6 @@ static void	lock_piece(t_game *g)
 	effect_on_piece_lock(&g->effects);
 	g->hold_used = false;
 	g->accum_ms = 0;
-	g->seq++;
 	spawn_next(g);
 }
 

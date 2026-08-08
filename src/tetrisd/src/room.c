@@ -689,6 +689,7 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 				server_room->dirty[slot] = true;
 			if (server_room->dirty[slot])
 			{
+				server_room->games[slot].seq++;
 				game_snapshot(&server_room->games[slot], &snaps[n]);
 				pids[n] = server_room->games[slot].player_id;
 				server_room->dirty[slot] = false;
