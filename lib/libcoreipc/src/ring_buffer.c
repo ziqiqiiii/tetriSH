@@ -121,8 +121,7 @@ size_t	ring_drain(t_ring_buffer *rb, void *out, size_t max_records)
 	pthread_mutex_lock(&rb->mutex);
 	while (n < max_records && rb->head != rb->tail)
 	{
-		memcpy((unsigned char *)out + n * rb->record_size,
-			slot_at(rb, rb->head), rb->record_size);
+		memcpy((unsigned char *)out + n * rb->record_size, slot_at(rb, rb->head), rb->record_size);
 		rb->head = advance(rb, rb->head);
 		n++;
 	}
