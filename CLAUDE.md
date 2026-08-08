@@ -13,7 +13,7 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio; no gameplay or networking yet |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. The match screens are still scaffolds |
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, and the self-affecting half of the Gaiden ability catalogue + tests (10 of 10 suites pass). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (13 of 13 suites pass). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -135,8 +135,9 @@ Header at `lib/libtetrisbrain/include/tetrisbrain.h`; each module is one `.c` un
 | `board.c` | `board_init`, `board_get`, `board_set`, `board_in_bounds`, `board_inject_garbage`, `board_copy` |
 | `pieces.c` | `piece_spawn`, `piece_is_valid`, `piece_move`, `piece_rotate`, `piece_stamp` |
 | `gravity.c` | `gravity_tick`, `piece_soft_drop`, `piece_hard_drop` |
+| `lockdown.c` | `lockdown_init`, `lockdown_grounded`, `lockdown_on_fall`, `lockdown_on_shift`, `lockdown_tick` (Guideline Extended Placement: 500 ms, 15 resets) |
 | `lineclear.c` | `board_clear_lines` (returns lines cleared 0–4) |
-| `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms` |
+| `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms`, `clear_duration_ms` |
 | `abilities.c` | `board_cut_top`, `board_cut_bottom`, `board_apply_gravity`, `board_invert`, `board_fill_rows`, `board_clear_cells`, `board_delete_columns` |
 | `bag.c` | `piece_bag_init`, `piece_bag_next` (7-bag randomiser) |
 | `charge.c` | `charge_state_init`, `charge_on_clear`, `ability_cost`, `charge_can_afford`, `charge_deduct`, `charge_transfer` |
@@ -255,8 +256,8 @@ See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–5 are
 implemented. Steps 6 and 7 are Double mode and Battle Royale (ADR-0009).
 
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
-`/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`, plus pushed
-`STATE`. A player holds at most one connection — a second `LOGIN` displaces the
+`/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`,
+`LEADERBOARD`, plus pushed `STATE`. A player holds at most one connection — a second `LOGIN` displaces the
 first (ADR-0004). Inputs are rate limited per connection, answering `429` with
 `Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
 own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.

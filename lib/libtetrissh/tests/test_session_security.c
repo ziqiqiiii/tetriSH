@@ -202,7 +202,7 @@ static void	test_invalid_state_and_close(void)
 		assert(sess.aes_key[i] == 0);
 		i++;
 	}
-	assert(send(fds[0], "Z", 1, MSG_NOSIGNAL) == 1);
+	assert(send(fds[0], "Z", 1, 0) == 1);
 	assert(recv(fds[1], &byte, 1, 0) == 1 && byte == 'Z');
 	close(fds[0]);
 	close(fds[1]);

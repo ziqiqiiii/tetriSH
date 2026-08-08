@@ -156,6 +156,14 @@
 # define TETRISD_ROUTE_SESSION					"/session"
 # define TETRISD_ROUTE_ROOMS					"/rooms"
 # define TETRISD_ROUTE_ROOM_PREFIX				"/room/"
+# define TETRISD_ROUTE_LEADERBOARD				"/leaderboard"
+
+/*
+** How many leaderboard lines one answer carries. The store's skip list is
+** ordered by (score, id), so this is a top-N read and not a page: a client
+** that wanted the whole table would be asking for a different route.
+*/
+# define TETRISD_LEADERBOARD_ROWS				10
 
 typedef struct s_server	t_server;
 typedef struct s_client	t_client;
@@ -301,6 +309,17 @@ typedef struct s_game
 	uint64_t			seq;
 	int					accum_ms;
 	/*
+	** How long the piece that has landed still belongs to the player.
+	**
+	** Guideline Extended Placement: a piece does not lock the instant it
+	** touches down, it locks half a second later, and moving or rotating it
+	** buys that half-second back fifteen times over. It is what makes it
+	** possible to slide a piece into a gap under an overhang instead of only
+	** dropping it onto one, so it is a rule of the game and belongs to
+	** whoever owns the board - here.
+	*/
+	t_lockdown			lockdown;
+	/*
 	** `active` is "this game is still being played" and is what decides
 	** whether the room is over; `paused` is "it is being played, but not
 	** right now". They have to be separate flags: a pause that cleared
@@ -316,6 +335,21 @@ typedef struct s_game
 	uint32_t			seed;
 	t_body_ability		last_ability;
 	t_body_clear_label	last_clear;
+	/*
+	** The completed rows, still on the board, waiting to be taken away.
+	**
+	** A clear is not instantaneous: for clear_duration_ms the rows are there,
+	** no piece has spawned, and the player cannot act. That is a rule and not
+	** a flourish, which is why it is the server holding it - a client that
+	** animated a clear the server had already finished would be drawing rows
+	** that were gone (docs/bugs/the_line_clear_never_reached_the_client.md).
+	**
+	** clearing_count is 0 whenever no clear is in progress, and it is the
+	** whole of the "am I clearing?" question.
+	*/
+	int					clearing_rows[BODY_CLEARING_MAX];
+	int					clearing_count;
+	int					clearing_ms;
 }	t_game;
 
 /*
@@ -672,6 +706,9 @@ int				join_handler(const t_htttp_message *msg, void *context);
 int				leave_handler(const t_htttp_message *msg, void *context);
 int				start_handler(const t_htttp_message *msg, void *context);
 bool			request_is_authorised(t_request_context *ctx);
+
+/* HANDLERS_LEADERBOARD.C */
+int				leaderboard_handler(const t_htttp_message *msg, void *context);
 
 /* REQUEST_TARGET.C */
 int				request_input_target(t_request_context *ctx, t_server_room **out);

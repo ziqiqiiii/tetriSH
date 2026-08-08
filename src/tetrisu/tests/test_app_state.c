@@ -30,8 +30,9 @@ static void	test_screen_names_and_parents(void)
 		assert(strcmp(app_screen_name((t_app_screen)screen), "Unknown") != 0);
 		screen++;
 	}
-	assert(app_screen_parent(APP_SCREEN_LOGIN) == APP_SCREEN_ENTRY);
-	assert(app_screen_parent(APP_SCREEN_HOME) == APP_SCREEN_ENTRY);
+	assert(app_screen_parent(APP_SCREEN_LOGIN) == APP_SCREEN_LOGIN);
+	assert(app_screen_parent(APP_SCREEN_SIGN_UP) == APP_SCREEN_LOGIN);
+	assert(app_screen_parent(APP_SCREEN_HOME) == APP_SCREEN_LOGIN);
 	assert(app_screen_parent(APP_SCREEN_SOLO) == APP_SCREEN_HOME);
 	assert(app_screen_parent(APP_SCREEN_MARKETPLACE) == APP_SCREEN_HOME);
 	assert(app_screen_parent(APP_SCREEN_CREATE_ROOM_MODAL) == APP_SCREEN_LOBBY);
@@ -50,16 +51,19 @@ static void	test_entry_and_account_navigation(void)
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN));
 	assert(navigation.current == APP_SCREEN_LOGIN);
 	assert(navigation.previous == APP_SCREEN_ENTRY);
-	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
-	assert(navigation.current == APP_SCREEN_ENTRY);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_SIGN_UP));
+	assert(navigation.current == APP_SCREEN_SIGN_UP);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_LOGIN);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_AUTHENTICATED));
 	assert(navigation.current == APP_SCREEN_HOME && !navigation.offline);
-	app_navigation_init(&navigation, APP_SCREEN_ENTRY);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_LOGIN);
+	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_PLAY_OFFLINE));
 	assert(navigation.current == APP_SCREEN_HOME && navigation.offline);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
-	assert(navigation.current == APP_SCREEN_ENTRY && !navigation.offline);
+	assert(navigation.current == APP_SCREEN_LOGIN && !navigation.offline);
 	printf("PASS test_entry_and_account_navigation\n");
 }
 
@@ -70,14 +74,14 @@ static void	test_home_destinations_and_back(void)
 		APP_NAV_OPEN_MARKETPLACE,
 		APP_NAV_OPEN_SETTINGS,
 		APP_NAV_OPEN_LEADERBOARD,
-		APP_NAV_OPEN_LOBBY
+		APP_NAV_OPEN_MULTIPLAYER_MODE
 	};
 	static const t_app_screen		screens[] = {
 		APP_SCREEN_SOLO,
 		APP_SCREEN_MARKETPLACE,
 		APP_SCREEN_SETTINGS,
 		APP_SCREEN_LEADERBOARD,
-		APP_SCREEN_LOBBY
+		APP_SCREEN_MULTIPLAYER_MODE
 	};
 	t_app_navigation				navigation;
 	size_t							index;
@@ -103,6 +107,15 @@ static void	test_multiplayer_navigation_chain(void)
 	t_app_navigation	navigation;
 
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
+	/* Multiplayer now opens the mode picker; the lobby hangs off that. */
+	assert(!app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
+	assert(app_navigation_dispatch(&navigation,
+			APP_NAV_OPEN_MULTIPLAYER_MODE));
+	assert(navigation.current == APP_SCREEN_MULTIPLAYER_MODE);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
+	assert(navigation.current == APP_SCREEN_LOBBY);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_BACK));
+	assert(navigation.current == APP_SCREEN_MULTIPLAYER_MODE);
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOBBY));
 	assert(app_navigation_dispatch(&navigation, APP_NAV_OPEN_CREATE_ROOM));
 	assert(navigation.current == APP_SCREEN_CREATE_ROOM_MODAL);
@@ -131,6 +144,12 @@ static void	test_invalid_transitions_are_rejected(void)
 	app_navigation_init(&navigation, APP_SCREEN_HOME);
 	assert(!app_navigation_dispatch(&navigation, APP_NAV_START_DOUBLE));
 	assert(!app_navigation_dispatch(&navigation, APP_NAV_OPEN_WAITING_ROOM));
+	assert(navigation.current == APP_SCREEN_HOME);
+	/* Multiplayer is online-only, so an offline session cannot reach it. */
+	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
+	assert(app_navigation_dispatch(&navigation, APP_NAV_PLAY_OFFLINE));
+	assert(!app_navigation_dispatch(&navigation,
+			APP_NAV_OPEN_MULTIPLAYER_MODE));
 	assert(navigation.current == APP_SCREEN_HOME);
 	printf("PASS test_invalid_transitions_are_rejected\n");
 }

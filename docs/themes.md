@@ -1,29 +1,31 @@
 # tetriSH Themes
 
-There are **4 different characters** available in the game: **Princess**, **Halloween**, **Wolf-man**, and **Mirurun**. See the [Tetris Battle Gaiden character list](https://tetris.wiki/Tetris_Battle_Gaiden) for reference.
-
-These 4 characters remain default for the default theme. For every other theme, each character gets a different **nickname** and **character image**, while the character's **actual name and abilities remain the same**.
+The Settings catalogue currently exposes seven theme labels and their preview
+thumbnails. This document records the canonical labels and the four-character
+power reference used by the client fixture. Preview ownership is deliberately
+mixed so the Settings screen can demonstrate its Marketplace flow: Haaland and
+Clauding are locked, while the other five themes are owned. These fixture flags
+do not add theme gameplay behavior.
 
 ## Theme List
 
 | # | Theme |
 |---|---|
-| 1 | Default |
-| 2 | Design and AI |
-| 3 | Do u wanna build a snowman? |
+| 1 | Classic |
+| 2 | Design AI University |
+| 3 | Do You Wanna Build a Snowman |
 | 4 | Haaland |
-| 5 | John Cena |
-| 6 | Claude-ing |
-| 7 | Al-Merqaedes |
-| 8 | Nuclear Gandhi |
+| 5 | Al Merqaedes F1 Team |
+| 6 | Nuclear Ghandi |
+| 7 | Clauding |
 
----
+## Classic character and power reference
 
-## 1. Default Theme
-
-### Default Characters
-
-The default theme uses each character's canonical name and full ability set.
+The four character entries and their four powers are the canonical character
+material used by the Settings fixture. Mirurun and Halloween are owned in the
+preview; Princess and Wolf-man remain visible but locked. See the
+[Tetris Battle Gaiden character list](https://tetris.wiki/Tetris_Battle_Gaiden)
+for the reference source.
 
 A **Target** is the player an offensive ability lands on, as defined in
 [CONTEXT.md](CONTEXT.md): Single mode has no Target and offensive abilities are
@@ -35,9 +37,10 @@ player's next piece lock — see
 
 `docs/use_cases.md` carries a second table of the same abilities, phrased as
 server-enforced effects. The two are kept in step; this one is the source of
-truth for ability text.
+truth for ability text. The Settings fixture in `src/tetrisu/src/app_provider.c`
+carries an abbreviated form of the same descriptions, sized for its card layout.
 
-#### 1. Princess
+### 1. Princess
 
 | Level | Ability | Description |
 |---|---|---|
@@ -46,7 +49,7 @@ truth for ability text.
 | 3 | Paralysis | Stops the Target from rotating their next 3 pieces. |
 | 4 | Copy | Replaces the player's field with a copy of a Target's. |
 
-#### 2. Halloween
+### 2. Halloween
 
 | Level | Ability | Description |
 |---|---|---|
@@ -55,7 +58,7 @@ truth for ability text.
 | 3 | Vampire | Steals the Target's crystals. |
 | 4 | Bomb | Destroys random blocks on the Target's field. |
 
-#### 3. Wolf-man
+### 3. Wolf-man
 
 | Level | Ability | Description |
 |---|---|---|
@@ -64,7 +67,7 @@ truth for ability text.
 | 3 | Pals | Lines sent by any opponent will lower the player's stack for a short time. That excludes lines sent through powers. |
 | 4 | Thwack | For the player's next 4 pieces, non-crystal blocks will drop from any line cleared, allowing lower incomplete lines to also be cleared. |
 
-#### 4. Mirurun
+### 4. Mirurun
 
 | Level | Ability | Description |
 |---|---|---|
@@ -73,114 +76,32 @@ truth for ability text.
 | 3 | Pentaris | Sends five lines of garbage to the Target. |
 | 4 | Sirtet | All rows containing blocks on the Target's field are inverted, so that spaces are converted to blocks and non-crystal blocks are converted to spaces. |
 
----
+## Design AI University
 
-## 2. Design and AI
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.
 
-### Theme Color Scheme
+## Do You Wanna Build a Snowman
 
-| Color | Hex | RGB |
-|---|---|---|
-| White | `#FFFFFF` | (255, 255, 255) |
-| Black | `#000000` | (0, 0, 0) |
-| SUTD Red | `#A90B2C` | (169, 11, 44) |
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.
 
-> "We're the first Design and AI uni"
->
-> "We don't teach AI as a tool, we teach it as a mindset that shaped by human-centered design"
-> ([Reference](https://www.youtube.com/watch?v=ZF1BvtWpzc4))
+## Haaland
 
-### Character Nicknames
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.
 
-| Character | Nickname |
-|---|---|
-| Princess | Princess Fab.io |
-| Halloween | Fab.io Halloween Edition |
-| Wolf-man | Wolf-man Fab.io |
-| Mirurun | Cute Fab.io |
+## Al Merqaedes F1 Team
 
----
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.
 
-## 3. Do u wanna build a snowman?
+## Nuclear Ghandi
 
-### Character Nicknames
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.
 
-| Character | Nickname |
-|---|---|
-| Princess | Princess Elsa |
-| Halloween | Sven |
-| Wolf-man | Olaf |
-| Mirurun | Princess Anna |
+## Clauding
 
----
-
-## 4. Haaland
-
-### Character Nicknames
-
-| Character | Nickname |
-|---|---|
-| Princess | Princess Haaland 🎀 |
-| Halloween | Haalandween |
-| Wolf-man | Viking Haaland |
-| Mirurun | Cute Netherlands supporters |
-
----
-
-## 5. John Cena
-
-### Character Nicknames
-
-| Character | Nickname |
-|---|---|
-| Princess | Princess Cena 🎀 |
-| Halloween | Halloween Cena |
-| Wolf-man | Wolf-man Cena |
-| Mirurun | Blushing Cena 👉👈 |
-
----
-
-## 6. Claude-ing
-
-### Theme Color Scheme
-
-| Color | Hex | RGB |
-|---|---|---|
-| White | `#FFFFFF` | (255, 255, 255) |
-| Dark | `#191919` | (25, 25, 25) |
-| Claude Orange | `#C15F3C` | (193, 95, 60) |
-
-### Character Nicknames
-
-| Character | Nickname |
-|---|---|
-| Princess | Sister Gemini |
-| Halloween | Cousin ChatGPT |
-| Wolf-man | Uncle Deepseek |
-| Mirurun | Brother Claude |
-
----
-
-## 7. Al-Merqaedes
-
-### Character Nicknames
-
-| Character | Nickname |
-|---|---|
-| Princess | Princess Antonelli 🎀 |
-| Halloween | Osama Bin Russel |
-| Wolf-man | Toto Wolff-man |
-| Mirurun | Blushing Talibanatolli 👉👈 |
-
----
-
-## 8. Nuclear Gandhi
-
-### Character Nicknames
-
-| Character | Nickname |
-|---|---|
-| Princess | Princess Gandhi 🎀 |
-| Halloween | Nuclear Gandhi |
-| Wolf-man | Wolf-man Gandhi |
-| Mirurun | Cute Gandhi 😙 |
+The Settings catalogue provides this theme label and its preview thumbnail. No
+theme-specific mechanics, prices, colors, or nicknames are assigned here.

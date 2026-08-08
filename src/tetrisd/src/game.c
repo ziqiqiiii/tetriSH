@@ -5,6 +5,11 @@ static void				spawn_next(t_game *g);
 static void				lock_piece(t_game *g);
 static t_body_clear_label	clear_label(int lines, bool perfect);
 static int				step_interval(const t_game *g);
+static bool				begin_clear(t_game *g);
+static void				finish_clear(t_game *g);
+static bool				advance_clear(t_game *g, int elapsed_ms);
+static bool				apply_fall(t_game *g, int elapsed_ms);
+static bool				apply_lockdown(t_game *g, int elapsed_ms);
 
 /**
  * @brief Blanks a game slot back to "nobody is playing here".
@@ -67,6 +72,15 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
  * paused is not owed back to it - resuming must not drop the piece four rows
  * to make up for the pause.
  *
+ * A game holding completed rows is not falling: gravity is the clear's timer
+ * for as long as it runs, and the piece that comes next has not been dealt.
+ * Every tick of it is a snapshot, so the client has the frames to animate it
+ * with rather than one flash at each end.
+ *
+ * Falling and locking are two clocks, not one. A piece that has landed is
+ * out of rows to fall but still has its lock delay to spend, so the same
+ * elapsed milliseconds are charged against both.
+ *
  * @param g Game to advance.
  * @param elapsed_ms Milliseconds since this game was last advanced.
  * @return true when the board or piece changed and a snapshot is due.
@@ -77,16 +91,10 @@ bool	game_gravity(t_game *g, int elapsed_ms)
 
 	if (g == NULL || !g->active || g->paused || elapsed_ms <= 0)
 		return (false);
-	changed = false;
-	g->accum_ms += elapsed_ms;
-	while (g->active && g->accum_ms >= step_interval(g))
-	{
-		g->accum_ms -= step_interval(g);
-		if (gravity_tick(&g->board, &g->piece) == BRAIN_LOCKED)
-			lock_piece(g);
-		changed = true;
-	}
-	return (changed);
+	if (g->clearing_count > 0)
+		return (advance_clear(g, elapsed_ms));
+	changed = apply_fall(g, elapsed_ms);
+	return (apply_lockdown(g, elapsed_ms) || changed);
 }
 
 /**
@@ -98,11 +106,17 @@ bool	game_gravity(t_game *g, int elapsed_ms)
  */
 bool	game_move(t_game *g, int dcol)
 {
-	if (g == NULL || !g->active || g->paused)
+	bool	was_grounded;
+
+	if (g == NULL || !g->active || g->paused || g->clearing_count > 0)
 		return (false);
 	if (effect_controls_inverted(&g->effects))
 		dcol = -dcol;
-	return (piece_move(&g->board, &g->piece, dcol, 0) == BRAIN_OK);
+	was_grounded = lockdown_grounded(&g->board, &g->piece);
+	if (piece_move(&g->board, &g->piece, dcol, 0) != BRAIN_OK)
+		return (false);
+	lockdown_on_shift(&g->lockdown, was_grounded);
+	return (true);
 }
 
 /**
@@ -114,21 +128,30 @@ bool	game_move(t_game *g, int dcol)
  */
 bool	game_rotate(t_game *g, int dir)
 {
-	int	kick;
+	bool	was_grounded;
+	int		kick;
 
-	if (g == NULL || !g->active || g->paused
+	if (g == NULL || !g->active || g->paused || g->clearing_count > 0
 		|| effect_rotation_blocked(&g->effects))
 		return (false);
 	kick = 0;
-	return (piece_rotate_with_kick(&g->board, &g->piece, dir, &kick)
-		== BRAIN_OK);
+	was_grounded = lockdown_grounded(&g->board, &g->piece);
+	if (piece_rotate_with_kick(&g->board, &g->piece, dir, &kick) != BRAIN_OK)
+		return (false);
+	lockdown_on_shift(&g->lockdown, was_grounded);
+	return (true);
 }
 
 /**
  * @brief Drops the falling piece: one row on a soft drop, all the way on hard.
  *
  * A hard drop always locks, which is why it can never be "blocked" - it is
- * accepted even when the piece is already resting on the stack.
+ * accepted even when the piece is already resting on the stack. That is the
+ * whole difference between the two under the Guideline: hard drop is the
+ * input that says "and I am done with it", soft drop is only gravity in a
+ * hurry. So a soft drop into the floor does nothing at all and the piece
+ * keeps its lock delay, which is what leaves the player the half-second the
+ * drop was pressed to reach.
  *
  * @param g Game to act on.
  * @param hard true for a hard drop, false for a soft drop.
@@ -138,7 +161,7 @@ bool	game_drop(t_game *g, bool hard)
 {
 	int	distance;
 
-	if (g == NULL || !g->active || g->paused
+	if (g == NULL || !g->active || g->paused || g->clearing_count > 0
 		|| effect_fastdrop_blocked(&g->effects))
 		return (false);
 	if (hard)
@@ -149,13 +172,11 @@ bool	game_drop(t_game *g, bool hard)
 		lock_piece(g);
 		return (true);
 	}
-	if (piece_soft_drop(&g->board, &g->piece) == BRAIN_OK)
-	{
-		score_add_drop(&g->score, 1, false);
-		g->accum_ms = 0;
-		return (true);
-	}
-	lock_piece(g);
+	if (piece_soft_drop(&g->board, &g->piece) != BRAIN_OK)
+		return (false);
+	score_add_drop(&g->score, 1, false);
+	g->accum_ms = 0;
+	lockdown_on_fall(&g->lockdown, &g->piece);
 	return (true);
 }
 
@@ -178,7 +199,8 @@ bool	game_hold(t_game *g)
 {
 	int	outgoing;
 
-	if (g == NULL || !g->active || g->paused || g->hold_used)
+	if (g == NULL || !g->active || g->paused || g->hold_used
+		|| g->clearing_count > 0)
 		return (false);
 	outgoing = (int)g->piece.type;
 	g->hold_used = true;
@@ -192,6 +214,7 @@ bool	game_hold(t_game *g)
 	}
 	g->piece = piece_spawn((t_piece_type)g->hold);
 	g->hold = outgoing;
+	lockdown_init(&g->lockdown, &g->piece);
 	if (!piece_is_valid(&g->board, &g->piece))
 	{
 		g->topped_out = true;
@@ -228,6 +251,13 @@ bool	game_pause(t_game *g, bool paused)
  * recorded: restarting is the player choosing that it did not happen, and the
  * room records what a player finishes or forfeits, not what they discard.
  *
+ * The snapshot sequence is the one thing carried across. It counts STATE
+ * frames on a connection, not events in a game, and the client drops any
+ * snapshot numbered below the last it saw - so a counter that went back to
+ * zero made the whole of the new game's opening look like replayed frames,
+ * and the board sat frozen until the count climbed past where the old game
+ * had left it.
+ *
  * @param g Game to restart.
  * @return true when a new game was dealt.
  */
@@ -235,12 +265,15 @@ bool	game_restart(t_game *g)
 {
 	t_player_id	pid;
 	uint32_t	seed;
+	uint64_t	seq;
 
 	if (g == NULL || g->player_id == 0)
 		return (false);
 	pid = g->player_id;
 	seed = g->seed * 1664525u + 1013904223u;
+	seq = g->seq;
 	game_start(g, pid, seed);
+	g->seq = seq;
 	return (true);
 }
 
@@ -269,6 +302,8 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 		out->phase = BODY_PHASE_TOP_OUT;
 	else if (g->paused)
 		out->phase = BODY_PHASE_PAUSED;
+	else if (g->clearing_count > 0)
+		out->phase = BODY_PHASE_CLEARING;
 	row = 0;
 	while (row < BODY_BOARD_ROWS)
 	{
@@ -305,6 +340,14 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 		out->charge = BODY_CHARGE_MAX;
 	out->last_ability = g->last_ability;
 	out->last_clear = g->last_clear;
+	out->clearing_count = g->clearing_count;
+	out->clearing_ms = g->clearing_ms;
+	row = 0;
+	while (row < g->clearing_count && row < BODY_CLEARING_MAX)
+	{
+		out->clearing_rows[row] = g->clearing_rows[row];
+		row++;
+	}
 }
 
 /**
@@ -321,6 +364,7 @@ static void	spawn_next(t_game *g)
 	int	i;
 
 	g->piece = piece_spawn((t_piece_type)g->next[0]);
+	lockdown_init(&g->lockdown, &g->piece);
 	i = 0;
 	while (i < BODY_NEXT_COUNT - 1)
 	{
@@ -353,10 +397,53 @@ static void	spawn_next(t_game *g)
  */
 static void	lock_piece(t_game *g)
 {
+	piece_stamp(&g->board, &g->piece);
+	g->hold_used = false;
+	g->accum_ms = 0;
+	if (begin_clear(g))
+		return ;
+	finish_clear(g);
+}
+
+/**
+ * @brief Holds the rows the landed piece completed, if it completed any.
+ *
+ * Nothing is taken away and nothing is scored here. The rows stay on the
+ * board for clear_duration_ms, which is what the client animates and what
+ * makes it honest to animate: for that long the board really does still have
+ * them, and there is no piece to move because none has been dealt.
+ *
+ * @param g Game whose piece has just landed.
+ * @return true when a clear is now in progress.
+ */
+static bool	begin_clear(t_game *g)
+{
+	g->clearing_count = board_find_full_lines(&g->board, g->clearing_rows);
+	if (g->clearing_count <= 0)
+	{
+		g->clearing_count = 0;
+		return (false);
+	}
+	g->clearing_ms = 0;
+	return (true);
+}
+
+/**
+ * @brief Runs the held clear out and hands the board back.
+ *
+ * This is the whole of what a lock used to do inline: take the rows away,
+ * apply the effects that ride on a clear, score it, and deal the next piece.
+ * It is also reached with clearing_count 0 by a lock that completed nothing,
+ * because a lock that clears nothing still scores nothing, still consumes its
+ * effects, and still needs a piece.
+ *
+ * @param g Game whose clear is over.
+ */
+static void	finish_clear(t_game *g)
+{
 	int		cleared;
 	bool	perfect;
 
-	piece_stamp(&g->board, &g->piece);
 	cleared = board_clear_lines(&g->board);
 	if (cleared > 0 && effect_thwack_active(&g->effects))
 		cleared += board_cascade_clear(&g->board);
@@ -371,9 +458,35 @@ static void	lock_piece(t_game *g)
 	}
 	g->last_clear = clear_label(cleared, perfect);
 	effect_on_piece_lock(&g->effects);
-	g->hold_used = false;
+	g->clearing_count = 0;
+	g->clearing_ms = 0;
 	g->accum_ms = 0;
 	spawn_next(g);
+}
+
+/**
+ * @brief Charges elapsed time against a clear in progress.
+ *
+ * Every tick reports a change even when the millisecond count is all that
+ * moved, because that count is the animation: a client sent only the first
+ * and last frame would have nothing to interpolate and would flash.
+ *
+ * @param g Game holding completed rows.
+ * @param elapsed_ms Milliseconds since the last tick.
+ * @return true, always - a clear in progress always owes a snapshot.
+ */
+static bool	advance_clear(t_game *g, int elapsed_ms)
+{
+	int	duration_ms;
+
+	duration_ms = clear_duration_ms(g->level);
+	g->clearing_ms += elapsed_ms;
+	if (g->clearing_ms >= duration_ms)
+	{
+		g->clearing_ms = duration_ms;
+		finish_clear(g);
+	}
+	return (true);
 }
 
 /**
@@ -415,4 +528,57 @@ static int	step_interval(const t_game *g)
 	if (interval < 1)
 		return (1);
 	return (interval);
+}
+
+/**
+ * @brief Drops the piece by however many rows the elapsed time bought.
+ *
+ * The accumulator is emptied the moment the piece lands rather than left to
+ * grow: the seconds a piece spends resting are not owed to it, and a piece
+ * nudged back off a ledge should fall on the next step and not instantly.
+ *
+ * @param g Game whose piece is falling.
+ * @param elapsed_ms Milliseconds since the last tick.
+ * @return true when the piece changed rows.
+ */
+static bool	apply_fall(t_game *g, int elapsed_ms)
+{
+	bool	changed;
+
+	changed = false;
+	g->accum_ms += elapsed_ms;
+	while (g->accum_ms >= step_interval(g))
+	{
+		g->accum_ms -= step_interval(g);
+		if (gravity_tick(&g->board, &g->piece) != BRAIN_OK)
+		{
+			g->accum_ms = 0;
+			break ;
+		}
+		lockdown_on_fall(&g->lockdown, &g->piece);
+		changed = true;
+	}
+	return (changed);
+}
+
+/**
+ * @brief Charges the same elapsed time against a landed piece's lock delay.
+ *
+ * Only the expiry is a change worth a snapshot: while the delay runs the
+ * board looks exactly as it did, so a client told about every tick of it
+ * would be sent the same frame forty times.
+ *
+ * @param g Game whose piece may be resting.
+ * @param elapsed_ms Milliseconds since the last tick.
+ * @return true when the piece locked on this tick.
+ */
+static bool	apply_lockdown(t_game *g, int elapsed_ms)
+{
+	bool	grounded;
+
+	grounded = lockdown_grounded(&g->board, &g->piece);
+	if (!lockdown_tick(&g->lockdown, grounded, elapsed_ms))
+		return (false);
+	lock_piece(g);
+	return (true);
 }

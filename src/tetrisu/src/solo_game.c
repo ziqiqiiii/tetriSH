@@ -129,10 +129,7 @@ bool	solo_game_update(t_solo_game *game, int elapsed_ms)
 		return (false);
 	remaining_ms = elapsed_ms;
 	started_in_countdown = game->countdown_active;
-	changed = advance_ability_feedback(game, elapsed_ms);
-	changed = advance_personal_best(game, elapsed_ms) || changed;
-	changed = advance_event_animations(game, elapsed_ms) || changed;
-	changed = advance_danger_presentation(game, elapsed_ms) || changed;
+	changed = solo_game_update_presentation(game, elapsed_ms);
 	if (started_in_countdown)
 		return (changed);
 	if (game->paused)
@@ -169,6 +166,33 @@ bool	solo_game_update(t_solo_game *game, int elapsed_ms)
 		if (!started_in_reveal && game->phase == SOLO_TOP_OUT_REVEAL)
 			return (true);
 	}
+	return (changed);
+}
+
+/**
+ * @brief Advances only the timers that belong to the client either way.
+ *
+ * The countdown, the ability feedback, the personal-best banner and the
+ * danger fade are presentation: the server has no opinion about any of them
+ * and never sends them. Online they are the *only* thing that ticks, which is
+ * why they are reachable without the rules that follow them in
+ * solo_game_update - an online game that skipped this would hold its 3-2-1 on
+ * screen forever and never accept an input.
+ *
+ * @param game Pointer to the Solo state.
+ * @param elapsed_ms Elapsed monotonic time in milliseconds.
+ * @return true when a visible animation may have changed.
+ */
+bool	solo_game_update_presentation(t_solo_game *game, int elapsed_ms)
+{
+	bool	changed;
+
+	if (game == NULL || elapsed_ms < 0)
+		return (false);
+	changed = advance_ability_feedback(game, elapsed_ms);
+	changed = advance_personal_best(game, elapsed_ms) || changed;
+	changed = advance_event_animations(game, elapsed_ms) || changed;
+	changed = advance_danger_presentation(game, elapsed_ms) || changed;
 	return (changed);
 }
 
@@ -533,15 +557,7 @@ static int	gameplay_next_wake_ms(const t_solo_game *game)
  */
 int	solo_clear_duration_ms(int level)
 {
-	if (level <= 6)
-		return (200);
-	if (level == 7)
-		return (175);
-	if (level == 8)
-		return (150);
-	if (level == 9)
-		return (125);
-	return (100);
+	return (clear_duration_ms(level));
 }
 
 /**
