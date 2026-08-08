@@ -137,7 +137,6 @@ t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
 	}
 	charge_deduct(&g->charge, def->level);
 	remember(g, def->level, true);
-	g->seq++;
 	return (ABILITY_ACTIVATED);
 }
 
@@ -202,9 +201,9 @@ static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
  * @brief Halloween L1 (Fry): fills the own bottom three rows, to burn later.
  *
  * The rows go in now and come out at the next lock, which is what game.c's
- * fry counter is for. The hole rides on the sequence number rather than on a
+ * fry counter is for. The hole rides on the snapshot counter rather than on a
  * random source: libtetrisbrain owns no RNG on purpose, and a hole that moves
- * predictably with the game's own clock is fair without inventing one.
+ * with how long the game has been running is fair without inventing one.
  *
  * @param g Game to transform.
  * @return true when the transform was kept.

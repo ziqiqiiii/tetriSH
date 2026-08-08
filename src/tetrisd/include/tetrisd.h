@@ -289,6 +289,15 @@ typedef struct s_game
 	bool				hold_used;
 	int					lines;
 	int					level;
+	/*
+	** How many snapshots this game has had pushed. It counts STATE frames,
+	** not events: docs/tetrisu-local-to-tetrisd.md asks for a monotonically
+	** increasing sequence number so a client can ignore a replayed or
+	** out-of-order snapshot, and a counter that only moved on interesting
+	** events would let two different boards share a number - which is
+	** exactly the case that check cannot catch. room.c bumps it once, at the
+	** one place a snapshot is taken.
+	*/
 	uint64_t			seq;
 	int					accum_ms;
 	/*
