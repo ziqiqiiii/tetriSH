@@ -7,6 +7,16 @@
 # define DISCARD_INPUT_BATCH_MAX		256
 
 /*
+ * Why the loop ended, when it ended because a screen could not be drawn
+ * rather than because the player asked to leave. notcurses owns the terminal
+ * until render_teardown, so the reason cannot be printed where it is found -
+ * it waits here and is printed once the terminal belongs to the shell again.
+ * Without this the client restores the terminal and exits 0 on a failed draw,
+ * which from the outside is indistinguishable from a crash.
+ */
+static const char	*g_exit_reason;
+
+/*
  * What the four multiplayer screens hand to each other. The picker chooses the
  * mode, the lobby or the create-room panel chooses the room, and the waiting
  * room is the only one that holds a model across keystrokes because its ready
@@ -345,6 +355,11 @@ int	main(void)
 	render_teardown(&ctx);
 	if (net_session.connected)
 		net_disconnect(&net_session.net);
+	if (g_exit_reason != NULL)
+	{
+		fprintf(stderr, "tetrisu: %s\n", g_exit_reason);
+		return (1);
+	}
 	return (0);
 }
 
@@ -373,7 +388,10 @@ static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 		|| navigation->current == APP_SCREEN_SIGN_UP)
 	{
 		if (!render_auth_show(ctx, form, rebuild))
+		{
+			g_exit_reason = "the sign-in screen could not be drawn";
 			return (-1);
+		}
 		rebuild = false;
 		key = render_wait_input(ctx, &input);
 		action = AUTH_ACTION_NONE;

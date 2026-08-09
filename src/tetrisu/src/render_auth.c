@@ -1,5 +1,16 @@
 #include "tetrisu.h"
 
+/*
+ * Below this the form does not fit at all. Every other screen answers that
+ * with a resize notice; this one used to answer it by failing, and
+ * run_auth_flow turns a failed draw into APP_NAV_QUIT - so a terminal a few
+ * columns too narrow ended the application the instant the intro finished,
+ * with the terminal restored and nothing printed. Indistinguishable from a
+ * crash, and the sign-in screen is the first thing drawn after the intro.
+ */
+# define AUTH_MIN_ROWS	12
+# define AUTH_MIN_COLS	38
+
 typedef struct s_auth_layout
 {
 	int	field_rows[4];
@@ -18,6 +29,7 @@ typedef struct s_auth_layout
 }	t_auth_layout;
 
 static bool			auth_art_available(const t_render_ctx *ctx);
+static bool			show_too_small(t_render_ctx *ctx);
 static t_auth_layout	auth_layout(const t_render_ctx *ctx,
 					t_auth_form_mode mode);
 static void			set_color(struct ncplane *plane, int red, int green,
@@ -74,8 +86,8 @@ bool	render_auth_show(t_render_ctx *ctx, const t_auth_form *form,
 			render_background_destroy(ctx);
 	}
 	ncplane_dim_yx(ctx->std, &rows, &cols);
-	if (rows < 12 || cols < 38)
-		return (false);
+	if (rows < AUTH_MIN_ROWS || cols < AUTH_MIN_COLS)
+		return (show_too_small(ctx));
 	pixel_background = false;
 	if (auth_art_available(ctx))
 		pixel_background = render_auth_pixel_background_refresh(ctx, form,
@@ -199,6 +211,50 @@ static bool	auth_art_available(const t_render_ctx *ctx)
 		return (false);
 	ncplane_dim_yx(ctx->std, &rows, &cols);
 	return (rows >= 24 && cols >= 64);
+}
+
+/**
+ * @brief Keeps sign-in alive below its minimum size, showing a resize notice.
+ *
+ * The artwork and the form are both dropped: what stays is one line naming
+ * the size the screen needs, on the same plane the form would have used, so
+ * growing the terminal draws the form again on the next resize event.
+ */
+static bool	show_too_small(t_render_ctx *ctx)
+{
+	ncplane_options	options;
+	uint64_t		channels;
+	char			notice[64];
+	unsigned		rows;
+	unsigned		cols;
+
+	render_auth_pixel_overlay_destroy(ctx);
+	render_auth_pixel_background_reset(ctx);
+	render_screen_destroy(ctx);
+	render_background_destroy(ctx);
+	ncplane_dim_yx(ctx->std, &rows, &cols);
+	if (rows == 0 || cols == 0)
+		return (false);
+	memset(&options, 0, sizeof(options));
+	options.rows = (int)rows;
+	options.cols = (int)cols;
+	ctx->screen_plane = ncplane_create(ctx->std, &options);
+	if (ctx->screen_plane == NULL)
+		return (false);
+	channels = 0;
+	(void)ncchannels_set_fg_rgb8(&channels, 255, 236, 249);
+	(void)ncchannels_set_bg_rgb8(&channels, 8, 8, 31);
+	(void)ncplane_set_base(ctx->screen_plane, " ", 0, channels);
+	ncplane_erase(ctx->screen_plane);
+	snprintf(notice, sizeof(notice), "SIGN IN NEEDS %dx%d",
+		AUTH_MIN_COLS, AUTH_MIN_ROWS);
+	set_color(ctx->screen_plane, 255, 206, 104);
+	put_centered(ctx->screen_plane, 0, notice, true);
+	set_color(ctx->screen_plane, 190, 156, 230);
+	put_centered(ctx->screen_plane, 1, "RESIZE THE TERMINAL", false);
+	ncplane_move_top(ctx->screen_plane);
+	render_notification_raise(ctx);
+	return (notcurses_render(ctx->nc) == 0);
 }
 
 static t_auth_layout	auth_layout(const t_render_ctx *ctx,
