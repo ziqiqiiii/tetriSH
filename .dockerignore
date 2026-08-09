@@ -1,0 +1,47 @@
+# Keep the build context small and the image free of host-built artefacts.
+# Anything listed here is rebuilt inside the container by `make`.
+
+# Version control and editor/agent state
+.git
+.gitattributes
+.gitignore
+.claude
+.scratch
+
+# Docker's own files
+Dockerfile
+.dockerignore
+
+# Development credentials. Never bake these into an image — `make certs`
+# mints fresh ones inside the container (see scripts/generate_certs.sh).
+certs/
+
+# Host build output. Objects built against the host's libraries would shadow
+# the container's and break the link, so they must not enter the context.
+**/obj/
+**/*.o
+**/*.a
+**/*.d
+**/*.so
+**/*.so.*
+**/*.dylib
+bin/
+src/tetrish/bin/
+src/tetrish/macmini_shell
+src/tetrisd/tetrisd
+src/tetrislogd/tetrislogd
+src/tetrisctl/tetrisctl
+src/tetrisu/tetrisu
+
+# Daemon runtime state and test scratch — recreated at run time
+tmp/
+**/tests/tmp/
+**/tests/bin/
+archive/
+
+# Debug droppings
+vgcore.*
+core
+core.*
+*.dSYM/
+.DS_Store
