@@ -173,10 +173,8 @@ bool			piece_is_valid(const t_board *b, const t_piece *p);
 bool			piece_cells(const t_piece *p, int cols[4], int rows[4]);
 t_brain_result	piece_move(const t_board *b, t_piece *p, int dcol, int drow);
 t_brain_result	piece_rotate(const t_board *b, t_piece *p, int dir);
-t_brain_result	piece_rotate_with_kick(const t_board *b, t_piece *p, int dir,
-					int *kick_index);
-t_spin_type		piece_t_spin_type(const t_board *b, const t_piece *p,
-					int kick_index);
+t_brain_result	piece_rotate_with_kick(const t_board *b, t_piece *p, int dir, int *kick_index);
+t_spin_type		piece_t_spin_type(const t_board *b, const t_piece *p, int kick_index);
 void			piece_stamp(t_board *b, const t_piece *p);
 
 /* BAG.C */
@@ -198,8 +196,7 @@ bool			lockdown_tick(t_lockdown *lock, bool grounded, int elapsed_ms);
 
 /* LINECLEAR.C */
 int				board_clear_lines(t_board *b);
-int				board_find_full_lines(const t_board *b,
-					int rows[BRAIN_MAX_CLEAR_LINES]);
+int				board_find_full_lines(const t_board *b, int rows[BRAIN_MAX_CLEAR_LINES]);
 bool			board_is_empty(const t_board *b);
 
 /* SCORING.C */
@@ -208,10 +205,8 @@ int				level_from_lines(int total_lines);
 int				gravity_interval_ms(int level);
 int				clear_duration_ms(int level);
 void			score_state_init(t_score_state *state);
-t_score_result	score_apply_clear(t_score_state *state, int lines_cleared,
-					int level, t_spin_type spin, bool perfect_clear);
-uint64_t		score_add_drop(t_score_state *state, int cells,
-					bool hard_drop);
+t_score_result	score_apply_clear(t_score_state *state, int lines_cleared, int level, t_spin_type spin, bool perfect_clear);
+uint64_t		score_add_drop(t_score_state *state, int cells, bool hard_drop);
 
 /* ABILITIES.C */
 void			board_cut_top(t_board *b, int n);
@@ -219,8 +214,7 @@ void			board_cut_bottom(t_board *b, int n);
 void			board_apply_gravity(t_board *b);
 void			board_invert(t_board *b);
 void			board_fill_rows(t_board *b, int n, int hole_col);
-void			board_clear_cells(t_board *b, int cols[], int rows[],
-					int count);
+void			board_clear_cells(t_board *b, int cols[], int rows[], int count);
 void			board_delete_columns(t_board *b, int start_col, int end_col);
 int				board_cascade_clear(t_board *b);
 
