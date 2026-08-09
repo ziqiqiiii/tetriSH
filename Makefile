@@ -189,7 +189,21 @@ DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
 DOCKER_NAME		:= tetrish
 DOCKER_PORT		:= 4242
 
-DOCKER_TTY		 = $(shell [ -e /dev/tty ] && [ -t 1 ] && printf -- '-it' || printf -- '-i')
+# -t only works when there is a terminal, so a piped or CI invocation must not
+# ask for one - but neither `[ -t 0 ]` nor `[ -t 1 ]` can answer that here:
+# make gives the $(shell ...) subshell pipes for both, so both tests are false
+# even at a real terminal. Opening /dev/tty is the test that survives, because
+# it is the controlling terminal whatever the standard descriptors point at.
+# Getting this wrong costs more than a missing flag: with no TTY the container
+# has no line discipline, so Ctrl-C and Ctrl-D do nothing and notcurses hangs
+# forever waiting on terminal capability replies that cannot arrive.
+# /dev/tty must be *opened*, not merely stat'd: the device node exists even in
+# a session with no controlling terminal, so `[ -c ]` and `[ -r ]` both pass
+# there and would hand a TTY-less CI run the -t it cannot use. Opening it and
+# testing that descriptor is the only form that answers the real question.
+DOCKER_TTY		 = $(shell { { [ -t 3 ] && printf -- '-it' \
+					|| printf -- '-i'; } 3</dev/tty || printf -- '-i'; } \
+					2>/dev/null)
 
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
