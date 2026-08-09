@@ -75,6 +75,17 @@ typedef enum
 	T_SPIN_FULL
 }	t_spin_type;
 
+/* Battle Royale targeting modes. The values are the wire representation
+ * carried in HTTTP bodies, so they are pinned explicitly and must not be
+ * reordered. */
+typedef enum
+{
+	TARGET_RANDOM		= 0,
+	TARGET_ATTACKERS	= 1,
+	TARGET_KO			= 2,
+	TARGET_TOP_SCORE	= 3
+}	t_target_mode;
+
 typedef struct
 {
 	uint64_t	total;
@@ -209,5 +220,8 @@ bool			effect_fastdrop_blocked(const t_effect_state *state);
 bool			effect_controls_inverted(const t_effect_state *state);
 bool			effect_thwack_active(const t_effect_state *state);
 int				effect_fry_rows(const t_effect_state *state);
+
+/* GARBAGE.C */
+int				garbage_lines_from_clear(int lines_cleared);
 
 # endif
