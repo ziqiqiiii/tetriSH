@@ -51,6 +51,8 @@ GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` ad
 
 Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported; where no notcurses package exists, it is built from source.
 
+The compiler and the assembler have to be upgraded together: GCC 15 writes non-ASCII string constants with the `.base64` directive, which GNU as only understands from binutils 2.44. A machine whose GCC has outrun its binutils compiles most of the tree and then fails on `src/tetrisu/src/render_multiplayer.c` — the one file that draws a box — with ``unknown pseudo-op: `.base64'``. `make check-deps` probes the pair and says so before the build starts; `make deps` upgrades binutils where the package manager can.
+
 ```bash
 make deps                # check and install anything missing
 make check-deps          # check only; never modifies the system
