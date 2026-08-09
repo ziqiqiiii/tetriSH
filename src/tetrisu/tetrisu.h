@@ -650,6 +650,7 @@
 /* One second per step, matching the visible "starting in N" copy. */
 # define WAITING_ROOM_COUNTDOWN_START	5
 # define WAITING_ROOM_COUNTDOWN_STEP_MS	1000
+# define WAITING_ROOM_REFRESH_MS	500
 # define WAITING_ROOM_DOUBLE_PLAYERS	2
 # define WAITING_ROOM_ROYALE_MIN_PLAYERS	4
 /* The authored waiting-room roster has room for eight legible rows. */
@@ -1608,7 +1609,12 @@ typedef struct s_app_data_provider
 	 * split, so the seam is the same shape now as it will be then.
 	 */
 	t_app_provider_result	(*create_room)(void *userdata, t_app_game_mode mode,
-			t_app_room_view_model *view);
+				t_app_room_view_model *view);
+	t_app_provider_result	(*refresh_room)(void *userdata, const char *room_id,
+				t_app_room_view_model *view);
+	t_app_provider_result	(*leave_room)(void *userdata, const char *room_id);
+	t_app_provider_result	(*start_room)(void *userdata, const char *room_id,
+				t_app_room_view_model *view);
 	/*
 	 * Spending and equipping. Both answer with the whole model as it stands
 	 * afterwards rather than with a verdict the caller applies to its own
@@ -2565,6 +2571,14 @@ t_app_provider_result	app_room_view_load(
 					t_app_screen_view_model *view);
 t_app_provider_result	app_room_view_create(
 					const t_app_data_provider *provider, t_app_game_mode mode,
+					t_app_screen_view_model *view);
+t_app_provider_result	app_room_view_refresh(
+					const t_app_data_provider *provider, const char *room_id,
+					t_app_screen_view_model *view);
+t_app_provider_result	app_room_view_leave(
+					const t_app_data_provider *provider, const char *room_id);
+t_app_provider_result	app_room_view_start(
+					const t_app_data_provider *provider, const char *room_id,
 					t_app_screen_view_model *view);
 const char		*app_data_status_name(t_app_data_status status);
 const char		*app_game_mode_name(t_app_game_mode mode);

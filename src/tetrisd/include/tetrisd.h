@@ -794,6 +794,8 @@ t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
+bool			server_room_snapshot(const t_server_room *server_room,
+					t_body_room *out);
 const t_game	*server_room_game_at(const t_server_room *server_room, int slot);
 
 /* SERVER.C */

@@ -167,9 +167,10 @@ waiting room with chat and a pre-match countdown — while the authoritative
 - Lobby and waiting-room volume keys use the same floating music-volume card
   as Home and Solo; they do not replace room-list, readiness, countdown, or
   chat feedback.
-- The countdown is the only value in the client that advances without input, so
-  it is the only thing on its region plane: one small plane repaints per second
-  and nothing else on the screen is touched.
+- The countdown and the live room snapshot advance without input. The client
+  refreshes the authoritative roster and room state every 500 ms, and the
+  existing region signatures repaint only the seats or status that changed;
+  the countdown keeps its own small once-per-second plane.
 - The lobby, the create-room panel and the waiting room share one duel-hall
   backdrop and one set of region planes. Switching between them destroys the
   planes the previous screen owned, because leaving one behind would strand a
@@ -387,13 +388,16 @@ blank.
 it reports `SERVER ONLINE`, `SIGN UP` registers a player and `LOGIN` binds the
 connection. Single Player then plays Solo against `tetrisd` — every board
 mutation is server-authoritative and the renderer draws only `STATE` snapshots.
-Multiplayer's lobby, create-room, and join-by-id are driven by `LIST`/`JOIN`
-against the server.
+Multiplayer's lobby and create/join paths are driven by `LIST`/`JOIN`. Once
+seated, the waiting room polls the read-only `LIST /room/<name>` snapshot,
+sends `LEAVE` before navigating back, and sends `START` before launching a
+match. The snapshot carries the ordered roster, owner, readiness, capacity,
+mode, and room state; refresh never joins the room again.
 
 | Screen | Server reach today |
 |---|---|
-| Login / Sign Up, Settings, Marketplace, catalogues, Single Player, Leaderboard, Multiplayer lobby & create/join | Driven by `tetrisd` |
-| Waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+| Login / Sign Up, Settings, Marketplace, catalogues, Single Player, Leaderboard, Multiplayer lobby, create/join, and waiting-room roster/start/leave | Driven by `tetrisd` |
+| Double / Battle Royale match presentation | Match screens remain scaffolded; room start and server game allocation are live |
 
 Settings and the Marketplace read `LIST /store` for the catalogue and its
 prices and `PROFILE` for the wallet, rank, inventory and loadout; `Enter` on a
@@ -720,7 +724,7 @@ and drive a real socket against it:
 | Suite | Client | What it covers |
 |---|---|---|
 | `test_net_solo.sh` | `net_smoke` | The wire: `JOIN`/`START`, every gameplay action, `STATE` decoded into the Solo view model |
-| `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join |
+| `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join, live roster refresh, owner-only start, leave, and room re-entry |
 | `test_solo_authority.sh` | `solo_authority_smoke` | The layer `solo_mode.c` calls: who owns the board, and the hold that stops `tetrisd`'s clock for the length of the client's 3-2-1 |
 
 The fixture walks its port upward from the suite's base rather than using a

@@ -73,12 +73,11 @@ typedef enum e_net_state
 ** route would be a schema this side does not own.
 */
 /*
-** Big enough for the longest body a route answers with, which is the
-** leaderboard: ten lines of `<rank> <username> <score>`, and a username may
-** be 31 characters. At 512 a table of long names came back cut in half and
-** decoded as a short one, which reads as a real answer.
+** Big enough for the longest body a route answers with: a 99-seat waiting-room
+** roster. It matches TETRISD_BODY_MAX_BYTES so a valid server response is
+** never truncated into a smaller, apparently valid snapshot.
 */
-# define NET_BODY_MAX	1024
+# define NET_BODY_MAX	8192
 
 typedef struct s_net_result
 {

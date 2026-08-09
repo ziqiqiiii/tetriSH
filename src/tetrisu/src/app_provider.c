@@ -25,6 +25,12 @@ static t_app_provider_result	fixture_load_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
 static t_app_provider_result	fixture_create_room(void *userdata,
 				t_app_game_mode mode, t_app_room_view_model *view);
+static t_app_provider_result	fixture_refresh_room(void *userdata,
+				const char *room_id, t_app_room_view_model *view);
+static t_app_provider_result	fixture_leave_room(void *userdata,
+				const char *room_id);
+static t_app_provider_result	fixture_start_room(void *userdata,
+				const char *room_id, t_app_room_view_model *view);
 static void	set_room_summary(t_app_room_summary_view_model *room,
 				const char *id, const char *owner, t_app_game_mode mode,
 				t_app_room_state state, int players, int capacity);
@@ -76,6 +82,9 @@ void	app_fixture_provider_init(t_app_data_provider *provider)
 	provider->load_lobby = fixture_load_lobby;
 	provider->load_room = fixture_load_room;
 	provider->create_room = fixture_create_room;
+	provider->refresh_room = fixture_refresh_room;
+	provider->leave_room = fixture_leave_room;
+	provider->start_room = fixture_start_room;
 }
 
 /**
@@ -131,6 +140,81 @@ t_app_provider_result	app_room_view_create(
 		result = provider->create_room(provider->userdata, mode,
 				&view->data.room);
 	view->status = status_from_result(result);
+	return (result);
+}
+
+/**
+ * @brief Replaces a waiting-room model with a read-only provider snapshot.
+ *
+ * @param provider Provider carrying the refresh operation.
+ * @param room_id Room to refresh.
+ * @param view Waiting-room screen model to update on success.
+ * @return Provider result; view remains unchanged on failure.
+ */
+t_app_provider_result	app_room_view_refresh(
+	const t_app_data_provider *provider, const char *room_id,
+	t_app_screen_view_model *view)
+{
+	t_app_room_view_model	room;
+	t_app_provider_result	result;
+
+	if (view == NULL || room_id == NULL || room_id[0] == '\0')
+		return (APP_PROVIDER_INVALID);
+	if (provider == NULL || provider->refresh_room == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	memset(&room, 0, sizeof(room));
+	result = provider->refresh_room(provider->userdata, room_id, &room);
+	if (result == APP_PROVIDER_OK)
+	{
+		view->data.room = room;
+		view->status = APP_DATA_READY;
+	}
+	return (result);
+}
+
+/**
+ * @brief Leaves the current room through the provider.
+ *
+ * @param provider Provider carrying the leave operation.
+ * @param room_id Room the player is leaving.
+ * @return Provider result.
+ */
+t_app_provider_result	app_room_view_leave(
+	const t_app_data_provider *provider, const char *room_id)
+{
+	if (provider == NULL || provider->leave_room == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (room_id == NULL || room_id[0] == '\0')
+		return (APP_PROVIDER_INVALID);
+	return (provider->leave_room(provider->userdata, room_id));
+}
+
+/**
+ * @brief Starts the current room and adopts the authoritative result.
+ *
+ * @param provider Provider carrying the start operation.
+ * @param room_id Room the owner is starting.
+ * @param view Waiting-room screen model to update on success.
+ * @return Provider result; view remains unchanged on failure.
+ */
+t_app_provider_result	app_room_view_start(
+	const t_app_data_provider *provider, const char *room_id,
+	t_app_screen_view_model *view)
+{
+	t_app_room_view_model	room;
+	t_app_provider_result	result;
+
+	if (view == NULL || room_id == NULL || room_id[0] == '\0')
+		return (APP_PROVIDER_INVALID);
+	if (provider == NULL || provider->start_room == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	memset(&room, 0, sizeof(room));
+	result = provider->start_room(provider->userdata, room_id, &room);
+	if (result == APP_PROVIDER_OK)
+	{
+		view->data.room = room;
+		view->status = APP_DATA_READY;
+	}
 	return (result);
 }
 
@@ -794,6 +878,56 @@ static t_app_provider_result	fixture_create_room(void *userdata,
 	view->local_slot = 0;
 	set_room_player(&view->players[0], "PreviewPlayer", true, true);
 	seed_room_chat(view);
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Refreshes a fixture room through the same whole-snapshot seam.
+ *
+ * @param userdata Fixture provider state (unused).
+ * @param room_id Room id to reload.
+ * @param view Receives the deterministic room snapshot.
+ * @return Provider result from the fixture loader.
+ */
+static t_app_provider_result	fixture_refresh_room(void *userdata,
+	const char *room_id, t_app_room_view_model *view)
+{
+	return (fixture_load_room(userdata, room_id, view));
+}
+
+/**
+ * @brief Accepts leaving a fixture room.
+ *
+ * @param userdata Fixture provider state (unused).
+ * @param room_id Room being left.
+ * @return APP_PROVIDER_OK for a named room, otherwise APP_PROVIDER_INVALID.
+ */
+static t_app_provider_result	fixture_leave_room(void *userdata,
+	const char *room_id)
+{
+	(void)userdata;
+	if (room_id == NULL || room_id[0] == '\0')
+		return (APP_PROVIDER_INVALID);
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Starts a fixture room without inventing a second model.
+ *
+ * @param userdata Fixture provider state (unused).
+ * @param room_id Room being started.
+ * @param view Existing room model, marked in-game on success.
+ * @return APP_PROVIDER_OK for valid input, otherwise APP_PROVIDER_INVALID.
+ */
+static t_app_provider_result	fixture_start_room(void *userdata,
+	const char *room_id, t_app_room_view_model *view)
+{
+	(void)userdata;
+	if (room_id == NULL || room_id[0] == '\0' || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	if (fixture_load_room(NULL, room_id, view) != APP_PROVIDER_OK)
+		return (APP_PROVIDER_INVALID);
+	view->state = APP_ROOM_STATE_IN_GAME;
 	return (APP_PROVIDER_OK);
 }
 

@@ -74,8 +74,14 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_mp_session *session);
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
-				t_app_navigation *navigation, t_mp_session *session,
-				t_room_action action);
+					const t_app_data_provider *provider,
+					t_app_navigation *navigation, t_mp_session *session,
+					t_room_action action);
+static void	refresh_waiting_room(const t_app_data_provider *provider,
+					t_mp_session *session, bool *changed);
+static int	waiting_room_wait_ms(const t_waiting_room_state *state,
+					uint64_t countdown_deadline, uint64_t refresh_deadline,
+					bool polling);
 static bool	load_room_view(const t_app_data_provider *provider,
 				t_mp_session *session);
 static bool	apply_start_screen_override(t_app_navigation *navigation,
@@ -1708,10 +1714,13 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	ncinput					input;
 	uint32_t				key;
 	uint64_t				deadline;
+	uint64_t				refresh_deadline;
 	uint64_t				now;
 	int						wait_ms;
 	bool					prompted;
 	bool					auto_start;
+	bool					polling;
+	bool					room_changed;
 
 	if (!load_room_view(provider, session))
 		return (-1);
@@ -1728,6 +1737,7 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	auto_start = navigation->previous != APP_SCREEN_DOUBLE
 		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE;
 	if (auto_start
+		&& waiting_room_local_is_owner(&session->room_view.data.room)
 		&& waiting_room_auto_start_allowed(&session->room_view.data.room))
 		(void)waiting_room_begin_countdown(&session->room_state);
 	(void)notcurses_mice_disable(ctx->nc);
@@ -1740,23 +1750,37 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	if (session->room_state.counting_down)
 		deadline = ui_notification_now_ms()
 			+ WAITING_ROOM_COUNTDOWN_STEP_MS;
+	polling = provider != NULL && provider->refresh_room != NULL
+		&& !provider->local_fixtures;
+	refresh_deadline = ui_notification_now_ms() + WAITING_ROOM_REFRESH_MS;
 	while (navigation->current == APP_SCREEN_WAITING_ROOM)
 	{
-		wait_ms = -1;
-		if (session->room_state.counting_down)
-		{
-			now = ui_notification_now_ms();
-			wait_ms = deadline > now ? (int)(deadline - now) : 0;
-		}
+		wait_ms = waiting_room_wait_ms(&session->room_state, deadline,
+				refresh_deadline, polling);
 		key = render_wait_input_timeout(ctx, &input, wait_ms);
 		action = ROOM_ACTION_NONE;
 		prompted = false;
+		room_changed = false;
 		previous = session->room_state;
 		if (key == 0)
 		{
-			deadline += WAITING_ROOM_COUNTDOWN_STEP_MS;
-			if (waiting_room_tick(&session->room_state))
-				action = ROOM_ACTION_LAUNCH;
+			now = ui_notification_now_ms();
+			if (session->room_state.counting_down && now >= deadline)
+			{
+				deadline = now + WAITING_ROOM_COUNTDOWN_STEP_MS;
+				if (waiting_room_tick(&session->room_state))
+					action = ROOM_ACTION_LAUNCH;
+			}
+			if (polling && now >= refresh_deadline)
+			{
+				refresh_deadline = now + WAITING_ROOM_REFRESH_MS;
+				refresh_waiting_room(provider, session, &room_changed);
+				if (session->room_view.data.room.state == APP_ROOM_STATE_IN_GAME)
+					action = ROOM_ACTION_LAUNCH;
+				else if (session->room_state.counting_down
+					&& !waiting_room_can_start(&session->room_view.data.room))
+					(void)waiting_room_cancel_countdown(&session->room_state);
+			}
 		}
 		else if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
 			continue ;
@@ -1788,11 +1812,13 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (prompted && session->room_state.counting_down)
 			deadline = ui_notification_now_ms()
 				+ WAITING_ROOM_COUNTDOWN_STEP_MS;
-		if (!apply_room_action(ctx, audio, navigation, session, action))
+		if (!apply_room_action(ctx, audio, provider, navigation, session, action))
 			return (-1);
 		/* Double auto-starts; Battle Royale can only enter here through the
 		 * owner's explicit Start action handled above. */
-		if (auto_start && navigation->current == APP_SCREEN_WAITING_ROOM
+		if (auto_start && action != ROOM_ACTION_LAUNCH
+			&& navigation->current == APP_SCREEN_WAITING_ROOM
+			&& waiting_room_local_is_owner(&session->room_view.data.room)
 			&& waiting_room_auto_start_allowed(
 				&session->room_view.data.room))
 			(void)waiting_room_begin_countdown(&session->room_state);
@@ -1802,8 +1828,8 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (waiting_room_action_leaves_screen(action))
 			discard_queued_input(ctx);
 		if (navigation->current == APP_SCREEN_WAITING_ROOM
-			&& waiting_room_state_view_changed(&previous,
-				&session->room_state)
+			&& (room_changed || waiting_room_state_view_changed(&previous,
+					&session->room_state))
 			&& !render_waiting_room_show(ctx, &session->room_view,
 				&session->room_state, false))
 			return (-1);
@@ -1814,12 +1840,13 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 /**
  * @brief Applies one waiting-room action to the room model and navigation.
  *
- * Readying and starting are resolved locally because there is no server yet;
- * both go through the same policy helpers a server-driven build will call, so
- * only the source of the room snapshot changes later.
+ * Fixture readiness remains local. Leave and Start cross the provider seam so
+ * a network session cannot navigate away from a room state the server still
+ * owns.
  */
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
-	t_app_navigation *navigation, t_mp_session *session, t_room_action action)
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session, t_room_action action)
 {
 	t_app_room_view_model	*room;
 	t_room_feedback			blocker;
@@ -1869,20 +1896,107 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	}
 	if (action == ROOM_ACTION_LAUNCH)
 	{
+		if (room->state != APP_ROOM_STATE_IN_GAME
+			&& !waiting_room_local_is_owner(room))
+		{
+			(void)waiting_room_cancel_countdown(&session->room_state);
+			return (true);
+		}
+		if (room->state != APP_ROOM_STATE_IN_GAME
+			&& app_room_view_start(provider, room->id, &session->room_view)
+				!= APP_PROVIDER_OK)
+		{
+			(void)waiting_room_cancel_countdown(&session->room_state);
+			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
+			return (true);
+		}
 		audio_play_menu_select(audio);
-		room->state = APP_ROOM_STATE_IN_GAME;
 		(void)app_navigation_dispatch(navigation,
-			waiting_room_launch_action(room));
+			waiting_room_launch_action(&session->room_view.data.room));
 		return (true);
 	}
 	if (action == ROOM_ACTION_LEAVE)
 	{
-		audio_play_menu_select(audio);
-		(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		if (app_room_view_leave(provider, room->id) == APP_PROVIDER_OK)
+		{
+			audio_play_menu_select(audio);
+			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		}
+		else
+			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
 	}
 	else if (action == ROOM_ACTION_QUIT)
 		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	return (true);
+}
+
+/**
+ * @brief Refreshes the room model without re-entering it.
+ *
+ * Local chat is retained until the server owns that stream; the authoritative
+ * snapshot replaces every roster and room-state field.
+ *
+ * @param provider Provider carrying the read-only refresh hook.
+ * @param session Multiplayer screen session.
+ * @param changed Receives whether anything renderable changed.
+ */
+static void	refresh_waiting_room(const t_app_data_provider *provider,
+	t_mp_session *session, bool *changed)
+{
+	t_app_room_view_model	before;
+	t_app_room_chat_view_model	chat[APP_ROOM_CHAT_MAX];
+	int					chat_count;
+	t_app_provider_result	result;
+
+	before = session->room_view.data.room;
+	chat_count = before.chat_count;
+	memcpy(chat, before.chat, sizeof(chat));
+	result = app_room_view_refresh(provider, session->room_id,
+			&session->room_view);
+	if (result == APP_PROVIDER_OK)
+	{
+		if (session->room_view.data.room.chat_count == 0 && chat_count > 0)
+		{
+			session->room_view.data.room.chat_count = chat_count;
+			memcpy(session->room_view.data.room.chat, chat, sizeof(chat));
+		}
+		*changed = memcmp(&before, &session->room_view.data.room,
+				sizeof(before)) != 0;
+		return ;
+	}
+	if (result == APP_PROVIDER_INVALID)
+		session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
+	*changed = false;
+}
+
+/**
+ * @brief Computes the next waiting-room deadline without busy-spinning.
+ *
+ * @param state Current countdown state.
+ * @param countdown_deadline Next countdown tick time.
+ * @param refresh_deadline Next live snapshot time.
+ * @param polling Whether the provider supports network refresh.
+ * @return Milliseconds to wait, or -1 when only input can wake the loop.
+ */
+static int	waiting_room_wait_ms(const t_waiting_room_state *state,
+	uint64_t countdown_deadline, uint64_t refresh_deadline, bool polling)
+{
+	uint64_t	next;
+	uint64_t	now;
+
+	next = 0;
+	if (state->counting_down)
+		next = countdown_deadline;
+	if (polling && (next == 0 || refresh_deadline < next))
+		next = refresh_deadline;
+	if (next == 0)
+		return (-1);
+	now = ui_notification_now_ms();
+	if (next <= now)
+		return (0);
+	if (next - now > INT_MAX)
+		return (INT_MAX);
+	return ((int)(next - now));
 }
 
 /**

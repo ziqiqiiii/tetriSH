@@ -30,6 +30,8 @@ static void	test_fixture_provider_contract(void)
 	assert(provider.load_profile != NULL && provider.load_catalogue != NULL);
 	assert(provider.load_leaderboard != NULL && provider.load_lobby != NULL);
 	assert(provider.load_room != NULL && provider.create_room != NULL);
+	assert(provider.refresh_room != NULL && provider.leave_room != NULL);
+	assert(provider.start_room != NULL);
 	assert(provider.login(provider.userdata, "", "password", "example.com",
 			&auth)
 		== APP_PROVIDER_INVALID);
@@ -57,6 +59,13 @@ static void	test_fixture_provider_contract(void)
 		assert(room.mode == APP_GAME_MODE_DOUBLE);
 		assert(room.player_count == 1);
 		assert(room.players[0].owner && room.players[0].ready);
+		assert(provider.refresh_room(provider.userdata, room.id, &room)
+			== APP_PROVIDER_OK);
+		assert(provider.start_room(provider.userdata, room.id, &room)
+			== APP_PROVIDER_OK);
+		assert(room.state == APP_ROOM_STATE_IN_GAME);
+		assert(provider.leave_room(provider.userdata, room.id)
+			== APP_PROVIDER_OK);
 		assert(provider.create_room(provider.userdata, APP_GAME_MODE_NONE,
 				&room) == APP_PROVIDER_INVALID);
 	}

@@ -143,6 +143,18 @@ One line per room:
 - `status` ∈ `WAITING | READY | IN_GAME | FINISHED`
 - Rooms travel by **name** (`S-01`, `BR-10`), never by id. The ids run per mode, so only the prefixed name is unique. `mode` rides as its own field so clients never parse the prefix.
 
+### Room — `LIST /room/<name>` snapshot (`room.c`)
+
+| Function | Description |
+|---|---|
+| `body_room_encode(in, out, cap)` | Serialise one authoritative waiting-room snapshot |
+| `body_room_decode(buf, len, out)` | Parse the fixed room header and its ordered occupied-seat rows |
+
+The header carries the room name, mode, status, minimum players, capacity, and
+occupied-seat count. Each following row carries the server slot, player id,
+owner/player role, ready/waiting state, and username. Rows must be in strictly
+increasing server-slot order; refreshes therefore preserve a stable roster.
+
 ### Profile — ProfileView (`profile.c`)
 
 | Function | Description |
@@ -211,6 +223,7 @@ libstatusbody/
 ├── src/
 │   ├── state.c             application/tetris-state encode/decode
 │   ├── rooms.c             LIST /rooms row encode/decode
+│   ├── room.c              LIST /room/<name> snapshot encode/decode
 │   ├── profile.c           ProfileView encode/decode
 │   ├── leaderboard.c       leaderboard row encode/decode
 │   ├── catalogue.c         LIST /store catalogue encode/decode

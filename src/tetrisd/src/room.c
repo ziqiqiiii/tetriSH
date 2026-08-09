@@ -436,6 +436,56 @@ bool	server_room_describe(const t_server_room *server_room,
 }
 
 /**
+ * @brief Projects an authoritative room and its occupied seats for a client.
+ *
+ * The wire model is compact but preserves server slot order. Keeping the
+ * projection here maintains room.c's ownership of the domain object while
+ * allowing the waiting-room handler to encode a stable snapshot.
+ *
+ * @param server_room Room to project.
+ * @param out Receives the complete wire-facing snapshot.
+ * @return true when the room exists and the projection fits.
+ */
+bool	server_room_snapshot(const t_server_room *server_room,
+	t_body_room *out)
+{
+	const t_slot	*slot;
+	int			index;
+
+	if (server_room == NULL || out == NULL || server_room->room == NULL)
+		return (false);
+	memset(out, 0, sizeof(*out));
+	snprintf(out->name, sizeof(out->name), "%s", server_room->room->name);
+	out->mode = (t_body_mode)server_room->room->mode;
+	out->status = (t_body_room_status)server_room->room->status;
+	out->min_to_start = server_room->room->min_to_start;
+	out->slot_count = server_room->room->slot_count;
+	index = 0;
+	while (index < server_room->room->slot_count)
+	{
+		slot = &server_room->room->slots[index];
+		if (slot->occupied)
+		{
+			if (out->member_count >= BODY_ROOM_MEMBERS_MAX)
+				return (false);
+			out->members[out->member_count].slot = slot->index;
+			out->members[out->member_count].player_id
+				= slot->membership.player_id;
+			out->members[out->member_count].owner
+				= membership_is_owner(&slot->membership);
+			out->members[out->member_count].ready
+				= slot->status == SLOT_READY;
+			snprintf(out->members[out->member_count].username,
+				sizeof(out->members[out->member_count].username), "%s",
+				slot->membership.username);
+			out->member_count++;
+		}
+		index++;
+	}
+	return (true);
+}
+
+/**
  * @brief Borrows the game being played in one slot, for reading only.
  *
  * @param server_room Room holding the slot.

@@ -96,6 +96,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `SIGNUP` | `/account` | Register a player; `201` with its id, `409` when the name is taken |
 | `LOGIN` | `/session` | Bind the connection to a player, displacing any older one |
 | `LIST` | `/rooms` | Every occupied room, in-game ones included |
+| `LIST` | `/room/<name>` | Detailed room state and ordered occupied seats; visible only to a player seated in that room |
 | `LIST` | `/store` | The character and theme catalogues, with the prices this server charges |
 | `LEADERBOARD` | `/leaderboard` | Top ten by recorded score, rank ascending; registering is what puts a player on it, so a fresh account ranks last with nought |
 | `PROFILE` | `/player/<pid>` | Wallet, score, rank, owned items and the equipped loadout; `403` for another player |
