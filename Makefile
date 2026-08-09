@@ -189,12 +189,8 @@ DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
 DOCKER_NAME		:= tetrish
 DOCKER_PORT		:= 4242
 
-# -t only works when stdin is a terminal, so a piped or CI invocation must not
-# ask for one. Lazily expanded: it is a property of the shell running the
-# recipe, not of the moment this file was parsed.
-DOCKER_TTY		 = $(shell [ -t 0 ] && printf -- '-it' || printf -- '-i')
+DOCKER_TTY		 = $(shell [ -e /dev/tty ] && [ -t 1 ] && printf -- '-it' || printf -- '-i')
 
-# Installs dependencies, builds every component, and mints the dev certs.
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
 	@ $(DOCKER) build -t $(DOCKER_REF) .
@@ -205,21 +201,15 @@ docker-run: docker-stop
 	@ $(DOCKER) run --rm $(DOCKER_TTY) --name $(DOCKER_NAME) \
 		-p $(DOCKER_PORT):$(DOCKER_PORT) $(DOCKER_REF)
 
-# These two publish no port, so they can run beside a live docker-run.
 docker-test:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
 
 docker-shell:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) bash
 
-# Frees both the port and the name for the next docker-run, which depends on
-# this. `rm -f` rather than `stop`: a container that has exited still owns its
-# name, so stopping alone would trade "port is already allocated" for "name is
-# already in use". Silent and successful when there is nothing to remove.
 docker-stop:
 	@ $(DOCKER) rm -f $(DOCKER_NAME) >/dev/null 2>&1 || true
 
-# Kept out of fclean: the image is shared state, not this tree's build output.
 docker-clean:
 	@ $(DOCKER) image rm -f $(DOCKER_REF) >/dev/null 2>&1 || true
 	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF)$(CLR_RMV) ✔️"
@@ -241,16 +231,6 @@ fclean:
 	@ $(RM) $(BIN)
 	@ echo "$(RED)Deleted $(BLUE)component binaries$(CLR_RMV) ✔️"
 
-# Like fclean but also wipes daemon runtime state: stops whatever is still
-# running, delegates to the shell's own `reset` (drops its tmp/ and archive/),
-# and clears the repo-level bin/tmp.
-#
-# The daemons are stopped first, and stopping them is what this target owes
-# them: tetrisctl blocks until each has finished tearing down, so the wipe
-# cannot delete tmp/ out from under a logger that is still writing into it.
-# Reversing these lines is the self-inflicted wound tetrislogd's sink reclaim
-# was written to survive - reclaim stays, because a log file can still be
-# rotated or removed by hand, but it stops being a patch for this.
 reset:
 	@ if [ -x $(BIN)/tetrisctl ]; then \
 		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
