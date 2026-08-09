@@ -19,23 +19,33 @@ static void		deliver(t_server_room *server_room, const unsigned char *bytes,
  * entirely. Neither is an error worth reporting upwards - the feed is not
  * something a room can fail at (UC-09 E1).
  *
+ * Failing to *build* the message is a different thing, and is reported. The
+ * counter is therefore only advanced once the bytes exist: a seq spent on a
+ * line nobody received would leave a permanent hole in the feed, and the
+ * sender would have been told the number of a message that was never sent.
+ *
  * @param server_room Room whose members receive the message.
  * @param chat Message to send; its seq and at are overwritten here.
+ * @return true when the line was built and handed to every seat.
  */
-void	room_chat_broadcast(t_server_room *server_room, t_body_chat *chat)
+bool	room_chat_broadcast(t_server_room *server_room, t_body_chat *chat)
 {
 	unsigned char	*bytes;
 	size_t			len;
 
 	if (server_room == NULL || server_room->room == NULL || chat == NULL)
-		return ;
-	server_room->chat_seq++;
-	chat->seq = server_room->chat_seq;
+		return (false);
+	chat->seq = server_room->chat_seq + 1;
 	chat->at = clock_now_ms();
 	if (serialise_chat(server_room, chat, &bytes, &len) != 0)
-		return ;
+	{
+		chat->seq = 0;
+		return (false);
+	}
+	server_room->chat_seq = chat->seq;
 	deliver(server_room, bytes, len);
 	free(bytes);
+	return (true);
 }
 
 /**
@@ -67,7 +77,7 @@ void	room_narrate(t_server_room *server_room, const char *fmt, ...)
 	va_end(args);
 	if (written < 0 || (size_t)written >= sizeof(chat.text))
 		return ;
-	room_chat_broadcast(server_room, &chat);
+	(void)room_chat_broadcast(server_room, &chat);
 }
 
 /**
@@ -111,6 +121,11 @@ static int	serialise_chat(const t_server_room *server_room,
  * several of them; the message is serialised once and copied per recipient,
  * which is cheaper than building it again for each.
  *
+ * A seat that cannot be given its copy is skipped, not returned on: losing
+ * one player's line is what the lane is already allowed to do, while giving
+ * up here would silently cut off every seat after it - so in a 99-slot room
+ * the feed would reach whoever happened to sit before the failure.
+ *
  * @param server_room Room whose seats receive the message.
  * @param bytes Serialised message; still owned by the caller afterwards.
  * @param len Length of bytes.
@@ -131,7 +146,7 @@ static void	deliver(t_server_room *server_room, const unsigned char *bytes,
 			continue ;
 		copy = malloc(len);
 		if (copy == NULL)
-			return ;
+			continue ;
 		memcpy(copy, bytes, len);
 		if (registry_enqueue_chat(&server_room->srv->reg,
 				slot->membership.player_id, copy, len) != 0)

@@ -20,6 +20,7 @@ static void	test_received_counts_every_line_not_the_ones_held(void);
 static void	test_an_empty_feed_reads_as_empty(void);
 static void	test_narration_and_chat_share_the_ring(void);
 static void	test_send_refuses_what_the_wire_would_refuse(void);
+static void	test_leaving_a_room_forgets_its_feed(void);
 
 static void	take_line(t_net_client *net, const char *sender, const char *text);
 
@@ -31,6 +32,7 @@ int	main(void)
 	test_an_empty_feed_reads_as_empty();
 	test_narration_and_chat_share_the_ring();
 	test_send_refuses_what_the_wire_would_refuse();
+	test_leaving_a_room_forgets_its_feed();
 	return (0);
 }
 
@@ -159,6 +161,36 @@ static void	test_send_refuses_what_the_wire_would_refuse(void)
 	assert(net_chat_send(&net, "D-01", "not seated yet", NULL) == -1);
 	assert(net_chat_held(&net) == 0);
 	printf("PASS test_send_refuses_what_the_wire_would_refuse\n");
+}
+
+/*
+** A feed belongs to one room. The ring used to outlive the room it was filled
+** from, so leaving one and joining the next drew the old room's conversation
+** in the new room's panel - and since tetrisd numbers each room's feed from
+** one, the two runs of seq interleaved on top of it.
+**
+** chat_received is checked as well as chat_held: it is what a screen compares
+** against to notice a line it has not drawn, so a reset that left it standing
+** would make the first line of the new room look like one already seen.
+*/
+static void	test_leaving_a_room_forgets_its_feed(void)
+{
+	t_net_client	net;
+
+	memset(&net, 0, sizeof(net));
+	take_line(&net, "amber", "see you next game");
+	take_line(&net, "blake", "gg");
+	assert(net_chat_held(&net) == 2);
+	net_chat_reset(&net);
+	assert(net_chat_held(&net) == 0);
+	assert(net_chat_at(&net, 0) == NULL);
+	assert(net.chat_received == 0);
+	net_chat_reset(NULL);
+	take_line(&net, "casey", "first line of the next room");
+	assert(net_chat_held(&net) == 1);
+	assert(strcmp(net_chat_at(&net, 0)->text,
+			"first line of the next room") == 0);
+	printf("PASS test_leaving_a_room_forgets_its_feed\n");
 }
 
 static void	take_line(t_net_client *net, const char *sender, const char *text)

@@ -32,6 +32,25 @@ void	net_chat_take(t_net_client *net, const t_body_chat *line)
 }
 
 /**
+ * @brief Forgets every line held, because they belonged to a room left.
+ *
+ * A feed is a fact about one room. The ring outlived the room it was filled
+ * from, so leaving one and joining the next opened the new room's panel
+ * showing the old room's conversation - and tetrisd numbers each room's feed
+ * from one, so the two runs of seq interleaved on top of that.
+ *
+ * @param net Client whose feed is emptied.
+ */
+void	net_chat_reset(t_net_client *net)
+{
+	if (net == NULL)
+		return ;
+	net->chat_head = 0;
+	net->chat_held = 0;
+	net->chat_received = 0;
+}
+
+/**
  * @brief Reports how many lines of the feed this client is still holding.
  *
  * @param net Client to ask.

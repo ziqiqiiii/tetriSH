@@ -20,7 +20,9 @@ static bool	sayable(const char *text);
  * @param msg The request (unused; the body is read through the context).
  * @param context The request context.
  * @return 200 when broadcast, 429 rate-limited, 404 when not in that room,
- *         403 when muted, 400 when the text is unsendable.
+ *         403 when muted, 400 when the text is unsendable, 500 when the line
+ *         could not be built - which is the server's fault, not the sender's,
+ *         and must not be answered with a seq nobody will ever receive.
  */
 int	chat_handler(const t_htttp_message *msg, void *context)
 {
@@ -54,7 +56,11 @@ int	chat_handler(const t_htttp_message *msg, void *context)
 		request_body_printf(ctx, "reason bad-text\n");
 		return (400);
 	}
-	room_chat_broadcast(server_room, &chat);
+	if (!room_chat_broadcast(server_room, &chat))
+	{
+		request_body_printf(ctx, "reason unsendable\n");
+		return (500);
+	}
 	request_body_printf(ctx, "room %s\nseq %llu\n", name,
 		(unsigned long long)chat.seq);
 	return (200);

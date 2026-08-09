@@ -182,8 +182,13 @@ int		net_login(t_net_client *net, const char *username,
 ** The two readers hand back the ring rather than a view model, for the same
 ** reason the store does: what tetrisd said is one thing, and what a screen
 ** draws is another.
+**
+** net_chat_reset empties it. The ring holds one room's feed and nothing else,
+** so every path that leaves a room calls it - otherwise the next room opens
+** showing the last one's conversation.
 */
 void	net_chat_take(t_net_client *net, const t_body_chat *line);
+void	net_chat_reset(t_net_client *net);
 size_t	net_chat_held(const t_net_client *net);
 const t_body_chat	*net_chat_at(const t_net_client *net, size_t index);
 int		net_chat_send(t_net_client *net, const char *room, const char *text,

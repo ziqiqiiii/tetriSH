@@ -838,7 +838,7 @@ bool			server_room_is_muted(const t_server_room *server_room, t_player_id pid);
 const t_game	*server_room_game_at(const t_server_room *server_room, int slot);
 
 /* NARRATE.C */
-void			room_chat_broadcast(t_server_room *server_room, t_body_chat *chat);
+bool			room_chat_broadcast(t_server_room *server_room, t_body_chat *chat);
 void			room_narrate(t_server_room *server_room, const char *fmt, ...)
 					__attribute__((format(printf, 2, 3)));
 

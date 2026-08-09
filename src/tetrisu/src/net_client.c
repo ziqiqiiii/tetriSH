@@ -22,6 +22,7 @@ static int	receive_message(t_net_client *net, t_htttp_message *out,
 				int timeout_ms);
 static bool	take_state(t_net_client *net, const t_htttp_message *msg);
 static void	take_chat(t_net_client *net, const t_htttp_message *msg);
+static bool	addressed_to_this_room(const t_net_client *net, const char *path);
 static void	take_player_id(t_net_client *net, const t_htttp_message *msg);
 static void	take_reason(const t_htttp_message *msg, t_net_result *out);
 static void	take_body(const t_htttp_message *msg, t_net_result *out);
@@ -108,6 +109,13 @@ int	net_connect(t_net_client *net, const t_net_config *cfg)
 /**
  * @brief Closes the session and returns the client to offline.
  *
+ * session_close wipes the keys and forgets the descriptor; it deliberately
+ * does not close it, because the descriptor is the caller's (libtetrissh's
+ * README says so, and tetrisd's own release path calls both). So the socket
+ * is closed here. Leaving it open leaked a descriptor per reconnect, and -
+ * far worse than the descriptor - sent no FIN, so tetrisd went on believing
+ * in a connection nobody was reading and held the player's seat with it.
+ *
  * @param net Client to close; safe on one that never connected.
  */
 void	net_disconnect(t_net_client *net)
@@ -115,10 +123,14 @@ void	net_disconnect(t_net_client *net)
 	if (net == NULL)
 		return ;
 	if (net->fd >= 0)
+	{
 		session_close(&net->sess);
+		close(net->fd);
+	}
 	net->fd = -1;
 	net->state = NET_OFFLINE;
 	net->has_state = false;
+	net_chat_reset(net);
 }
 
 /**
@@ -385,6 +397,10 @@ static bool	take_state(t_net_client *net, const t_htttp_message *msg)
  * Unlike a snapshot a line is never superseded, so nothing is compared: every
  * message that decodes is kept, and the ring decides what falls off the end.
  *
+ * What is compared is the room. A line the server sent while this client was
+ * still seated elsewhere can arrive after it has joined the next room, and
+ * filing it would put one room's conversation in another's panel.
+ *
  * @param net Client whose feed receives the line.
  * @param msg The message that arrived.
  */
@@ -395,9 +411,30 @@ static void	take_chat(t_net_client *net, const t_htttp_message *msg)
 	if (msg->type != HTTTP_MESSAGE_REQUEST || msg->method == NULL
 		|| strcmp(msg->method, "CHAT") != 0 || msg->body == NULL)
 		return ;
+	if (!addressed_to_this_room(net, msg->path))
+		return ;
 	if (body_chat_decode((const char *)msg->body, msg->body_len, &line) != 0)
 		return ;
 	net_chat_take(net, &line);
+}
+
+/**
+ * @brief Checks that a pushed CHAT names the room this client is sitting in.
+ *
+ * @param net Client to ask.
+ * @param path The pushed message's path.
+ * @return true when the path is /room/<name> and names this client's room.
+ */
+static bool	addressed_to_this_room(const t_net_client *net, const char *path)
+{
+	size_t	prefix_len;
+
+	if (path == NULL || net->room[0] == '\0')
+		return (false);
+	prefix_len = strlen(TETRISU_ROUTE_ROOM);
+	if (strncmp(path, TETRISU_ROUTE_ROOM, prefix_len) != 0)
+		return (false);
+	return (strcmp(path + prefix_len, net->room) == 0);
 }
 
 /**
