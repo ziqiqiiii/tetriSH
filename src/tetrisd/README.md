@@ -23,6 +23,7 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 ## Features
 
 - One reactor thread in `epoll_wait` owns every connection, the lobby, the rooms, the games and every outbox — no locks over game state; beside it, a bounded pool runs the one genuinely blocking call under a deadline the reactor enforces
+- Server-authoritative off the board too: the marketplace catalogue, prices, wallet, inventory and equipped loadout are the store's, and a client sends an item id and nothing else
 - One gravity `timerfd` for the whole server, not a ticker thread per room; elapsed comes from the clock, so a late or coalesced tick catches games up rather than running them slow
 - Server-authoritative: the client sends inputs, never board state, and the subject of every input rides in the request path
 - A player holds at most one connection — a second `LOGIN` displaces the first; disconnecting forfeits the game in progress, so an abandoned game is still recorded
@@ -95,7 +96,11 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `SIGNUP` | `/account` | Register a player; `201` with its id, `409` when the name is taken |
 | `LOGIN` | `/session` | Bind the connection to a player, displacing any older one |
 | `LIST` | `/rooms` | Every occupied room, in-game ones included |
+| `LIST` | `/store` | The character and theme catalogues, with the prices this server charges |
 | `LEADERBOARD` | `/leaderboard` | Top ten by recorded score, rank ascending; registering is what puts a player on it, so a fresh account ranks last with nought |
+| `PROFILE` | `/player/<pid>` | Wallet, score, rank, owned items and the equipped loadout; `403` for another player |
+| `BUY` | `/store/character/<cid>`, `/store/theme/<tid>` | Spend the wallet; answers the updated profile, `403` `insufficient-funds`, `409` `inventory-full` |
+| `EQUIP` | `/player/<pid>/character/<cid>`, `/player/<pid>/theme/<tid>` | Set the loadout; answers the updated profile, `403` `not-owned` |
 | `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
 | `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
 | `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
@@ -132,7 +137,7 @@ Rooms are named by the lobby (`S-01`, `D-02`, `BR-03`), never by clients, which 
 
 Statuses in use: `200`, `201`, `400`, `401`, `403`, `404`, `409`, `413`, `429`, `500`, `501`.
 
-A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`. A bare status would leave a player unable to tell a full room from one already playing, or "you cannot afford that" from "that ability has nothing here to act on".
+A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`, `insufficient-funds`, `inventory-full`, `not-owned`. A bare status would leave a player unable to tell a full room from one already playing, or "you cannot afford that" from "that ability has nothing here to act on".
 
 ### Abilities
 
@@ -151,6 +156,18 @@ Charge is `libtetrisbrain`'s: two cleared lines bank one, and levels 1–4 cost 
 | Wolf-man | 4 | Thwack | For the next four pieces, blocks cascade after a clear |
 
 Every transform is tried on a copy and kept only when the falling piece survives it, so an ability that would leave the piece inside the stack is refused whole rather than half-applied.
+
+### Marketplace
+
+Which four abilities an `ABILITY` level selects from is decided by the equipped character, so who owns what is a gameplay fact, not a cosmetic one. `tetrisd` therefore decides all of it: the price comes from `config/characters.cfg` and `config/themes.cfg`, the balance from the store, and `db_buy_*` / `db_equip_*` enforce affordability and ownership atomically under their own write lock. A client sends an id and nothing else — it cannot name a price, assert what it owns, or equip a character it never bought.
+
+`BUY` and `EQUIP` answer with the **updated profile** rather than a bare status, so acting on the account and re-reading it are one round trip and no client ever draws a wallet it has not been told. Buying something already owned is a no-op that answers `200` with that same profile — the owned list in it is what tells the screen the tile is theirs.
+
+Catalogue ids are never reused or renumbered: they are written into every player's owned lists, so renumbering would repoint what somebody already bought at a different item. Theme id `5` is the gap left by a cut theme and stays a gap, which is why `LIST /store` carries each id explicitly rather than implying it from position.
+
+The wallet is filled by playing. A game that reaches game-over — or is forfeited by leaving, topping out, or losing the connection — is recorded once with `db_record_game`, which credits `TETRISD_POINTS_PER_WALLET_POINT` (100) game points per wallet point. The credit is the difference between what the player's `lifetime_points` were worth before the game and what they are worth after, not that game's score divided on its own, so a game worth less than the rate leaves its remainder on the account instead of rounding to nothing (`docs/game-economics.md`). A game abandoned by restarting is not recorded at all.
+
+The same call ranks the player, and it ranks them on their **best single game**, not on that total — `leaderboard_score` moves only when a game beats it. The two must not be confused: charging the wallet against the best score would stop paying the moment a player stopped setting records, and ranking on the total would rank whoever played most.
 
 ---
 
@@ -266,7 +283,8 @@ src/tetrisd/
 │   ├── handshake_pool.c   Bounded workers for the one blocking call
 │   ├── dispatch.c         Frame → route → status; body field helpers
 │   ├── request_target.c   Who may act on whose board, and the input budget
-│   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input, game
+│   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input, game,
+│   │                      profile (PROFILE), store (LIST /store, BUY, EQUIP)
 │   ├── ability_ctrl.c     The Gaiden catalogue, targeting, and what it costs
 │   ├── room.c             Both halves of a Room; ticking and STATE push
 │   ├── game.c             t_game — the aggregate libtetrisbrain does not own
@@ -280,7 +298,7 @@ src/tetrisd/
 
 ## Testing
 
-Thirteen suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
+Fourteen suites. Integration suites boot a real server in-process on port `0` through `server_start` and talk to it with a headless `libtetrissh` client, over throwaway certificates and a throwaway data directory:
 
 ```bash
 make -C src/tetrisd test

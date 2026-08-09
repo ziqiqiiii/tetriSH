@@ -10,7 +10,7 @@ receives.
 - [Build And Test](#build-and-test)
 - [Usage](#usage)
 - [Codec Contract](#codec-contract)
-- [The Four Codecs](#the-four-codecs)
+- [The Five Codecs](#the-five-codecs)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 
@@ -80,7 +80,7 @@ On failure both return `-1` and set `errno`:
 
 
 ---
-## The Four Codecs
+## The Five Codecs
 
 One codec per HTTTP body type, each its own `.c` file. Every subsection below
 gives the pair's functions, then the wire format those functions read and write.
@@ -176,6 +176,24 @@ One line per rank, ascending:
 <rank> <username> <score>
 ```
 
+### Catalogue — `LIST /store` rows (`catalogue.c`)
+
+| Function | Description |
+|---|---|
+| `body_catalogue_encode(in, out, cap)` | Serialise both catalogues, each section count-prefixed |
+| `body_catalogue_decode(buf, len, out)` | Parse both sections; a count past `BODY_CATALOGUE_MAX` is refused before a row is read |
+
+Characters first, then themes:
+
+```
+characters <n>
+<id> <price> <name>          (exactly n lines)
+themes <n>
+<id> <price> <name>          (exactly n lines)
+```
+
+The name runs to end of line and may contain spaces, which is why it is last; the id is the catalogue id, which carries gaps and is therefore not a position.
+
 ### Error Codes
 
 | `errno` | Meaning |
@@ -195,6 +213,7 @@ libstatusbody/
 │   ├── rooms.c             LIST /rooms row encode/decode
 │   ├── profile.c           ProfileView encode/decode
 │   ├── leaderboard.c       leaderboard row encode/decode
+│   ├── catalogue.c         LIST /store catalogue encode/decode
 │   ├── body_util.h           Private — shared append/scan primitives
 │   └── body_util.c           Private — not part of the public API
 ├── tests/test_*.c          Unit tests, one per module (each with its own main)

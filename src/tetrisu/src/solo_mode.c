@@ -26,6 +26,7 @@ static bool	apply_handling_actions(t_solo_authority *authority,
 				t_solo_game *game, t_solo_handling_state *handling,
 				const t_solo_handling_config *config, int elapsed_ms);
 static void	play_solo_events(t_audio_ctx *audio, uint32_t events);
+static uint64_t	load_personal_best(const t_solo_authority *authority);
 
 /**
  * @brief Runs the Solo game loop.
@@ -84,7 +85,7 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 		return (-1);
 	}
 	solo_authority_open(&authority, net, &game, new_game_seed());
-	solo_game_set_personal_best(&game, solo_best_load());
+	solo_game_set_personal_best(&game, load_personal_best(&authority));
 	solo_game_start_countdown(&game);
 	play_solo_events(audio, solo_game_take_events(&game));
 	handling_config = solo_handling_default_config();
@@ -160,7 +161,11 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 					elapsed_ms);
 		if (display_ready && solo_game_finish_personal_best(&game))
 		{
-			(void)solo_best_store(game.personal_best);
+			/* Online the record is the account's, and tetrisd already wrote
+			** it when it recorded the game; writing the file too would leave
+			** this machine claiming a score nobody playing offline set. */
+			if (!solo_authority_is_online(&authority))
+				(void)solo_best_store(game.personal_best);
 			needs_draw = true;
 		}
 		if (display_ready && solo_game_update_danger(&game, elapsed_ms))
@@ -612,4 +617,27 @@ static void	play_solo_events(t_audio_ctx *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_TICK);
 	if ((events & SOLO_EVENT_COUNTDOWN_GO) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_GO);
+}
+
+/**
+ * @brief Loads the best score this game is to be measured against.
+ *
+ * Online the record belongs to the account, so it comes out of the same
+ * PROFILE the Marketplace reads and follows the player to whatever terminal
+ * they sign in at. Offline there is no account to ask and the machine's own
+ * file stands in, which is also the fallback when the server will not answer -
+ * starting a signed-in player at zero would announce their next bad game as a
+ * personal best.
+ *
+ * @param authority Authority running this game.
+ * @return The best score to compare this game against.
+ */
+static uint64_t	load_personal_best(const t_solo_authority *authority)
+{
+	t_body_profile	profile;
+
+	if (solo_authority_is_online(authority)
+		&& net_profile(authority->net, &profile) == 0)
+		return (profile.score);
+	return (solo_best_load());
 }

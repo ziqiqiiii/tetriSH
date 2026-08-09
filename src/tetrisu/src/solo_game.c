@@ -336,32 +336,66 @@ bool	solo_game_finish_personal_best(t_solo_game *game)
 }
 
 /**
- * @brief Calculates the pulsing then fading best-score banner opacity.
+ * @brief Calculates the opacity of the best-score line on the top-out panel.
+ *
+ * A new best pulses to announce itself and then rests lit; it does not fade
+ * away, because the panel it sits on stays up until the player restarts and
+ * the score is what they are reading it for. A game that did not beat the
+ * record has nothing to announce, so its line is simply drawn.
  *
  * @param game Pointer to the Solo state.
- * @return Alpha from 0 through 255.
+ * @return Alpha from 0 through 255; 0 when there is no line to draw.
  */
 unsigned	solo_game_personal_best_opacity(const t_solo_game *game)
 {
 	int	elapsed;
 	int	phase;
-	int	remaining;
 
-	if (game == NULL || !game->new_personal_best)
+	if (game == NULL)
 		return (0);
+	if (!game->new_personal_best)
+	{
+		if (game->phase == SOLO_GAME_OVER && game->personal_best > 0)
+			return (255);
+		return (0);
+	}
 	elapsed = game->personal_best_elapsed_ms;
 	if (elapsed >= SOLO_PERSONAL_BEST_PULSE_MS)
-	{
-		remaining = SOLO_PERSONAL_BEST_PULSE_MS
-			+ SOLO_PERSONAL_BEST_FADE_MS - elapsed;
-		if (remaining <= 0)
-			return (0);
-		return ((unsigned)(255 * remaining / SOLO_PERSONAL_BEST_FADE_MS));
-	}
+		return (255);
 	phase = elapsed % (SOLO_PERSONAL_BEST_PULSE_MS / 2);
 	if (phase > SOLO_PERSONAL_BEST_PULSE_MS / 4)
 		phase = SOLO_PERSONAL_BEST_PULSE_MS / 2 - phase;
 	return ((unsigned)(255 - 60 * phase / (SOLO_PERSONAL_BEST_PULSE_MS / 4)));
+}
+
+/**
+ * @brief Writes what the top-out panel should say about the best score.
+ *
+ * Both renderers ask this rather than deciding it themselves, so the pixel
+ * canvas and the compatibility plane cannot drift into saying two different
+ * things about the same game.
+ *
+ * @param game Pointer to the Solo state.
+ * @param out Buffer receiving the caption.
+ * @param cap Size of out; SOLO_BEST_CAPTION_MAX is enough for either form.
+ * @return true when there is a caption to draw, false when there is nothing
+ *         to say - the game is not over, or no record has ever been set.
+ */
+bool	solo_game_best_caption(const t_solo_game *game, char *out, size_t cap)
+{
+	if (game == NULL || out == NULL || cap == 0)
+		return (false);
+	if (game->phase != SOLO_GAME_OVER)
+		return (false);
+	if (game->new_personal_best)
+	{
+		snprintf(out, cap, "NEW PERSONAL BEST");
+		return (true);
+	}
+	if (game->personal_best == 0)
+		return (false);
+	snprintf(out, cap, "BEST %" PRIu64, game->personal_best);
+	return (true);
 }
 
 /**
@@ -474,7 +508,7 @@ int	solo_game_next_wake_ms(const t_solo_game *game)
 			- game->ability_feedback_elapsed_ms;
 	wake_ms = animation_wake_ms(wake_ms, feedback_ms > 0, feedback_ms);
 	personal_best_ms = SOLO_PERSONAL_BEST_PULSE_MS
-		+ SOLO_PERSONAL_BEST_FADE_MS - game->personal_best_elapsed_ms;
+		- game->personal_best_elapsed_ms;
 	wake_ms = animation_wake_ms(wake_ms, game->new_personal_best,
 			personal_best_ms);
 	wake_ms = animation_wake_ms(wake_ms, game->score_event_active,
@@ -1069,7 +1103,10 @@ static bool	advance_ability_feedback(t_solo_game *game, int elapsed_ms)
 }
 
 /**
- * @brief Advances the short new-best pulse and fade on the shared loop clock.
+ * @brief Advances the short new-best pulse on the shared loop clock.
+ *
+ * The clock stops at the end of the pulse rather than running on into a fade,
+ * which is what lets the loop go idle while the lit line stays on screen.
  *
  * @param game Pointer to the Solo state.
  * @param elapsed_ms Elapsed monotonic milliseconds.
@@ -1077,16 +1114,13 @@ static bool	advance_ability_feedback(t_solo_game *game, int elapsed_ms)
  */
 static bool	advance_personal_best(t_solo_game *game, int elapsed_ms)
 {
-	int	total_ms;
-
 	if (!game->new_personal_best)
 		return (false);
-	total_ms = SOLO_PERSONAL_BEST_PULSE_MS + SOLO_PERSONAL_BEST_FADE_MS;
-	if (game->personal_best_elapsed_ms >= total_ms)
+	if (game->personal_best_elapsed_ms >= SOLO_PERSONAL_BEST_PULSE_MS)
 		return (false);
 	game->personal_best_elapsed_ms += elapsed_ms;
-	if (game->personal_best_elapsed_ms > total_ms)
-		game->personal_best_elapsed_ms = total_ms;
+	if (game->personal_best_elapsed_ms > SOLO_PERSONAL_BEST_PULSE_MS)
+		game->personal_best_elapsed_ms = SOLO_PERSONAL_BEST_PULSE_MS;
 	return (elapsed_ms > 0);
 }
 

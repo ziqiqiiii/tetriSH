@@ -43,6 +43,15 @@ static t_app_provider_result	load_provider_screen(
 				bool offline, t_app_screen_view_model *view);
 static void	set_screen_copy(t_app_screen_view_model *view,
 				const char *subtitle);
+static t_settings_equip_result	equip_slot(
+				const t_app_data_provider *provider,
+				t_app_settings_view_model *settings,
+				const t_app_catalogue_view_model *catalogue,
+				t_app_catalogue_kind kind, int slot);
+static void	adopt_settings(t_app_settings_view_model *target,
+				const t_app_settings_view_model *source);
+static t_app_catalogue_kind	catalogue_kind_of(
+				const t_marketplace_state *state);
 
 /**
  * @brief Installs deterministic, visibly marked data for UI development.
@@ -186,6 +195,215 @@ void	app_settings_apply_local_controls(t_app_settings_view_model *view,
 }
 
 /**
+ * @brief Returns the entry a catalogue panel marks as equipped.
+ *
+ * The flag is the server's answer, copied straight out of the profile's
+ * equipped id, so this reads the loadout rather than reconstructing it from
+ * whatever the renderer last displayed.
+ *
+ * @param catalogue The panel to search.
+ * @return The equipped entry, or NULL when the panel marks none.
+ */
+const t_app_catalogue_item_view_model	*app_catalogue_equipped(
+	const t_app_catalogue_view_model *catalogue)
+{
+	int	index;
+
+	if (catalogue == NULL)
+		return (NULL);
+	index = 0;
+	while (index < catalogue->count && index < APP_CATALOGUE_MAX_ITEMS)
+	{
+		if (catalogue->items[index].equipped)
+			return (&catalogue->items[index]);
+		index++;
+	}
+	return (NULL);
+}
+
+/**
+ * @brief Buys the focused Marketplace entry through the provider.
+ *
+ * Owned and unaffordable are answered without a request. Not because the
+ * client decides them - tetrisd refuses both on its own, and its refusal is
+ * the one that counts - but because the wallet and the price on screen both
+ * came from the server on this screen's load, and one connection per player
+ * means nothing else can have spent it since. Sending a request whose answer
+ * is already known would only make the shelf feel slower.
+ *
+ * @param provider Data provider; a NULL buy_item takes the fixture path.
+ * @param market The model, replaced wholesale on success.
+ * @param state Which tile is focused.
+ * @return Bought, already owned, insufficient funds, or invalid selection.
+ */
+t_marketplace_purchase_result	app_marketplace_buy(
+	const t_app_data_provider *provider,
+	t_app_marketplace_view_model *market, const t_marketplace_state *state)
+{
+	const t_app_catalogue_item_view_model	*item;
+	t_app_settings_view_model				updated;
+
+	if (provider == NULL || provider->buy_item == NULL)
+		return (marketplace_buy_focused(market, state));
+	item = marketplace_focused_item(market, state);
+	if (item == NULL || !market->signed_in || market->offline)
+		return (MARKETPLACE_PURCHASE_INVALID);
+	if (item->owned)
+		return (MARKETPLACE_PURCHASE_OWNED);
+	if (!marketplace_can_afford(market, item))
+		return (MARKETPLACE_PURCHASE_INSUFFICIENT);
+	if (provider->buy_item(provider->userdata,
+			catalogue_kind_of(state), item->item_id, &updated)
+		!= APP_PROVIDER_OK)
+		return (MARKETPLACE_PURCHASE_INVALID);
+	adopt_settings(market, &updated);
+	return (MARKETPLACE_PURCHASE_BOUGHT);
+}
+
+/**
+ * @brief Equips the focused Marketplace entry through the provider.
+ *
+ * @param provider Data provider; a NULL equip_item takes the fixture path.
+ * @param market The model, replaced wholesale on success.
+ * @param state Which tile is focused.
+ * @return Changed, unchanged, locked, or invalid selection result.
+ */
+t_settings_equip_result	app_marketplace_equip(
+	const t_app_data_provider *provider,
+	t_app_marketplace_view_model *market, const t_marketplace_state *state)
+{
+	const t_app_catalogue_item_view_model	*item;
+	t_app_settings_view_model				updated;
+
+	if (provider == NULL || provider->equip_item == NULL)
+		return (marketplace_equip_focused(market, state));
+	item = marketplace_focused_item(market, state);
+	if (item == NULL || !market->signed_in || market->offline)
+		return (SETTINGS_EQUIP_INVALID);
+	if (!item->owned)
+		return (SETTINGS_EQUIP_LOCKED);
+	if (item->equipped)
+		return (SETTINGS_EQUIP_UNCHANGED);
+	if (provider->equip_item(provider->userdata,
+			catalogue_kind_of(state), item->item_id, &updated)
+		!= APP_PROVIDER_OK)
+		return (SETTINGS_EQUIP_INVALID);
+	adopt_settings(market, &updated);
+	return (SETTINGS_EQUIP_CHANGED);
+}
+
+/**
+ * @brief Equips the character in one Settings panel slot through the provider.
+ *
+ * @param provider Data provider; a NULL equip_item takes the fixture path.
+ * @param settings The model, replaced wholesale on success.
+ * @param slot Panel slot holding the character.
+ * @return Changed, unchanged, locked, or invalid selection result.
+ */
+t_settings_equip_result	app_settings_equip_character(
+	const t_app_data_provider *provider,
+	t_app_settings_view_model *settings, int slot)
+{
+	if (provider == NULL || provider->equip_item == NULL)
+		return (settings_equip_character_slot(settings, slot));
+	return (equip_slot(provider, settings, &settings->characters,
+			APP_CATALOGUE_CHARACTERS, slot));
+}
+
+/**
+ * @brief Equips the theme in one Settings panel slot through the provider.
+ *
+ * @param provider Data provider; a NULL equip_item takes the fixture path.
+ * @param settings The model, replaced wholesale on success.
+ * @param slot Panel slot holding the theme.
+ * @return Changed, unchanged, locked, or invalid selection result.
+ */
+t_settings_equip_result	app_settings_equip_theme(
+	const t_app_data_provider *provider,
+	t_app_settings_view_model *settings, int slot)
+{
+	if (provider == NULL || provider->equip_item == NULL)
+		return (settings_equip_theme_slot(settings, slot));
+	return (equip_slot(provider, settings, &settings->themes,
+			APP_CATALOGUE_THEMES, slot));
+}
+
+/**
+ * @brief Equips whatever occupies one panel slot of one catalogue.
+ *
+ * @param provider Data provider with an equip_item.
+ * @param settings The model, replaced wholesale on success.
+ * @param catalogue The panel the slot belongs to.
+ * @param kind Which catalogue that is.
+ * @param slot Panel slot to equip.
+ * @return Changed, unchanged, locked, or invalid selection result.
+ */
+static t_settings_equip_result	equip_slot(
+	const t_app_data_provider *provider,
+	t_app_settings_view_model *settings,
+	const t_app_catalogue_view_model *catalogue,
+	t_app_catalogue_kind kind, int slot)
+{
+	t_app_settings_view_model	updated;
+
+	if (settings == NULL || !settings->signed_in || slot < 0
+		|| slot >= catalogue->count || slot >= APP_CATALOGUE_MAX_ITEMS)
+		return (SETTINGS_EQUIP_INVALID);
+	if (!catalogue->items[slot].owned)
+		return (SETTINGS_EQUIP_LOCKED);
+	if (catalogue->items[slot].equipped)
+		return (SETTINGS_EQUIP_UNCHANGED);
+	if (provider->equip_item(provider->userdata, kind,
+			catalogue->items[slot].item_id, &updated) != APP_PROVIDER_OK)
+		return (SETTINGS_EQUIP_INVALID);
+	adopt_settings(settings, &updated);
+	return (SETTINGS_EQUIP_CHANGED);
+}
+
+/**
+ * @brief Replaces the account half of a model, keeping the local half.
+ *
+ * The provider answers with the account as tetrisd holds it and nothing else,
+ * so the volume and the renderer mode standing in the old model are carried
+ * across rather than being zeroed by a purchase.
+ *
+ * @param target The model being updated in place.
+ * @param source What the provider answered with.
+ */
+static void	adopt_settings(t_app_settings_view_model *target,
+	const t_app_settings_view_model *source)
+{
+	int						music_volume;
+	t_tetrisu_renderer_mode	renderer_mode;
+	bool					offline;
+	char					local_status[APP_TEXT_MAX];
+
+	music_volume = target->music_volume;
+	renderer_mode = target->renderer_mode;
+	offline = target->offline;
+	snprintf(local_status, sizeof(local_status), "%s", target->local_status);
+	*target = *source;
+	target->music_volume = music_volume;
+	target->renderer_mode = renderer_mode;
+	target->offline = offline;
+	snprintf(target->local_status, sizeof(target->local_status), "%s",
+		local_status);
+}
+
+/**
+ * @brief Reports which catalogue the Marketplace cursor is inside.
+ *
+ * @param state The Marketplace cursor.
+ * @return The focused catalogue kind.
+ */
+static t_app_catalogue_kind	catalogue_kind_of(const t_marketplace_state *state)
+{
+	if (marketplace_focused_is_character(state))
+		return (APP_CATALOGUE_CHARACTERS);
+	return (APP_CATALOGUE_THEMES);
+}
+
+/**
  * @brief Returns a compact label for loading, empty, and failure UI.
  */
 const char	*app_data_status_name(t_app_data_status status)
@@ -243,6 +461,13 @@ static t_app_provider_result	fixture_sign_up(void *userdata,
 
 /**
  * @brief Supplies a deterministic preview profile.
+ *
+ * The wallet is sized against the real prices rather than left at a number
+ * that dwarfs them: at 3200 points every tile on a shelf where nothing costs
+ * more than 15 read as affordable, so the two states the Marketplace exists to
+ * show - short of funds, and spending down to it - could not be previewed at
+ * all. 20 buys two characters and then nothing, which is the shape of an
+ * account four games old (docs/game-economics.md).
  */
 static t_app_provider_result	fixture_load_profile(void *userdata,
 	t_app_profile_view_model *view)
@@ -258,7 +483,7 @@ static t_app_provider_result	fixture_load_profile(void *userdata,
 	snprintf(view->portrait_asset, sizeof(view->portrait_asset),
 		DEFAULT_MIRURUN_PATH);
 	view->score = 125400;
-	view->wallet_points = 3200;
+	view->wallet_points = 20;
 	view->rank = 7;
 	return (APP_PROVIDER_OK);
 }
@@ -309,6 +534,13 @@ static t_app_provider_result	fixture_preview_login(void *userdata,
 
 /**
  * @brief Supplies compact character or theme fixture catalogues.
+ *
+ * The prices are the shipped catalogue's - characters.cfg and themes.cfg under
+ * lib/libmacminidb/config, and docs/game-economics.md behind them - not
+ * invented ones. A preview whose shelf
+ * priced Wolf-man at 1800 against a real 10 was not previewing the store; the
+ * numbers a designer looked at to decide whether a tile reads as affordable
+ * were numbers no player would ever be shown.
  */
 static t_app_provider_result	fixture_load_catalogue(void *userdata,
 	t_app_catalogue_kind kind, t_app_catalogue_view_model *view)
@@ -367,11 +599,11 @@ static t_app_provider_result	fixture_load_catalogue(void *userdata,
 			true, false);
 		set_character_details(&view->items[1], HALLOWEEN_PORTRAIT_PATH,
 			halloween_abilities, halloween_descriptions);
-		set_catalogue_item(&view->items[2], "princess", "Princess", 1400,
+		set_catalogue_item(&view->items[2], "princess", "Princess", 10,
 			false, false);
 		set_character_details(&view->items[2], PRINCESS_PORTRAIT_PATH,
 			princess_abilities, princess_descriptions);
-		set_catalogue_item(&view->items[3], "wolfman", "Wolf-man", 1800,
+		set_catalogue_item(&view->items[3], "wolfman", "Wolf-man", 10,
 			false, false);
 		set_character_details(&view->items[3], WOLFMAN_PORTRAIT_PATH,
 			wolfman_abilities, wolfman_descriptions);
@@ -390,26 +622,26 @@ static t_app_provider_result	fixture_load_catalogue(void *userdata,
 			sizeof(view->items[1].portrait_asset), "%s",
 			SETTINGS_THEME_DESIGN_AI_UNIVERSITY_PREVIEW_PATH);
 		set_catalogue_item(&view->items[2], "snowman",
-			"Do You Wanna Build a Snowman", 0, true, false);
+			"Do You Wanna Build a Snowman", 5, true, false);
 		snprintf(view->items[2].portrait_asset,
 			sizeof(view->items[2].portrait_asset), "%s",
 			SETTINGS_THEME_SNOWMAN_PREVIEW_PATH);
-		set_catalogue_item(&view->items[3], "haaland", "Haaland", 1200,
+		set_catalogue_item(&view->items[3], "haaland", "Haaland", 8,
 			false, false);
 		snprintf(view->items[3].portrait_asset,
 			sizeof(view->items[3].portrait_asset), "%s",
 			SETTINGS_THEME_HAALAND_PREVIEW_PATH);
 		set_catalogue_item(&view->items[4], "al_merqaedes",
-			"Al Merqaedes F1 Team", 0, true, false);
+			"Al Merqaedes F1 Team", 15, true, false);
 		snprintf(view->items[4].portrait_asset,
 			sizeof(view->items[4].portrait_asset), "%s",
 			SETTINGS_THEME_AL_MERQAEDES_PREVIEW_PATH);
 		set_catalogue_item(&view->items[5], "nuclear_ghandi",
-			"Nuclear Ghandi", 0, true, false);
+			"Nuclear Ghandi", 15, true, false);
 		snprintf(view->items[5].portrait_asset,
 			sizeof(view->items[5].portrait_asset), "%s",
 			SETTINGS_THEME_NUCLEAR_GHANDI_PREVIEW_PATH);
-		set_catalogue_item(&view->items[6], "clauding", "Clauding", 1600,
+		set_catalogue_item(&view->items[6], "clauding", "Clauding", 7,
 			false, false);
 		snprintf(view->items[6].portrait_asset,
 			sizeof(view->items[6].portrait_asset), "%s",

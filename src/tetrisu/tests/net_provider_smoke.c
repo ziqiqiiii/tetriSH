@@ -116,11 +116,12 @@ static int	check_signup_and_login(t_app_net_session *session,
 }
 
 /**
- * @brief load_profile reads the cache the login populated from the body.
+ * @brief load_profile reads the account, rather than remembering the login.
  *
- * A fresh account has zero score and wallet; the important field is username,
- * which the Home and lobby headers display. rank is unknown server-side and
- * reads -1, which is the provider's honest "not served" sentinel.
+ * A fresh account has zero score and wallet, a real rank, and item 1 of each
+ * kind equipped. Score and wallet used to come from whatever LOGIN mentioned
+ * and rank was a hardcoded -1; all four are read from PROFILE now, which is
+ * what lets the Marketplace spend a balance the server agrees with.
  */
 static int	check_profile_reflects_login(t_app_data_provider *provider,
 			t_app_net_session *session)
@@ -138,7 +139,18 @@ static int	check_profile_reflects_login(t_app_data_provider *provider,
 		return (0);
 	if (view.wallet_points != 0)
 		return (0);
-	if (view.rank != -1)
+	/*
+	** Rank was -1 here for as long as nothing knew it. It is read now, and a
+	** registered account always has one - the store indexes every player by
+	** (score, id) from signup, so a fresh account ranks last rather than
+	** nowhere.
+	*/
+	if (view.rank < 1)
+		return (0);
+	/* Signup grants and equips item 1 of each kind (UC-01). */
+	if (strcmp(view.character, "Halloween") != 0)
+		return (0);
+	if (strcmp(view.theme, "Default") != 0)
 		return (0);
 	return (1);
 }

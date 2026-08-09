@@ -799,6 +799,7 @@ static void	test_gameplay_events_are_one_shot(void)
 static void	test_personal_best_only_finishes_once_at_game_over(void)
 {
 	t_solo_game	game;
+	char		caption[SOLO_BEST_CAPTION_MAX];
 	unsigned	opacity;
 
 	solo_game_init(&game, 802u);
@@ -813,11 +814,15 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
 	assert(!solo_game_finish_personal_best(&game));
 	opacity = solo_game_personal_best_opacity(&game);
 	assert(opacity == 255);
+	assert(solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(strcmp(caption, "NEW PERSONAL BEST") == 0);
 	assert(solo_game_next_wake_ms(&game) == SOLO_PERSONAL_BEST_FRAME_MS);
+	/* The pulse ends lit and stays there: the panel it sits on is still up,
+	** and the score is the thing the player stayed to read. */
 	assert(solo_game_update(&game, SOLO_PERSONAL_BEST_PULSE_MS));
 	assert(solo_game_personal_best_opacity(&game) == 255);
-	assert(solo_game_update(&game, SOLO_PERSONAL_BEST_FADE_MS));
-	assert(solo_game_personal_best_opacity(&game) == 0);
+	assert(!solo_game_update(&game, 5000));
+	assert(solo_game_personal_best_opacity(&game) == 255);
 	solo_game_init(&game, 803u);
 	solo_game_set_personal_best(&game, UINT64_C(1000));
 	game.phase = SOLO_GAME_OVER;
@@ -825,6 +830,15 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
 	assert(!solo_game_finish_personal_best(&game));
 	assert(game.personal_best_checked);
 	assert(!game.new_personal_best);
+	/* Falling short still says what the record is, solid and unannounced. */
+	assert(solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(strcmp(caption, "BEST 1000") == 0);
+	assert(solo_game_personal_best_opacity(&game) == 255);
+	/* A player with no record yet is told nothing rather than "BEST 0". */
+	solo_game_init(&game, 804u);
+	game.phase = SOLO_GAME_OVER;
+	assert(!solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(solo_game_personal_best_opacity(&game) == 0);
 	printf("PASS test_personal_best_only_finishes_once_at_game_over\n");
 }
 

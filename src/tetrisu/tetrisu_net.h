@@ -41,6 +41,8 @@
 # define TETRISU_ROUTE_ROOMS	"/rooms"
 # define TETRISU_ROUTE_ROOM		"/room/"
 # define TETRISU_ROUTE_LEADERBOARD	"/leaderboard"
+# define TETRISU_ROUTE_STORE	"/store"
+# define TETRISU_ROUTE_PLAYER	"/player/"
 
 /* where tetrisd is and how to prove it is tetrisd; all of it from .tetrishrc */
 typedef struct s_net_config
@@ -122,6 +124,15 @@ typedef struct s_app_net_session
 	char		username[NET_USER_MAX];
 	int64_t		score;
 	int64_t		wallet;
+	/*
+	** The store front, fetched once. It is the server's config files, which
+	** cannot change while the server is up, so re-reading it on every screen
+	** would be a second round trip for an answer that is already known -
+	** whereas the profile beside it changes with every purchase and is never
+	** cached.
+	*/
+	t_body_catalogue	catalogue;
+	bool			has_catalogue;
 }	t_app_net_session;
 
 /* NET_CLIENT.C */
@@ -140,5 +151,23 @@ int		net_signup(t_net_client *net, const char *username,
 			const char *password, t_net_result *out);
 int		net_login(t_net_client *net, const char *username,
 			const char *password, t_net_result *out);
+
+/*
+** NET_STORE.C - the Marketplace half of the account.
+**
+** All four decode into the libstatusbody types rather than into view models:
+** what tetrisd said is one thing, and what a screen draws is another, so the
+** mapping between them stays in net_provider.c where the rest of it lives.
+**
+** net_buy and net_equip answer with the profile as it stands afterwards,
+** which is what tetrisd sends back, so a caller never has to re-read to find
+** out what the wallet is now.
+*/
+int		net_profile(t_net_client *net, t_body_profile *out);
+int		net_catalogue(t_net_client *net, t_body_catalogue *out);
+int		net_buy(t_net_client *net, bool character, uint32_t item_id,
+			t_body_profile *out, int *status);
+int		net_equip(t_net_client *net, bool character, uint32_t item_id,
+			t_body_profile *out, int *status);
 
 # endif

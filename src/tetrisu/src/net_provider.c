@@ -17,11 +17,37 @@ static t_app_provider_result	net_login_action(void *userdata,
 				const char *domain, t_app_auth_view_model *view);
 static t_app_provider_result	net_load_profile(void *userdata,
 				t_app_profile_view_model *view);
-static t_app_provider_result	stub_settings(void *userdata,
+static t_app_provider_result	net_load_settings(void *userdata,
 				t_app_settings_view_model *view);
-static t_app_provider_result	stub_catalogue(void *userdata,
+static t_app_provider_result	net_load_catalogue(void *userdata,
 				t_app_catalogue_kind kind,
 				t_app_catalogue_view_model *view);
+static t_app_provider_result	net_buy_item(void *userdata,
+				t_app_catalogue_kind kind, uint32_t item_id,
+				t_app_settings_view_model *view);
+static t_app_provider_result	net_equip_item(void *userdata,
+				t_app_catalogue_kind kind, uint32_t item_id,
+				t_app_settings_view_model *view);
+static t_app_provider_result	write_result(int status);
+static void			build_settings(t_app_net_session *session,
+				const t_body_profile *profile,
+				t_app_settings_view_model *view);
+static const t_body_catalogue	*session_catalogue(t_app_net_session *session);
+static void			apply_profile(t_app_net_session *session,
+				const t_body_profile *profile,
+				t_app_profile_view_model *view);
+static void			fill_catalogue(const t_body_profile *profile,
+				const t_body_catalogue *store, t_app_catalogue_kind kind,
+				t_app_catalogue_view_model *view);
+static void			fill_item(t_app_catalogue_item_view_model *item,
+				const t_body_catalogue_item *row, t_app_catalogue_kind kind,
+				const t_body_profile *profile, const t_theme_assets *assets);
+static bool			owns(const uint32_t *ids, size_t count, uint32_t id);
+static const char		*item_name(const t_body_catalogue_item *rows,
+				size_t count, uint32_t id);
+static void			character_portrait(const t_body_profile *profile,
+				const t_body_catalogue *store, const char *slug, char *out,
+				size_t cap);
 static t_app_provider_result	net_load_leaderboard(void *userdata,
 				t_app_leaderboard_view_model *view);
 static t_app_provider_result	net_load_lobby(void *userdata,
@@ -48,13 +74,15 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->login = net_login_action;
 	provider->sign_up = net_sign_up_action;
 	provider->load_profile = net_load_profile;
-	provider->load_settings = stub_settings;
-	provider->load_catalogue = stub_catalogue;
+	provider->load_settings = net_load_settings;
+	provider->load_catalogue = net_load_catalogue;
 	provider->preview_login = NULL;
 	provider->load_leaderboard = net_load_leaderboard;
 	provider->load_lobby = net_load_lobby;
 	provider->load_room = net_load_room;
 	provider->create_room = net_create_room;
+	provider->buy_item = net_buy_item;
+	provider->equip_item = net_equip_item;
 }
 
 static t_app_provider_result	net_sign_up_action(void *userdata,
@@ -116,40 +144,414 @@ static t_app_provider_result	net_login_action(void *userdata,
 	return (APP_PROVIDER_OK);
 }
 
+/*
+** PROFILE /player/<pid> - the account, as tetrisd holds it.
+**
+** The wallet, the rank and the loadout used to be guessed here: the score and
+** wallet were whatever LOGIN happened to mention, and rank was -1 because
+** nothing knew it. All three are now read, which is what makes the number on
+** the Marketplace the number a purchase is actually charged against.
+*/
 static t_app_provider_result	net_load_profile(void *userdata,
 			t_app_profile_view_model *view)
 {
 	t_app_net_session	*session;
+	t_body_profile		profile;
 
 	if (userdata == NULL || view == NULL)
 		return (APP_PROVIDER_INVALID);
 	session = (t_app_net_session *)userdata;
 	if (session->net.state < NET_AUTHED || session->username[0] == '\0')
 		return (APP_PROVIDER_UNAVAILABLE);
-	memset(view, 0, sizeof(*view));
-	view->signed_in = true;
-	snprintf(view->username, sizeof(view->username), "%s", session->username);
-	view->score = (uint64_t)session->score;
-	view->wallet_points = (int)session->wallet;
-	view->rank = -1;
+	if (net_profile(&session->net, &profile) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	apply_profile(session, &profile, view);
 	return (APP_PROVIDER_OK);
 }
 
-static t_app_provider_result	stub_settings(void *userdata,
+/*
+** Settings and the Marketplace are the same model: the profile that owns the
+** wallet, and both catalogues marked with what this player owns and has
+** equipped. Two reads rather than one, because ownership is a fact about the
+** account and the price list is a fact about the server - and only the first
+** of them changes when somebody buys something.
+*/
+static t_app_provider_result	net_load_settings(void *userdata,
 		t_app_settings_view_model *view)
 {
-	(void)userdata;
-	(void)view;
+	t_app_net_session		*session;
+	const t_body_catalogue	*store;
+	t_body_profile			profile;
+
+	if (userdata == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_AUTHED)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (net_profile(&session->net, &profile) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	store = session_catalogue(session);
+	if (store == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	build_settings(session, &profile, view);
+	return (APP_PROVIDER_OK);
+}
+
+static t_app_provider_result	net_load_catalogue(void *userdata,
+		t_app_catalogue_kind kind, t_app_catalogue_view_model *view)
+{
+	t_app_net_session		*session;
+	const t_body_catalogue	*store;
+	t_body_profile			profile;
+
+	if (userdata == NULL || view == NULL
+		|| (kind != APP_CATALOGUE_CHARACTERS && kind != APP_CATALOGUE_THEMES))
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_AUTHED)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (net_profile(&session->net, &profile) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	store = session_catalogue(session);
+	if (store == NULL)
+		return (APP_PROVIDER_UNAVAILABLE);
+	fill_catalogue(&profile, store, kind, view);
+	return (APP_PROVIDER_OK);
+}
+
+/*
+** BUY and EQUIP. Both answer with the profile tetrisd holds afterwards, so
+** the caller replaces its copy rather than patching it: the wallet, the owned
+** list and the equipped id move together, and a screen that debited its own
+** balance would be showing a number nobody had agreed to.
+**
+** A refusal writes nothing at all. The screen keeps drawing the account as it
+** was, which is what it still is.
+*/
+static t_app_provider_result	net_buy_item(void *userdata,
+		t_app_catalogue_kind kind, uint32_t item_id,
+		t_app_settings_view_model *view)
+{
+	t_app_net_session	*session;
+	t_body_profile		profile;
+	int					status;
+
+	if (userdata == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_AUTHED)
+		return (APP_PROVIDER_UNAVAILABLE);
+	status = 0;
+	if (net_buy(&session->net, kind == APP_CATALOGUE_CHARACTERS, item_id,
+			&profile, &status) != 0)
+		return (write_result(status));
+	build_settings(session, &profile, view);
+	return (APP_PROVIDER_OK);
+}
+
+static t_app_provider_result	net_equip_item(void *userdata,
+		t_app_catalogue_kind kind, uint32_t item_id,
+		t_app_settings_view_model *view)
+{
+	t_app_net_session	*session;
+	t_body_profile		profile;
+	int					status;
+
+	if (userdata == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_AUTHED)
+		return (APP_PROVIDER_UNAVAILABLE);
+	status = 0;
+	if (net_equip(&session->net, kind == APP_CATALOGUE_CHARACTERS, item_id,
+			&profile, &status) != 0)
+		return (write_result(status));
+	build_settings(session, &profile, view);
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Maps a refused store write onto a provider result.
+ *
+ * A status tetrisd chose is the server saying no to this request, which the
+ * screen has copy for; anything else means the answer never arrived, which is
+ * a different thing to tell the player.
+ *
+ * @param status The status tetrisd answered with, or 0 when none did.
+ * @return INVALID for a refusal, UNAVAILABLE for a transport failure.
+ */
+static t_app_provider_result	write_result(int status)
+{
+	if (status >= 400 && status < 500)
+		return (APP_PROVIDER_INVALID);
 	return (APP_PROVIDER_UNAVAILABLE);
 }
 
-static t_app_provider_result	stub_catalogue(void *userdata,
-		t_app_catalogue_kind kind, t_app_catalogue_view_model *view)
+/**
+ * @brief Builds the whole Settings/Marketplace model from one profile.
+ *
+ * Shared by the load and by both writes, so what a purchase leaves on screen
+ * is built by the same code that built what was there before it - the wallet,
+ * the owned flags and the equipped flags cannot drift apart because they are
+ * never written separately.
+ *
+ * The local controls are deliberately left zeroed: volume and renderer mode
+ * describe this terminal, not this account, and the caller re-applies them.
+ *
+ * @param session Signed-in session holding the cached catalogue.
+ * @param profile The profile tetrisd answered with.
+ * @param view Receives the model.
+ */
+static void	build_settings(t_app_net_session *session,
+		const t_body_profile *profile, t_app_settings_view_model *view)
 {
-	(void)userdata;
-	(void)kind;
-	(void)view;
-	return (APP_PROVIDER_UNAVAILABLE);
+	const t_body_catalogue	*store;
+
+	memset(view, 0, sizeof(*view));
+	store = session_catalogue(session);
+	if (store == NULL)
+		return ;
+	apply_profile(session, profile, &view->profile);
+	fill_catalogue(profile, store, APP_CATALOGUE_CHARACTERS,
+		&view->characters);
+	fill_catalogue(profile, store, APP_CATALOGUE_THEMES, &view->themes);
+	view->signed_in = true;
+}
+
+/**
+ * @brief Returns the store front, fetching it the first time it is asked for.
+ *
+ * @param session Signed-in session holding the cache.
+ * @return The catalogue, or NULL when it could not be read.
+ */
+static const t_body_catalogue	*session_catalogue(t_app_net_session *session)
+{
+	if (session->has_catalogue)
+		return (&session->catalogue);
+	if (net_catalogue(&session->net, &session->catalogue) != 0)
+		return (NULL);
+	session->has_catalogue = true;
+	return (&session->catalogue);
+}
+
+/**
+ * @brief Maps one decoded profile onto the view model every screen reads.
+ *
+ * The session's cached score and wallet are refreshed here too, because the
+ * lobby's identity strip reads them straight off the session rather than
+ * through a profile load.
+ *
+ * @param session Session whose cached totals are updated.
+ * @param profile The profile tetrisd answered with.
+ * @param view Receives the mapped profile.
+ */
+static void	apply_profile(t_app_net_session *session,
+		const t_body_profile *profile, t_app_profile_view_model *view)
+{
+	const t_body_catalogue	*store;
+	const char				*name;
+
+	memset(view, 0, sizeof(*view));
+	view->signed_in = true;
+	snprintf(view->username, sizeof(view->username), "%s", profile->username);
+	view->score = profile->score;
+	view->wallet_points = (int)profile->wallet;
+	view->rank = profile->rank;
+	session->score = (int64_t)profile->score;
+	session->wallet = (int64_t)profile->wallet;
+	snprintf(session->username, sizeof(session->username), "%s",
+		profile->username);
+	store = session_catalogue(session);
+	if (store == NULL)
+		return ;
+	name = item_name(store->characters, store->character_count,
+			profile->equipped_character);
+	if (name != NULL)
+		snprintf(view->character, sizeof(view->character), "%s", name);
+	name = item_name(store->themes, store->theme_count,
+			profile->equipped_theme);
+	if (name != NULL)
+		snprintf(view->theme, sizeof(view->theme), "%s", name);
+	character_portrait(profile, store,
+		catalogue_character_slug(profile->equipped_character),
+		view->portrait_asset, sizeof(view->portrait_asset));
+}
+
+/**
+ * @brief Fills one catalogue panel from the store front and the account.
+ *
+ * Price and name come from the store, owned and equipped from the profile,
+ * and the artwork from this machine - the three sources the screen needs and
+ * the reason a tile cannot be drawn from any one of them alone.
+ *
+ * @param profile The account, for ownership and the loadout.
+ * @param store The store front, for ids, names and prices.
+ * @param kind Which panel is being filled.
+ * @param view Receives the panel.
+ */
+static void	fill_catalogue(const t_body_profile *profile,
+		const t_body_catalogue *store, t_app_catalogue_kind kind,
+		t_app_catalogue_view_model *view)
+{
+	const t_body_catalogue_item	*rows;
+	t_theme_assets				assets;
+	size_t						count;
+	size_t						i;
+
+	memset(view, 0, sizeof(*view));
+	view->kind = kind;
+	/* Built once for the panel rather than per tile: every character on the
+	** shelf is drawn in the same equipped theme, and the answer does not
+	** change between rows. */
+	tetrisu_theme_assets_build_by_id(&assets, profile->equipped_theme,
+		item_name(store->themes, store->theme_count, profile->equipped_theme));
+	if (kind == APP_CATALOGUE_CHARACTERS)
+	{
+		rows = store->characters;
+		count = store->character_count;
+	}
+	else
+	{
+		rows = store->themes;
+		count = store->theme_count;
+	}
+	if (count > APP_CATALOGUE_MAX_ITEMS)
+		count = APP_CATALOGUE_MAX_ITEMS;
+	i = 0;
+	while (i < count)
+	{
+		fill_item(&view->items[i], &rows[i], kind, profile, &assets);
+		i++;
+	}
+	view->count = (int)count;
+}
+
+/**
+ * @brief Writes one shelf tile from its catalogue row and the account.
+ *
+ * A character's artwork belongs to the theme, so its tile is drawn from the
+ * equipped theme's assets rather than from any file the character owns on its
+ * own - which is why a panel of characters needs a theme to be filled at all.
+ * Leaving that out is what emptied every character tile on the shelves: the
+ * row carried an id, a name and a price, and no path for the renderer to draw.
+ *
+ * @param item The tile to fill.
+ * @param row The catalogue row tetrisd sent.
+ * @param kind Which catalogue the row belongs to.
+ * @param profile The account, for ownership and the loadout.
+ * @param assets The equipped theme's artwork, already resolved.
+ */
+static void	fill_item(t_app_catalogue_item_view_model *item,
+		const t_body_catalogue_item *row, t_app_catalogue_kind kind,
+		const t_body_profile *profile, const t_theme_assets *assets)
+{
+	const char	*slug;
+	const char	*path;
+
+	memset(item, 0, sizeof(*item));
+	item->item_id = row->id;
+	item->price = (int)row->price;
+	snprintf(item->name, sizeof(item->name), "%s", row->name);
+	if (kind == APP_CATALOGUE_CHARACTERS)
+	{
+		slug = catalogue_character_slug(row->id);
+		item->owned = owns(profile->owned_characters,
+				profile->owned_character_count, row->id);
+		item->equipped = (profile->equipped_character == row->id);
+		catalogue_character_abilities(row->id, item->abilities);
+		path = tetrisu_theme_character_path(assets, slug);
+		if (path != NULL)
+			snprintf(item->portrait_asset, sizeof(item->portrait_asset), "%s",
+				path);
+	}
+	else
+	{
+		slug = catalogue_theme_slug(row->id);
+		item->owned = owns(profile->owned_themes, profile->owned_theme_count,
+				row->id);
+		item->equipped = (profile->equipped_theme == row->id);
+		if (catalogue_theme_preview(row->id) != NULL)
+			snprintf(item->portrait_asset, sizeof(item->portrait_asset), "%s",
+				catalogue_theme_preview(row->id));
+	}
+	if (slug != NULL)
+		snprintf(item->id, sizeof(item->id), "%s", slug);
+}
+
+/**
+ * @brief Reports whether an owned-id list holds one id.
+ *
+ * @param ids The owned ids.
+ * @param count How many ids the list holds.
+ * @param id The id to look for.
+ * @return true when the id is present.
+ */
+static bool	owns(const uint32_t *ids, size_t count, uint32_t id)
+{
+	size_t	i;
+
+	i = 0;
+	while (i < count)
+	{
+		if (ids[i] == id)
+			return (true);
+		i++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Looks up one catalogue row's name by its id.
+ *
+ * A scan, not an index: catalogue ids carry gaps, so a row's id is not its
+ * position in the answer.
+ *
+ * @param rows The catalogue rows.
+ * @param count How many rows there are.
+ * @param id The id to look for.
+ * @return The name, or NULL when no row carries that id.
+ */
+static const char	*item_name(const t_body_catalogue_item *rows, size_t count,
+			uint32_t id)
+{
+	size_t	i;
+
+	i = 0;
+	while (i < count)
+	{
+		if (rows[i].id == id)
+			return (rows[i].name);
+		i++;
+	}
+	return (NULL);
+}
+
+/**
+ * @brief Resolves the equipped character's portrait within the equipped theme.
+ *
+ * A character's artwork belongs to the theme, so the portrait is whichever
+ * file the equipped theme ships for that character - which is why both ids
+ * are needed to answer what looks like a question about one of them.
+ *
+ * @param profile The account, for both equipped ids.
+ * @param store The store front, for the theme's display name.
+ * @param slug The equipped character's local slug; may be NULL.
+ * @param out Buffer receiving the path.
+ * @param cap Size of out.
+ */
+static void	character_portrait(const t_body_profile *profile,
+		const t_body_catalogue *store, const char *slug, char *out, size_t cap)
+{
+	t_theme_assets	assets;
+	const char		*path;
+
+	if (slug == NULL)
+		return ;
+	tetrisu_theme_assets_build_by_id(&assets, profile->equipped_theme,
+		item_name(store->themes, store->theme_count, profile->equipped_theme));
+	path = tetrisu_theme_character_path(&assets, slug);
+	if (path != NULL)
+		snprintf(out, cap, "%s", path);
 }
 
 /*

@@ -36,6 +36,10 @@
 # define BODY_CLEARING_MAX	4
 # define BODY_CHARGE_MAX		10
 # define BODY_COLOR_MAX		15
+/* one store front: the catalogue caps in libmacminidb are 64 per kind, but
+** what tetrisd sells is a fixed roster of four characters and seven themes */
+# define BODY_CATALOGUE_MAX	16
+# define BODY_ITEM_NAME_MAX	32
 /* what t_body_state.hold reads when the player is holding nothing */
 # define BODY_HOLD_EMPTY		(-1)
 
@@ -178,6 +182,43 @@ typedef struct s_body_leaderboard_row
 	uint64_t	score;
 }	t_body_leaderboard_row;
 
+/*
+** One item on the store front: what it is, what it costs, what to call it.
+**
+** Ownership is deliberately absent - it is a fact about a player, not about
+** the catalogue, and it arrives in t_body_profile's owned lists. Keeping the
+** two apart is what lets the catalogue be the same answer for everybody.
+**
+** The id is the catalogue id and is never renumbered, because it is written
+** into players' owned lists. Gaps in it are expected, so a client must not
+** treat the id as a position in the array.
+*/
+typedef struct s_body_catalogue_item
+{
+	uint32_t	id;
+	uint64_t	price;
+	char		name[BODY_ITEM_NAME_MAX];
+}	t_body_catalogue_item;
+
+/*
+** application/tetris-status body for LIST /store, in encode order:
+**   characters <n>
+**   <id> <price> <name>          (exactly n lines)
+**   themes <n>
+**   <id> <price> <name>          (exactly n lines)
+**
+** The name runs to end of line and may contain spaces ("Do u wanna build a
+** snowman?"), which is why it is last on the line and why nothing may follow
+** it. Both counts may be 0; a store with nothing in it is a valid answer.
+*/
+typedef struct s_body_catalogue
+{
+	t_body_catalogue_item	characters[BODY_CATALOGUE_MAX];
+	size_t					character_count;
+	t_body_catalogue_item	themes[BODY_CATALOGUE_MAX];
+	size_t					theme_count;
+}	t_body_catalogue;
+
 /* STATE.C */
 int	body_state_encode(const t_body_state *in, char *out, size_t cap);
 int	body_state_decode(const char *buf, size_t len, t_body_state *out);
@@ -193,5 +234,9 @@ int	body_profile_decode(const char *buf, size_t len, t_body_profile *out);
 /* LEADERBOARD.C */
 int	body_leaderboard_encode(const t_body_leaderboard_row *rows, size_t count, char *out, size_t cap);
 int	body_leaderboard_decode(const char *buf, size_t len, t_body_leaderboard_row *rows, size_t cap, size_t *count);
+
+/* CATALOGUE.C */
+int	body_catalogue_encode(const t_body_catalogue *in, char *out, size_t cap);
+int	body_catalogue_decode(const char *buf, size_t len, t_body_catalogue *out);
 
 # endif

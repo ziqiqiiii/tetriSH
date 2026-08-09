@@ -90,7 +90,11 @@ AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
 # Header search path + generated defines shared by every target.
+# DEPFLAGS makes each object record the headers it actually included, so a
+# CoreStack header that changes the shape of a struct rebuilds every object
+# holding one instead of leaving stale ones to be linked against fresh code.
 INC			:= -I. $(LIB_INC)
+DEPFLAGS	:= -MMD -MP
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
 LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
 
@@ -101,6 +105,7 @@ LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
 # Binary : every .c under src/            -> bin/tetrisu
 SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+DEP			:= $(OBJ:.o=.d)
 
 # Logic  : pure app-state, no notcurses/SDL -> logic.a (linked into unit tests).
 # main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
@@ -125,10 +130,13 @@ check-dependencies:
 	@ $(MAKE) --no-print-directory -s deps
 
 # --- object rule (header stays at the tetrisu root, reached via -I.) ---------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) $(NET_HEADER) $(BRAIN_HEADER) | check-dependencies libs
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies libs
 	@ mkdir -p $(dir $@)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
-	@ $(CC) $(FLAGS) -c $< -o $@
+	@ $(CC) $(FLAGS) $(DEPFLAGS) -c $< -o $@
+
+# Absent on a first build, when everything compiles anyway.
+-include $(DEP)
 
 # --- tetrisu binary ---------------------------------------------------------
 $(NAME_PATH): $(OBJ) $(LIB_ARCS)
@@ -228,6 +236,16 @@ $(TEST_BIN_DIR)/net_provider_smoke: $(TESTS_DIR)/net_provider_smoke.c $(LOGIC_LI
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# The Marketplace and Settings against a live tetrisd: prices, wallet,
+# ownership and the loadout, all of which moved out of the client's view model
+# and into the account. Same link line - the store calls live in the app
+# archive beside the rest of the network layer.
+$(TEST_BIN_DIR)/store_smoke: $(TESTS_DIR)/store_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The layer solo_mode.c calls, driven against a live tetrisd: who owns the
 # board, and the countdown hold that reconciles the client's 3-2-1 with the
 # server's gravity. Same link line - solo_authority.c is in the app archive.
@@ -252,7 +270,7 @@ unit: $(UNIT_BINS)
 	@ $(TEST_RUNNER) unit $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
-			 $(TEST_BIN_DIR)/solo_authority_smoke
+			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 

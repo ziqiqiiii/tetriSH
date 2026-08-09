@@ -17,6 +17,9 @@
 NAME		:= libmacminidb.a
 CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
+# Header prerequisites, generated per object, so a change to the shape of
+# t_player rebuilds every module that stores one rather than half of them.
+DEPFLAGS	:= -MMD -MP
 LDLIBS		:= -lpthread
 AR			:= ar
 ARFLAGS		:= rcs
@@ -47,6 +50,7 @@ HEADER		:= $(INC_DIR)/macminidb.h $(INC_DIR)/internal.h
 # Every .c under src/ is part of the library.
 SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+DEP			:= $(OBJ:.o=.d)
 
 ################################################################################
 #                                   BUILD                                      #
@@ -54,10 +58,13 @@ OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 all: $(NAME)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@ mkdir -p $(OBJ_DIR)
-	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
+	@ $(CC) $(FLAGS) $(DEPFLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+
+# Absent on a first build, when everything compiles anyway.
+-include $(DEP)
 
 $(NAME): $(OBJ)
 	@ $(AR) $(ARFLAGS) $@ $(OBJ)

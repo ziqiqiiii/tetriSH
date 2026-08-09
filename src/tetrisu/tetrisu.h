@@ -117,6 +117,14 @@
 # define APP_ASSET_PATH_MAX	512
 # define APP_ABILITY_TEXT_MAX	192
 # define APP_CHARACTER_ABILITY_COUNT	4
+/*
+ * How many rows the local artwork tables in catalogue_art.c carry. They are
+ * parallel arrays rather than one array of structs, because a .c file here
+ * declares no types - so the row count has to be named in one place, or a row
+ * added to one column and forgotten in another reads past the end of the next.
+ */
+# define APP_CATALOGUE_CHARACTER_ROWS	4
+# define APP_CATALOGUE_THEME_ROWS	7
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
 # define AUTH_OVERLAY_PLANE_MAX	16
@@ -154,9 +162,15 @@
 # define SOLO_DANGER_DIM_MAX	150
 # define SOLO_DANGER_BOARD_PAD	4
 # define SOLO_TOP_OUT_REVEAL_MS	350
+/*
+** The best-score line pulses for its first PULSE_MS and then rests, lit, for
+** as long as the top-out panel is up. It used to fade back out after a second,
+** which meant the one thing a player wanted to read after a good game was the
+** one thing the screen took away from them.
+*/
 # define SOLO_PERSONAL_BEST_PULSE_MS	720
-# define SOLO_PERSONAL_BEST_FADE_MS	300
 # define SOLO_PERSONAL_BEST_FRAME_MS	33
+# define SOLO_BEST_CAPTION_MAX	32
 # define SOLO_SCORE_EVENT_PULSE_MS	420
 # define SOLO_SCORE_EVENT_FADE_MS	300
 # define SOLO_ABILITY_READY_PULSE_MS	540
@@ -871,8 +885,17 @@ typedef struct s_app_character_ability_view_model
 	char	description[APP_ABILITY_TEXT_MAX];
 }	t_app_character_ability_view_model;
 
+/*
+ * One shelf tile. `item_id` is the catalogue id tetrisd sells it under and is
+ * what BUY and EQUIP name; `id` stays the local slug the renderer and the
+ * fixture suites match on. Both are kept because they answer different
+ * questions - the server has never heard of "wolfman", and the artwork lookup
+ * has never heard of theme 6 - and because catalogue ids carry gaps (the cut
+ * John Cena theme), so an id can never double as a position in this array.
+ */
 typedef struct s_app_catalogue_item_view_model
 {
+	uint32_t	item_id;
 	char	id[APP_TEXT_MAX];
 	char	name[APP_TEXT_MAX];
 	char	portrait_asset[APP_ASSET_PATH_MAX];
@@ -1461,6 +1484,26 @@ typedef struct s_app_data_provider
 	 */
 	t_app_provider_result	(*create_room)(void *userdata, t_app_game_mode mode,
 			t_app_room_view_model *view);
+	/*
+	 * Spending and equipping. Both answer with the whole model as it stands
+	 * afterwards rather than with a verdict the caller applies to its own
+	 * copy: the wallet, the owned flags and the equipped flags all move
+	 * together, and a screen that patched its view model would be drawing a
+	 * balance nobody had agreed to. It costs no extra round trip - tetrisd
+	 * answers a write with the new profile, and the price list it is marked
+	 * against was already cached.
+	 *
+	 * A refusal writes nothing, so the screen keeps drawing the account as it
+	 * was, which is what it still is. The local controls (volume, renderer)
+	 * are not touched either way and have to be re-applied by the caller,
+	 * because they never belonged to the account.
+	 */
+	t_app_provider_result	(*buy_item)(void *userdata,
+			t_app_catalogue_kind kind, uint32_t item_id,
+			t_app_settings_view_model *view);
+	t_app_provider_result	(*equip_item)(void *userdata,
+			t_app_catalogue_kind kind, uint32_t item_id,
+			t_app_settings_view_model *view);
 }	t_app_data_provider;
 
 // How far the terminal can be trusted with bitmap graphics. NONE is the
@@ -2246,6 +2289,29 @@ void			app_net_provider_init(t_app_data_provider *provider,
 t_app_provider_result	app_provider_preview_sign_in(
 					const t_app_data_provider *provider,
 					t_app_auth_view_model *view);
+/*
+ * The Marketplace and Settings writes, routed through the provider when it
+ * has one and falling back to the in-model mutators when it does not - which
+ * is what keeps the fixture preview build working without giving it a server.
+ *
+ * On success the model is replaced by what the server now holds, so callers
+ * must re-apply the local controls afterwards; these wrappers preserve them
+ * across the swap so an equip cannot silently reset the volume.
+ */
+t_marketplace_purchase_result	app_marketplace_buy(
+					const t_app_data_provider *provider,
+					t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
+t_settings_equip_result	app_marketplace_equip(
+					const t_app_data_provider *provider,
+					t_app_marketplace_view_model *market,
+					const t_marketplace_state *state);
+t_settings_equip_result	app_settings_equip_character(
+					const t_app_data_provider *provider,
+					t_app_settings_view_model *settings, int slot);
+t_settings_equip_result	app_settings_equip_theme(
+					const t_app_data_provider *provider,
+					t_app_settings_view_model *settings, int slot);
 t_app_provider_result	app_screen_view_load(
 					const t_app_data_provider *provider,
 					t_app_screen screen, t_app_screen_view_model *view);
@@ -2265,9 +2331,39 @@ t_app_provider_result	app_room_view_create(
 const char		*app_data_status_name(t_app_data_status status);
 const char		*app_game_mode_name(t_app_game_mode mode);
 
+/*
+** CATALOGUE_ART.C - the local half of a catalogue row.
+**
+** tetrisd owns which items exist, what they are called and what they cost.
+** What it has never heard of is the artwork: portraits, theme previews, and
+** the ability copy from docs/themes.md are files on this machine, and no
+** amount of server authority can put them on the wire.
+**
+** So the two halves meet on the catalogue id, which is the one thing both
+** ends agree on and the one thing that never changes. Matching on the name
+** instead would break the first time a theme is renamed, and matching on
+** position would break already: theme ids carry a gap where the cut John
+** Cena theme was.
+**
+** Every lookup answers NULL for an id it does not know, so a catalogue row
+** tetrisd adds before this table catches up degrades to a tile without art
+** rather than to a crash.
+*/
+/* CATALOGUE_ART.C */
+const char		*catalogue_character_slug(uint32_t item_id);
+void			catalogue_character_abilities(uint32_t item_id,
+					t_app_character_ability_view_model *out);
+const char		*catalogue_theme_slug(uint32_t item_id);
+const char		*catalogue_theme_preview(uint32_t item_id);
+const char		*catalogue_theme_directory(uint32_t item_id);
+
 /* THEME_ASSETS.C */
 void			tetrisu_theme_assets_build(t_theme_assets *assets,
 					const char *theme_name);
+void			tetrisu_theme_assets_build_by_id(t_theme_assets *assets,
+					uint32_t theme_id, const char *display_name);
+void			tetrisu_theme_apply_by_id(t_render_ctx *ctx,
+					uint32_t theme_id, const char *display_name);
 const char		*tetrisu_theme_character_path(
 					const t_theme_assets *assets, const char *character_name);
 void			tetrisu_theme_apply(t_render_ctx *ctx, const char *theme_name);
@@ -2275,6 +2371,11 @@ void			tetrisu_character_apply(t_render_ctx *ctx,
 					const char *character_name);
 void			tetrisu_visual_selection_sync(t_render_ctx *ctx,
 					t_app_settings_view_model *settings);
+void			tetrisu_visual_selection_bind(t_render_ctx *ctx,
+					const t_app_data_provider *provider,
+					t_app_settings_view_model *settings);
+const t_app_catalogue_item_view_model	*app_catalogue_equipped(
+					const t_app_catalogue_view_model *catalogue);
 
 /* AUTH_FORM.C */
 void			auth_form_init(t_auth_form *form, t_auth_form_mode mode);
@@ -2698,6 +2799,8 @@ void			solo_game_set_personal_best(t_solo_game *game,
 					uint64_t score);
 bool			solo_game_finish_personal_best(t_solo_game *game);
 unsigned		solo_game_personal_best_opacity(const t_solo_game *game);
+bool			solo_game_best_caption(const t_solo_game *game, char *out,
+					size_t cap);
 void			solo_game_start_countdown(t_solo_game *game);
 int				solo_game_countdown_value(const t_solo_game *game);
 unsigned		solo_game_countdown_opacity(const t_solo_game *game);

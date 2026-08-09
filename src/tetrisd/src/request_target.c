@@ -57,6 +57,35 @@ int	request_input_target(t_request_context *ctx, t_server_room **out)
 }
 
 /**
+ * @brief Reads a decimal player id off the front of a path segment.
+ *
+ * Ids are issued from 1, so 0 is free to mean "that was not an id" and every
+ * caller can compare the answer against the connection's player without a
+ * second success flag to test first.
+ *
+ * @param text Start of the id, mid-path.
+ * @param end Receives the first character after the id; may be NULL.
+ * @return The id, or 0 when no digits start the segment.
+ */
+t_player_id	request_player_id(const char *text, const char **end)
+{
+	unsigned long long	value;
+	char				*stop;
+
+	if (end != NULL)
+		*end = text;
+	if (text == NULL || *text < '0' || *text > '9')
+		return (0);
+	errno = 0;
+	value = strtoull(text, &stop, 10);
+	if (errno != 0)
+		return (0);
+	if (end != NULL)
+		*end = stop;
+	return ((t_player_id)value);
+}
+
+/**
  * @brief Reads the request body as a single upper-case command word.
  *
  * @param ctx Request context.

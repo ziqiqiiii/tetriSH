@@ -40,7 +40,14 @@ int	main(int argc, char **argv)
 		return (EXIT_FAILURE);
 	if (server_start(&cfg, &srv) != 0)
 	{
-		fprintf(stderr, "tetrisd: failed to start on port %d\n", cfg.port);
+		/* Every way server_start can fail has already said which one it was,
+		** and said it to the logger - so name where that reason is rather
+		** than guessing at it here. Naming the port was worse than saying
+		** nothing: a store that would not open reported a port that was
+		** never in use, and the one thing the boot had got right is what
+		** the person who typed the command went and looked at. */
+		fprintf(stderr, "tetrisd: failed to start - the reason was logged"
+			" (tetrislogd's sink, or %s)\n", cfg.err_path);
 		daemon_pid_release(&pf);
 		return (EXIT_FAILURE);
 	}
