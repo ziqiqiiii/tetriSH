@@ -554,8 +554,15 @@ static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
 	 * so a keypress deliberately does not raise it: nothing would ever take it
 	 * back down, and it would sit over HOLD and NEXT for the rest of the match.
 	 */
+	/*
+	 * The name is bounded by APP_TEXT_MAX and the banner by
+	 * MP_MATCH_STATUS_MAX, which is the shorter of the two, so the name is
+	 * cut to what is left after the suffix rather than letting snprintf
+	 * decide where the sentence stops.
+	 */
 	snprintf(state->status, sizeof(state->status),
-		"%s SELECTED - AWAITING SERVER TARGET AUTHORITY",
+		"%.*s SELECTED - AWAITING SERVER TARGET AUTHORITY",
+		(int)(MP_MATCH_STATUS_MAX - MP_MATCH_SELECTED_SUFFIX_LEN - 1),
 		character->abilities[index].name);
 	audio_play_sfx(audio, AUDIO_SFX_ABILITY_ACTIVATED);
 }

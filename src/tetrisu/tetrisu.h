@@ -664,6 +664,13 @@
 # define MP_MATCH_INPUT_BATCH_MAX	64
 # define MP_BR_OPPONENT_COUNT	98
 # define MP_MATCH_STATUS_MAX	96
+/* " SELECTED - AWAITING SERVER TARGET AUTHORITY" - the fixed half of the
+** ability banner, so the name in front of it can be cut to fit */
+# define MP_MATCH_SELECTED_SUFFIX_LEN	44
+/* How much of an ability name a loadout row shows. Four APP_TEXT_MAX names
+** do not fit one APP_ABILITY_TEXT_MAX line, and the row is centred and
+** clipped anyway, so the cut is stated here rather than left to snprintf */
+# define MP_MATCH_POWER_NAME_MAX	40
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425

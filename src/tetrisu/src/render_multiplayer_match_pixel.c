@@ -1556,8 +1556,8 @@ static void draw_ability_popover(t_render_ctx *ctx, uint32_t *pixels,
 		frame.height - 12};
 	mp_match_pixel_fill_rect(pixels, width, height, &box, g_panel, 232);
 	box = (t_mp_rect){rect->x + 14, rect->y + 12, rect->width - 28, 26};
-	snprintf(line, sizeof(line), "%s  [%d]",
-		character->abilities[index].name, index + 1);
+	snprintf(line, sizeof(line), "%.*s  [%d]",
+		MP_MATCH_POWER_NAME_MAX, character->abilities[index].name, index + 1);
 	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 14,
 		g_cream, true);
 	box.y += 28;
@@ -1721,7 +1721,9 @@ static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 	int grid[BOARD_HEIGHT][BOARD_WIDTH];
 	t_mp_rect frame;
 	t_mp_rect title;
-	char countdown[4];
+	/* "3", "2", "1", "GO" - sized for any int so the format is provably
+	** bounded rather than bounded by what the countdown happens to count */
+	char countdown[12];
 	int countdown_value;
 	int step;
 
@@ -1742,8 +1744,13 @@ static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 	 * information and redraw only on a lock.
 	 */
 	board_cell_grid(game, grid, local);
-	draw_grid_cells(ctx, pixels, width, height, rect, grid,
-		danger_backing(step));
+	/*
+	 * board_cell_grid fills the grid and draw_grid_cells only reads it, so
+	 * the cast is the qualifier the call adds, not one it drops. Before C23
+	 * int (*)[N] does not convert to const int (*)[N] on its own.
+	 */
+	draw_grid_cells(ctx, pixels, width, height, rect,
+		(const int (*)[BOARD_WIDTH])grid, danger_backing(step));
 	countdown_value = local ? solo_game_countdown_value(game) : -1;
 	if (countdown_value >= 0)
 	{

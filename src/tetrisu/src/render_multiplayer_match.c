@@ -208,9 +208,12 @@ static void	draw_selection(t_render_ctx *ctx, struct ncplane *plane,
 		row = portrait.y + portrait.height + 1;
 		if (row < card.y + card.height - 3)
 		{
-			snprintf(line, sizeof(line), "POWERS: %s / %s / %s / %s",
-				character->abilities[0].name, character->abilities[1].name,
-				character->abilities[2].name, character->abilities[3].name);
+			snprintf(line, sizeof(line),
+				"POWERS: %.*s / %.*s / %.*s / %.*s",
+				MP_MATCH_POWER_NAME_MAX, character->abilities[0].name,
+				MP_MATCH_POWER_NAME_MAX, character->abilities[1].name,
+				MP_MATCH_POWER_NAME_MAX, character->abilities[2].name,
+				MP_MATCH_POWER_NAME_MAX, character->abilities[3].name);
 			set_fg(plane, MATCH_LAVENDER_R,
 				MATCH_LAVENDER_G, MATCH_LAVENDER_B);
 			put_centered(plane, row, card.x + 1, card.width - 2, line, false);
@@ -519,9 +522,12 @@ static void	draw_abilities(struct ncplane *plane, const t_mp_rect *rect,
 	put_centered(plane, rect->y + 3, rect->x, rect->width, line, false);
 	if (compact)
 	{
-		snprintf(line, sizeof(line), "[1] %s  [2] %s  [3] %s  [4] %s",
-			character->abilities[0].name, character->abilities[1].name,
-			character->abilities[2].name, character->abilities[3].name);
+		snprintf(line, sizeof(line),
+			"[1] %.*s  [2] %.*s  [3] %.*s  [4] %.*s",
+			MP_MATCH_POWER_NAME_MAX, character->abilities[0].name,
+			MP_MATCH_POWER_NAME_MAX, character->abilities[1].name,
+			MP_MATCH_POWER_NAME_MAX, character->abilities[2].name,
+			MP_MATCH_POWER_NAME_MAX, character->abilities[3].name);
 		set_fg(plane, MATCH_CREAM_R, MATCH_CREAM_G, MATCH_CREAM_B);
 		put_centered(plane, rect->y + 1, rect->x, rect->width, line, false);
 		return ;
