@@ -112,7 +112,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-05 Join from List | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | • `404` no room<br>• `409` full<br>• `409` in-game |
 | UC-06 Join by ID | `JOIN /room/<id>` | HTTTP → tetrisd | `200` | • `404` no room<br>• `409` full*<br>• `409` in-game* |
 | UC-07 Leave Room | `LEAVE /room/<id>` | HTTTP → tetrisd | `200` | `404` not in room |
-| UC-08 Start Game | `START /room/<id>` (owner) | HTTTP → tetrisd | `200` | • `403` not owner<br>• `409` too few/started |
+| UC-08 Start Game | Double auto-start / `START /room/<id>` (BR owner) | client or HTTTP → tetrisd | `200` | • `403` not owner<br>• `409` too few/started |
 | UC-08a Non-owner Start | `START /room/<id>` (non-owner) | HTTTP → tetrisd | — | `403` not owner |
 | UC-09 Chat | `CHAT /room/<id>` body text | HTTTP → tetrisd | `200` | • `429` rate-limited<br>• `403` muted<br>• `404` |
 | UC-10 Single Player | play via UC-13; server `db_record_game` on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
@@ -120,12 +120,13 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>/player/<pid>` | server-originated push, one subject per snapshot (no client status) | HTTTP ← tetrisd | pushed | — |
+| UC-15/16 Browse Store | `LIST /store` | HTTTP → tetrisd | `200` (both catalogues, ids + prices) | `500` |
 | UC-15 Buy Character | `BUY /store/character/<cid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-16 Buy Theme | `BUY /store/theme/<tid>` | HTTTP → tetrisd | `200` (bought / owned no-op) | `403` insufficient • `409` inventory full • `404` no item |
 | UC-17 Deduct Points | — internal to `db_buy_*` | — | — | — |
 | UC-18 Set Default Character | `EQUIP /player/<pid>/character/<cid>` | HTTTP → tetrisd | `200` | `403` not owned • `404` |
 | UC-19 Set Default Theme | `EQUIP /player/<pid>/theme/<tid>` | HTTTP → tetrisd | `200` | `403` not owned • `404` |
-| UC-20 View Settings | `PROFILE /player/<pid>` (+ rank) | HTTTP → tetrisd | `200` (player doc + rank) | `500` |
+| UC-20 View Settings | `PROFILE /player/<pid>` (+ rank) | HTTTP → tetrisd | `200` (player doc + rank) | `403` another player • `500` |
 | UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
 | UC-21 View Leaderboard | `LEADERBOARD /leaderboard` (top-N) | HTTTP → tetrisd | `200` (top entries) | `500` |
 | UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
@@ -257,9 +258,11 @@ SLOT_STATUS
 | Battle Royale | 4–99 | 4 |
 
 - Room flips `WAITING → READY` when `number_of_players >= min_to_start` (and every occupied slot is `READY`).
-- Room falls back `READY → WAITING` if `number_of_players` drops below `min_to_start`.
+- Room falls back `READY → WAITING` if the player count drops below
+  `min_to_start` or any occupied slot stops being `READY`.
 - In Battle Royale, a `READY` room keeps accepting joiners up to `slot_count`.
-- Only *crossing* `min_to_start` changes room status. E.g.
+- The server recomputes readiness after a join, leave, or ready-state change.
+  E.g.
   - BR at 5/8 dropping to 3 → `WAITING`
   - back to 4 → `READY`.
 
@@ -277,9 +280,9 @@ stateDiagram-v2
         state "IN_GAME<br/>(msg: GAME IN PROGRESS)" as R_IN_GAME
         state "FINISHED<br/>(msg: GAME OVER, RECORDING THE RESULTS)" as R_FINISHED
 
-        R_WAITING --> R_READY : players >= min
-        R_READY --> R_WAITING : players below min
-        R_READY --> R_IN_GAME : OWNER START
+        R_WAITING --> R_READY : players >= min and all occupied READY
+        R_READY --> R_WAITING : below min or an occupied slot un-readies
+        R_READY --> R_IN_GAME : AUTO (Double) / OWNER START (BR)
         R_IN_GAME --> R_FINISHED : game ends
         R_FINISHED --> [*] : records written
     }
@@ -333,23 +336,24 @@ stateDiagram-v2
 | **Goal** | See the list of open rooms in order to choose one to join. |
 | **Preconditions** | Player is authenticated and has entered the Multiplayer Lobby. |
 | **Postconditions (success)** | The current list of open rooms (ID, Mode, Players, State, Owner) is displayed; Player's own username, leaderboard score, and ranking are shown in the header. |
-| **Trigger** | Player selects **Multiplayer** on the Home page. |
+| **Trigger** | Player selects **Multiplayer** on the Home page and chooses a mode. |
 
 **Main Success Scenario**
-1. Player enters the Lobby.
-2. System requests the current room directory from the Game Server.
-3. System renders each room row:
+1. System opens the Multiplayer Mode Picker.
+2. Player chooses Double or Battle Royale; System enters the Lobby filtered to that mode.
+3. System requests the current room directory from the Game Server.
+4. System renders each room row:
     - ID
     - Mode (D / BR)
     - Players (e.g. 1/2, 8/8)
-    - State (WAITING / IN-GAME)
+    - State (WAITING / READY / IN-GAME / FINISHED)
     - Owner
-4. System renders the header with the Player's username, leaderboard score, and ranking.
+5. System renders the header with the Player's username, leaderboard score, and ranking.
 
 **Extensions / Alternate Flows**
-- **2a. No open rooms:** System shows an empty list; Player may Create Room (UC-04) or Join by Room ID (UC-06).
-- **3a. Player presses `[R]` Refresh:** → UC-03a Refresh Room List (re-runs steps 2–4).
-- **3b. Player presses `[B]` Back:** System returns to the Home page.
+- **3a. No open rooms:** System shows an empty list; Player may Create Room (UC-04) or Join by Room ID (UC-06).
+- **4a. Player presses `[R]` Refresh:** → UC-03a Refresh Room List (re-runs steps 3–5).
+- **4b. Player presses `[B]` Back:** System returns to the Mode Picker; Back there returns Home.
 
 **Exceptions**
 - **E1. Server unreachable:** System shows a stale-list warning or connection error.
@@ -375,7 +379,7 @@ stateDiagram-v2
 **Main Success Scenario**
 1. System opens the **Create Room** modal.
 2. System presents the mode options: `[1] Double` (2 players, default) and `[2] Battle Royale` (4–99 players).
-3. Player selects a mode with `[↑/↓]`.
+3. Player selects a mode with `[↑/↓]` or `[1]/[2]`; number keys select only.
 4. Player presses `[ENTER]` to create (`«include»` **UC-04a Select Game Mode**).
 5. System sends the create/JOIN request; the Game Server:
    - marks the creating Player as `OWNER` (PLAYER_STATUS);
@@ -549,17 +553,17 @@ stateDiagram-v2
 | Field | Content |
 |---|---|
 | **ID** | UC-08 |
-| **Primary Actor** | Room Owner |
+| **Primary Actor** | System (Double) or Room Owner (Battle Royale) |
 | **Goal** | Begin the match for everyone in the room. |
-| **Preconditions** | Actor is the Room Owner; room has enough ready players (Double: 2/2; Battle Royale: ≥ 4). |
+| **Preconditions** | Every occupied player is ready; Double is 2/2, while Battle Royale has at least 4 players. |
 | **Postconditions (success)** | The room transitions to IN-GAME; all members enter the corresponding gameplay screen. |
-| **Trigger** | Owner presses `[S]` Start. |
+| **Trigger** | Double becomes ready automatically; Battle Royale Owner presses `[S]` Start. |
 
 **Main Success Scenario**
 1. Room reaches the required player count; status shows "Ready to start".
-2. Owner presses `[S]` Start.
-3. System sends `START /room/<id>`.
-4. Server verifies the requester is the Owner and the room meets minimum players.
+2. For Double, System arms the countdown immediately. For Battle Royale, Owner presses `[S]` Start.
+3. For Battle Royale, System sends `START /room/<id>`.
+4. Server verifies the Battle Royale requester is the Owner and that every occupied player is ready.
 5. Server transitions the room to IN-GAME and pushes the initial `STATE`.
 6. All members' clients switch to the gameplay screen (Double → UC-11, Battle Royale → UC-12).
 
@@ -584,7 +588,7 @@ stateDiagram-v2
 | **Primary Actor** | Player (non-owner member of the room) |
 | **Goal** | A non-owner attempts to start the match; the server must reject the attempt because starting is an owner-only privilege. |
 | **Preconditions** | Player is a member of a Waiting Room but is **not** the Room Owner. |
-| **Postconditions (success)** | No state change: the room stays in WAITING; the requesting Player is informed that only the Owner can start; the rejection is logged. |
+| **Postconditions (success)** | No state change: the room stays WAITING or READY; the requesting Player is informed that only the Owner can start; the rejection is logged. |
 | **Trigger** | A non-owner Player presses `[S]` Start. |
 
 **Main Success Scenario** *(success here = the attempt is correctly denied)*
@@ -592,7 +596,7 @@ stateDiagram-v2
 2. Client sends `START /room/<id>`.
 3. Server checks the requester's identity against the room's Owner.
 4. Server determines the requester is not the Owner and returns `403 Forbidden`.
-5. Server leaves the room unchanged (still WAITING) and logs the rejected attempt at warning level.
+5. Server leaves the room status unchanged and logs the rejected attempt at warning level.
 6. Client shows a "Only the room owner can start the game" message; the Player remains in the Waiting Room.
 
 **Extensions / Alternate Flows**

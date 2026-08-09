@@ -69,6 +69,10 @@ dkms.conf
 # debug information files
 *.dwo
 
+# clangd compilation database (generated; machine-specific absolute paths)
+compile_commands.json
+.cache/
+
 # settings
 settings*
 

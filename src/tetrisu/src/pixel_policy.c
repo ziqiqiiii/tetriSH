@@ -19,15 +19,11 @@ static bool	contains_fold(const char *haystack, const char *needle);
  *   over what is already there. Those two backends therefore draw stationary
  *   bitmaps only, however capable the terminal itself is.
  * - Bounded memory under repeated retransmission. The Kitty and iTerm2
- *   protocols hand the terminal an image registry, and a terminal that never
- *   frees a replaced entry climbs to gigabytes while the board redraws. The
- *   backend enum cannot separate the good from the bad, because notcurses
- *   only reports the animated and self-referential Kitty levels for kitty
- *   itself: every other terminal answering the Kitty graphics query lands on
- *   NCPIXEL_KITTY_STATIC (see the generic bitmap fallback in termdesc.c). So
- *   registry terminals are split by name, and an unrecognised one gets the
- *   stationary tier, which retransmits on board change rather than per frame.
- *   Sixel and the framebuffer keep no registry, so nothing accumulates there.
+ *   protocols hand the terminal an image registry. Only terminals measured to
+ *   replace entries safely get moving bitmaps; every other registry backend
+ *   keeps graphics through the stationary tier, which retransmits on board
+ *   change rather than per frame. Sixel and the framebuffer keep no registry,
+ *   so nothing accumulates there.
  *
  * @param backend Pixel backend reported by notcurses_check_pixel_support().
  * @param term Detected terminal name, or NULL when unknown.
@@ -57,15 +53,45 @@ t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
 }
 
 /**
+ * @brief Reports whether authored notification bitmaps are available.
+ *
+ * Stationary protocols cannot move or alpha-blend a bitmap plane, but Sixel
+ * still preserves transparent pixels through DCS P2=1. Notifications account
+ * for the remaining lifecycle restrictions in their renderer; only a true
+ * cell-only tier needs the terminal-native card.
+ *
+ * @param policy Pixel capability tier selected for the session.
+ * @return true when the tier can display the authored notification bitmap.
+ */
+bool	tetrisu_pixel_policy_supports_notification_art(
+	t_tetrisu_pixel_policy policy)
+{
+	return (policy != TETRISU_PIXELS_NONE);
+}
+
+/**
+ * @brief Reports whether a screen redraw must retransmit notification art.
+ *
+ * Movable bitmap planes retain their z-order. Stationary protocols paint at
+ * the cursor, so a newly emitted full-screen bitmap overwrites a notification
+ * even when its logical plane remains above the screen plane.
+ *
+ * @param policy Pixel capability tier selected for the session.
+ * @return true when notification art must be rebuilt after screen redraws.
+ */
+bool	tetrisu_pixel_policy_notification_needs_reemit(
+	t_tetrisu_pixel_policy policy)
+{
+	return (policy == TETRISU_PIXELS_STATIONARY);
+}
+
+/**
  * @brief Grades a terminal that keeps an image registry by measured behaviour.
  *
- * Only two answers are earned by measurement. Terminals observed to free a
- * replaced image move bitmaps freely; terminals observed to retain every frame
- * are the one case worth giving up bitmaps for entirely. Everything else is
- * merely unmeasured, not known-broken, so it draws stationary bitmaps: those
- * retransmit when the board changes instead of once per frame, which is both
- * the presentation the terminal deserves and a far smaller bet if it turns out
- * to leak. TETRISU_RENDERER pins any of the three explicitly.
+ * Terminals observed to free a replaced image move bitmaps freely. Every other
+ * registry terminal draws stationary bitmaps, retaining authored graphics
+ * while avoiding per-frame retransmission. TETRISU_RENDERER pins any of the
+ * three tiers explicitly.
  *
  * @param term Detected terminal name, or NULL when unknown.
  * @return The tier this registry terminal has earned.
@@ -76,8 +102,6 @@ static t_tetrisu_pixel_policy	registry_policy(const char *term)
 		return (TETRISU_PIXELS_STATIONARY);
 	if (contains_fold(term, "ghostty") || contains_fold(term, "kitty"))
 		return (TETRISU_PIXELS_MOVABLE);
-	if (contains_fold(term, "wezterm") || contains_fold(term, "iterm"))
-		return (TETRISU_PIXELS_NONE);
 	return (TETRISU_PIXELS_STATIONARY);
 }
 

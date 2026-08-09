@@ -10,7 +10,13 @@ those points feed two things we track for each player:
 | Value | What it is | What it's for |
 |---|---|---|
 | `leaderboard_scores` | The player's personal highest (best) single-game score | Ranking / bragging rights only |
-| `wallet_points` | The sum of points earned per game ÷ 1000 | The currency to buy new characters or themes |
+| `lifetime_points` | Every point ever scored, added up | Nothing ranks on it; it is what the wallet's rate is charged against |
+| `wallet_points` | `lifetime_points ÷ 100`, less everything bought | The currency to buy new characters or themes |
+
+The first two are deliberately separate. Ranking on a running total ranks
+whoever played *most*, not whoever played *best* — a player grinding
+100-point games passes one who scored 5,000 once, and skill cannot catch up
+with persistence. The wallet still needs a running total, so it gets its own.
 
 ---
 
@@ -53,15 +59,30 @@ use it to sanity-check the wallet pricing below.
 
 For all the pricing math below, we assume the everyone is around beginner level (and also not much game can be play), so **average score is 5,000 points per game** (Middle of Beginner Tier).
 
+That table is a full sitting, though, and a demo game is not one. Somebody who
+walks up to a terminal, plays for two minutes and tops out lands well under the
+bottom of the Beginner row — nearer **500 points** — which is the figure the
+wallet rate and the prices below are actually sized against.
+
 ---
 
 ## Wallet economy
 
 ```
-wallet_points = Sum of points earned per game / 1000
+wallet_points earned = lifetime_points / 100
 ```
 
-At an average game of 5,000 points, that's about **5 wallet_points per game**.
+The sum comes first and the division second, which is the whole rule: a game
+is paid the difference between what the running total was worth before it and
+what it is worth after, so the remainder stays on the account instead of being
+rounded away. Three games of 90 points each pay 0, 1, then 1 — not 0, 0, 0.
+
+That matters because the games actually played here are short. A demo game
+lasts a couple of minutes and lands nearer **500 points** than the 5,000 the
+skill table above calls a beginner game, and at a rate of one point per
+thousand every one of them would have earned nothing at all. One point per
+hundred puts a short game at about **5 wallet_points**, which is what the
+pricing below is sized against.
 
 ---
 
@@ -73,7 +94,7 @@ Each item costs a flat number of `wallet_points`.
 
 **Characters:**
 
-Each character is worth 10 wallet_points (about 0.5 average games).
+Each character is worth 10 wallet_points (about 2 games).
 
 **Themes:**
 
@@ -81,14 +102,20 @@ Each character is worth 10 wallet_points (about 0.5 average games).
 |---|---|---|
 | Default | — | Free (starting theme) |
 | Design and AI | Free for SUTDents | — |
-| Do u wanna build a snowman? | 5 | ~1 games |
-| Haaland | 8 | ~1.6 game |
-| John Cena | 10 | ~2 games |
+| Do u wanna build a snowman? | 5 | ~1 game |
+| Haaland | 8 | ~1.6 games |
 | Claude-ing | 7 | ~1.4 games |
 | Al-Merqaedes | 15 | ~3 games |
 | Nuclear Gandhi | 15 | ~3 games |
 
-The "est. games" column assumes the 20,000-point (≈ 20 wallet_points) average game.
+The "est. games" column assumes the short demo game — about 500 points, so
+about 5 wallet_points — described under [Wallet economy](#wallet-economy).
+
+The John Cena theme was costed here at 10 but never drawn, so it is cut rather
+than shipped as a purchase with no artwork behind it. Its catalogue id (5) is
+left as a gap in `themes.cfg` instead of being reassigned — ids are persisted
+in every player's `owned_themes` list, so renumbering would re-point what
+somebody already bought at a different theme.
 
 ### Why these prices
 

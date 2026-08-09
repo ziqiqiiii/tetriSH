@@ -10,7 +10,15 @@ static const t_htttp_route	g_routes[] = {
 	{"START", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, start_handler},
 	{"MOVE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, move_handler},
 	{"ROTATE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, rotate_handler},
-	{"DROP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, drop_handler}
+	{"DROP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, drop_handler},
+	{"HOLD", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, hold_handler},
+	{"PAUSE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, pause_handler},
+	{"RESTART", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, restart_handler},
+	{"ABILITY", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, ability_handler},
+	{"LEADERBOARD", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, leaderboard_handler},
+	{"PROFILE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, profile_handler},
+	{"BUY", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, buy_handler},
+	{"EQUIP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, equip_handler}
 };
 
 // Static Functions
@@ -77,31 +85,27 @@ void	client_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
  * @param body Body bytes, or NULL for an empty response.
  * @param body_len Length of body.
  */
-void	request_reply(t_client *cli, unsigned int status, const char *body,
-		size_t body_len)
+void	request_reply(t_client *cli, unsigned int status, const char *body, size_t body_len)
 {
 	t_htttp_message	resp;
 	char			date[HTTTP_DATE_BUFSIZE];
 	char			pid[32];
 
 	htttp_message_init(&resp);
-	if (htttp_message_make_response(&resp, status, reason_for(status))
-		== HTTTP_OK)
+	if (htttp_message_make_response(&resp, status, reason_for(status)) == HTTTP_OK)
 	{
 		if (htttp_format_date(time(NULL), date) == HTTTP_OK)
 			htttp_message_set_header(&resp, "Date", date);
 		if (cli->state == CLI_AUTHED)
 		{
-			snprintf(pid, sizeof(pid), "%llu",
-				(unsigned long long)cli->player_id);
+			snprintf(pid, sizeof(pid), "%llu", (unsigned long long)cli->player_id);
 			htttp_message_set_header(&resp, "Player-Id", pid);
 		}
 		if (status == 429u)
 			htttp_message_set_header(&resp, "Retry-After", "1");
 		if (body != NULL && body_len > 0)
 		{
-			htttp_message_set_header(&resp, "Content-Type",
-				HTTTP_CONTENT_TYPE_STATUS);
+			htttp_message_set_header(&resp, "Content-Type", HTTTP_CONTENT_TYPE_STATUS);
 			htttp_message_set_body(&resp, body, body_len);
 		}
 		client_send(cli, &resp, false);
@@ -139,8 +143,7 @@ const char	*request_body_field(const t_request_context *ctx, const char *key, ch
 		n = i;
 		while (n < ctx->msg->body_len && body[n] != '\n')
 			n++;
-		if (n - i > key_len + 1 && memcmp(&body[i], key, key_len) == 0
-			&& body[i + key_len] == ' ')
+		if (n - i > key_len + 1 && memcmp(&body[i], key, key_len) == 0 && body[i + key_len] == ' ')
 		{
 			i += key_len + 1;
 			if (n - i >= cap)
@@ -232,8 +235,7 @@ static bool	body_declares_itself(const t_htttp_message *msg)
  * @param msg The parsed message, or NULL when parsing itself failed.
  * @return The status code to answer with.
  */
-static unsigned int	result_status(t_htttp_result res,
-					const t_htttp_message *msg)
+static unsigned int	result_status(t_htttp_result res, const t_htttp_message *msg)
 {
 	const char	*player;
 

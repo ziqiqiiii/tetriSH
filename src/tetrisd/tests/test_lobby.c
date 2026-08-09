@@ -21,10 +21,10 @@ static void	test_leaving_removes_an_empty_room(void);
 static void	test_only_the_owner_starts_the_game(void);
 static void	test_start_needs_enough_players(void);
 static void	test_ownership_passes_to_a_successor(void);
+static void	test_a_destroyed_room_does_not_take_its_successor_with_it(void);
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
-static int		simple(t_harness *hc, const char *method, const char *path,
-					const char *body);
+static int		simple(t_harness *hc, const char *method, const char *path, const char *body);
 static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap);
 
 int	main(void)
@@ -36,6 +36,7 @@ int	main(void)
 	test_only_the_owner_starts_the_game();
 	test_start_needs_enough_players();
 	test_ownership_passes_to_a_successor();
+	test_a_destroyed_room_does_not_take_its_successor_with_it();
 	return (0);
 }
 
@@ -194,6 +195,47 @@ static void	test_ownership_passes_to_a_successor(void)
  * @param name Username to register.
  * @return 0 on success, -1 otherwise.
  */
+/*
+** A room the lobby destroyed leaves an index behind, and the lobby hands that
+** index straight back out. If the runtime attached to it is not blanked with
+** it, the server's tick is still walking the *old* room through the new one's
+** state: it finds no active games, decides the game is over, and clears every
+** slot - evicting whoever just created the room, seconds after they did.
+**
+** The tick period is stretched so the second room is certainly created inside
+** the window a tick would land in, which is what makes this deterministic
+** rather than a race the suite would only lose sometimes.
+*/
+static void	test_a_destroyed_room_does_not_take_its_successor_with_it(void)
+{
+	t_body_room_row	rows[LOBBY_MAX_ROOMS];
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	char			room[ROOM_NAME_MAX];
+	char			path[96];
+
+	assert(fx_start(&fx) == 0);
+	server_stop(fx.srv);
+	fx.cfg.tick_ms = 1000;
+	assert(server_start(&fx.cfg, &fx.srv) == 0);
+	assert(player(&fx, &amber, "amber") == 0);
+	assert(hc_join_new(&amber, "single", room, sizeof(room)) == 201);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&amber, "START", path, NULL) == 200);
+	assert(simple(&amber, "LEAVE", path, NULL) == 200);
+	assert(player(&fx, &blake, "blake") == 0);
+	assert(hc_join_new(&blake, "single", room, sizeof(room)) == 201);
+	usleep(1500 * 1000);
+	assert(list_rooms(&blake, rows, LOBBY_MAX_ROOMS) == 1);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&blake, "START", path, NULL) == 200);
+	hc_close(&blake);
+	hc_close(&amber);
+	fx_stop(&fx);
+	printf("PASS test_a_destroyed_room_does_not_take_its_successor_with_it\n");
+}
+
 static int	player(t_fixture *fx, t_harness *hc, const char *name)
 {
 	if (hc_connect(hc, fx) != 0)
@@ -245,8 +287,7 @@ static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap)
 		return (0);
 	assert(resp.status_code == 200);
 	if (resp.body != NULL && resp.body_len > 0)
-		assert(body_rooms_decode((const char *)resp.body, resp.body_len, rows,
-				cap, &count) == 0);
+		assert(body_rooms_decode((const char *)resp.body, resp.body_len, rows, cap, &count) == 0);
 	htttp_message_free(&resp);
 	return (count);
 }

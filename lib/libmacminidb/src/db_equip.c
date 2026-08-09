@@ -78,7 +78,7 @@ t_db_result	db_equip_theme(t_db *db, t_player_id id, t_item_id tid)
 	else
 	{
 		tmp = *p;
-		tmp.current_equipped_character = tid;
+		tmp.current_equipped_theme = tid;
 		r = db_persist(db, &tmp);
 		if (r == DB_OK)
 			*p = tmp;

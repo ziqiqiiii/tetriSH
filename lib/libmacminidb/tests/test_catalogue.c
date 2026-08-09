@@ -16,7 +16,7 @@ void	test_loads_full_roster(void)
 	c = catalogue_load(CFG_DIR);
 	assert(c != NULL);
 	assert(c->char_count == 4);
-	assert(c->theme_count == 8);
+	assert(c->theme_count == 7);
 	catalogue_free(c);
 	printf("PASS test_loads_full_roster\n");
 }
@@ -50,7 +50,7 @@ void	test_theme_lookup(void)
 {
 	t_catalogue		*c;
 	const t_theme	*def;
-	const t_theme	*cena;
+	const t_theme	*gandhi;
 
 	c = catalogue_load(CFG_DIR);
 	assert(c != NULL);
@@ -59,12 +59,30 @@ void	test_theme_lookup(void)
 	assert(strcmp(def->name, "Default") == 0);
 	assert(def->cost_points == 0);
 	assert(strlen(def->description) > 0);
-	cena = catalogue_theme(c, 5);
-	assert(cena != NULL && strcmp(cena->name, "John Cena") == 0);
-	assert(cena->cost_points == 30);
+	gandhi = catalogue_theme(c, 8);
+	assert(gandhi != NULL && strcmp(gandhi->name, "Nuclear Gandhi") == 0);
+	assert(gandhi->cost_points == 15);
 	assert(catalogue_theme(c, 999) == NULL);
 	catalogue_free(c);
 	printf("PASS test_theme_lookup\n");
+}
+
+// Ids are positional labels, not array indexes: id 5 is the gap left by the
+// cut John Cena theme, and the ids after it keep the values players already
+// have written into their owned_themes lists rather than sliding down one.
+void	test_ids_are_not_indexes(void)
+{
+	t_catalogue		*c;
+
+	c = catalogue_load(CFG_DIR);
+	assert(c != NULL);
+	assert(catalogue_theme(c, 5) == NULL);
+	assert(catalogue_theme(c, 6) != NULL);
+	assert(strcmp(catalogue_theme(c, 6)->name, "Claude-ing") == 0);
+	assert(catalogue_theme(c, 7) != NULL);
+	assert(strcmp(catalogue_theme(c, 7)->name, "Al-Merqaedes") == 0);
+	catalogue_free(c);
+	printf("PASS test_ids_are_not_indexes\n");
 }
 
 // A missing config directory fails the load cleanly (no crash, NULL result),
@@ -84,6 +102,7 @@ int	main(void)
 	test_loads_full_roster();
 	test_character_lookup();
 	test_theme_lookup();
+	test_ids_are_not_indexes();
 	test_missing_dir_and_null();
 	return (0);
 }

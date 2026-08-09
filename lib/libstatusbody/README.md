@@ -10,7 +10,7 @@ receives.
 - [Build And Test](#build-and-test)
 - [Usage](#usage)
 - [Codec Contract](#codec-contract)
-- [The Four Codecs](#the-four-codecs)
+- [The Five Codecs](#the-five-codecs)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 
@@ -80,7 +80,7 @@ On failure both return `-1` and set `errno`:
 
 
 ---
-## The Four Codecs
+## The Five Codecs
 
 One codec per HTTTP body type, each its own `.c` file. Every subsection below
 gives the pair's functions, then the wire format those functions read and write.
@@ -91,7 +91,7 @@ All bodies are plaintext `key value` lines. Single public header,
 
 | Function | Description |
 |---|---|
-| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4 and cell type/color nibbles before writing |
+| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15 and cell type/color nibbles before writing |
 | `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
 
 Fixed key order, exactly as encoded:
@@ -101,6 +101,7 @@ seq 42
 phase active
 piece 3 1 4 0
 next 0 1 2
+hold 5 1
 score 1200
 lines 14
 level 2
@@ -119,6 +120,7 @@ board
 |---|---|
 | `piece` | `<type> <rotation> <col> <row>` |
 | `next` | `<t0> <t1> <t2>` (`BODY_NEXT_COUNT` = 3) |
+| `hold` | `<type\|-1> <0\|1>` — held piece and whether the hold is already spent on the falling one; `BODY_HOLD_EMPTY` (`-1`) = holding nothing |
 | `ability` | `<level> <0\|1>` — last activation; level `0` = none |
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
@@ -174,6 +176,24 @@ One line per rank, ascending:
 <rank> <username> <score>
 ```
 
+### Catalogue — `LIST /store` rows (`catalogue.c`)
+
+| Function | Description |
+|---|---|
+| `body_catalogue_encode(in, out, cap)` | Serialise both catalogues, each section count-prefixed |
+| `body_catalogue_decode(buf, len, out)` | Parse both sections; a count past `BODY_CATALOGUE_MAX` is refused before a row is read |
+
+Characters first, then themes:
+
+```
+characters <n>
+<id> <price> <name>          (exactly n lines)
+themes <n>
+<id> <price> <name>          (exactly n lines)
+```
+
+The name runs to end of line and may contain spaces, which is why it is last; the id is the catalogue id, which carries gaps and is therefore not a position.
+
 ### Error Codes
 
 | `errno` | Meaning |
@@ -193,6 +213,7 @@ libstatusbody/
 │   ├── rooms.c             LIST /rooms row encode/decode
 │   ├── profile.c           ProfileView encode/decode
 │   ├── leaderboard.c       leaderboard row encode/decode
+│   ├── catalogue.c         LIST /store catalogue encode/decode
 │   ├── body_util.h           Private — shared append/scan primitives
 │   └── body_util.c           Private — not part of the public API
 ├── tests/test_*.c          Unit tests, one per module (each with its own main)

@@ -1,6 +1,9 @@
 #include "tetrisu.h"
 
 static int	clamp_int(int value, int min, int max);
+static bool	show_notification(t_ui_notification_stack *stack,
+					t_ui_notification_kind kind, const char *title,
+					const char *message, int percent, uint64_t now_ms);
 static int	find_title(const t_ui_notification_stack *stack,
 				const char *title);
 static void	move_to_front(t_ui_notification_stack *stack, int index);
@@ -30,15 +33,49 @@ void	ui_notification_stack_init(t_ui_notification_stack *stack)
  * @param percent Percentage value, clamped to 0..100.
  * @param now_ms Current monotonic timestamp.
  */
-void	ui_notification_show(t_ui_notification_stack *stack,
+bool	ui_notification_show(t_ui_notification_stack *stack,
 	const char *title, int percent, uint64_t now_ms)
 {
-	int	index;
-	int	insert;
+	return (show_notification(stack, UI_NOTIFICATION_VOLUME, title, "",
+			percent, now_ms));
+}
+
+/**
+ * @brief Adds or refreshes the fixed ownership-error notification.
+ *
+ * Keeping this copy in the model makes bitmap and compatibility renderers
+ * present the same Marketplace guidance without duplicating strings.
+ */
+bool	ui_notification_show_ownership(t_ui_notification_stack *stack,
+	uint64_t now_ms)
+{
+	return (show_notification(stack, UI_NOTIFICATION_OWNERSHIP,
+		UI_NOTIFICATION_OWNERSHIP_TITLE, UI_NOTIFICATION_OWNERSHIP_MESSAGE,
+		0, now_ms));
+}
+
+static bool	show_notification(t_ui_notification_stack *stack,
+	t_ui_notification_kind kind, const char *title, const char *message,
+	int percent, uint64_t now_ms)
+{
+	int		index;
+	int		insert;
+	int		clamped_percent;
+	const char	*safe_message;
 
 	if (stack == NULL || title == NULL || title[0] == '\0')
-		return ;
+		return (false);
+	safe_message = message != NULL ? message : "";
+	clamped_percent = clamp_int(percent, 0, 100);
 	index = find_title(stack, title);
+	if (index == 0 && stack->items[0].kind == kind
+		&& stack->items[0].percent == clamped_percent
+		&& strncmp(stack->items[0].message, safe_message,
+			UI_NOTIFICATION_MESSAGE_MAX) == 0)
+	{
+		stack->items[0].shown_at_ms = now_ms;
+		return (false);
+	}
 	if (index >= 0)
 		move_to_front(stack, index);
 	else
@@ -55,10 +92,14 @@ void	ui_notification_show(t_ui_notification_stack *stack,
 			stack->count++;
 	}
 	memset(&stack->items[0], 0, sizeof(stack->items[0]));
+	stack->items[0].kind = kind;
 	snprintf(stack->items[0].title, sizeof(stack->items[0].title),
 		"%.*s", UI_NOTIFICATION_TITLE_MAX, title);
-	stack->items[0].percent = clamp_int(percent, 0, 100);
+	snprintf(stack->items[0].message, sizeof(stack->items[0].message),
+		"%.*s", UI_NOTIFICATION_MESSAGE_MAX, safe_message);
+	stack->items[0].percent = clamped_percent;
 	stack->items[0].shown_at_ms = now_ms;
+	return (true);
 }
 
 /**
@@ -167,6 +208,50 @@ int	ui_notification_next_wake_ms(const t_ui_notification_stack *stack,
 			}
 			else
 				delay = 0;
+		}
+		if (next < 0 || clamp_delay(delay) < next)
+			next = clamp_delay(delay);
+		index++;
+	}
+	return (next);
+}
+
+/**
+ * @brief Returns the delay until the next notification fully expires.
+ *
+ * Stationary bitmap protocols cannot alpha-blend fade frames. They keep the
+ * authored card opaque and sleep until its model lifetime ends, avoiding
+ * repeated Sixel plane replacement while preserving the same total duration.
+ *
+ * @param stack Stack to inspect.
+ * @param now_ms Current monotonic timestamp.
+ * @return Delay in milliseconds, or -1 when the stack is empty.
+ */
+int	ui_notification_next_expiry_ms(const t_ui_notification_stack *stack,
+	uint64_t now_ms)
+{
+	uint64_t	delay;
+	uint64_t	elapsed;
+	int			index;
+	int			next;
+
+	if (stack == NULL || stack->count == 0)
+		return (-1);
+	next = -1;
+	index = 0;
+	while (index < stack->count)
+	{
+		if (now_ms < stack->items[index].shown_at_ms)
+			delay = stack->items[index].shown_at_ms - now_ms
+				+ UI_NOTIFICATION_HOLD_MS + UI_NOTIFICATION_FADE_MS;
+		else
+		{
+			elapsed = now_ms - stack->items[index].shown_at_ms;
+			if (elapsed >= UI_NOTIFICATION_HOLD_MS + UI_NOTIFICATION_FADE_MS)
+				delay = 0;
+			else
+				delay = UI_NOTIFICATION_HOLD_MS + UI_NOTIFICATION_FADE_MS
+					- elapsed;
 		}
 		if (next < 0 || clamp_delay(delay) < next)
 			next = clamp_delay(delay);

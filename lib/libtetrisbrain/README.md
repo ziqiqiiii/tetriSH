@@ -297,6 +297,29 @@ Single public header, `include/tetrisbrain.h`.
 | `piece_hard_drop(b, p)` | Fall until it lands |
 | `piece_drop_distance(b, p)` | Rows the piece would fall before landing, without mutating it — the ghost/drop preview |
 
+### Lock Down (`lockdown.c`)
+
+The Guideline's Extended Placement lock down: a piece that has landed is still
+the player's for `LOCKDOWN_DELAY_MS` (500), and every move or rotation buys
+that half-second back — `LOCKDOWN_MAX_RESETS` (15) times per piece, refilled
+whenever it falls past the lowest row it has occupied. It is what lets a piece
+be slid into a gap instead of only dropped onto one.
+
+No time is kept here beyond what the caller hands over, and the state is the
+caller's. Both `tetrisd` and `tetrisu`'s offline rules run this table, for the
+same reason they share `gravity_interval_ms` and `clear_duration_ms`: two
+copies drifted into a game that played differently depending on whether a
+server was listening
+([`docs/bugs/`](../../docs/bugs/the_piece_locked_the_moment_it_landed.md)).
+
+| Function | Description |
+|---|---|
+| `lockdown_init(lock, p)` | Arm a fresh delay for a newly spawned or held piece |
+| `lockdown_grounded(b, p)` | Whether the piece can still descend; probed on a copy |
+| `lockdown_on_fall(lock, p)` | Refill the reset budget when a descent reaches a new lowest row |
+| `lockdown_on_shift(lock, was_grounded)` | Spend one reset on a move or rotation made while resting |
+| `lockdown_tick(lock, grounded, elapsed_ms)` | Charge elapsed time; `true` when the piece is out of time |
+
 ### Line Clear (`lineclear.c`)
 
 | Function | Description |
@@ -315,6 +338,7 @@ Single public header, `include/tetrisbrain.h`.
 | `score_on_clear(lines_cleared, level)` | Plain clear table (`100 / 300 / 500 / 800`) × displayed level |
 | `level_from_lines(total_lines)` | Displayed level; starts at `1` and rises every ten lines |
 | `gravity_interval_ms(level)` | Tetris Worlds-style interval; `0` means caller-applied 20G at level 19+ |
+| `clear_duration_ms(level)` | How long completed rows are held before being taken away — a rule, not a flourish: for that long they are still on the board, no piece has spawned, and the player cannot act. Both `tetrisd` and `tetrisu` read it, so there is one table |
 
 ### Abilities (`abilities.c`)
 
@@ -373,6 +397,7 @@ libtetrisbrain/
 │   ├── pieces.c            Tetromino shapes, SRS rotation, wall kicks, T-Spin rule
 │   ├── bag.c               Caller-owned deterministic seven-bag randomiser
 │   ├── gravity.c           Gravity tick, soft drop, hard drop, drop distance
+│   ├── lockdown.c          Guideline Extended Placement lock down
 │   ├── lineclear.c         Full-row detection and compaction
 │   ├── scoring.c           Clear/combo/back-to-back scoring, level, gravity ramp
 │   ├── abilities.c         Battle Royale ability board transforms

@@ -87,8 +87,7 @@ void	logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	va_end(ap);
-	if (logrecord_make(&rec, level, clock_now_ms(), (uint32_t)getpid(),
-			TETRISD_COMPONENT_NAME, msg) != 0)
+	if (logrecord_make(&rec, level, clock_now_ms(), (uint32_t)getpid(), TETRISD_COMPONENT_NAME, msg) != 0)
 		return ;
 	ring_push(&lg->ring, &rec);
 }

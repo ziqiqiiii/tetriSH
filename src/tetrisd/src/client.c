@@ -1,21 +1,21 @@
 #include "tetrisd.h"
 
 // Static Functions
-static int	start_reader(t_client *cli);
-static void	*reader_main(void *arg);
-static void	*writer_main(void *arg);
-static void	teardown(t_client *cli);
+static void	unwatch(t_client *cli);
+static void	release(t_client *cli);
 
 /**
- * @brief Takes ownership of an accepted connection and starts serving it.
+ * @brief Takes ownership of an accepted connection and starts its handshake.
  *
- * The client is registered before its handshake runs, so a shutdown can
- * interrupt a peer that never finishes one. From here on the connection
- * belongs to its own reader thread, which frees it when the peer goes away.
+ * The client is registered before its handshake runs, so the connection limit
+ * is enforced at accept time - a peer beyond it is refused before any crypto
+ * is spent on it - and so a shutdown can reach a peer that never finishes one.
+ * From here the handshake pool owns the descriptor until it hands the
+ * established session back to the reactor.
  *
  * @param srv Server the connection belongs to.
  * @param fd Accepted socket descriptor; closed here on failure.
- * @return 0 when a reader thread took over, -1 when the client was refused.
+ * @return 0 when the pool took over, -1 when the client was refused.
  */
 int	client_spawn(t_server *srv, int fd)
 {
@@ -25,181 +25,137 @@ int	client_spawn(t_server *srv, int fd)
 		return (-1);
 	cli = calloc(1, sizeof(*cli));
 	if (cli == NULL)
-	{
-		close(fd);
-		return (-1);
-	}
+		return (close(fd), -1);
+	cli->tag.source = EVENT_CLIENT;
 	cli->fd = fd;
 	cli->srv = srv;
 	cli->index = -1;
-	cli->room_index = -1;
-	cli->slot_index = -1;
 	cli->state = CLI_HANDSHAKE;
+	server_room_unbind(cli);
 	if (outbox_init(&cli->outbox) != 0 || registry_add(&srv->reg, cli) != 0)
 	{
 		outbox_destroy(&cli->outbox);
-		close(fd);
-		free(cli);
-		return (-1);
+		return (close(fd), free(cli), -1);
 	}
-	if (start_reader(cli) != 0)
+	if (handshake_pool_submit(&srv->pool, cli) != 0)
 	{
 		registry_remove(&srv->reg, cli);
 		outbox_destroy(&cli->outbox);
-		close(fd);
-		free(cli);
-		return (-1);
+		return (close(fd), free(cli), -1);
 	}
 	return (0);
 }
 
 /**
- * @brief Serialises a message and queues it for this client's writer thread.
+ * @brief Moves a handshaken connection into the event loop.
  *
- * Handlers and tickers never touch the socket: they hand bytes to the outbox
- * and move on, which is what keeps one slow peer from blocking a room.
+ * This is the handoff: from here the socket is non-blocking and the reactor is
+ * its only reader and its only writer, so the session's sequence counters have
+ * exactly one owner. A client that cannot be adopted is ended rather than left
+ * connected but unwatched.
  *
- * @param cli Client to send to.
- * @param msg Message to serialise; the caller still owns and frees it.
- * @param is_state true for a STATE push (latest-wins mailbox).
+ * @param cli Client whose handshake succeeded.
  */
-void	client_send(t_client *cli, t_htttp_message *msg, bool is_state)
+void	client_adopt(t_client *cli)
 {
-	unsigned char	*bytes;
-	size_t			len;
-	int				rc;
+	struct epoll_event	ev;
 
-	if (cli == NULL || msg == NULL)
+	if (cli == NULL || cli->dead)
 		return ;
-	if (htttp_serialize(msg, &bytes, &len) != HTTTP_OK)
+	memset(&ev, 0, sizeof(ev));
+	ev.events = EPOLLIN;
+	ev.data.ptr = cli;
+	if (unixsock_set_nonblock(cli->fd) != 0 || epoll_ctl(cli->srv->epoll_fd, EPOLL_CTL_ADD, cli->fd, &ev) != 0)
+	{
+		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING, "cannot watch fd %d: %s", cli->fd, strerror(errno));
+		client_kill(cli);
 		return ;
-	if (is_state)
-		rc = outbox_push_state(&cli->outbox, bytes, len);
-	else
-		rc = outbox_push(&cli->outbox, bytes, len);
-	if (rc != 0)
-	{
-		free(bytes);
-		shutdown(cli->fd, SHUT_RDWR);
 	}
+	cli->watched = true;
+	registry_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
 }
 
 /**
- * @brief Starts the detached reader thread that owns the client from now on.
- *
- * @param cli Client to serve.
- * @return 0 on success, -1 when the thread could not be created.
- */
-static int	start_reader(t_client *cli)
-{
-	pthread_attr_t	attr;
-	int				rc;
-
-	if (pthread_attr_init(&attr) != 0)
-		return (-1);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	rc = pthread_create(&cli->reader, &attr, reader_main, cli);
-	pthread_attr_destroy(&attr);
-	if (rc != 0)
-		return (-1);
-	return (0);
-}
-
-/**
- * @brief Reader thread: handshake, then one request at a time until the end.
- *
- * It blocks in session_recv, which is why every client needs its own thread;
- * the matching writer thread is only started once the session is established,
- * so nothing can be sent over an unauthenticated connection.
- *
- * @param arg The client.
- * @return Always NULL.
- */
-static void	*reader_main(void *arg)
-{
-	t_client		*cli;
-	unsigned char	*buf;
-	ssize_t			n;
-
-	cli = arg;
-	buf = malloc(TETRISSH_MAX_PLAINTEXT);
-	if (buf != NULL && session_handshake_server(cli->fd, &cli->sess,
-			cli->srv->cfg.cert_path, cli->srv->cfg.key_path) == 0)
-	{
-		registry_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
-		if (pthread_create(&cli->writer, NULL, writer_main, cli) == 0)
-			cli->writer_started = true;
-		while (cli->writer_started && atomic_load(&cli->srv->running))
-		{
-			n = session_recv(&cli->sess, buf, TETRISSH_MAX_PLAINTEXT);
-			if (n <= 0 || atomic_load(&cli->outbox.overflowed))
-				break ;
-			client_handle_frame(cli, buf, (size_t)n);
-		}
-	}
-	else
-		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING,
-			"handshake failed on fd %d", cli->fd);
-	free(buf);
-	teardown(cli);
-	return (NULL);
-}
-
-/**
- * @brief Writer thread: the one caller of session_send for this connection.
- *
- * Keeping sends on a single thread is what makes the frame sequence numbers
- * meaningful - two threads encrypting into the same session would interleave.
- *
- * @param arg The client.
- * @return Always NULL.
- */
-static void	*writer_main(void *arg)
-{
-	t_client	*cli;
-	t_outbound_message	msg;
-	ssize_t		sent;
-
-	cli = arg;
-	while (outbox_pop(&cli->outbox, &msg) == 0)
-	{
-		sent = session_send(&cli->sess, msg.bytes, msg.len);
-		free(msg.bytes);
-		if (sent < 0)
-		{
-			shutdown(cli->fd, SHUT_RDWR);
-			break ;
-		}
-	}
-	return (NULL);
-}
-
-/**
- * @brief Ends a client: forfeit, unlink, stop the writer, free everything.
+ * @brief Ends a client: forfeit, unlink, and park it for the reaper.
  *
  * The order is the lifetime rule: the player leaves the room first (a
  * disconnect mid-game is a forfeit, ADR-0002), then the client is unlinked
- * from the registry so nobody can enqueue into it, and only then are the
- * socket and memory released.
+ * from the registry so nothing can address it as that player again, and only
+ * then is the socket shut down.
  *
- * @param cli Client to tear down; the pointer is invalid afterwards.
+ * Nothing is freed here. A batch of epoll events may hold several pointers to
+ * this client, so it goes on the zombie list and client_reap releases it once
+ * the whole batch has been processed (docs/adr/0008).
+ *
+ * @param cli Client to end; a second call and a NULL are both ignored.
  */
-static void	teardown(t_client *cli)
+void	client_kill(t_client *cli)
 {
 	t_server	*srv;
 
+	if (cli == NULL || cli->dead)
+		return ;
 	srv = cli->srv;
+	cli->dead = true;
+	unwatch(cli);
 	server_room_forfeit(srv, cli);
 	registry_remove(&srv->reg, cli);
 	shutdown(cli->fd, SHUT_RDWR);
 	outbox_close(&cli->outbox);
-	if (cli->writer_started)
-		pthread_join(cli->writer, NULL);
+	cli->next_zombie = srv->zombies;
+	srv->zombies = cli;
+}
+
+/**
+ * @brief Frees every client killed during the batch that has just finished.
+ *
+ * This is the only free() site for a client, and calling it anywhere other
+ * than between batches turns a stale epoll_event.data.ptr into a use-after
+ * free - the one rule in the reactor that a later change can break without a
+ * single test noticing.
+ *
+ * @param srv Server whose zombie list is drained.
+ */
+void	client_reap(t_server *srv)
+{
+	t_client	*cli;
+
+	if (srv == NULL)
+		return ;
+	while (srv->zombies != NULL)
+	{
+		cli = srv->zombies;
+		srv->zombies = cli->next_zombie;
+		release(cli);
+	}
+}
+
+/**
+ * @brief Removes a client's descriptor from the epoll set.
+ *
+ * @param cli Client being unwatched; safe when it never was.
+ */
+static void	unwatch(t_client *cli)
+{
+	if (!cli->watched)
+		return ;
+	epoll_ctl(cli->srv->epoll_fd, EPOLL_CTL_DEL, cli->fd, NULL);
+	cli->watched = false;
+	cli->writable_armed = false;
+}
+
+/**
+ * @brief Releases one dead client's descriptor, buffers, and memory.
+ *
+ * @param cli Client to release; the pointer is invalid afterwards.
+ */
+static void	release(t_client *cli)
+{
+	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "client %s disconnected", cli->username[0] != '\0' ? cli->username : "(anonymous)");
 	session_close(&cli->sess);
 	close(cli->fd);
 	outbox_destroy(&cli->outbox);
-	logger_emit(&srv->log, COREIPC_LOG_INFO, "client %s disconnected",
-		cli->username[0] != '\0' ? cli->username : "(anonymous)");
+	buffer_free(&cli->recv);
+	buffer_free(&cli->send);
 	free(cli);
 }
-

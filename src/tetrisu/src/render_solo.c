@@ -154,7 +154,17 @@ static void	destroy_board_planes(t_solo_render *solo);
  */
 void	render_solo_create(t_render_ctx *ctx, t_solo_render *solo)
 {
+	const char	*character_path;
+
 	memset(solo, 0, sizeof(*solo));
+	snprintf(solo->background_path, sizeof(solo->background_path), "%s",
+		ctx->theme_assets.solo_background);
+	character_path = tetrisu_theme_character_path(&ctx->theme_assets,
+		ctx->active_character);
+	if (character_path == NULL)
+		character_path = DEFAULT_MIRURUN_PATH;
+	snprintf(solo->character_path, sizeof(solo->character_path), "%s",
+		character_path);
 	reset_render_signatures(solo);
 	calculate_solo_layout(ctx, solo);
 	update_solo_compatibility_badge(ctx, solo);
@@ -854,7 +864,8 @@ static bool	update_compatibility_score(t_render_ctx *ctx,
 static bool	update_compatibility_overlay(t_render_ctx *ctx,
 	t_solo_render *solo, const t_solo_game *game)
 {
-	char		countdown[8];
+	char		countdown[12];
+	char		best[SOLO_BEST_CAPTION_MAX];
 	const char	*title;
 	const char	*action;
 	t_color		white;
@@ -910,24 +921,25 @@ static bool	update_compatibility_overlay(t_render_ctx *ctx,
 		ncplane_move_top(solo->compatibility_overlay_plane);
 		return (true);
 	}
+	best_opacity = 0;
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";
 		action = "R  RESTART";
-		best_opacity = solo_game_personal_best_opacity(game);
+		if (solo_game_best_caption(game, best, sizeof(best)))
+			best_opacity = solo_game_personal_best_opacity(game);
 	}
 	else
 	{
 		title = "PAUSED";
 		action = "P  RESUME";
-		best_opacity = 0;
 	}
 	if (!compatibility_put_overlay_line(solo->compatibility_overlay_plane,
 			rows / 6, title, pink, true))
 		return (false);
 	if (best_opacity > 0
 		&& !compatibility_put_overlay_line(solo->compatibility_overlay_plane,
-			rows / 3, "NEW PERSONAL BEST",
+			rows / 3, best,
 			popover_faded_color(pink, (int)best_opacity), true))
 		return (false);
 	if (!compatibility_put_overlay_line(solo->compatibility_overlay_plane,

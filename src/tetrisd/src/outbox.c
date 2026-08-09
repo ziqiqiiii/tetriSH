@@ -8,25 +8,18 @@ static bool	take_next(t_outbox *ob, t_outbound_message *out);
  * @brief Prepares an empty outbox for one client.
  *
  * @param ob Outbox to initialise.
- * @return 0 on success, -1 when the mutex or condition variable failed.
+ * @return 0 on success, -1 when ob is NULL.
  */
 int	outbox_init(t_outbox *ob)
 {
 	if (ob == NULL)
 		return (-1);
 	memset(ob, 0, sizeof(*ob));
-	if (pthread_mutex_init(&ob->mutex, NULL) != 0)
-		return (-1);
-	if (pthread_cond_init(&ob->cond, NULL) != 0)
-	{
-		pthread_mutex_destroy(&ob->mutex);
-		return (-1);
-	}
 	return (0);
 }
 
 /**
- * @brief Queues one serialised response for the client's writer thread.
+ * @brief Queues one serialised response for the reactor to seal and write.
  *
  * The queue is bounded on purpose: a client that stops reading must not be
  * able to grow the server's memory, so overflow is reported and the caller
@@ -43,20 +36,16 @@ int	outbox_push(t_outbox *ob, unsigned char *bytes, size_t len)
 
 	if (ob == NULL || bytes == NULL)
 		return (-1);
-	pthread_mutex_lock(&ob->mutex);
 	if (ob->closed || ob->count == TETRISD_OUTBOX_CAPACITY)
 	{
 		if (!ob->closed)
-			atomic_store(&ob->overflowed, true);
-		pthread_mutex_unlock(&ob->mutex);
+			ob->overflowed = true;
 		return (-1);
 	}
 	slot = (ob->head + ob->count) % TETRISD_OUTBOX_CAPACITY;
 	ob->slots[slot].bytes = bytes;
 	ob->slots[slot].len = len;
 	ob->count++;
-	pthread_cond_signal(&ob->cond);
-	pthread_mutex_unlock(&ob->mutex);
 	return (0);
 }
 
@@ -64,8 +53,7 @@ int	outbox_push(t_outbox *ob, unsigned char *bytes, size_t len)
  * @brief Leaves the latest STATE snapshot in the client's one-slot mailbox.
  *
  * A snapshot supersedes the one before it, so a slow client loses
- * intermediate frames rather than making a room's ticker wait - and the
- * ticker never blocks on anybody's socket.
+ * intermediate frames rather than holding up the tick that produced them.
  *
  * @param ob Outbox to mail into.
  * @param bytes Serialised STATE push; freed by the outbox once accepted.
@@ -76,50 +64,57 @@ int	outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
 {
 	if (ob == NULL || bytes == NULL)
 		return (-1);
-	pthread_mutex_lock(&ob->mutex);
 	if (ob->closed)
-	{
-		pthread_mutex_unlock(&ob->mutex);
 		return (-1);
-	}
 	free_msg(&ob->state);
 	ob->state.bytes = bytes;
 	ob->state.len = len;
 	ob->state_pending = true;
-	pthread_cond_signal(&ob->cond);
-	pthread_mutex_unlock(&ob->mutex);
 	return (0);
 }
 
 /**
- * @brief Waits for the next message to send, blocking while the outbox is idle.
+ * @brief Takes the next message to send, or reports that there is none.
  *
- * Queued responses go out before the STATE mailbox: a request_reply is part of a
- * request the client is waiting on, while a snapshot is only ever the latest
- * truth. The caller owns the returned bytes.
+ * Queued responses go out before the STATE mailbox: a request_reply is part of
+ * a request the client is waiting on, while a snapshot is only ever the latest
+ * truth. An empty outbox and a closed one are the same answer. The caller owns
+ * the returned bytes.
  *
  * @param ob Outbox to take from.
  * @param out Receives the message.
- * @return 0 when a message was taken, -1 once the outbox is closed and empty.
+ * @return 0 when a message was taken, -1 when nothing was waiting.
  */
 int	outbox_pop(t_outbox *ob, t_outbound_message *out)
 {
 	if (ob == NULL || out == NULL)
 		return (-1);
-	pthread_mutex_lock(&ob->mutex);
-	while (!ob->closed && ob->count == 0 && !ob->state_pending)
-		pthread_cond_wait(&ob->cond, &ob->mutex);
 	if (!take_next(ob, out))
-	{
-		pthread_mutex_unlock(&ob->mutex);
 		return (-1);
-	}
-	pthread_mutex_unlock(&ob->mutex);
 	return (0);
 }
 
 /**
- * @brief Closes the outbox and wakes the writer thread.
+ * @brief Reports whether an outbox has nothing waiting to go out.
+ *
+ * The reactor sweeps every client after a tick, and asking is far cheaper than
+ * sealing a frame to discover there was nothing to seal.
+ *
+ * @param ob Outbox to inspect.
+ * @return true when neither a response nor a snapshot is pending.
+ */
+bool	outbox_idle(t_outbox *ob)
+{
+	bool	idle;
+
+	if (ob == NULL)
+		return (true);
+	idle = ob->count == 0 && !ob->state_pending;
+	return (idle);
+}
+
+/**
+ * @brief Closes the outbox and drops whatever it was still holding.
  *
  * Everything still queued is dropped: the connection is going away, so the
  * bytes have nowhere to go and holding them would leak.
@@ -132,7 +127,6 @@ void	outbox_close(t_outbox *ob)
 
 	if (ob == NULL)
 		return ;
-	pthread_mutex_lock(&ob->mutex);
 	ob->closed = true;
 	i = 0;
 	while (i < ob->count)
@@ -144,22 +138,18 @@ void	outbox_close(t_outbox *ob)
 	ob->head = 0;
 	free_msg(&ob->state);
 	ob->state_pending = false;
-	pthread_cond_broadcast(&ob->cond);
-	pthread_mutex_unlock(&ob->mutex);
 }
 
 /**
- * @brief Releases the outbox's lock, condition variable, and any bytes left.
+ * @brief Releases any bytes the outbox was still holding.
  *
- * @param ob Outbox to destroy; must have no waiters left.
+ * @param ob Outbox to destroy.
  */
 void	outbox_destroy(t_outbox *ob)
 {
 	if (ob == NULL)
 		return ;
 	outbox_close(ob);
-	pthread_cond_destroy(&ob->cond);
-	pthread_mutex_destroy(&ob->mutex);
 }
 
 /**
@@ -175,7 +165,7 @@ static void	free_msg(t_outbound_message *msg)
 }
 
 /**
- * @brief Moves the next message out of the outbox, under the caller's lock.
+ * @brief Moves the next message out of the outbox.
  *
  * @param ob Outbox to take from.
  * @param out Receives the message.

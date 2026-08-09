@@ -212,8 +212,7 @@ misread.
 | `TD_RC_NAME` | `TETRISD_RC_FILENAME` |
 | `TD_KEY_PREFIX` | `TETRISD_CONFIG_KEY_PREFIX` |
 
-**Do not rename** — scheduled for deletion, see §8:
-`TD_DISPLACE_WAIT_MS`, `TD_MAX_GAMES`.
+**Do not rename** — scheduled for deletion, see §8: `TD_MAX_GAMES`.(`TD_DISPLACE_WAIT_MS` was on this list and has since been deleted by step 3.)
 
 ### 3.2 Request handlers — `h_` becomes `_handler`
 
@@ -648,10 +647,14 @@ later deletes, and that is avoidable by simply not renaming them:
 
 | Leave alone | Deleted by |
 |---|---|
-| `TD_DISPLACE_WAIT_MS` | step 5 |
-| `reg_wait_absent` | step 5 |
-| `reg_wait_empty` | step 5 (registry teardown becomes loop-owned) |
+| `TD_DISPLACE_WAIT_MS` | step 3 — a wait on the loop, from the loop, is a deadlock |
+| `reg_wait_absent` | step 3, with it |
+| `reg_wait_empty` | step 3 (registry teardown became loop-owned) |
 | `TD_MAX_GAMES` | step 7 (games allocated per seated slot) |
+
+The first three were listed under step 5 and came out at step 3 instead: the
+reactor does not make the wait unnecessary, it makes it impossible. Step 5 still
+owns the four locks themselves.
 
 Everything else in §3 survives the migration under its new name.
 

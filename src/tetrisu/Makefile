@@ -21,7 +21,8 @@ RM			:= rm -rf
 
 AUTO_INSTALL_DEPS				:= 1
 INSTALL_NOTCURSES_FROM_SOURCE	:= 1
-NOTCURSES_VERSION				:= v3.0.17
+NOTCURSES_VERSION				:= v3.0.12
+NOTCURSES_MIN_VERSION			:= 3.0.5
 NOTCURSES_PREFIX				:= /usr/local
 
 CLR_RMV		:= \033[0m
@@ -58,8 +59,20 @@ BIN_DIR		:= bin
 NAME_PATH	:= $(BIN_DIR)/$(NAME)
 
 HEADER		:= tetrisu.h
+NET_HEADER	:= tetrisu_net.h
 ASSET_DIR	:= $(CURDIR)/assets
-BRAIN_DIR	:= ../../lib/libtetrisbrain
+
+# One archive per CoreStack library, each with the include path that goes with
+# it. libtetrisbrain is the local prediction and the shared piece/board types;
+# the other three are the session tetrisu speaks to tetrisd over — the
+# handshake and framing, the HTTTP messages, and the bodies inside them.
+LIB_ROOT	:= ../../lib
+LIB_NAMES	:= libtetrisbrain libtetrissh libhtttp libstatusbody
+LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
+LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
+LIB_INC		:= $(LIB_DIRS:%=-I%/include)
+
+BRAIN_DIR	:= $(LIB_ROOT)/libtetrisbrain
 BRAIN_LIB	:= $(BRAIN_DIR)/libtetrisbrain.a
 BRAIN_INC	:= -I$(BRAIN_DIR)/include
 BRAIN_HEADER	:= $(BRAIN_DIR)/include/tetrisbrain.h
@@ -77,9 +90,13 @@ AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
 # Header search path + generated defines shared by every target.
-INC			:= -I. $(BRAIN_INC)
+# DEPFLAGS makes each object record the headers it actually included, so a
+# CoreStack header that changes the shape of a struct rebuilds every object
+# holding one instead of leaving stale ones to be linked against fresh code.
+INC			:= -I. $(LIB_INC)
+DEPFLAGS	:= -MMD -MP
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
-LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS)
+LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
 
 ################################################################################
 #                                  SOURCES                                     #
@@ -88,6 +105,7 @@ LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS)
 # Binary : every .c under src/            -> bin/tetrisu
 SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+DEP			:= $(OBJ:.o=.d)
 
 # Logic  : pure app-state, no notcurses/SDL -> logic.a (linked into unit tests).
 # main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
@@ -101,7 +119,7 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 #                                   BUILD                                      #
 ################################################################################
 
-all: check-dependencies brain $(NAME_PATH)
+all: check-dependencies libs $(NAME_PATH)
 
 # A standalone tetrisu build can ask root for shared deps, then this Makefile
 # owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
@@ -112,15 +130,18 @@ check-dependencies:
 	@ $(MAKE) --no-print-directory -s deps
 
 # --- object rule (header stays at the tetrisu root, reached via -I.) ---------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) $(BRAIN_HEADER) | check-dependencies brain
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies libs
 	@ mkdir -p $(dir $@)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
-	@ $(CC) $(FLAGS) -c $< -o $@
+	@ $(CC) $(FLAGS) $(DEPFLAGS) -c $< -o $@
+
+# Absent on a first build, when everything compiles anyway.
+-include $(DEP)
 
 # --- tetrisu binary ---------------------------------------------------------
-$(NAME_PATH): $(OBJ) $(BRAIN_LIB)
+$(NAME_PATH): $(OBJ) $(LIB_ARCS)
 	@ mkdir -p $(BIN_DIR)
-	@ $(CC) $(FLAGS) $(OBJ) $(BRAIN_LIB) $(LDLIBS) -o $@
+	@ $(CC) $(FLAGS) $(OBJ) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built ✔️"
 
@@ -137,6 +158,7 @@ deps:
 	@ UNAME_S=$(UNAME) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
 		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) CC=$(CC) \
 		PKG_CONFIG=$(PKG_CONFIG) GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
@@ -144,6 +166,7 @@ deps:
 install-deps:
 	@ INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
 		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) \
 		bash ./scripts/install_deps.sh
 
@@ -152,13 +175,22 @@ install-notcurses-from-source:
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) \
 		bash ./scripts/install_notcurses.sh
 
-brain:
-	@ $(MAKE) --no-print-directory -s -C $(BRAIN_DIR)
+# Every CoreStack archive tetrisu links, built in place by its own Makefile.
+# Cleanup never recurses into lib/ — the archives are shared with the daemons
+# and owned by their own directories.
+libs:
+	@ for d in $(LIB_DIRS); do $(MAKE) --no-print-directory -s -C $$d; done
+
+$(LIB_ARCS): libs
+	@ :
+
+brain: libs
 
 # Compile/link probing is a shell responsibility; the script checks the actual
 # headers and libraries rather than trusting package-manager state.
 check-tetrisu-deps:
 	@ CC=$(CC) PKG_CONFIG=$(PKG_CONFIG) AUDIO_DEPS='$(AUDIO_DEPS)' \
+		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		bash ./scripts/check_deps.sh
 
 ################################################################################
@@ -171,26 +203,76 @@ TEST_RUNNER		:= ./scripts/run_tests.sh
 
 UNIT_SRC		:= $(wildcard $(TESTS_DIR)/test_*.c)
 UNIT_BINS		:= $(UNIT_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
+INTEGRATION_SRC	:= $(wildcard $(TESTS_DIR)/integration/*.sh)
 
 # --- logic archive (pure app-state, linked into every unit test) ------------
 $(LOGIC_LIB): $(LOGIC_OBJ)
 	@ ar rcs $@ $(LOGIC_OBJ)
 
 # --- unit test binaries -----------------------------------------------------
-$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(BRAIN_LIB) $(HEADER)
+$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
-	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(BRAIN_LIB) -o $@
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# No automated integration test: notcurses queries the terminal for
+# --- network smoke binary ---------------------------------------------------
+# Not a unit test: it needs a tetrisd, so the integration script starts one and
+# runs this against it. It links the whole app archive because the network
+# layer writes into the same Solo view model the renderer reads.
+$(TEST_BIN_DIR)/net_smoke: $(TESTS_DIR)/net_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The network app data provider driven against a live tetrisd: the acceptance
+# test for the net-mode wiring (CHECK SERVER, SIGN UP, LOGIN, profile, lobby,
+# create/join room). Same link line as net_smoke - it uses the provider vtable
+# which lives in the app archive alongside the network layer.
+$(TEST_BIN_DIR)/net_provider_smoke: $(TESTS_DIR)/net_provider_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The Marketplace and Settings against a live tetrisd: prices, wallet,
+# ownership and the loadout, all of which moved out of the client's view model
+# and into the account. Same link line - the store calls live in the app
+# archive beside the rest of the network layer.
+$(TEST_BIN_DIR)/store_smoke: $(TESTS_DIR)/store_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The layer solo_mode.c calls, driven against a live tetrisd: who owns the
+# board, and the countdown hold that reconciles the client's 3-2-1 with the
+# server's gravity. Same link line - solo_authority.c is in the app archive.
+$(TEST_BIN_DIR)/solo_authority_smoke: $(TESTS_DIR)/solo_authority_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
 # a scripted pty (forkpty) does not, and there is no notcurses option to
 # skip the probe. Manual check via `make run` is the verification path.
-test: $(UNIT_BINS)
-	@ echo "\n$(CYAN)==> Running tests$(CLR_RMV)"
+#
+# The network layer is a different matter, and is covered: it needs no
+# terminal, so tests/integration/ drives it against a real tetrisd.
+test: unit integration
+
+unit: $(UNIT_BINS)
+	@ echo "\n$(CYAN)==> Running unit tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) unit $(UNIT_BINS)
+
+integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
+			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke
+	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
+	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
 ################################################################################
 #                                   CLEANUP                                    #
@@ -210,7 +292,8 @@ re: fclean all
 #                              PHONY && PRECIOUS                               #
 ################################################################################
 
-.PHONY:		all run deps install-deps install-notcurses-from-source brain \
-			check-dependencies check-tetrisu-deps test clean fclean re
+.PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
+			check-dependencies check-tetrisu-deps test unit integration \
+			clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

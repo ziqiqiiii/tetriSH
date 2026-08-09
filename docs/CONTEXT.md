@@ -55,6 +55,16 @@ One round played in a room, from START until it finishes; its outcome is
 recorded per player.
 _Avoid_: match, round
 
+**Lock Down**:
+The moment a falling piece becomes part of the stack. It is not the moment
+the piece lands: a landed piece keeps a Lock Delay of half a second, and each
+move or rotation buys that back up to fifteen times per piece, refilled
+whenever the piece falls past the lowest row it has reached. This is the Tetris
+Guideline's Extended Placement, and it is why a piece can be slid into a gap
+rather than only dropped onto one. A hard drop is the one input that locks
+immediately; a soft drop into the floor does nothing at all.
+_Avoid_: settle, land (landing is what starts the delay, not what ends it)
+
 **Top-out**:
 Losing a game because the stack leaves no room for the next piece to spawn.
 

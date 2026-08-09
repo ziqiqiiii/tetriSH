@@ -10,6 +10,7 @@ static const char	*g_head = \
 	"phase active\n" \
 	"piece 3 1 4 0\n" \
 	"next 0 1 2\n" \
+	"hold 5 1\n" \
 	"score 1200\n" \
 	"lines 14\n" \
 	"level 2\n" \
@@ -38,6 +39,8 @@ static void	make_state(t_body_state *st)
 	st->next[0] = 0;
 	st->next[1] = 1;
 	st->next[2] = 2;
+	st->hold = 5;
+	st->hold_used = true;
 	st->score = 1200;
 	st->lines = 14;
 	st->level = 2;
@@ -82,6 +85,7 @@ void	test_state_encode_contains_all_required_keys(void)
 	assert(strstr(out, "phase ") != NULL);
 	assert(strstr(out, "piece ") != NULL);
 	assert(strstr(out, "next ") != NULL);
+	assert(strstr(out, "hold ") != NULL);
 	assert(strstr(out, "score ") != NULL);
 	assert(strstr(out, "lines ") != NULL);
 	assert(strstr(out, "level ") != NULL);
@@ -262,6 +266,39 @@ void	test_state_large_seq_round_trips_exactly(void)
 	printf("PASS test_state_large_seq_round_trips_exactly\n");
 }
 
+/*
+** An empty hold slot is a value the wire has to carry, not the absence of a
+** line: a client that saw no "hold" key could not tell "holding nothing" from
+** a truncated body. BODY_HOLD_EMPTY is the one negative number the field
+** accepts, and anything below it is a malformed frame.
+*/
+void	test_state_hold_round_trips_empty_and_held(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[4096];
+	int				n;
+
+	make_state(&in);
+	in.hold = BODY_HOLD_EMPTY;
+	in.hold_used = false;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "hold -1 0\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.hold == BODY_HOLD_EMPTY && !back.hold_used);
+	make_state(&in);
+	in.hold = 6;
+	in.hold_used = true;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "hold 6 1\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.hold == 6 && back.hold_used);
+	in.hold = BODY_HOLD_EMPTY - 1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_hold_round_trips_empty_and_held\n");
+}
+
 int	main(void)
 {
 	test_state_encode_contains_all_required_keys();
@@ -274,5 +311,6 @@ int	main(void)
 	test_state_decode_rejects_unknown_key_and_trailing_junk();
 	test_state_decode_rejects_numeric_overflow();
 	test_state_large_seq_round_trips_exactly();
+	test_state_hold_round_trips_empty_and_held();
 	return (0);
 }

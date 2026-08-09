@@ -23,6 +23,8 @@ static void	test_accounts_survive_a_restart(void);
 static void	test_a_second_login_displaces_the_first(void);
 static void	test_displacement_releases_the_old_connection_s_slot(void);
 static void	test_a_body_without_a_content_type_is_refused(void);
+static void	test_boot_refuses_an_unusable_private_key(void);
+static void	test_handshakes_outlive_the_certificate_files(void);
 
 static int	raw_request(t_harness *hc, const char *method, const char *path,
 				const char *pid, const char *body);
@@ -39,7 +41,53 @@ int	main(void)
 	test_a_second_login_displaces_the_first();
 	test_displacement_releases_the_old_connection_s_slot();
 	test_a_body_without_a_content_type_is_refused();
+	test_boot_refuses_an_unusable_private_key();
+	test_handshakes_outlive_the_certificate_files();
 	return (0);
+}
+
+/*
+** config_validate only proves the two files can be read. Parsing them is what
+** proves they are usable, and that now happens once at boot, so a key that is
+** readable but is not a key fails the person who started the daemon rather
+** than the first player who tries to connect.
+*/
+static void	test_boot_refuses_an_unusable_private_key(void)
+{
+	t_fixture	fx;
+	t_config	broken;
+	t_server	*srv;
+
+	assert(fx_start(&fx) == 0);
+	broken = fx.cfg;
+	snprintf(broken.key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", fx.cfg.cert_path);
+	srv = NULL;
+	assert(server_start(&broken, &srv) == -1);
+	assert(srv == NULL);
+	fx_stop(&fx);
+	printf("PASS test_boot_refuses_an_unusable_private_key\n");
+}
+
+/*
+** The certificate and key are read once, not once per connection, so removing
+** both files out from under a running server changes nothing a client can
+** observe. This is what makes the handshake safe to run on a bounded worker
+** pool: no connection is waiting on the disk (ADR-0008).
+*/
+static void	test_handshakes_outlive_the_certificate_files(void)
+{
+	t_fixture	fx;
+	t_harness	hc;
+
+	assert(fx_start(&fx) == 0);
+	assert(remove(fx.cfg.cert_path) == 0);
+	assert(remove(fx.cfg.key_path) == 0);
+	assert(hc_connect(&hc, &fx) == 0);
+	assert(hc_signup(&hc, "amber", "hunter2") == 201);
+	assert(hc_login(&hc, "amber", "hunter2") == 200);
+	hc_close(&hc);
+	fx_stop(&fx);
+	printf("PASS test_handshakes_outlive_the_certificate_files\n");
 }
 
 /*
@@ -249,10 +297,8 @@ static void	test_a_body_without_a_content_type_is_refused(void)
 	assert(fx_start(&fx) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	htttp_message_init(&req);
-	assert(htttp_message_make_request(&req, "SIGNUP", TETRISD_ROUTE_ACCOUNT)
-		== HTTTP_OK);
-	assert(htttp_message_set_body(&req, "username amber\npassword hunter2\n",
-			31) == HTTTP_OK);
+	assert(htttp_message_make_request(&req, "SIGNUP", TETRISD_ROUTE_ACCOUNT) == HTTTP_OK);
+	assert(htttp_message_set_body(&req, "username amber\npassword hunter2\n", 31) == HTTTP_OK);
 	assert(htttp_serialize(&req, &bytes, &len) == HTTTP_OK);
 	assert(session_send(&hc.sess, bytes, len) >= 0);
 	free(bytes);

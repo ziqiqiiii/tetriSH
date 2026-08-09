@@ -41,7 +41,7 @@ bool	app_navigation_dispatch(t_app_navigation *navigation,
 		navigation->offline = true;
 	else if (action == APP_NAV_AUTHENTICATED)
 		navigation->offline = false;
-	else if (target == APP_SCREEN_ENTRY)
+	else if (target == APP_SCREEN_ENTRY || target == APP_SCREEN_LOGIN)
 		navigation->offline = false;
 	navigation->previous = navigation->current;
 	navigation->current = target;
@@ -53,13 +53,19 @@ bool	app_navigation_dispatch(t_app_navigation *navigation,
  */
 t_app_screen	app_screen_parent(t_app_screen screen)
 {
-	if (screen == APP_SCREEN_LOGIN || screen == APP_SCREEN_SIGN_UP
-		|| screen == APP_SCREEN_HOME)
-		return (APP_SCREEN_ENTRY);
+	if (screen == APP_SCREEN_SIGN_UP || screen == APP_SCREEN_HOME)
+		return (APP_SCREEN_LOGIN);
 	if (screen == APP_SCREEN_SOLO || screen == APP_SCREEN_MARKETPLACE
 		|| screen == APP_SCREEN_SETTINGS || screen == APP_SCREEN_LEADERBOARD
-		|| screen == APP_SCREEN_LOBBY)
+		|| screen == APP_SCREEN_MULTIPLAYER_MODE)
 		return (APP_SCREEN_HOME);
+	/*
+	 * Back out of the lobby returns to the mode picker rather than the home
+	 * menu, so changing your mind about Double versus Battle Royale costs one
+	 * key instead of a round trip through Home.
+	 */
+	if (screen == APP_SCREEN_LOBBY)
+		return (APP_SCREEN_MULTIPLAYER_MODE);
 	if (screen == APP_SCREEN_CREATE_ROOM_MODAL
 		|| screen == APP_SCREEN_WAITING_ROOM)
 		return (APP_SCREEN_LOBBY);
@@ -83,6 +89,7 @@ const char	*app_screen_name(t_app_screen screen)
 		"Marketplace",
 		"Settings",
 		"Leaderboard",
+		"Multiplayer",
 		"Multiplayer Lobby",
 		"Create Room",
 		"Waiting Room",
@@ -150,6 +157,21 @@ const char	*menu_stub_text(int selected_index)
 }
 
 /**
+ * @brief Returns whether the explicit local UI preview gate is enabled.
+ *
+ * The environment is intentionally strict: only TETRISU_UI_PREVIEW=1
+ * exposes the fixture sign-in action. This keeps the unavailable real server
+ * path and the offline path unchanged for normal runs.
+ */
+bool	app_ui_preview_enabled(void)
+{
+	const char	*value;
+
+	value = getenv("TETRISU_UI_PREVIEW");
+	return (value != NULL && strcmp(value, "1") == 0);
+}
+
+/**
  * @brief Resolves only routes allowed by the item-15 screen graph.
  */
 static bool	navigation_target(const t_app_navigation *navigation,
@@ -164,7 +186,8 @@ static bool	navigation_target(const t_app_navigation *navigation,
 		*target = app_screen_parent(current);
 	else if (action == APP_NAV_OPEN_LOGIN && current == APP_SCREEN_ENTRY)
 		*target = APP_SCREEN_LOGIN;
-	else if (action == APP_NAV_OPEN_SIGN_UP && current == APP_SCREEN_ENTRY)
+	else if (action == APP_NAV_OPEN_SIGN_UP
+		&& (current == APP_SCREEN_ENTRY || current == APP_SCREEN_LOGIN))
 		*target = APP_SCREEN_SIGN_UP;
 	else if (action == APP_NAV_PLAY_OFFLINE
 		&& (current == APP_SCREEN_ENTRY || current == APP_SCREEN_LOGIN
@@ -176,14 +199,19 @@ static bool	navigation_target(const t_app_navigation *navigation,
 	else if (action == APP_NAV_OPEN_SOLO && current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_SOLO;
 	else if (action == APP_NAV_OPEN_MARKETPLACE
-		&& current == APP_SCREEN_HOME)
+		&& !navigation->offline
+		&& (current == APP_SCREEN_HOME || current == APP_SCREEN_SETTINGS))
 		*target = APP_SCREEN_MARKETPLACE;
 	else if (action == APP_NAV_OPEN_SETTINGS && current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_SETTINGS;
 	else if (action == APP_NAV_OPEN_LEADERBOARD
 		&& current == APP_SCREEN_HOME)
 		*target = APP_SCREEN_LEADERBOARD;
-	else if (action == APP_NAV_OPEN_LOBBY && current == APP_SCREEN_HOME)
+	else if (action == APP_NAV_OPEN_MULTIPLAYER_MODE
+		&& !navigation->offline && current == APP_SCREEN_HOME)
+		*target = APP_SCREEN_MULTIPLAYER_MODE;
+	else if (action == APP_NAV_OPEN_LOBBY
+		&& current == APP_SCREEN_MULTIPLAYER_MODE)
 		*target = APP_SCREEN_LOBBY;
 	else if (action == APP_NAV_OPEN_CREATE_ROOM
 		&& current == APP_SCREEN_LOBBY)

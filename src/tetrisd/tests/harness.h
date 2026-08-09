@@ -18,20 +18,20 @@
 
 typedef struct s_harness
 {
-	t_session	sess;
-	int			fd;
-	t_player_id	player_id;
-	bool		authed;
+	t_session		sess;
+	int				fd;
+	t_player_id		player_id;
+	bool			authed;
 	t_body_state	last_state;
-	bool		has_state;
+	bool			has_state;
 }	t_harness;
 
 typedef struct s_fixture
 {
-	t_server	*srv;
+	t_server		*srv;
 	t_config		cfg;
-	char		dir[96];
-	char		ca_path[192];
+	char			dir[96];
+	char			ca_path[192];
 }	t_fixture;
 
 /* HARNESS.C */

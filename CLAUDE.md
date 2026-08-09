@@ -13,16 +13,16 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio; no gameplay or networking yet |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. Settings and the Marketplace are server-authoritative too (`tests/integration/test_net_store.sh`): the catalogue and its prices come from `LIST /store`, the wallet, rank, inventory and loadout from `PROFILE`, and buying and equipping are `BUY` and `EQUIP` — the client sends an item id and nothing else. Artwork is keyed by catalogue id in `catalogue_art.c`, because that is the only field both ends agree on. The match screens are still scaffolds |
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
-| `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
+| `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests. A Player carries three running numbers that answer three different questions and must not be conflated: `leaderboard_score` is the best single game (what the board ranks on, moved only by being beaten), `lifetime_points` is every point ever scored (what the wallet's rate is charged against), `wallet_points` is what is left to spend |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
 | `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX` dgram/stream, self-pipe, mqueue + tests (7 of 7 suites pass) |
 | `lib/libcoredaemon` | implemented — detach + readiness pipe, pidfile claim/probe/wait + tests (3 of 3 suites pass, valgrind-clean) |
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, client threads, auth, lobby, room ticker, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting + tests (7 of 7 suites pass, valgrind-clean and ThreadSanitizer-clean). Its threading model is being replaced by an event loop (ADR-0008) and Double/Battle Royale are designed but unbuilt (ADR-0009) |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (14 of 14 suites pass). A game that reaches game-over or is forfeited is recorded once through `award_game` in `room.c`, which credits the wallet at `TETRISD_POINTS_PER_WALLET_POINT` (100) game points each — as the difference between what the player's `lifetime_points` were worth before the game and after, so a game worth less than the rate carries its remainder rather than rounding to nothing. The same call ranks the player on their **best single game**, never on that total. ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -135,8 +135,9 @@ Header at `lib/libtetrisbrain/include/tetrisbrain.h`; each module is one `.c` un
 | `board.c` | `board_init`, `board_get`, `board_set`, `board_in_bounds`, `board_inject_garbage`, `board_copy` |
 | `pieces.c` | `piece_spawn`, `piece_is_valid`, `piece_move`, `piece_rotate`, `piece_stamp` |
 | `gravity.c` | `gravity_tick`, `piece_soft_drop`, `piece_hard_drop` |
+| `lockdown.c` | `lockdown_init`, `lockdown_grounded`, `lockdown_on_fall`, `lockdown_on_shift`, `lockdown_tick` (Guideline Extended Placement: 500 ms, 15 resets) |
 | `lineclear.c` | `board_clear_lines` (returns lines cleared 0–4) |
-| `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms` |
+| `scoring.c` | `score_on_clear`, `level_from_lines`, `gravity_interval_ms`, `clear_duration_ms` |
 | `abilities.c` | `board_cut_top`, `board_cut_bottom`, `board_apply_gravity`, `board_invert`, `board_fill_rows`, `board_clear_cells`, `board_delete_columns` |
 | `bag.c` | `piece_bag_init`, `piece_bag_next` (7-bag randomiser) |
 | `charge.c` | `charge_state_init`, `charge_on_clear`, `ability_cost`, `charge_can_afford`, `charge_deduct`, `charge_transfer` |
@@ -164,7 +165,10 @@ so never test these against `DB_OK`. The catalogue getters `db_get_character` /
 Surface: `db_signup` / `db_login` / `db_get_player`, `db_buy_character` /
 `db_buy_theme` / `db_equip_character` / `db_equip_theme`,
 `db_player_owns_character` / `db_player_owns_theme`, `db_record_game`,
-`db_leaderboard` / `db_rank`, `db_get_character` / `db_get_theme`.
+`db_leaderboard` / `db_rank`, `db_get_character` / `db_get_theme`,
+`db_characters` / `db_themes`. The last pair enumerates a whole catalogue,
+which probing ids cannot do — ids carry gaps, so a `NULL` is not the end of
+the roster.
 
 Indexes: hash map (`username → player`) for point lookups, skip list
 (`(score, id) → player`) for the leaderboard. Writes append to a
@@ -178,6 +182,18 @@ character and theme catalogues load once from `config/*.cfg` at open.
 enum (`TETRISSH_ROLE_CLIENT` / `TETRISSH_ROLE_SERVER`). `session_recv` returns
 one complete decrypted message. `src/common.c` is the frozen course-provided
 crypto helper — the Makefile compiles it separately with relaxed flags.
+
+Beneath the two blocking calls sits a pure frame codec: `session_frame_seal` /
+`session_frame_open` (`frame.c`) do the AES-256-GCM work over caller-owned byte
+arrays, perform no I/O, and ignore `sess->fd`; `session_send` / `session_recv`
+are thin wrappers that add the socket and the 4-byte length prefix. That split
+is ADR-0008 step 1, and it is what lets the reactor own the socket.
+
+The server's certificate and private key are loaded once into an opaque
+`t_tetrissh_credentials` (`session_credentials_load` / `session_credentials_free`),
+which `session_handshake_server` takes instead of two paths — so the handshake
+never touches the disk (ADR-0008 step 2). The object is immutable after loading
+and safe to share across concurrent handshakes.
 
 ## libtetrisroom API (tetrisroom.h)
 
@@ -214,31 +230,63 @@ Config comes from `.tetrishrc` as `export TETRISD_*=...` lines (`argv[1]` →
 `$TETRISHRC` → `./.tetrishrc`, then environment), re-read on SIGHUP; missing
 certificates are a fatal boot error (`make certs` mints dev ones).
 
-Threads **as built today**: main loop `poll()`s listener + self-pipe; per client
-a reader thread (blocks in `session_recv`) and a writer thread (sole
-`session_send` caller); per in-game room a ticker thread; one log shipper
-thread. Lock order is `lobby_mutex > room->mutex > registry rwlock > outbox
-mutex`, and no `db_*`, `session_*`, or IPC send happens under any lock (the
-non-blocking outbox push is the sole exception). The registry rwlock is the
-client-lifetime guard.
+Threads **as built today**: one reactor thread in `epoll_wait` owns the
+listener, the wake pipe and every established connection — it reads, opens
+frames, dispatches, seals and writes, and it owns the lobby, the rooms, the
+games, the registry and every outbox. Beside it: a `TETRISD_HANDSHAKE_WORKERS`
+pool (default 4) running the blocking handshake under a per-handshake budget
+(`TETRISD_HANDSHAKE_TIMEOUT_MS`, default 5 s) that the reactor enforces, and
+one log shipper thread. Gravity is one `timerfd` in the reactor's epoll set,
+not a thread per room.
 
-**This model is being replaced** — see
-[ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md), accepted and not yet
-implemented. `tetrisd` becomes a reactor: one thread in `epoll_wait` owns the
-lobby, every room, every game, the registry and every outbox, beside a
-four-worker handshake pool that owns only its own descriptors until handoff.
-Every lock above is deleted, along with `registry_wait_absent` and
-`TD_DISPLACE_WAIT_MS`. The property that replaces the lock order is *one owner
-of all mutable game state*. The migration is seven staged steps, each ending
-green; until step 5 lands, the description above is the truth and the locks are
-load-bearing. Do not remove a lock ahead of its step.
+The reactor's lifetime rule replaces the registry rwlock as the thing that
+keeps `epoll_event.data.ptr` valid: **no client is freed inside the event
+loop.** `client_kill` unlinks it and parks it on the zombie list, and
+`client_reap` — run once after every event in a batch — is the only `free()`
+site for a client.
 
-M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
-`/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`, plus pushed
-`STATE`. A player holds at most one connection — a second `LOGIN` displaces the
+There is no lock order, because there are no locks over game state:
+
+> `tetrisd` has exactly one owner of all mutable game state.
+
+The four-level order this replaced (`lobby_mutex > room->mutex > registry
+rwlock > outbox mutex`) is gone with the locks in it. Two locks survive and
+neither guards game state: the handshake pool's own mutex, and whatever
+`libmacminidb` holds internally. Wanting a third is a sign the work is on the
+wrong thread.
+
+See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–5 are
+implemented. Steps 6 and 7 are Double mode and Battle Royale (ADR-0009).
+
+M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST` (`/rooms` and `/store`),
+`JOIN` (`/rooms` creates, `/room/<name>` joins), `LEAVE`, `START`, `MOVE`,
+`ROTATE`, `DROP`, `LEADERBOARD`, `PROFILE`, `BUY`, `EQUIP`, plus pushed
+`STATE`. The marketplace is the store's: prices come from `config/*.cfg`,
+`db_buy_*` / `db_equip_*` enforce affordability and ownership atomically, and
+`BUY`/`EQUIP` answer with the updated profile so a client never draws a wallet
+it has not been told. Catalogue ids are never renumbered — they live in
+players' owned lists — so they carry gaps and are never a position. A player holds at most one connection — a second `LOGIN` displaces the
 first (ADR-0004). Inputs are rate limited per connection, answering `429` with
 `Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
 own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
+
+A Room is two objects sharing a lobby index — the domain `t_room` and the
+runtime beside it (games, dirty flags, `ticking`) — and `room.c` is the only
+module that holds either. `server_room_open` and the static `room_close` are
+the only callers of `lobby_create_room` / `lobby_destroy_room`, closing a room
+blanks its runtime in the same call, and nothing outside `room.c` reaches
+through `->room`. Handlers ask the Room (`server_room_seat`,
+`server_room_start`, `server_room_input`, `server_room_describe`) rather than
+the domain object; the two halves drifting apart is what evicted a player from
+a room seconds after they created it
+(`docs/bugs/room_runtime_outlived_its_room.md`).
+
+The client's half of a Slot is `t_room_binding` on `t_client`, and `room.c`
+owns that too: seating writes it, `server_room_unbind` is the only clear, and
+`server_room_resolve(srv, cli, name)` is how anyone asks which room it names
+now — it returns the room or `NULL` and writes nothing, so no caller has to
+validate before it indexes. A stale binding is thrown away at one deliberate
+site, `JOIN`; every other route refuses and leaves it.
 
 ## Key Design Constraints
 
@@ -250,7 +298,7 @@ own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 - The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `unixsock_dgram_bind`, which unlinks its socket path unconditionally.
 - A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
 - `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
-- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint is being retired rather than satisfied — ADR-0008 removes the shared state instead of ordering access to it — but it still binds every lock that exists until the step that deletes it.
+- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint has been retired rather than satisfied — ADR-0008 removed the shared state instead of ordering access to it — but it still binds every lock elsewhere in the project.
 - Cross-player effects (garbage, offensive abilities) are queued against a **Target** and applied at that player's next piece lock, never on arrival (ADR-0009). A player's own inputs still apply immediately. Injecting garbage under an active piece can produce a board `piece_is_valid` would reject, so the safe point is a game rule, not an optimisation. Battle Royale is one Room of 4–99 slots; garbage never crosses rooms.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 - All components compile clean under `-Wall -Wextra -Werror`; test binaries are expected to pass `valgrind --leak-check=full --error-exitcode=1`.

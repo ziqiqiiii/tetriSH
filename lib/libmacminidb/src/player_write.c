@@ -29,6 +29,10 @@ static size_t	player_size(const t_player *p);
  * by that many u32 ids. Nothing is written unless the whole record fits, so
  * a return of 0 leaves buf untouched.
  *
+ * The layout is positional and carries no version tag, so a log written before
+ * lifetime_points was added does not decode against this one. Wiping the data
+ * directory (`make reset`) is the migration.
+ *
  * @param p The player document to serialise.
  * @param buf Destination buffer.
  * @param cap Capacity of buf in bytes.
@@ -47,6 +51,7 @@ size_t	player_serialise(const t_player *p, uint8_t *buf, size_t cap)
 	put_bytes(buf, &off, p->password_hashed, DB_HASH_LEN);
 	put_bytes(buf, &off, p->salt, DB_SALT_LEN);
 	put_u64(buf, &off, (uint64_t)p->leaderboard_score);
+	put_u64(buf, &off, (uint64_t)p->lifetime_points);
 	put_u64(buf, &off, (uint64_t)p->wallet_points);
 	put_u32(buf, &off, p->current_equipped_character);
 	put_u32(buf, &off, p->current_equipped_theme);
@@ -120,7 +125,7 @@ static size_t	player_size(const t_player *p)
 
 	n = sizeof(uint64_t);
 	n += DB_MAX_USERNAME + DB_HASH_LEN + DB_SALT_LEN;
-	n += 2 * sizeof(uint64_t);
+	n += 3 * sizeof(uint64_t);
 	n += 2 * sizeof(uint32_t);
 	n += sizeof(uint32_t) + p->owned_characters_count * sizeof(uint32_t);
 	n += sizeof(uint32_t) + p->owned_themes_count * sizeof(uint32_t);
