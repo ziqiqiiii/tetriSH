@@ -1799,7 +1799,7 @@ static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
 		if (countdown_value == 0)
 			snprintf(countdown, sizeof(countdown), "GO!");
 		else
-			snprintf(countdown, sizeof(countdown), "%d", countdown_value);
+			snprintf(countdown, sizeof(countdown), "%d", countdown_value % 10);
 		draw_text_centered_opacity(canvas, solo, countdown, x + 64,
 			y + 16, countdown_value == 0 ? 16 : 32,
 			32, 1, g_pink, countdown_opacity);

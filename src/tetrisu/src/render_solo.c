@@ -901,7 +901,7 @@ static bool	update_compatibility_overlay(t_render_ctx *ctx,
 		if (countdown_value == 0)
 			snprintf(countdown, sizeof(countdown), "GO!");
 		else
-			snprintf(countdown, sizeof(countdown), "%d", countdown_value);
+			snprintf(countdown, sizeof(countdown), "%d", countdown_value % 10);
 		countdown_opacity = solo_game_countdown_opacity(game);
 		if (!compatibility_put_overlay_line(
 				solo->compatibility_overlay_plane, rows / 2, countdown,
