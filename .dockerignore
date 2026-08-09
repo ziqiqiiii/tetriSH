@@ -39,6 +39,11 @@ tmp/
 **/tests/bin/
 archive/
 
+# clangd's generated database and cache: absolute paths from the host machine,
+# meaningless (and misleading) inside the image
+compile_commands.json
+.cache/
+
 # Debug droppings
 vgcore.*
 core

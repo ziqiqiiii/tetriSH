@@ -21,6 +21,13 @@
 #   make clean        recurse `clean` into every component
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
+#
+#   make docker-build build the image (installs every dependency itself)
+#   make docker-run   run the shell + daemons in a container, publishing 4242
+#   make docker-test  run every test suite inside a container
+#   make docker-shell open a bash prompt inside a container
+#   make docker-stop  stop the running container, freeing its port
+#   make docker-clean remove the image
 
 MAKE_FLAGS	:= --no-print-directory -s
 RM			:= rm -rf
@@ -168,6 +175,56 @@ deps-info:
 		bash ./scripts/deps_info.sh
 
 ################################################################################
+#                                    DOCKER                                    #
+################################################################################
+
+# Containerised build of the whole stack. Every dependency - the toolchain,
+# OpenSSL, ncurses, SDL2 and the source-built notcurses - is installed by the
+# Dockerfile, so there is no separate download step to run here.
+
+DOCKER			:= docker
+DOCKER_IMAGE	:= tetrish
+DOCKER_TAG		:= dev
+DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
+DOCKER_NAME		:= tetrish
+DOCKER_PORT		:= 4242
+
+# -t only works when stdin is a terminal, so a piped or CI invocation must not
+# ask for one. Lazily expanded: it is a property of the shell running the
+# recipe, not of the moment this file was parsed.
+DOCKER_TTY		 = $(shell [ -t 0 ] && printf -- '-it' || printf -- '-i')
+
+# Installs dependencies, builds every component, and mints the dev certs.
+docker-build:
+	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
+	@ $(DOCKER) build -t $(DOCKER_REF) .
+	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_REF)$(CLR_RMV) built ✔️"
+
+
+docker-run: docker-stop
+	@ $(DOCKER) run --rm $(DOCKER_TTY) --name $(DOCKER_NAME) \
+		-p $(DOCKER_PORT):$(DOCKER_PORT) $(DOCKER_REF)
+
+# These two publish no port, so they can run beside a live docker-run.
+docker-test:
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
+
+docker-shell:
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) bash
+
+# Frees both the port and the name for the next docker-run, which depends on
+# this. `rm -f` rather than `stop`: a container that has exited still owns its
+# name, so stopping alone would trade "port is already allocated" for "name is
+# already in use". Silent and successful when there is nothing to remove.
+docker-stop:
+	@ $(DOCKER) rm -f $(DOCKER_NAME) >/dev/null 2>&1 || true
+
+# Kept out of fclean: the image is shared state, not this tree's build output.
+docker-clean:
+	@ $(DOCKER) image rm -f $(DOCKER_REF) >/dev/null 2>&1 || true
+	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF)$(CLR_RMV) ✔️"
+
+################################################################################
 #                                   CLEANUP                                    #
 ################################################################################
 
@@ -214,4 +271,6 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run certs stack test clean fclean reset re
+			bin-link run certs stack test docker-build docker-run \
+			docker-test docker-shell docker-stop docker-clean \
+			clean fclean reset re

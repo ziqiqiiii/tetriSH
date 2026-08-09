@@ -11,6 +11,7 @@ Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of 
 - [Status](#status)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
+- [Docker](#docker)
 - [Run](#run)
 - [Binaries](#binaries)
 - [Libraries](#libraries)
@@ -47,9 +48,7 @@ The sections below describe the target design; this table says what exists today
 
 ## Prerequisites
 
-GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` additionally needs notcurses (required); SDL2 and SDL2_mixer are optional and enable its audio, which compiles out via `-DTETRISU_ENABLE_AUDIO=0`.
-
-Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported; where no notcurses package exists, it is built from source.
+GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` also needs notcurses 3.0.5+, built from source where no package supplies it; SDL2 and SDL2_mixer are optional and enable its audio, which compiles out via `-DTETRISU_ENABLE_AUDIO=0`. Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported.
 
 ```bash
 make deps                # check and install anything missing
@@ -58,9 +57,7 @@ make deps-info           # show detected OS/WSL and dependency policy
 make -C src/tetrisu deps # tetrisu render/audio deps only
 ```
 
-Installation may request sudo access. Use `AUTO_INSTALL_DEPS=0` when system changes are not allowed, as in CI.
-
-Valgrind is installed on Linux/WSL for memory-safety runs but is not needed to compile; it is unreliable on current macOS, so run those checks on Linux or WSL. `REQUIRE_VALGRIND=1 make check-deps` makes the check enforce it.
+Installation may request sudo. Set `AUTO_INSTALL_DEPS=0` to keep it check-only, as in CI, or use [Docker](#docker) to build without touching the host. Valgrind is needed only for memory-safety runs, and is unreliable on current macOS — run those on Linux or WSL; `REQUIRE_VALGRIND=1 make check-deps` enforces its presence.
 
 ---
 
@@ -107,6 +104,31 @@ gcc my_program.c lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/inclu
 ```
 
 Networked binaries additionally link OpenSSL (`-lssl -lcrypto`); `libmacminidb` requires `-lpthread`.
+
+---
+
+## Docker
+
+Builds the whole stack without installing anything on the host — the image carries the toolchain, builds every component, and mints the development certificates.
+
+```bash
+make docker-build                     # build the image
+make docker-run                       # shell + daemons, publishing 4242
+make docker-run DOCKER_PORT=5252      # any variable below overrides per run
+```
+
+| Target | Description |
+|---|---|
+| `make docker-build` | Build the image — installs every dependency, builds all components, mints certs |
+| `make docker-run` | Run the shell with the daemons up, publishing `TETRISD_PORT` |
+| `make docker-test` | Run every component test suite inside a container |
+| `make docker-shell` | Open a `bash` prompt inside a container |
+| `make docker-stop` | Remove the running container, freeing its port and name |
+| `make docker-clean` | Remove the image |
+
+`docker-run` names its container and removes any predecessor first — the shell it starts never exits on its own, so a stale one would keep the port bound. `docker-test` and `docker-shell` publish no port and run alongside it. Override `DOCKER_TAG`, `DOCKER_NAME`, or `DOCKER_PORT` on any target.
+
+notcurses is built from source at the tag `src/tetrisu/Makefile` pins, read at build time so bumping it there rebuilds the image to match. No distro package works: Ubuntu's predates the `NCBLIT_4x2` blitter `tetrisu` uses, and Debian ships none.
 
 ---
 
@@ -354,6 +376,7 @@ MacMini_tetriSH/
 ├── .claude/skills/                Code, Makefile, and README style guides
 ├── scripts/                       Dependency check/install helpers
 ├── .tetrishrc                     Shell start-up file — launches the daemons
+├── Dockerfile                     Containerised build of the whole stack
 ├── Makefile                       Umbrella; recurses into every component
 └── README.md
 ```
@@ -387,7 +410,7 @@ make -C lib/libtetrisbrain test FILTER=abilities   # one library suite
 make -C src/tetrish unit FILTER=lexer              # one shell suite
 ```
 
-Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macOS.
+Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macOS. `make docker-test` runs the whole suite in a container, which also gets a Linux valgrind on a macOS host.
 
 ---
 
