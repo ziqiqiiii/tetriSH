@@ -20,6 +20,12 @@ static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
 static void	play_match_events(t_audio_ctx *audio, uint32_t events);
 static bool	match_mouse_pixel_position(const t_render_ctx *ctx,
 				const ncinput *input, int *x, int *y);
+static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_mp_match_state *state,
+				const t_solo_handling_state *handling,
+				const t_solo_handling_config *config);
+static uint32_t	wait_match_input(t_render_ctx *ctx, int timeout_ms,
+					ncinput *input);
 
 /**
  * @brief Runs the client-only Double/Battle Royale presentation.
@@ -44,9 +50,11 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	uint64_t				previous_ms;
 	uint64_t				now_ms;
 	int						elapsed_ms;
+	int						wait_ms;
 	bool					leave;
 	bool					changed;
 	bool					rebuild;
+	bool					input_backlog;
 	bool					mouse_enabled;
 	int					input_batch;
 
@@ -74,17 +82,35 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	rebuild = true;
 	leave = false;
 	mouse_enabled = notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS) == 0;
+	if (!render_multiplayer_match_show(ctx, &state, rebuild))
+	{
+		render_multiplayer_match_destroy(ctx);
+		return (-1);
+	}
+	rebuild = false;
 	previous_ms = match_now_ms();
+	input_backlog = false;
 	while (!leave)
 	{
-		if (!render_multiplayer_match_show(ctx, &state, rebuild))
-		{
-			render_multiplayer_match_destroy(ctx);
-			return (-1);
-		}
-		rebuild = false;
+		/*
+		 * The loop sleeps until something is actually due - gravity, the lock
+		 * delay, a DAS or ARR repeat, the selection countdown, a notification,
+		 * the music cross-fade - instead of spinning at a fixed frame rate.
+		 * Polling every frame and repainting unconditionally is what made two
+		 * pixel boards stutter: the terminal was being handed a full bitmap
+		 * far faster than it could parse one, and input queued up behind it.
+		 */
+		wait_ms = next_match_wake_ms(ctx, audio, &state, &handling,
+				&handling_config);
+		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
+			wait_ms = RENDER_RESIZE_POLL_MS;
 		memset(&input, 0, sizeof(input));
-		key = render_wait_input_timeout(ctx, &input, MP_MATCH_FRAME_MS);
+		if (input_backlog)
+			key = notcurses_get_nblock(ctx->nc, &input);
+		else
+			key = wait_match_input(ctx, wait_ms, &input);
+		if (render_notification_next_wake_ms(ctx) == 0)
+			render_notification_tick(ctx);
 		now_ms = match_now_ms();
 		if (now_ms < previous_ms)
 			elapsed_ms = 0;
@@ -129,30 +155,157 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 				changed = true;
 			}
 		}
+		if (render_terminal_geometry_changed(ctx))
+		{
+			solo_handling_reset(&handling);
+			if (render_geometry_refresh(ctx, true) < 0)
+				break ;
+			render_multiplayer_match_destroy(ctx);
+			rebuild = true;
+			/* Reflow is an explicit pause; protocol negotiation time must not
+			 * be charged to gameplay gravity. */
+			previous_ms = match_now_ms();
+		}
 		if (key == (uint32_t)-1)
 			leave = true;
 		else if (key != 0)
+		{
+			/*
+			 * Anything the player pressed is a reason to present: the frame it
+			 * belongs to is the one it has to appear in. Waiting for the next
+			 * gravity tick to notice would put up to a whole gravity interval
+			 * between a keypress and the piece moving on screen. Repainting on
+			 * a key that changed nothing costs nothing - the renderer compares
+			 * signatures and returns early.
+			 */
+			changed = true;
 			leave = handle_match_key(&state, ctx, audio, key, &input, &rebuild,
 					&handling, &handling_config);
+		}
+		input_backlog = false;
 		input_batch = 0;
-		while (!leave && key != (uint32_t)-1
-			&& input_batch < MP_MATCH_INPUT_BATCH_MAX)
+		while (!leave && key != 0 && key != (uint32_t)-1)
 		{
+			input_batch++;
+			if (input_batch >= MP_MATCH_INPUT_BATCH_MAX)
+			{
+				input_backlog = true;
+				break ;
+			}
 			memset(&input, 0, sizeof(input));
 			key = notcurses_get_nblock(ctx->nc, &input);
-			if (key == 0)
+			if (key == 0 || key == (uint32_t)-1)
 				break ;
 			leave = handle_match_key(&state, ctx, audio, key, &input, &rebuild,
 					&handling, &handling_config);
-			input_batch++;
 		}
-		if (changed)
-			continue ;
+		if (leave)
+			break ;
+		/*
+		 * Present the moment something changed, with no rate of our own on top
+		 * of the terminal's. The renderer compares signatures and repaints
+		 * only the region planes that actually moved, so the terminal is
+		 * already the thing setting the pace - adding a frame budget here just
+		 * put a delay between a keypress and the piece.
+		 */
+		if (changed || rebuild)
+		{
+			if (!render_multiplayer_match_show(ctx, &state, rebuild))
+			{
+				render_multiplayer_match_destroy(ctx);
+				return (-1);
+			}
+			rebuild = false;
+		}
 	}
 	if (mouse_enabled)
 		(void)notcurses_mice_disable(ctx->nc);
 	render_multiplayer_match_destroy(ctx);
 	return (0);
+}
+
+/**
+ * @brief Waits for one terminal event, key-up events included.
+ *
+ * A match cannot use render_wait_input_timeout(). That helper is the menus'
+ * and it deliberately drops NCTYPE_RELEASE so a tapped arrow moves a selection
+ * exactly once - correct for a menu, fatal for a board: the press takes the
+ * key held and charges DAS, and if the release is swallowed on the way in
+ * nothing ever hands the axis back, so one tap slides the piece to the wall.
+ *
+ * Solo reads the input descriptor itself for the same reason. This is that
+ * function, minus the session socket a match has no use for.
+ *
+ * @param ctx Active render context.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @param input Output metadata for the received event.
+ * @return A key code, 0 on timeout, or (uint32_t)-1 on failure.
+ */
+static uint32_t	wait_match_input(t_render_ctx *ctx, int timeout_ms,
+	ncinput *input)
+{
+	struct pollfd	poll_fd;
+	int				result;
+
+	memset(&poll_fd, 0, sizeof(poll_fd));
+	poll_fd.fd = notcurses_inputready_fd(ctx->nc);
+	poll_fd.events = POLLIN;
+	if (poll_fd.fd < 0)
+		return ((uint32_t)-1);
+	errno = 0;
+	result = poll(&poll_fd, 1, timeout_ms);
+	if (result < 0)
+	{
+		if (errno == EINTR)
+			return (0);
+		return ((uint32_t)-1);
+	}
+	if (result == 0 || (poll_fd.revents & POLLIN) == 0)
+		return (0);
+	errno = 0;
+	return (notcurses_get_nblock(ctx->nc, input));
+}
+
+/**
+ * @brief Returns the earliest deadline the match loop must wake for.
+ *
+ * Every clock in the screen gets a vote, so the loop can sleep between them
+ * rather than poll: both boards' gravity and lock delay, the DAS and ARR
+ * repeats the player is holding, the character-select countdown, a
+ * notification's dismissal and the music cross-fade.
+ */
+static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_mp_match_state *state, const t_solo_handling_state *handling,
+	const t_solo_handling_config *config)
+{
+	int	wake_ms;
+	int	candidate;
+
+	wake_ms = -1;
+	if (state->phase == MP_MATCH_CHARACTER_SELECT)
+		wake_ms = MP_MATCH_FRAME_MS;
+	else if (state->phase == MP_MATCH_PLAYING)
+	{
+		wake_ms = solo_game_next_wake_ms(&state->local_game);
+		candidate = solo_game_next_wake_ms(&state->opponent_game);
+		if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+			wake_ms = candidate;
+		if (!state->local_game.paused && !state->local_game.countdown_active
+			&& state->local_game.phase == SOLO_ACTIVE)
+		{
+			candidate = solo_handling_next_wake_ms(handling, config,
+					gravity_interval_ms(state->local_game.level));
+			if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+				wake_ms = candidate;
+		}
+	}
+	candidate = render_notification_next_wake_ms(ctx);
+	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+		wake_ms = candidate;
+	candidate = audio_next_wake_ms(audio);
+	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+		wake_ms = candidate;
+	return (wake_ms);
 }
 
 static int	preview_player_count(t_app_game_mode mode)
@@ -185,6 +338,7 @@ static uint64_t	match_now_ms(void)
 	return ((uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
 }
 
+/* TEMPORARY: frame cost instrumentation, removed once the lag is pinned. */
 static uint32_t	match_seed(void)
 {
 	return ((uint32_t)(match_now_ms() ^ (uint64_t)getpid()));
@@ -311,12 +465,12 @@ static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
 		select_power(state, audio, key);
 		return (false);
 	}
-	if (key == 'p' || key == 'P')
-	{
-		solo_game_toggle_pause(&state->local_game);
-		solo_handling_reset(handling);
-		return (false);
-	}
+	/*
+	 * There is deliberately no pause in a match. Solo can stop its own clock
+	 * because nobody else is waiting on it; a match cannot, and a key that
+	 * froze only the local board while rivals kept playing would be worse than
+	 * no key at all. P falls through to the game keys, where it means nothing.
+	 */
 	if (apply_game_key(state, key))
 		play_match_events(audio, solo_game_take_events(&state->local_game));
 	return (false);
@@ -395,6 +549,11 @@ static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
 	index = (int)(key - '1');
 	if (character == NULL || index < 0 || index >= APP_CHARACTER_ABILITY_COUNT)
 		return ;
+	/*
+	 * The popover is hover-driven and the pointer leaving is what dismisses it,
+	 * so a keypress deliberately does not raise it: nothing would ever take it
+	 * back down, and it would sit over HOLD and NEXT for the rest of the match.
+	 */
 	snprintf(state->status, sizeof(state->status),
 		"%s SELECTED - AWAITING SERVER TARGET AUTHORITY",
 		character->abilities[index].name);

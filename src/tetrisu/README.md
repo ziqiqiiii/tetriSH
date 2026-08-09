@@ -278,6 +278,21 @@ Leaderboard, Settings, and Settings → Marketplace are reachable. Without
 `TETRISU_UI_PREVIEW=1`, the preview action is not rendered or accepted; real
 server sign-in and Play Offline retain their existing behavior.
 
+Every screen below Home is several keystrokes deep, which makes checking one in
+a real terminal slow and an automated visual pass fragile. `TETRISU_START_SCREEN`
+boots straight into one — the real screen, loading its real model through the
+provider and leaving through its own Back route, not a preview of it:
+
+```bash
+TETRISU_UI_PREVIEW=1 TETRISU_START_SCREEN=lobby ./bin/tetrisu
+```
+
+It accepts `solo`, `marketplace`, `settings`, `leaderboard`, `multiplayer`,
+`lobby`, `create`, `room`, `double`, and `royale`; anything else is ignored and
+the app boots at Login as usual. `TETRISU_MATCH_PREVIEW=double|battle` is the
+older, narrower gate for the two match screens, and
+`TETRISU_MATCH_PREVIEW_SKIP_SELECTION=1` skips their character select.
+
 By default the network adapter stays disconnected, so `CHECK SERVER` reports
 offline and `LOGIN`/`SIGN UP` stay refused; `PLAY OFFLINE` and the preview gate
 above are the two ways into Home. A refused button says which case applies on

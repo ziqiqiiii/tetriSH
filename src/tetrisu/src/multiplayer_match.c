@@ -429,9 +429,18 @@ void	mp_match_pixel_layout_build(t_app_game_mode mode, int width, int height,
 			+ 6 - layout->hud.y;
 	layout->controls = match_rect(margin, height - 62,
 		width - margin * 2, 46);
-	layout->ability_popover = match_rect(layout->loadout.x + 10,
-		layout->loadout.y + layout->loadout.height * 55 / 100,
-		layout->loadout.width - 20, layout->loadout.height * 40 / 100);
+	/*
+	 * Hold and Next take every row the loadout column has left under the
+	 * portrait and the fighter's name, rather than a fixed bottom fraction of
+	 * it. The four preview slots have to share whatever this is, so handing
+	 * them the leftover instead of 40% is the difference between a piece the
+	 * player can read at a glance and four thumbnails. The hovered ability
+	 * description borrows the same rectangle.
+	 */
+	top = layout->portrait.y + layout->portrait.height + 62;
+	layout->ability_popover = match_rect(layout->loadout.x + 10, top,
+		layout->loadout.width - 20,
+		max_int(120, layout->loadout.y + layout->loadout.height - top - 12));
 	layout->ability_center_x = layout->ability_bar.x
 		+ layout->ability_bar.width / 2;
 	layout->ability_hit_radius = max_int(18, min_int(32,
@@ -468,13 +477,24 @@ int	mp_match_ability_at_pixel(const t_mp_match_pixel_layout *layout,
 }
 
 /**
- * @brief Routes multiplayer movement through Solo's terminal repeat policy.
+ * @brief Routes multiplayer movement through Solo's handling, unaltered.
  *
- * A terminal Press is applied as one release-safe Solo tap. Only a genuine
- * Repeat event starts Solo's application-owned DAS/ARR state. This prevents a
- * slow rendered frame from producing several moves before the matching Release
- * can be read. A fresh Press also clears stale held state, so changing direction
- * at a wall can never be undone by an earlier key.
+ * The event type is handed to solo_handling_event() exactly as the terminal
+ * reported it, because that function is the whole DAS/ARR state machine and
+ * every event type already means something specific to it: Press takes the key
+ * held and charges DAS, Repeat is deliberately ignored while the key is held
+ * so that repeat timing belongs to the application rather than to the host's
+ * keyboard settings, Release hands the axis back to the opposite key, and
+ * Unknown is a legacy tap that never becomes held.
+ *
+ * Translating those types here is what made a match feel unlike Solo: a Press
+ * forwarded as Unknown returns an action without ever marking the key held, so
+ * horizontal_direction stayed zero, solo_handling_update() had nothing to
+ * repeat, and the piece could only move again when the host's own key repeat
+ * fired - one cell, then the OS repeat delay, then DAS on top of it.
+ *
+ * All this adds is the guard for when the board is not the player's to move:
+ * a Release must still be delivered, or the key stays held across the pause.
  */
 bool	mp_match_movement_event(const t_mp_match_state *state,
 	t_solo_handling_state *handling, const t_solo_handling_config *config,
@@ -487,25 +507,16 @@ bool	mp_match_movement_event(const t_mp_match_state *state,
 	if (!movement_key || state == NULL || handling == NULL || config == NULL
 		|| action == NULL)
 		return (false);
-	if (state->phase == MP_MATCH_PLAYING && !state->local_game.paused
-		&& !state->local_game.countdown_active
-		&& state->local_game.phase == SOLO_ACTIVE)
+	if (state->phase != MP_MATCH_PLAYING || state->local_game.paused
+		|| state->local_game.countdown_active
+		|| state->local_game.phase != SOLO_ACTIVE)
 	{
-		if (event_type == NCTYPE_PRESS)
-		{
-			solo_handling_reset(handling);
-			return (solo_handling_event(handling, config, key,
-					NCTYPE_UNKNOWN, action));
-		}
-		if (event_type == NCTYPE_REPEAT && handling->horizontal_direction == 0
-			&& !handling->down_held)
-			return (solo_handling_event(handling, config, key,
-					NCTYPE_PRESS, action));
-		return (solo_handling_event(handling, config, key, event_type, action));
+		if (event_type == NCTYPE_RELEASE)
+			(void)solo_handling_event(handling, config, key, event_type,
+				action);
+		return (false);
 	}
-	if (event_type == NCTYPE_RELEASE)
-		(void)solo_handling_event(handling, config, key, event_type, action);
-	return (false);
+	return (solo_handling_event(handling, config, key, event_type, action));
 }
 
 static int	first_selectable(const t_app_catalogue_view_model *characters)

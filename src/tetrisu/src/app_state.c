@@ -172,6 +172,45 @@ bool	app_ui_preview_enabled(void)
 }
 
 /**
+ * @brief Resolves the developer entry screen named by TETRISU_START_SCREEN.
+ *
+ * Every screen below the home menu is several keystrokes deep, which makes
+ * checking one of them in a real terminal slow and makes an automated visual
+ * pass fragile. This is the same kind of explicit environment gate as
+ * TETRISU_UI_PREVIEW: unset or unrecognised values return APP_SCREEN_COUNT and
+ * the app boots at Login exactly as before.
+ *
+ * @return The screen to boot into, or APP_SCREEN_COUNT when there is none.
+ */
+t_app_screen	app_start_screen_override(void)
+{
+	static const char *const	names[] = {
+		"solo", "marketplace", "settings", "leaderboard", "multiplayer",
+		"lobby", "create", "room", "double", "royale"
+	};
+	static const t_app_screen	screens[] = {
+		APP_SCREEN_SOLO, APP_SCREEN_MARKETPLACE, APP_SCREEN_SETTINGS,
+		APP_SCREEN_LEADERBOARD, APP_SCREEN_MULTIPLAYER_MODE, APP_SCREEN_LOBBY,
+		APP_SCREEN_CREATE_ROOM_MODAL, APP_SCREEN_WAITING_ROOM,
+		APP_SCREEN_DOUBLE, APP_SCREEN_BATTLE_ROYALE
+	};
+	const char					*value;
+	size_t						index;
+
+	value = getenv("TETRISU_START_SCREEN");
+	if (value == NULL || value[0] == '\0')
+		return (APP_SCREEN_COUNT);
+	index = 0;
+	while (index < sizeof(names) / sizeof(names[0]))
+	{
+		if (strcmp(value, names[index]) == 0)
+			return (screens[index]);
+		index++;
+	}
+	return (APP_SCREEN_COUNT);
+}
+
+/**
  * @brief Resolves only routes allowed by the item-15 screen graph.
  */
 static bool	navigation_target(const t_app_navigation *navigation,

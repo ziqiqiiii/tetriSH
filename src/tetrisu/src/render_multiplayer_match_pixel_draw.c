@@ -10,6 +10,7 @@ static const t_color g_dark = {7, 13, 23};
 static const t_color g_panel = {20, 9, 34};
 static const t_color g_panel_light = {39, 20, 58};
 
+static void	cache_portrait_pixels(t_render_ctx *ctx);
 static void	draw_text(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const char *text, int x, int y, int glyph_size,
 				int spacing, t_color tint);
@@ -40,7 +41,187 @@ bool mp_match_pixel_load_portrait(t_render_ctx *ctx, const char *path)
 	}
 	snprintf(ctx->mp_match_portrait_source,
 		sizeof(ctx->mp_match_portrait_source), "%s", path);
+	cache_portrait_pixels(ctx);
 	return (true);
+}
+
+/**
+ * @brief Reads the loaded portrait out of its visual into plain memory.
+ *
+ * One pass when the portrait changes, so drawing it is an array index rather
+ * than a library call per output pixel. A failed read leaves the cache empty
+ * and the drawing path falls back to sampling the visual.
+ */
+static void	cache_portrait_pixels(t_render_ctx *ctx)
+{
+	ncvgeom	geometry;
+	int		x;
+	int		y;
+
+	free(ctx->mp_match_portrait_pixels);
+	ctx->mp_match_portrait_pixels = NULL;
+	ctx->mp_match_portrait_px_width = 0;
+	ctx->mp_match_portrait_px_height = 0;
+	memset(&geometry, 0, sizeof(geometry));
+	if (ncvisual_geom(NULL, ctx->mp_match_portrait_visual, NULL,
+			&geometry) != 0 || geometry.pixx == 0 || geometry.pixy == 0)
+		return ;
+	ctx->mp_match_portrait_pixels = malloc((size_t)geometry.pixx
+			* geometry.pixy * sizeof(*ctx->mp_match_portrait_pixels));
+	if (ctx->mp_match_portrait_pixels == NULL)
+		return ;
+	y = 0;
+	while (y < (int)geometry.pixy)
+	{
+		x = 0;
+		while (x < (int)geometry.pixx)
+		{
+			if (ncvisual_at_yx(ctx->mp_match_portrait_visual, (unsigned)y,
+					(unsigned)x, &ctx->mp_match_portrait_pixels[(size_t)y
+					* geometry.pixx + x]) < 0)
+				ctx->mp_match_portrait_pixels[(size_t)y * geometry.pixx + x]
+					= 0;
+			x++;
+		}
+		y++;
+	}
+	ctx->mp_match_portrait_px_width = (int)geometry.pixx;
+	ctx->mp_match_portrait_px_height = (int)geometry.pixy;
+}
+
+/**
+ * @brief Loads the authored ability-popover frame once and reads it out.
+ */
+bool	mp_match_pixel_load_popover(t_render_ctx *ctx, const char *path)
+{
+	ncvgeom	geometry;
+	int		x;
+	int		y;
+
+	if (path == NULL || path[0] == '\0')
+		return (false);
+	if (ctx->mp_match_popover_pixels != NULL)
+		return (true);
+	if (ctx->mp_match_popover_visual == NULL)
+		ctx->mp_match_popover_visual = ncvisual_from_file(path);
+	if (ctx->mp_match_popover_visual == NULL)
+		return (false);
+	memset(&geometry, 0, sizeof(geometry));
+	if (ncvisual_geom(NULL, ctx->mp_match_popover_visual, NULL, &geometry) != 0
+		|| geometry.pixx == 0 || geometry.pixy == 0)
+		return (false);
+	ctx->mp_match_popover_pixels = malloc((size_t)geometry.pixx * geometry.pixy
+			* sizeof(*ctx->mp_match_popover_pixels));
+	if (ctx->mp_match_popover_pixels == NULL)
+		return (false);
+	y = 0;
+	while (y < (int)geometry.pixy)
+	{
+		x = 0;
+		while (x < (int)geometry.pixx)
+		{
+			if (ncvisual_at_yx(ctx->mp_match_popover_visual, (unsigned)y,
+					(unsigned)x, &ctx->mp_match_popover_pixels[(size_t)y
+					* geometry.pixx + x]) < 0)
+				ctx->mp_match_popover_pixels[(size_t)y * geometry.pixx + x] = 0;
+			x++;
+		}
+		y++;
+	}
+	ctx->mp_match_popover_px_width = (int)geometry.pixx;
+	ctx->mp_match_popover_px_height = (int)geometry.pixy;
+	return (true);
+}
+
+/**
+ * @brief Stretches the popover frame over the rectangle it decorates.
+ *
+ * Stretched rather than fitted: the frame is a border, so it has to reach the
+ * edges of the box whose contents it is framing.
+ */
+void	mp_match_pixel_draw_popover_art(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_rect *rect)
+{
+	uint32_t	source;
+	int			x;
+	int			y;
+
+	if (ctx->mp_match_popover_pixels == NULL
+		|| ctx->mp_match_popover_px_width <= 0
+		|| ctx->mp_match_popover_px_height <= 0
+		|| rect->width <= 0 || rect->height <= 0)
+		return ;
+	y = 0;
+	while (y < rect->height)
+	{
+		x = 0;
+		while (x < rect->width)
+		{
+			source = ctx->mp_match_popover_pixels[(size_t)((int64_t)y
+					* ctx->mp_match_popover_px_height / rect->height)
+				* ctx->mp_match_popover_px_width + (int64_t)x
+				* ctx->mp_match_popover_px_width / rect->width];
+			put_pixel(pixels, width, height, rect->x + x, rect->y + y,
+				(t_color){ncpixel_r(source), ncpixel_g(source),
+				ncpixel_b(source)}, ncpixel_a(source));
+			x++;
+		}
+		y++;
+	}
+}
+
+/**
+ * @brief Draws the equipped portrait, scaled to fit and keeping its ratio.
+ */
+void	mp_match_pixel_draw_portrait(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_rect *rect)
+{
+	t_mp_rect	destination;
+	uint32_t	source;
+	int			source_width;
+	int			source_height;
+	int			x;
+	int			y;
+
+	source_width = ctx->mp_match_portrait_px_width;
+	source_height = ctx->mp_match_portrait_px_height;
+	if (ctx->mp_match_portrait_pixels == NULL || source_width <= 0
+		|| source_height <= 0)
+	{
+		mp_match_pixel_draw_visual(pixels, width, height,
+			ctx->mp_match_portrait_visual, rect);
+		return ;
+	}
+	destination = *rect;
+	if ((int64_t)rect->width * source_height
+		> (int64_t)rect->height * source_width)
+	{
+		destination.width = (int)((int64_t)rect->height * source_width
+				/ source_height);
+		destination.x += (rect->width - destination.width) / 2;
+	}
+	else
+	{
+		destination.height = (int)((int64_t)rect->width * source_height
+				/ source_width);
+		destination.y += (rect->height - destination.height) / 2;
+	}
+	y = 0;
+	while (y < destination.height)
+	{
+		x = 0;
+		while (x < destination.width)
+		{
+			source = ctx->mp_match_portrait_pixels[(size_t)((int64_t)y
+					* source_height / destination.height) * source_width
+				+ (int64_t)x * source_width / destination.width];
+			put_pixel(pixels, width, height, destination.x + x,
+				destination.y + y, (t_color){ncpixel_r(source),
+				ncpixel_g(source), ncpixel_b(source)}, ncpixel_a(source));
+			x++;
+		}
+		y++;
+	}
 }
 
 void mp_match_pixel_draw_visual(uint32_t *pixels, int width, int height,
@@ -130,19 +311,35 @@ void mp_match_pixel_draw_circle(uint32_t *pixels, int width, int height,
 	}
 }
 
+/*
+ * An opaque fill is the same value in every pixel, so it does not need the
+ * blend at all. That matters because the largest fill in the match is the
+ * board's own backing: over a million pixels, each of which used to be a call
+ * through put_pixel into blend_pixel.
+ */
 void mp_match_pixel_fill_rect(uint32_t *pixels, int width, int height,
 	const t_mp_rect *rect, t_color tint, unsigned alpha)
 {
-	int x;
-	int y;
+	uint32_t	opaque;
+	int			first;
+	int			last;
+	int			x;
+	int			y;
 
+	first = max_int(0, rect->x);
+	last = min_int(rect->x + rect->width, width);
+	opaque = ncpixel(tint.r, tint.g, tint.b);
+	ncpixel_set_a(&opaque, 255u);
 	y = max_int(0, rect->y);
 	while (y < rect->y + rect->height && y < height)
 	{
-		x = max_int(0, rect->x);
-		while (x < rect->x + rect->width && x < width)
+		x = first;
+		while (x < last)
 		{
-			put_pixel(pixels, width, height, x, y, tint, alpha);
+			if (alpha >= 255u)
+				pixels[(size_t)y * width + x] = opaque;
+			else
+				put_pixel(pixels, width, height, x, y, tint, alpha);
 			x++;
 		}
 		y++;

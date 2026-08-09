@@ -76,6 +76,8 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 				t_room_action action);
 static bool	load_room_view(const t_app_data_provider *provider,
 				t_mp_session *session);
+static bool	apply_start_screen_override(t_app_navigation *navigation,
+				t_mp_session *session);
 static bool	is_multiplayer_screen(t_app_screen screen);
 static int	leave_multiplayer(t_render_ctx *ctx, t_app_navigation *navigation,
 				const t_menu_selection *menu);
@@ -109,6 +111,7 @@ int	main(void)
 	uint32_t			key;
 	int					hovered;
 	bool				direct_match_preview;
+	bool				direct_screen;
 
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
@@ -121,7 +124,9 @@ int	main(void)
 	direct_match_preview = match_preview != NULL
 		&& (strcmp(match_preview, "double") == 0
 			|| strcmp(match_preview, "battle") == 0);
-	if (!direct_match_preview)
+	direct_screen = direct_match_preview
+		|| app_start_screen_override() != APP_SCREEN_COUNT;
+	if (!direct_screen)
 		render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
 	audio_set_music_volume(&audio, HOME_BGM_START_VOLUME);
 	audio_play_music(&audio, ctx.theme_assets.music);
@@ -140,6 +145,9 @@ int	main(void)
 		snprintf(mp_session.room_id, sizeof(mp_session.room_id),
 			"KITTY-UI-PREVIEW");
 	}
+	else if (apply_start_screen_override(&navigation, &mp_session))
+		direct_match_preview = navigation.current == APP_SCREEN_DOUBLE
+			|| navigation.current == APP_SCREEN_BATTLE_ROYALE;
 	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
 	while (navigation.current != APP_SCREEN_QUIT)
 	{
@@ -1517,7 +1525,13 @@ static int	run_lobby_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		else if (action == LOBBY_ACTION_BACK)
 		{
 			audio_play_menu_select(audio);
-			session->mode = state.filter;
+			/*
+			 * The filter cycles through APP_GAME_MODE_NONE for "all rooms",
+			 * which is not a mode anything downstream can play; carrying it out
+			 * of here left the mode picker silently falling back to Double.
+			 */
+			if (state.filter != APP_GAME_MODE_NONE)
+				session->mode = state.filter;
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
 		else if (action == LOBBY_ACTION_QUIT
@@ -1599,6 +1613,7 @@ static int	run_create_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	t_create_room_action	action;
 	ncinput					input;
 	uint32_t				key;
+	bool					cued;
 
 	if (app_screen_view_load_for_session(provider,
 			APP_SCREEN_CREATE_ROOM_MODAL, navigation->offline, &view)
@@ -1614,6 +1629,7 @@ static int	run_create_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		key = render_wait_input(ctx, &input);
 		action = CREATE_ROOM_ACTION_NONE;
 		previous = state;
+		cued = false;
 		if (input.evtype == NCTYPE_RELEASE || nckey_mouse_p(key))
 			continue ;
 		if (key == (uint32_t)-1)
@@ -1638,10 +1654,17 @@ static int	run_create_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			state.feedback = MP_MODE_FEEDBACK_VOLUME;
 			state.feedback_value
 				= ui_notification_volume_percent(audio->music_volume);
+			cued = true;
 		}
 		if (create_room_state_view_changed(&previous, &state))
 		{
-			audio_play_menu_move(audio);
+			/*
+			 * A volume keypress already played its own cue, and it also moves
+			 * the feedback fields - so the view-changed repaint used to play a
+			 * second cue for the same key.
+			 */
+			if (!cued)
+				audio_play_menu_move(audio);
 			if (!render_create_room_show(ctx, &view, &state, false))
 				return (-1);
 		}
@@ -1689,12 +1712,24 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	uint64_t				now;
 	int						wait_ms;
 	bool					prompted;
+	bool					auto_start;
 
 	if (!load_room_view(provider, session))
 		return (-1);
 	(void)waiting_room_sync_state(&session->room_view.data.room);
 	waiting_room_state_init(&session->room_state);
-	if (waiting_room_auto_start_allowed(&session->room_view.data.room))
+	/*
+	 * Arriving from a finished match must not re-arm the countdown, for this
+	 * whole visit rather than only on entry. Reloading the room hands back a
+	 * ready room with everyone ready, so a Double room auto-started again the
+	 * instant the player left the match, relaunched it, and left Escape looking
+	 * like it did nothing forever. The player asked to be back in the room;
+	 * starting the next match is their call, and S still does it.
+	 */
+	auto_start = navigation->previous != APP_SCREEN_DOUBLE
+		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE;
+	if (auto_start
+		&& waiting_room_auto_start_allowed(&session->room_view.data.room))
 		(void)waiting_room_begin_countdown(&session->room_state);
 	(void)notcurses_mice_disable(ctx->nc);
 	render_notification_destroy(ctx);
@@ -1758,7 +1793,7 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			return (-1);
 		/* Double auto-starts; Battle Royale can only enter here through the
 		 * owner's explicit Start action handled above. */
-		if (navigation->current == APP_SCREEN_WAITING_ROOM
+		if (auto_start && navigation->current == APP_SCREEN_WAITING_ROOM
 			&& waiting_room_auto_start_allowed(
 				&session->room_view.data.room))
 			(void)waiting_room_begin_countdown(&session->room_state);
@@ -1874,6 +1909,40 @@ static bool	load_room_view(const t_app_data_provider *provider,
 }
 
 /**
+ * @brief Boots straight into the screen TETRISU_START_SCREEN names.
+ *
+ * Only the entry point moves. The screen still loads its model through the
+ * provider and still leaves through its own Back route, so this exercises the
+ * real screen rather than a preview of it. The multiplayer screens below the
+ * lobby also need the room the lobby would have chosen, which is why the mode
+ * and the room id are seeded here rather than left zeroed.
+ *
+ * @return Whether an override was named and applied.
+ */
+static bool	apply_start_screen_override(t_app_navigation *navigation,
+	t_mp_session *session)
+{
+	t_app_screen	screen;
+
+	screen = app_start_screen_override();
+	if (screen == APP_SCREEN_COUNT)
+		return (false);
+	navigation->current = screen;
+	navigation->previous = app_screen_parent(screen);
+	navigation->offline = false;
+	if (screen == APP_SCREEN_BATTLE_ROYALE)
+		session->mode = APP_GAME_MODE_BATTLE_ROYALE;
+	else if (screen == APP_SCREEN_DOUBLE)
+		session->mode = APP_GAME_MODE_DOUBLE;
+	if (screen == APP_SCREEN_WAITING_ROOM || screen == APP_SCREEN_DOUBLE
+		|| screen == APP_SCREEN_BATTLE_ROYALE)
+		snprintf(session->room_id, sizeof(session->room_id), "%s",
+			session->mode == APP_GAME_MODE_BATTLE_ROYALE
+			? "arena-88" : "duel-42");
+	return (true);
+}
+
+/**
  * @brief Reports whether a screen belongs to the multiplayer group.
  *
  * The four screens share one set of region planes and one static cache, so the
@@ -1972,9 +2041,15 @@ static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
 	audio_play_menu_select(audio);
 	if (!app_navigation_dispatch(navigation, action))
 		return (0);
+	/*
+	 * The scaffold owns a full-screen plane, so it has to be destroyed whenever
+	 * the step leaves this screen - not only on the way home. Destroying it only
+	 * for APP_SCREEN_HOME left it covering whatever came next, which is what
+	 * made leaving a match look like it had done nothing at all.
+	 */
+	render_screen_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
-		render_screen_destroy(ctx);
 		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		enable_home_mouse(ctx);

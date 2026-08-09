@@ -515,17 +515,23 @@ static t_app_provider_result	fixture_load_room(void *userdata,
 		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
 	view->player_count = view->mode == APP_GAME_MODE_DOUBLE
 		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
-	set_room_player(&view->players[0], names[0], true, true);
-	index = 1;
+	index = 0;
 	while (index < view->player_count - 1)
 	{
 		set_room_player(&view->players[index], names[index], false, true);
 		index++;
 	}
-	/* Joining completes the documented JOINING -> READY slot transition. */
+	/*
+	 * Joining completes the documented JOINING -> READY slot transition, and
+	 * the local player owns the room they are sitting in. Seating them last
+	 * and giving ownership to slot 0 made every Battle Royale room a dead end:
+	 * Start is the owner's to press, nobody else in a fixture ever presses it,
+	 * so the arena answered ONLY THE ROOM OWNER CAN START forever. The lobby
+	 * table still lists rooms owned by other players.
+	 */
 	view->local_slot = view->player_count - 1;
 	set_room_player(&view->players[view->local_slot], "PreviewPlayer",
-		false, true);
+		true, true);
 	seed_room_chat(view);
 	return (APP_PROVIDER_OK);
 }

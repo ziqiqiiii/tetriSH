@@ -17,19 +17,52 @@ static const t_color g_dark = {7, 13, 23};
 static const t_color g_panel = {20, 9, 34};
 static const t_color g_panel_light = {39, 20, 58};
 
+/*
+ * One pass over the surfaces that can change without the layout changing.
+ * The canvas is composed lazily: a frame in which nothing moved never
+ * allocates one. force says the canvas already holds the finished artwork, so
+ * a region only has to be cut out of it, not drawn again.
+ */
+typedef struct s_match_regions
+{
+	t_render_ctx					*ctx;
+	uint32_t						*pixels;
+	int								width;
+	int								height;
+	const t_mp_match_pixel_layout	*layout;
+	const t_mp_match_state			*state;
+	bool							force;
+	bool							changed;
+}	t_match_regions;
+
 static bool load_assets(t_render_ctx *ctx);
+static bool load_tile_atlas(t_render_ctx *ctx);
 static bool refresh_background(t_render_ctx *ctx, bool rebuild);
 static bool present_canvas(t_render_ctx *ctx, const uint32_t *pixels,
-				int width, int height);
+				int width, int height, bool cells);
 static bool create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *region,
 				struct ncplane **slot);
 static void destroy_region_planes(t_render_ctx *ctx);
+static bool regions_prepare(t_match_regions *pass);
+static int regions_local(t_match_regions *pass);
+static int regions_opponent(t_match_regions *pass);
+static int regions_battle(t_match_regions *pass);
+static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
+				int first, int count, struct ncplane **slot);
+static int regions_loadout(t_match_regions *pass);
+static int regions_hud(t_match_regions *pass);
+static int refresh_regions(t_match_regions *pass);
+static void compose_match(t_match_regions *pass);
+static void store_signatures(t_match_regions *pass, uint64_t signature);
+static bool match_incremental(t_match_regions *pass);
+static bool match_rebuild(t_match_regions *pass, uint64_t signature);
 static uint64_t match_signature(const t_mp_match_state *state,
 				int width, int height);
 static uint64_t static_signature(const t_mp_match_state *state,
 				int width, int height);
 static uint64_t game_signature(const t_solo_game *game);
+static int clear_flash_step(const t_solo_game *game);
 static uint64_t local_board_signature(const t_solo_game *game,
 				bool include_score);
 static uint64_t loadout_signature(const t_mp_match_state *state);
@@ -38,6 +71,26 @@ static uint64_t opponents_signature(const t_mp_match_state *state,
 				int first, int count);
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size);
 static uint32_t *new_canvas(t_render_ctx *ctx, int width, int height);
+static uint32_t *canvas_keep(t_render_ctx *ctx, int width, int height);
+static void clear_rect(uint32_t *pixels, int width, int height,
+				const t_mp_rect *rect);
+static void board_cell_grid(const t_solo_game *game,
+				int grid[BOARD_HEIGHT][BOARD_WIDTH], bool with_piece);
+static void repaint_cell(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, const t_mp_rect *board, int col, int row, int slot);
+static int repaint_changed_cells(t_match_regions *pass, int slot,
+				const t_mp_rect *board, const t_solo_game *game,
+				bool with_piece);
+static bool board_region_sync(t_match_regions *pass, int slot,
+				const t_mp_rect *board, const t_solo_game *game);
+static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region);
+static uint64_t band_signature(const t_render_ctx *ctx, int first, int last);
+static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
+				int band, t_mp_rect *out);
+static bool caption_stale(t_match_regions *pass);
+static bool regions_caption(t_match_regions *pass, const t_mp_rect *board);
+static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
+				const t_piece *piece, int layer);
 static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
 static void put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 				 t_color tint, unsigned alpha);
@@ -59,6 +112,9 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 static void draw_ability_bar(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_match_pixel_layout *layout,
 				const t_mp_match_state *state);
+static void draw_ability_popover(t_render_ctx *ctx, uint32_t *pixels,
+				int width, int height, const t_mp_rect *rect,
+				const t_mp_match_state *state);
 static void draw_hold_next(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_solo_game *game);
 static void draw_piece_preview(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -74,12 +130,24 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_board *board,
 				const t_piece *active, const t_piece *ghost);
+static void draw_grid_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, const t_mp_rect *rect,
+				const int grid[BOARD_HEIGHT][BOARD_WIDTH], t_color backing);
 static void draw_piece_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_piece *piece,
 				bool ghost);
 static void draw_tile(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, int tile, int x, int y, int size, unsigned opacity,
 				bool ghost);
+static bool tile_cache_ensure(t_render_ctx *ctx, int size, t_color backing);
+static void tile_cache_bake(t_render_ctx *ctx, int tile, int size, bool ghost,
+				t_color backing);
+static void draw_board_tile(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, int tile, int x, int y, int size, bool ghost,
+				t_color backing);
+static int danger_step(const t_solo_game *game);
+static t_color danger_backing(int step);
+static t_color danger_frame(int step, bool local);
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *rect,
 				const t_mp_match_state *state, int first, int count);
@@ -103,24 +171,24 @@ static void draw_hud_backdrop(uint32_t *pixels, int width, int height,
 /**
  * @brief Draws the authored-pixel multiplayer match surface.
  *
- * The font mask and tetromino atlas are the same assets used by Solo. Static
- * chrome stays on the screen plane while board, opponent, loadout, and HUD
- * regions are rewritten independently, so a movement key never retransmits
- * the complete terminal bitmap.
+ * The font mask and tetromino atlas are the same assets used by Solo, and so
+ * is the layering rule that makes Solo smooth: the stationary chrome is a
+ * quadrant-cell plane, and only the surfaces that animate - the boards, the
+ * loadout, the HUD, the falling piece - are bitmaps above it. Terminal bitmaps
+ * do not compose. Anything drawn over one invalidates it, so a full-screen
+ * bitmap underneath the moving parts makes every keypress cost a full-screen
+ * transfer; measured here, that was the whole of the input latency. Cells cost
+ * nothing to cover, so the chrome now pays once and the moving regions pay for
+ * their own area only.
  */
 bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 	const t_mp_match_state *state, bool rebuild_background)
 {
-	uint32_t *pixels;
+	t_match_regions pass;
 	uint64_t signature;
 	t_mp_match_pixel_layout layout;
-	t_mp_rect region;
 	int width;
 	int height;
-	int opponents;
-	int left_count;
-	bool changed;
-	int piece_changed;
 
 	if (ctx == NULL || state == NULL || render_compatibility_mode(ctx)
 		|| !render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc))
@@ -138,183 +206,621 @@ bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 	if (state->phase != MP_MATCH_PLAYING && !rebuild_background
 		&& ctx->screen_plane != NULL && ctx->mp_match_signature == signature)
 		return (true);
+	memset(&pass, 0, sizeof(pass));
+	pass.ctx = ctx;
+	pass.width = width;
+	pass.height = height;
+	pass.layout = &layout;
+	pass.state = state;
 	if (state->phase == MP_MATCH_PLAYING && !rebuild_background
 		&& ctx->screen_plane != NULL
 		&& ctx->mp_match_static_signature == static_signature(state,
 			width, height))
-	{
-		pixels = NULL;
-		changed = false;
-		if (ctx->mp_match_local_signature != local_board_signature(
-				&state->local_game, state->mode == APP_GAME_MODE_DOUBLE))
-		{
-			pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			mp_match_piece_planes_destroy(ctx);
-			draw_game_board(ctx, pixels, width, height, &layout.local_board,
-				&state->local_game, state->mode == APP_GAME_MODE_BATTLE_ROYALE
-					? "" : "YOUR BOARD", true);
-			if (state->mode == APP_GAME_MODE_DOUBLE)
-				draw_double_caption(ctx, pixels, width, height,
-					&layout.local_board, state->profile.username,
-					state->local_game.scoring.total,
-					state->local_game.crystal_charge, true);
-			region = (t_mp_rect){layout.local_board.x - 8,
-				layout.local_board.y - 8, layout.local_board.width + 16,
-				layout.local_board.height + (state->mode
-					== APP_GAME_MODE_DOUBLE ? 82 : 16)};
-			if (!create_region_plane(ctx, pixels, width, height, &region,
-					&ctx->mp_match_local_plane))
-				return (free(pixels), false);
-			ctx->mp_match_local_signature = local_board_signature(
-				&state->local_game, state->mode == APP_GAME_MODE_DOUBLE);
-			changed = true;
-		}
-		if (state->mode == APP_GAME_MODE_DOUBLE
-			&& ctx->mp_match_opponent_signature
-				!= game_signature(&state->opponent_game))
-		{
-			if (pixels == NULL)
-				pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			draw_game_board(ctx, pixels, width, height, &layout.opponent_board,
-				&state->opponent_game, state->opponent_name, false);
-			draw_double_caption(ctx, pixels, width, height,
-				&layout.opponent_board, state->opponent_name,
-				state->opponent_game.scoring.total, state->opponent_charge, false);
-			region = (t_mp_rect){layout.opponent_board.x - 8,
-				layout.opponent_board.y - 8, layout.opponent_board.width + 16,
-				layout.opponent_board.height + 82};
-			if (!create_region_plane(ctx, pixels, width, height, &region,
-					&ctx->mp_match_opponent_plane))
-				return (free(pixels), false);
-			ctx->mp_match_opponent_signature = game_signature(&state->opponent_game);
-			changed = true;
-		}
-		opponents = clamp_int(state->players_total - 1, 0,
-			APP_ROOM_MAX_PLAYERS - 1);
-		left_count = (opponents + 1) / 2;
-		if (state->mode == APP_GAME_MODE_BATTLE_ROYALE
-			&& ctx->mp_match_left_signature != opponents_signature(state,
-				0, left_count))
-		{
-			if (pixels == NULL)
-				pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			draw_opponent_region(ctx, pixels, width, height,
-				&layout.left_opponents, state, 0, left_count);
-			if (!create_region_plane(ctx, pixels, width, height,
-					&layout.left_opponents, &ctx->mp_match_left_plane))
-				return (free(pixels), false);
-			ctx->mp_match_left_signature = opponents_signature(state, 0, left_count);
-			changed = true;
-		}
-		if (state->mode == APP_GAME_MODE_BATTLE_ROYALE
-			&& ctx->mp_match_right_signature != opponents_signature(state,
-				left_count, opponents - left_count))
-		{
-			if (pixels == NULL)
-				pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			draw_opponent_region(ctx, pixels, width, height,
-				&layout.right_opponents, state, left_count,
-				opponents - left_count);
-			if (!create_region_plane(ctx, pixels, width, height,
-					&layout.right_opponents, &ctx->mp_match_right_plane))
-				return (free(pixels), false);
-			ctx->mp_match_right_signature = opponents_signature(state,
-				left_count, opponents - left_count);
-			changed = true;
-		}
-		if (ctx->mp_match_loadout_signature != loadout_signature(state))
-		{
-			if (pixels == NULL)
-				pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			draw_loadout(ctx, pixels, width, height, &layout.loadout, state, true);
-			draw_ability_bar(ctx, pixels, width, height, &layout, state);
-			if (!create_region_plane(ctx, pixels, width, height, &layout.loadout,
-					&ctx->mp_match_loadout_plane))
-				return (free(pixels), false);
-			if (!create_region_plane(ctx, pixels, width, height,
-					&layout.ability_bar, &ctx->mp_match_ability_plane))
-				return (free(pixels), false);
-			ctx->mp_match_loadout_signature = loadout_signature(state);
-			changed = true;
-		}
-		if (ctx->mp_match_hud_signature != hud_signature(state))
-		{
-			if (pixels == NULL)
-				pixels = new_canvas(ctx, width, height);
-			if (pixels == NULL)
-				return (false);
-			draw_match_hud(ctx, pixels, width, height, &layout, state);
-			if (!create_region_plane(ctx, pixels, width, height, &layout.hud,
-					&ctx->mp_match_hud_plane))
-				return (free(pixels), false);
-			ctx->mp_match_hud_signature = hud_signature(state);
-			changed = true;
-		}
-		piece_changed = mp_match_piece_planes_update(ctx, &layout,
-			&state->local_game);
-		if (piece_changed < 0)
-			return (free(pixels), false);
-		changed |= piece_changed != 0;
-		free(pixels);
-		if (!changed)
-			return (true);
-		render_notification_raise(ctx);
-		return (notcurses_render(ctx->nc) == 0);
-	}
+		return (match_incremental(&pass));
+	return (match_rebuild(&pass, signature));
+}
+
+/**
+ * @brief Redraws only the regions whose contents changed since the last frame.
+ *
+ * Nothing under these planes is a bitmap any more, so a region costs its own
+ * area and no more. A frame in which nothing moved returns without rendering.
+ */
+static bool match_incremental(t_match_regions *pass)
+{
+	if (refresh_regions(pass) < 0)
+		return (false);
+	pass->pixels = NULL;
+	if (!pass->changed)
+		return (true);
+	render_notification_raise(pass->ctx);
+	return (notcurses_render(pass->ctx->nc) == 0);
+}
+
+/**
+ * @brief Rebuilds every plane from a freshly composed canvas.
+ *
+ * During a match the composed canvas goes down as cells and the moving regions
+ * are cut from the same canvas as bitmaps on top, so the two layers agree
+ * pixel for pixel and only the sharper one is visible. The other phases are
+ * still one bitmap: they hold still, so nothing above them ever invalidates
+ * them, and they keep the authored resolution across the whole screen.
+ */
+static bool match_rebuild(t_match_regions *pass, uint64_t signature)
+{
+	t_render_ctx *ctx;
+	bool playing;
+
+	ctx = pass->ctx;
+	playing = pass->state->phase == MP_MATCH_PLAYING;
 	destroy_region_planes(ctx);
-	pixels = new_canvas(ctx, width, height);
-	if (pixels == NULL)
+	pass->pixels = new_canvas(ctx, pass->width, pass->height);
+	if (pass->pixels == NULL)
 		return (false);
-	if (state->phase == MP_MATCH_CHARACTER_SELECT)
-		compose_selection(ctx, pixels, width, height, state);
-	else if (state->mode == APP_GAME_MODE_DOUBLE)
-		compose_double(ctx, pixels, width, height, state);
-	else
-		compose_battle(ctx, pixels, width, height, state);
-	if (state->phase == MP_MATCH_FINISHED)
-		draw_result(ctx, pixels, width, height, state);
-	if (!present_canvas(ctx, pixels, width, height))
-	{
-		free(pixels);
+	compose_match(pass);
+	if (!present_canvas(ctx, pass->pixels, pass->width, pass->height, playing))
 		return (false);
-	}
-	free(pixels);
-	if (state->phase == MP_MATCH_PLAYING)
-	{
-		piece_changed = mp_match_piece_planes_update(ctx, &layout,
-			&state->local_game);
-		if (piece_changed < 0)
-			return (false);
-	}
-	else
-		mp_match_piece_planes_destroy(ctx);
-	ctx->mp_match_signature = signature;
-	ctx->mp_match_static_signature = state->phase == MP_MATCH_PLAYING
-		? static_signature(state, width, height) : 0;
-	ctx->mp_match_local_signature = local_board_signature(&state->local_game,
-		state->mode == APP_GAME_MODE_DOUBLE);
-	ctx->mp_match_opponent_signature = game_signature(&state->opponent_game);
-	ctx->mp_match_loadout_signature = loadout_signature(state);
-	ctx->mp_match_hud_signature = hud_signature(state);
-	opponents = clamp_int(state->players_total - 1, 0,
-		APP_ROOM_MAX_PLAYERS - 1);
-	left_count = (opponents + 1) / 2;
-	ctx->mp_match_left_signature = opponents_signature(state, 0, left_count);
-	ctx->mp_match_right_signature = opponents_signature(state, left_count,
-		opponents - left_count);
+	pass->force = true;
+	if (playing && refresh_regions(pass) < 0)
+		return (false);
+	pass->pixels = NULL;
+	store_signatures(pass, signature);
 	render_compatibility_badge_hide(ctx);
 	render_notification_raise(ctx);
 	return (notcurses_render(ctx->nc) == 0);
+}
+
+
+/**
+ * @brief Records what each board cell shows, piece and ghost included.
+ *
+ * One number per cell, so a frame can find the handful that differ from the
+ * frame before it instead of composing the board again.
+ */
+static void board_cell_grid(const t_solo_game *game,
+	int grid[BOARD_HEIGHT][BOARD_WIDTH], bool with_piece)
+{
+	t_piece ghost;
+	t_cell cell;
+	int row;
+	int col;
+
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			cell = board_get(&game->board, col, row);
+			grid[row][col] = 0;
+			if (solo_game_row_is_clearing(game, row))
+				grid[row][col] = 1000 + (clear_flash_step(game) == 2
+						? TILE_CLEAR_SECOND : TILE_CLEAR_FIRST);
+			else if (cell.type == CELL_GARBAGE)
+				grid[row][col] = 1000 + TILE_GARBAGE;
+			else if (cell.type == CELL_FILLED)
+				grid[row][col] = 1000
+					+ solo_canvas_piece_tile((t_piece_type)cell.color);
+			col++;
+		}
+		row++;
+	}
+	if (!with_piece || game->phase != SOLO_ACTIVE || game->countdown_active)
+		return ;
+	ghost = solo_game_ghost(game);
+	stamp_piece_cells(grid, &ghost, 2000);
+	stamp_piece_cells(grid, &game->active, 3000);
+}
+
+static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
+	const t_piece *piece, int layer)
+{
+	int cols[4];
+	int rows[4];
+	int index;
+
+	if (!piece_cells(piece, cols, rows))
+		return ;
+	index = 0;
+	while (index < 4)
+	{
+		if (board_in_bounds(cols[index], rows[index]))
+			grid[rows[index]][cols[index]] = layer
+				+ solo_canvas_piece_tile(piece->type);
+		index++;
+	}
+}
+
+/**
+ * @brief Repaints one cell over the board's own background.
+ *
+ * The board is filled opaque before its cells are drawn, so repainting a cell
+ * is that same fill over one cell followed by whatever now occupies it.
+ */
+static void repaint_cell(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_mp_rect *board, int col, int row, int slot)
+{
+	t_mp_rect cell;
+	int tile_size;
+	int id;
+
+	id = ctx->mp_match_boards[slot].cells[row][col];
+	tile_size = min_int(board->width / BOARD_WIDTH,
+			board->height / BOARD_HEIGHT);
+	cell = (t_mp_rect){board->x + col * tile_size, board->y + row * tile_size,
+		tile_size, tile_size};
+	/*
+	 * A baked tile already carries the board's backing colour, so the fill only
+	 * has to run for a cell that has become empty.
+	 */
+	if (id < 1000)
+	{
+		mp_match_pixel_fill_rect(pixels, width, height, &cell,
+			danger_backing(ctx->mp_match_boards[slot].danger), 255);
+		return ;
+	}
+	draw_board_tile(ctx, pixels, width, height, id % 1000, cell.x, cell.y,
+		tile_size, id >= 2000 && id < 3000,
+		danger_backing(ctx->mp_match_boards[slot].danger));
+}
+
+/**
+ * @brief Repaints only the cells that differ from the retained composition.
+ *
+ * Returns 0 when the cache cannot be trusted - a different board rectangle, a
+ * countdown, a finished game - and the caller composes the region in full.
+ */
+static int repaint_changed_cells(t_match_regions *pass, int slot,
+	const t_mp_rect *board, const t_solo_game *game, bool with_piece)
+{
+	int grid[BOARD_HEIGHT][BOARD_WIDTH];
+	t_mp_board_cache *cache;
+	int row;
+	int col;
+
+	cache = &pass->ctx->mp_match_boards[slot];
+	if (!cache->valid || memcmp(&cache->rect, board, sizeof(*board)) != 0
+		|| game->countdown_active || cache->danger != danger_step(game))
+		return (0);
+	board_cell_grid(game, grid, with_piece);
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (grid[row][col] != cache->cells[row][col])
+			{
+				cache->cells[row][col] = grid[row][col];
+				repaint_cell(pass->ctx, pass->pixels, pass->width,
+					pass->height, board, col, row, slot);
+			}
+			col++;
+		}
+		row++;
+	}
+	return (1);
+}
+
+/**
+ * @brief Brings one board region up to date, by cell diff where it can.
+ *
+ * Both boards go through here. The falling piece is only ever the local
+ * player's, so the opponent's cache holds landed blocks alone and survives
+ * every tick of a game nobody is steering.
+ */
+static bool board_region_sync(t_match_regions *pass, int slot,
+	const t_mp_rect *board, const t_solo_game *game)
+{
+	t_mp_board_cache *cache;
+	t_mp_rect region;
+	bool with_piece;
+
+	cache = &pass->ctx->mp_match_boards[slot];
+	with_piece = slot == 0;
+	if (pass->force)
+		return (true);
+	if (repaint_changed_cells(pass, slot, board, game, with_piece))
+		return (true);
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	clear_rect(pass->pixels, pass->width, pass->height, &region);
+	draw_game_board(pass->ctx, pass->pixels, pass->width, pass->height, board,
+		game, slot == 0 ? (pass->state->mode == APP_GAME_MODE_BATTLE_ROYALE
+			? "" : "YOUR BOARD") : pass->state->opponent_name, with_piece);
+	board_cell_grid(game, cache->cells, with_piece);
+	cache->rect = *board;
+	cache->danger = danger_step(game);
+	cache->valid = !game->countdown_active;
+	return (true);
+}
+
+/**
+ * @brief Gives one band's rectangle, snapped to whole terminal cells.
+ *
+ * The snap is the point: create_region_plane rounds a region out to the cells
+ * that contain it, so two bands whose unsnapped edges fall inside one cell row
+ * would both claim that row and blank each other. Cutting on cell boundaries
+ * makes the bands exactly tile the region.
+ */
+static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
+	int band, t_mp_rect *out)
+{
+	int	rows;
+	int	first;
+	int	last;
+
+	rows = (region->height + ctx->cell_px_y - 1) / ctx->cell_px_y;
+	first = rows * band / MP_MATCH_BOARD_BANDS;
+	last = rows * (band + 1) / MP_MATCH_BOARD_BANDS;
+	out->x = region->x;
+	out->width = region->width;
+	out->y = region->y + first * ctx->cell_px_y;
+	out->height = (last - first) * ctx->cell_px_y;
+}
+
+/**
+ * @brief Hashes the board rows a band covers, plus the band's own geometry.
+ *
+ * Only the local cache is hashed because only the local board is banded; the
+ * rows outside any band's board area contribute nothing, so a band holding
+ * only margin settles to a constant and stops being re-blitted.
+ */
+static uint64_t band_signature(const t_render_ctx *ctx, int first, int last)
+{
+	uint64_t	hash;
+	int			row;
+
+	hash = 1469598103934665603ULL;
+	hash = hash_bytes(hash, &first, sizeof(first));
+	hash = hash_bytes(hash, &last, sizeof(last));
+	row = max_int(0, first);
+	while (row < min_int(last, BOARD_HEIGHT))
+	{
+		hash = hash_bytes(hash, ctx->mp_match_boards[0].cells[row],
+				sizeof(ctx->mp_match_boards[0].cells[row]));
+		row++;
+	}
+	return (hash);
+}
+
+/**
+ * @brief Re-blits only the bands of the local board whose rows changed.
+ *
+ * A forced pass re-blits every band, because the canvas underneath it is new.
+ */
+static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region)
+{
+	t_render_ctx	*ctx;
+	t_mp_rect		strip;
+	uint64_t		signature;
+	int				tile_size;
+	int				band;
+
+	ctx = pass->ctx;
+	tile_size = max_int(1, min_int((region->width - 16) / BOARD_WIDTH,
+				(region->height - 16) / BOARD_HEIGHT));
+	band = 0;
+	while (band < MP_MATCH_BOARD_BANDS)
+	{
+		band_bounds(ctx, region, band, &strip);
+		signature = band_signature(ctx, (strip.y - region->y - 8) / tile_size,
+				(strip.y + strip.height - region->y - 8 + tile_size - 1)
+				/ tile_size);
+		if (strip.height > 0 && (pass->force
+				|| ctx->mp_match_band_signatures[band] != signature))
+		{
+			if (!create_region_plane(ctx, pass->pixels, pass->width,
+					pass->height, &strip, &ctx->mp_match_local_bands[band]))
+				return (false);
+			ctx->mp_match_band_signatures[band] = signature;
+		}
+		band++;
+	}
+	return (true);
+}
+
+/**
+ * @brief Reports whether the name-and-score strip under the board has moved on.
+ *
+ * The strip is part of the board's region but is not made of cells, so a cell
+ * diff cannot carry it. It changes only on a clear, which makes a full redraw
+ * of the region the cheap answer rather than a special case.
+ */
+static bool caption_stale(t_match_regions *pass)
+{
+	uint64_t signature;
+
+	if (pass->state->mode != APP_GAME_MODE_DOUBLE)
+		return (false);
+	signature = 1469598103934665603ULL;
+	signature = hash_bytes(signature, pass->state->profile.username,
+			strlen(pass->state->profile.username));
+	signature = hash_bytes(signature, &pass->state->local_game.scoring.total,
+			sizeof(pass->state->local_game.scoring.total));
+	signature = hash_bytes(signature, &pass->state->local_game.crystal_charge,
+			sizeof(pass->state->local_game.crystal_charge));
+	if (signature == pass->ctx->mp_match_caption_signature)
+		return (false);
+	pass->ctx->mp_match_caption_signature = signature;
+	return (true);
+}
+
+/**
+ * @brief Keeps the name-and-score strip on a plane of its own.
+ *
+ * The strip changes on a clear and the board changes on every input, so
+ * sharing one plane made each lock pay for a whole board. Two planes let each
+ * pay for itself.
+ */
+static bool regions_caption(t_match_regions *pass, const t_mp_rect *board)
+{
+	t_mp_rect strip;
+
+	strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
+		board->width + 16, 66};
+	if (pass->force || caption_stale(pass))
+	{
+		if (!pass->force)
+		{
+			clear_rect(pass->pixels, pass->width, pass->height, &strip);
+			draw_double_caption(pass->ctx, pass->pixels, pass->width,
+				pass->height, board, pass->state->profile.username,
+				pass->state->local_game.scoring.total,
+				pass->state->local_game.crystal_charge, true);
+		}
+		return (create_region_plane(pass->ctx, pass->pixels, pass->width,
+				pass->height, &strip,
+				&pass->ctx->mp_match_caption_plane));
+	}
+	return (true);
+}
+
+
+static void compose_match(t_match_regions *pass)
+{
+	if (pass->state->phase == MP_MATCH_CHARACTER_SELECT)
+		compose_selection(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->state);
+	else if (pass->state->mode == APP_GAME_MODE_DOUBLE)
+		compose_double(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->state);
+	else
+		compose_battle(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->state);
+	if (pass->state->phase == MP_MATCH_FINISHED)
+		draw_result(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->state);
+}
+
+/*
+ * A playing rebuild has already written every region signature through
+ * refresh_regions. Any other phase leaves no region planes behind, so their
+ * signatures are cleared and the first playing frame rebuilds from scratch.
+ */
+static void store_signatures(t_match_regions *pass, uint64_t signature)
+{
+	t_render_ctx *ctx;
+
+	ctx = pass->ctx;
+	ctx->mp_match_signature = signature;
+	if (pass->state->phase == MP_MATCH_PLAYING)
+	{
+		ctx->mp_match_static_signature = static_signature(pass->state,
+			pass->width, pass->height);
+		return ;
+	}
+	ctx->mp_match_static_signature = 0;
+	ctx->mp_match_local_signature = 0;
+	ctx->mp_match_opponent_signature = 0;
+	ctx->mp_match_left_signature = 0;
+	ctx->mp_match_right_signature = 0;
+	ctx->mp_match_loadout_signature = 0;
+	ctx->mp_match_hud_signature = 0;
+}
+
+static int refresh_regions(t_match_regions *pass)
+{
+	static int (*const steps[5])(t_match_regions *) = {regions_local,
+		regions_opponent, regions_battle, regions_loadout, regions_hud};
+	int index;
+	int result;
+
+	index = 0;
+	while (index < 5)
+	{
+		result = steps[index](pass);
+		if (result < 0)
+			return (-1);
+		if (result != 0)
+			pass->changed = true;
+		index++;
+	}
+	return (pass->changed);
+}
+
+/*
+ * On a rebuild the canvas is the caller's finished artwork and must not be
+ * overwritten; on an incremental frame the first region that needs one gets a
+ * blank canvas and every later region shares it.
+ */
+static bool regions_prepare(t_match_regions *pass)
+{
+	if (pass->pixels != NULL)
+		return (true);
+	pass->pixels = canvas_keep(pass->ctx, pass->width, pass->height);
+	return (pass->pixels != NULL);
+}
+
+static int regions_local(t_match_regions *pass)
+{
+	const t_mp_match_state *state;
+	const t_mp_rect *board;
+	t_mp_rect region;
+	uint64_t signature;
+	bool doubles;
+
+	state = pass->state;
+	board = &pass->layout->local_board;
+	doubles = state->mode == APP_GAME_MODE_DOUBLE;
+	signature = local_board_signature(&state->local_game, doubles);
+	if (!pass->force && pass->ctx->mp_match_local_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	if (!board_region_sync(pass, 0, board, &state->local_game))
+		return (-1);
+	if (!blit_local_bands(pass, &region))
+		return (-1);
+	if (doubles && !regions_caption(pass, board))
+		return (-1);
+	pass->ctx->mp_match_local_signature = signature;
+	return (1);
+}
+
+static int regions_opponent(t_match_regions *pass)
+{
+	const t_mp_match_state *state;
+	const t_mp_rect *board;
+	t_mp_rect region;
+	t_mp_rect strip;
+	uint64_t signature;
+
+	state = pass->state;
+	if (state->mode != APP_GAME_MODE_DOUBLE)
+		return (0);
+	board = &pass->layout->opponent_board;
+	signature = game_signature(&state->opponent_game);
+	if (!pass->force && pass->ctx->mp_match_opponent_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	if (!board_region_sync(pass, 1, board, &state->opponent_game))
+		return (-1);
+	if (!pass->force)
+	{
+		strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
+			board->width + 16, 66};
+		clear_rect(pass->pixels, pass->width, pass->height, &strip);
+		draw_double_caption(pass->ctx, pass->pixels, pass->width, pass->height,
+			board, state->opponent_name, state->opponent_game.scoring.total,
+			state->opponent_charge, false);
+	}
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 82};
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &region, &pass->ctx->mp_match_opponent_plane))
+		return (-1);
+	pass->ctx->mp_match_opponent_signature = signature;
+	return (1);
+}
+
+static int regions_battle(t_match_regions *pass)
+{
+	uint64_t left_signature;
+	uint64_t right_signature;
+	int opponents;
+	int left;
+	int changed;
+
+	if (pass->state->mode != APP_GAME_MODE_BATTLE_ROYALE)
+		return (0);
+	opponents = clamp_int(pass->state->players_total - 1, 0,
+			APP_ROOM_MAX_PLAYERS - 1);
+	left = (opponents + 1) / 2;
+	left_signature = opponents_signature(pass->state, 0, left);
+	right_signature = opponents_signature(pass->state, left, opponents - left);
+	changed = 0;
+	if (pass->force || pass->ctx->mp_match_left_signature != left_signature)
+	{
+		if (!regions_side(pass, &pass->layout->left_opponents, 0, left,
+				&pass->ctx->mp_match_left_plane))
+			return (-1);
+		pass->ctx->mp_match_left_signature = left_signature;
+		changed = 1;
+	}
+	if (pass->force || pass->ctx->mp_match_right_signature != right_signature)
+	{
+		if (!regions_side(pass, &pass->layout->right_opponents, left,
+				opponents - left, &pass->ctx->mp_match_right_plane))
+			return (-1);
+		pass->ctx->mp_match_right_signature = right_signature;
+		changed = 1;
+	}
+	return (changed);
+}
+
+static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
+	int first, int count, struct ncplane **slot)
+{
+	if (!regions_prepare(pass))
+		return (false);
+	if (!pass->force)
+	{
+		clear_rect(pass->pixels, pass->width, pass->height, rect);
+		draw_opponent_region(pass->ctx, pass->pixels, pass->width,
+			pass->height, rect, pass->state, first, count);
+	}
+	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, rect, slot));
+}
+
+static int regions_loadout(t_match_regions *pass)
+{
+	uint64_t signature;
+
+	signature = loadout_signature(pass->state);
+	if (!pass->force && pass->ctx->mp_match_loadout_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	if (!pass->force)
+	{
+		clear_rect(pass->pixels, pass->width, pass->height,
+			&pass->layout->loadout);
+		clear_rect(pass->pixels, pass->width, pass->height,
+			&pass->layout->ability_bar);
+		draw_loadout(pass->ctx, pass->pixels, pass->width, pass->height,
+			&pass->layout->loadout, pass->state, true);
+		draw_ability_bar(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->layout, pass->state);
+	}
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &pass->layout->loadout,
+			&pass->ctx->mp_match_loadout_plane))
+		return (-1);
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &pass->layout->ability_bar,
+			&pass->ctx->mp_match_ability_plane))
+		return (-1);
+	pass->ctx->mp_match_loadout_signature = signature;
+	return (1);
+}
+
+static int regions_hud(t_match_regions *pass)
+{
+	uint64_t signature;
+
+	signature = hud_signature(pass->state);
+	if (!pass->force && pass->ctx->mp_match_hud_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	if (!pass->force)
+	{
+		clear_rect(pass->pixels, pass->width, pass->height,
+			&pass->layout->hud);
+		draw_match_hud(pass->ctx, pass->pixels, pass->width, pass->height,
+			pass->layout, pass->state);
+	}
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &pass->layout->hud,
+			&pass->ctx->mp_match_hud_plane))
+		return (-1);
+	pass->ctx->mp_match_hud_signature = signature;
+	return (1);
 }
 
 void render_multiplayer_match_pixel_destroy(t_render_ctx *ctx)
@@ -325,10 +831,30 @@ void render_multiplayer_match_pixel_destroy(t_render_ctx *ctx)
 		ncvisual_destroy(ctx->mp_match_tile_visual);
 	if (ctx->mp_match_portrait_visual != NULL)
 		ncvisual_destroy(ctx->mp_match_portrait_visual);
+	free(ctx->mp_match_tile_atlas);
+	ctx->mp_match_tile_atlas = NULL;
+	free(ctx->mp_match_tile_scaled);
+	ctx->mp_match_tile_scaled = NULL;
+	ctx->mp_match_tile_scaled_size = 0;
+	free(ctx->mp_match_portrait_pixels);
+	ctx->mp_match_portrait_pixels = NULL;
+	ctx->mp_match_portrait_px_width = 0;
+	ctx->mp_match_portrait_px_height = 0;
+	if (ctx->mp_match_popover_visual != NULL)
+		ncvisual_destroy(ctx->mp_match_popover_visual);
+	ctx->mp_match_popover_visual = NULL;
+	free(ctx->mp_match_popover_pixels);
+	ctx->mp_match_popover_pixels = NULL;
+	ctx->mp_match_popover_px_width = 0;
+	ctx->mp_match_popover_px_height = 0;
+	free(ctx->mp_match_canvas);
+	ctx->mp_match_canvas = NULL;
+	ctx->mp_match_canvas_width = 0;
+	ctx->mp_match_canvas_height = 0;
+	memset(ctx->mp_match_boards, 0, sizeof(ctx->mp_match_boards));
 	ctx->mp_match_tile_visual = NULL;
 	ctx->mp_match_portrait_visual = NULL;
 	ctx->mp_match_portrait_source[0] = '\0';
-	mp_match_piece_planes_destroy(ctx);
 	destroy_region_planes(ctx);
 	ctx->mp_match_signature = 0;
 	ctx->mp_match_static_signature = 0;
@@ -346,7 +872,9 @@ static bool load_assets(t_render_ctx *ctx)
 		ctx->mp_font_visual = ncvisual_from_file(SHARED_FONT_MASK_PATH);
 	if (ctx->mp_match_tile_visual == NULL)
 		ctx->mp_match_tile_visual = ncvisual_from_file(DEFAULT_TILE_PATH);
-	return (ctx->mp_font_visual != NULL && ctx->mp_match_tile_visual != NULL);
+	if (ctx->mp_font_visual == NULL || ctx->mp_match_tile_visual == NULL)
+		return (false);
+	return (load_tile_atlas(ctx));
 }
 
 static bool refresh_background(t_render_ctx *ctx, bool rebuild)
@@ -363,24 +891,40 @@ static bool refresh_background(t_render_ctx *ctx, bool rebuild)
 		&& ctx->cell_px_x > 0 && ctx->cell_px_y > 0);
 }
 
+/**
+ * @brief Puts the composed canvas on the full-screen plane.
+ *
+ * cells selects the quadrant blitter over the bitmap one. It is set for the
+ * playing phase, where region bitmaps sit on top and a bitmap here would be
+ * invalidated by every one of them; the still phases keep the bitmap, since
+ * nothing covers it and the extra resolution is free.
+ */
 static bool present_canvas(t_render_ctx *ctx, const uint32_t *pixels,
-	int width, int height)
+	int width, int height, bool cells)
 {
 	ncplane_options options;
 	struct ncplane *plane;
 
 	if (render_plane_geometry_matches(ctx->screen_plane, ctx->bg_row,
 			ctx->bg_col, (unsigned)ctx->bg_rows, (unsigned)ctx->bg_cols))
+	{
+		ncplane_erase(ctx->screen_plane);
+		if (cells)
+			return (render_plane_blit_rgba_cells(ctx, ctx->screen_plane,
+					pixels, width, height, width));
 		return (render_plane_blit_rgba(ctx, ctx->screen_plane, pixels,
 				width, height, width));
+	}
 	memset(&options, 0, sizeof(options));
 	options.y = ctx->bg_row;
 	options.x = ctx->bg_col;
 	options.rows = ctx->bg_rows;
 	options.cols = ctx->bg_cols;
 	plane = ncplane_create(ctx->std, &options);
-	if (plane == NULL || !render_plane_blit_rgba(ctx, plane, pixels,
-			width, height, width))
+	if (plane == NULL || !(cells ? render_plane_blit_rgba_cells(ctx, plane,
+				pixels, width, height, width)
+			: render_plane_blit_rgba(ctx, plane, pixels, width, height,
+				width)))
 	{
 		if (plane != NULL)
 			ncplane_destroy(plane);
@@ -447,19 +991,28 @@ static void destroy_region_planes(t_render_ctx *ctx)
 
 	if (ctx == NULL)
 		return ;
-	planes[0] = &ctx->mp_match_local_plane;
-	planes[1] = &ctx->mp_match_opponent_plane;
-	planes[2] = &ctx->mp_match_left_plane;
-	planes[3] = &ctx->mp_match_right_plane;
-	planes[4] = &ctx->mp_match_loadout_plane;
-	planes[5] = &ctx->mp_match_hud_plane;
-	planes[6] = &ctx->mp_match_ability_plane;
+	planes[0] = &ctx->mp_match_opponent_plane;
+	planes[1] = &ctx->mp_match_left_plane;
+	planes[2] = &ctx->mp_match_right_plane;
+	planes[3] = &ctx->mp_match_loadout_plane;
+	planes[4] = &ctx->mp_match_hud_plane;
+	planes[5] = &ctx->mp_match_ability_plane;
+	planes[6] = &ctx->mp_match_caption_plane;
 	index = 0;
 	while (index < 7)
 	{
 		if (*planes[index] != NULL)
 			ncplane_destroy(*planes[index]);
 		*planes[index] = NULL;
+		index++;
+	}
+	index = 0;
+	while (index < MP_MATCH_BOARD_BANDS)
+	{
+		if (ctx->mp_match_local_bands[index] != NULL)
+			ncplane_destroy(ctx->mp_match_local_bands[index]);
+		ctx->mp_match_local_bands[index] = NULL;
+		ctx->mp_match_band_signatures[index] = 0;
 		index++;
 	}
 }
@@ -526,15 +1079,36 @@ static uint64_t static_signature(const t_mp_match_state *state,
 	return (hash);
 }
 
+/**
+ * @brief Reports which frame of the clear flash a board is showing.
+ *
+ * The completed rows stay on the board for the whole hold, so nothing else a
+ * board signature hashes moves when the flash flips from its first frame to its
+ * second. Without this the animation would only ever appear on a frame some
+ * other change had already paid for.
+ *
+ * @return 0 when no row is clearing, otherwise 1 or 2 for the flash frame.
+ */
+static int clear_flash_step(const t_solo_game *game)
+{
+	if (game->phase != SOLO_CLEARING || game->clear_count <= 0)
+		return (0);
+	if (game->clear_elapsed_ms >= solo_clear_duration_ms(game->level) / 2)
+		return (2);
+	return (1);
+}
+
 static uint64_t game_signature(const t_solo_game *game)
 {
 	uint64_t hash;
+	int flash;
 
 	hash = 1469598103934665603ULL;
 	hash = hash_bytes(hash, &game->board, sizeof(game->board));
-	hash = hash_bytes(hash, &game->active, sizeof(game->active));
 	hash = hash_bytes(hash, &game->phase, sizeof(game->phase));
 	hash = hash_bytes(hash, &game->scoring, sizeof(game->scoring));
+	flash = clear_flash_step(game);
+	hash = hash_bytes(hash, &flash, sizeof(flash));
 	return (hash_bytes(hash, &game->crystal_charge,
 			sizeof(game->crystal_charge)));
 }
@@ -544,14 +1118,21 @@ static uint64_t local_board_signature(const t_solo_game *game,
 {
 	uint64_t	hash;
 	int			countdown;
+	int			flash;
+	int			danger;
 
 	hash = 1469598103934665603ULL;
 	hash = hash_bytes(hash, &game->board, sizeof(game->board));
+	hash = hash_bytes(hash, &game->active, sizeof(game->active));
 	hash = hash_bytes(hash, &game->phase, sizeof(game->phase));
 	hash = hash_bytes(hash, &game->countdown_active,
 		sizeof(game->countdown_active));
 	countdown = solo_game_countdown_value(game);
 	hash = hash_bytes(hash, &countdown, sizeof(countdown));
+	flash = clear_flash_step(game);
+	hash = hash_bytes(hash, &flash, sizeof(flash));
+	danger = danger_step(game);
+	hash = hash_bytes(hash, &danger, sizeof(danger));
 	if (include_score)
 		hash = hash_bytes(hash, &game->scoring, sizeof(game->scoring));
 	return (hash);
@@ -623,25 +1204,83 @@ static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size)
 	return (hash);
 }
 
+/**
+ * @brief Returns the retained canvas, resetting it to the backdrop.
+ *
+ * Used where a whole composition is about to be written. Incremental frames
+ * take the same buffer through canvas_keep() and leave the previous frame's
+ * pixels in place.
+ */
 static uint32_t *new_canvas(t_render_ctx *ctx, int width, int height)
 {
 	const uint32_t *background;
-	uint32_t *pixels;
 	size_t bytes;
 	int source_width;
 	int source_height;
 
-	if (!solo_canvas_buffer_bytes(width, height, &bytes))
-		return (NULL);
-	pixels = malloc(bytes);
-	if (pixels == NULL)
+	if (canvas_keep(ctx, width, height) == NULL
+		|| !solo_canvas_buffer_bytes(width, height, &bytes))
 		return (NULL);
 	background = render_backdrop_pixels(ctx, &source_width, &source_height);
 	if (background != NULL && source_width == width && source_height == height)
-		memcpy(pixels, background, bytes);
+		memcpy(ctx->mp_match_canvas, background, bytes);
 	else
-		memset(pixels, 0, bytes);
-	return (pixels);
+		memset(ctx->mp_match_canvas, 0, bytes);
+	memset(ctx->mp_match_boards, 0, sizeof(ctx->mp_match_boards));
+	return (ctx->mp_match_canvas);
+}
+
+/**
+ * @brief Returns the retained canvas at this geometry, keeping its contents.
+ *
+ * A geometry change throws the old buffer away; the caller then has to
+ * recompose, which the invalidated cell cache already forces.
+ */
+static uint32_t *canvas_keep(t_render_ctx *ctx, int width, int height)
+{
+	size_t bytes;
+
+	if (!solo_canvas_buffer_bytes(width, height, &bytes))
+		return (NULL);
+	if (ctx->mp_match_canvas != NULL
+		&& ctx->mp_match_canvas_width == width
+		&& ctx->mp_match_canvas_height == height)
+		return (ctx->mp_match_canvas);
+	free(ctx->mp_match_canvas);
+	ctx->mp_match_canvas = malloc(bytes);
+	ctx->mp_match_canvas_width = width;
+	ctx->mp_match_canvas_height = height;
+	memset(ctx->mp_match_boards, 0, sizeof(ctx->mp_match_boards));
+	if (ctx->mp_match_canvas == NULL)
+		return (NULL);
+	memset(ctx->mp_match_canvas, 0, bytes);
+	return (ctx->mp_match_canvas);
+}
+
+/**
+ * @brief Clears a rectangle back to transparent.
+ *
+ * Regions that redraw wholesale used to get a blank canvas every frame. The
+ * canvas is retained now, so each of them clears its own rectangle instead and
+ * keeps composing exactly as it did.
+ */
+static void clear_rect(uint32_t *pixels, int width, int height,
+	const t_mp_rect *rect)
+{
+	int y;
+	int x;
+
+	y = max_int(0, rect->y);
+	while (y < min_int(rect->y + rect->height, height))
+	{
+		x = max_int(0, rect->x);
+		while (x < min_int(rect->x + rect->width, width))
+		{
+			pixels[(size_t)y * width + x] = 0;
+			x++;
+		}
+		y++;
+	}
 }
 
 static void compose_selection(t_render_ctx *ctx, uint32_t *pixels,
@@ -682,8 +1321,7 @@ static void compose_selection(t_render_ctx *ctx, uint32_t *pixels,
 	{
 		t_mp_rect image = {portrait.x + 12, portrait.y + 12,
 			portrait.width - 24, portrait.height - 24};
-		mp_match_pixel_draw_visual(pixels, width, height,
-			ctx->mp_match_portrait_visual, &image);
+		mp_match_pixel_draw_portrait(ctx, pixels, width, height, &image);
 	}
 	text = (t_mp_rect){stage.x + stage.width * 50 / 100, stage.y + 34,
 		stage.width * 45 / 100, 72};
@@ -837,7 +1475,6 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 	const t_app_catalogue_item_view_model *character;
 	t_mp_match_pixel_layout layout;
 	t_mp_rect box;
-	int index;
 
 	character = mp_match_selected_character(state);
 	mp_match_pixel_layout_build(state->mode, width, height, &layout);
@@ -848,8 +1485,8 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 		&box, 19, g_gold, true);
 	if (portrait && character != NULL
 		&& mp_match_pixel_load_portrait(ctx, character->portrait_asset))
-		mp_match_pixel_draw_visual(pixels, width, height,
-			ctx->mp_match_portrait_visual, &layout.portrait);
+		mp_match_pixel_draw_portrait(ctx, pixels, width, height,
+			&layout.portrait);
 	if (character != NULL)
 	{
 		box = (t_mp_rect){rect->x + 10,
@@ -863,21 +1500,80 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 			&layout.ability_popover, &state->local_game);
 	if (character != NULL && state->hovered_ability >= 1
 		&& state->hovered_ability <= APP_CHARACTER_ABILITY_COUNT)
-	{
-		index = state->hovered_ability - 1;
-		box = layout.ability_popover;
-		mp_match_pixel_draw_panel(pixels, width, height, &box, g_gold, 248);
-		box.x += 14;
-		box.y += 12;
-		box.width -= 28;
-		box.height = 28;
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height,
-			character->abilities[index].name, &box, 14, g_gold, false);
-		box.y += 34;
-		box.height = 54;
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height,
-			character->abilities[index].description, &box, 10, g_cream, false);
-	}
+		draw_ability_popover(ctx, pixels, width, height,
+			&layout.ability_popover, state);
+}
+
+/**
+ * @brief Draws the hovered ability in the shape Solo's popover uses.
+ *
+ * Same authored frame, same four lines in the same order - name with its slot,
+ * what it costs, what it does, how to fire it - so an ability learnt in Solo
+ * reads identically in a match. The text is the equipped character's own, which
+ * is why it comes from the catalogue rather than from solo_ability_name().
+ */
+static void draw_ability_popover(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_rect *rect,
+	const t_mp_match_state *state)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_mp_rect								frame;
+	t_mp_rect								box;
+	char									line[APP_TEXT_MAX];
+	int										index;
+
+	character = mp_match_selected_character(state);
+	index = state->hovered_ability - 1;
+	if (character == NULL)
+		return ;
+	/*
+	 * Solo's popover is a compact box, not a portrait. The slot it borrows here
+	 * is the tall HOLD/NEXT column, so the frame is sized to the four lines it
+	 * has to hold rather than stretched down the whole column - stretched, the
+	 * authored border became a full-height illustration with the text stranded
+	 * at the top of it.
+	 */
+	frame = *rect;
+	if (frame.height > MP_MATCH_POPOVER_HEIGHT)
+		frame.height = MP_MATCH_POPOVER_HEIGHT;
+	/*
+	 * The slot is taller than the popover, and whatever HOLD/NEXT last drew in
+	 * it is still on the retained canvas, so the unused remainder has to be
+	 * cleared rather than left showing stale previews under the box.
+	 */
+	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
+	if (mp_match_pixel_load_popover(ctx, ABILITY_POPOVER_PATH))
+		mp_match_pixel_draw_popover_art(ctx, pixels, width, height, &frame);
+	else
+		mp_match_pixel_draw_panel(pixels, width, height, &frame, g_pink, 248);
+	/*
+	 * Solo sets the popover's text on an opaque base and keeps the artwork in
+	 * its own column beside it. This slot is too narrow for two columns, so the
+	 * artwork stays as the frame and the text gets its own readable panel
+	 * inside it - text straight over the illustration was unreadable.
+	 */
+	box = (t_mp_rect){frame.x + 6, frame.y + 6, frame.width - 12,
+		frame.height - 12};
+	mp_match_pixel_fill_rect(pixels, width, height, &box, g_panel, 232);
+	box = (t_mp_rect){rect->x + 14, rect->y + 12, rect->width - 28, 26};
+	snprintf(line, sizeof(line), "%s  [%d]",
+		character->abilities[index].name, index + 1);
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 14,
+		g_cream, true);
+	box.y += 28;
+	snprintf(line, sizeof(line), "COST %d CRYSTALS",
+		solo_ability_cost((t_solo_ability)(index + 1)));
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 11,
+		g_gold, true);
+	box.y += 26;
+	box.height = 48;
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height,
+		character->abilities[index].description, &box, 11, g_cream, false);
+	box.y += 52;
+	box.height = 24;
+	snprintf(line, sizeof(line), "CLICK OR PRESS %d", index + 1);
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 10,
+		g_lavender, true);
 }
 
 static void draw_hold_next(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -945,9 +1641,15 @@ static void draw_piece_preview(t_render_ctx *ctx, uint32_t *pixels, int width,
 		max_row = max_int(max_row, rows[index]);
 		index++;
 	}
+	/*
+	 * The preview fills its slot. draw_tile() samples the 16px source at
+	 * whatever size it is asked for - the same upscale the board itself runs
+	 * at - so clamping a preview to the source size only ever made Hold and
+	 * Next smaller than the space reserved for them.
+	 */
 	tile = min_int((slot->width - 12) / (max_col - min_col + 1),
 		(slot->height - 10) / (max_row - min_row + 1));
-	tile = min_int(tile, TILE_SOURCE_SIZE);
+	tile = max_int(tile, 1);
 	origin_x = slot->x + (slot->width
 		- (max_col - min_col + 1) * tile) / 2;
 	origin_y = slot->y + (slot->height
@@ -1016,25 +1718,32 @@ static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 	int height, const t_mp_rect *rect, const t_solo_game *game,
 	const char *label, bool local)
 {
+	int grid[BOARD_HEIGHT][BOARD_WIDTH];
 	t_mp_rect frame;
 	t_mp_rect title;
-	t_piece ghost;
 	char countdown[4];
 	int countdown_value;
+	int step;
 
+	step = danger_step(game);
 	frame = (t_mp_rect){rect->x - 7, rect->y - 7,
 		rect->width + 14, rect->height + 14};
 	mp_match_pixel_draw_panel(pixels, width, height, &frame,
-		local ? g_pink : g_lavender, 248);
-	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
-	ghost = solo_game_ghost(game);
-	draw_board_cells(ctx, pixels, width, height, rect, &game->board,
-		game->phase == SOLO_ACTIVE && (!local
-			|| !render_pixel_planes_reliable(ctx)) && !game->countdown_active
-			? &game->active : NULL,
-		game->phase == SOLO_ACTIVE && (!local
-			|| !render_pixel_planes_reliable(ctx)) && !game->countdown_active
-			? &ghost : NULL);
+		danger_frame(step, local), 248);
+	mp_match_pixel_fill_rect(pixels, width, height, rect,
+		danger_backing(step), 255);
+	/*
+	 * The whole-board redraw and the per-cell diff read the same grid, so the
+	 * two paths cannot disagree about what a cell shows - which is what makes
+	 * the clear flash survive a fallback redraw. Only the player's own falling
+	 * piece is in it: an opponent board that tracked a falling piece changed on
+	 * every gravity tick of a game nobody is steering, and each change is a
+	 * full board recomposition; landed blocks carry the same threat
+	 * information and redraw only on a lock.
+	 */
+	board_cell_grid(game, grid, local);
+	draw_grid_cells(ctx, pixels, width, height, rect, grid,
+		danger_backing(step));
 	countdown_value = local ? solo_game_countdown_value(game) : -1;
 	if (countdown_value >= 0)
 	{
@@ -1125,6 +1834,42 @@ static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 	draw_piece_cells(ctx, pixels, width, height, rect, active, false);
 }
 
+/**
+ * @brief Paints a whole board from the cell grid the diff cache also holds.
+ *
+ * The layer encoding is the one repaint_cell decodes: 3000 the active piece,
+ * 2000 its ghost, 1000 a settled or clearing cell, 0 empty. Keeping the two
+ * readers of that encoding side by side is what stops a fallback redraw from
+ * disagreeing with an incremental one.
+ */
+static void draw_grid_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_mp_rect *rect,
+	const int grid[BOARD_HEIGHT][BOARD_WIDTH], t_color backing)
+{
+	int tile_size;
+	int row;
+	int col;
+	int id;
+
+	tile_size = min_int(rect->width / BOARD_WIDTH,
+			rect->height / BOARD_HEIGHT);
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			id = grid[row][col];
+			if (id >= 1000)
+				draw_board_tile(ctx, pixels, width, height, id % 1000,
+					rect->x + col * tile_size, rect->y + row * tile_size,
+					tile_size, id >= 2000 && id < 3000, backing);
+			col++;
+		}
+		row++;
+	}
+}
+
 static void draw_piece_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 	int height, const t_mp_rect *rect, const t_piece *piece, bool ghost)
 {
@@ -1150,44 +1895,277 @@ static void draw_piece_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 	}
 }
 
+/*
+ * The atlas is read out of the visual once and kept as plain memory. Sampling
+ * it through ncvisual_at_yx() cost one library call per output pixel, and a
+ * board at this scale is over a million of them - that single call was most of
+ * the frame time, and all of the input latency it produced.
+ */
 static void draw_tile(t_render_ctx *ctx, uint32_t *pixels, int width,
 	int height, int tile, int x, int y, int size, unsigned opacity, bool ghost)
 {
+	const uint32_t *row;
 	uint32_t source;
-	t_color tint;
 	unsigned alpha;
-	int source_x;
 	int source_y;
 	int draw_x;
 	int draw_y;
 
-	if (size <= 0)
+	if (size <= 0 || ctx->mp_match_tile_atlas == NULL || tile < 0
+		|| tile >= TILE_ATLAS_COUNT)
 		return ;
 	draw_y = 0;
 	while (draw_y < size)
 	{
 		source_y = draw_y * TILE_SOURCE_SIZE / size;
+		row = ctx->mp_match_tile_atlas + (size_t)(tile * TILE_SOURCE_STRIDE
+				+ source_y) * TILE_SOURCE_SIZE;
 		draw_x = 0;
 		while (draw_x < size)
 		{
-			source_x = draw_x * TILE_SOURCE_SIZE / size;
-			if (ncvisual_at_yx(ctx->mp_match_tile_visual,
-					(unsigned)(tile * TILE_SOURCE_STRIDE + source_y),
-					(unsigned)source_x, &source) >= 0)
-			{
-				if (ghost)
-					source = solo_canvas_ghost_tile_pixel(source,
-						source_x, source_y);
-				alpha = ncpixel_a(source) * opacity / 255u;
-				tint = (t_color){ncpixel_r(source), ncpixel_g(source),
-					ncpixel_b(source)};
-				put_pixel(pixels, width, height, x + draw_x, y + draw_y,
-					tint, alpha);
-			}
+			source = row[draw_x * TILE_SOURCE_SIZE / size];
+			if (ghost)
+				source = solo_canvas_ghost_tile_pixel(source,
+					draw_x * TILE_SOURCE_SIZE / size, source_y);
+			alpha = ncpixel_a(source) * opacity / 255u;
+			put_pixel(pixels, width, height, x + draw_x, y + draw_y,
+				(t_color){ncpixel_r(source), ncpixel_g(source),
+				ncpixel_b(source)}, alpha);
 			draw_x++;
 		}
 		draw_y++;
 	}
+}
+
+/**
+ * @brief Quantises Solo's danger fade into the steps the board is painted at.
+ *
+ * solo_game_danger_dim() is the shared signal: settled blocks in the top rows
+ * enter danger at once and leaving it needs the stack to stay clear, so the
+ * match and Solo agree about when a player is in trouble without either one
+ * owning the rule.
+ *
+ * @return 0 when clear, up to MP_MATCH_DANGER_STEPS at full danger.
+ */
+static int danger_step(const t_solo_game *game)
+{
+	unsigned	dim;
+
+	dim = solo_game_danger_dim(game);
+	if (dim == 0 || SOLO_DANGER_DIM_MAX == 0)
+		return (0);
+	return ((int)((dim * MP_MATCH_DANGER_STEPS + SOLO_DANGER_DIM_MAX - 1)
+			/ SOLO_DANGER_DIM_MAX));
+}
+
+/**
+ * @brief The board's backing colour at a danger step.
+ *
+ * Solo darkens the scenery and leaves the playfield lit. The match cannot do
+ * that - its scenery is a cell plane a full recompose owns - so it reddens the
+ * playfield instead, which carries the same warning without touching any
+ * surface outside the region that already redraws on every input.
+ */
+static t_color danger_backing(int step)
+{
+	static const t_color	peak = {74, 10, 20};
+	t_color					out;
+
+	if (step <= 0)
+		return (g_dark);
+	out.r = (unsigned char)(g_dark.r + (peak.r - g_dark.r) * step
+			/ MP_MATCH_DANGER_STEPS);
+	out.g = (unsigned char)(g_dark.g + (peak.g - g_dark.g) * step
+			/ MP_MATCH_DANGER_STEPS);
+	out.b = (unsigned char)(g_dark.b + (peak.b - g_dark.b) * step
+			/ MP_MATCH_DANGER_STEPS);
+	return (out);
+}
+
+/* The frame moves with the backing so the warning reads from the border too. */
+static t_color danger_frame(int step, bool local)
+{
+	t_color	base;
+	t_color	out;
+
+	base = g_pink;
+	if (!local)
+		base = g_lavender;
+	if (step <= 0)
+		return (base);
+	out.r = (unsigned char)(base.r + (g_red.r - base.r) * step
+			/ MP_MATCH_DANGER_STEPS);
+	out.g = (unsigned char)(base.g + (g_red.g - base.g) * step
+			/ MP_MATCH_DANGER_STEPS);
+	out.b = (unsigned char)(base.b + (g_red.b - base.b) * step
+			/ MP_MATCH_DANGER_STEPS);
+	return (out);
+}
+
+/**
+ * @brief Bakes one tile at the live cell size over the board's own backing.
+ *
+ * The board is filled opaque before its cells are drawn, so a tile composited
+ * over that same colour is what the blended result would have been - which is
+ * what lets the copy replace the blend. Alpha comes out 255 for every pixel,
+ * including the fully transparent ones, which land on the backing colour
+ * exactly as put_pixel's early return left them.
+ */
+static void tile_cache_bake(t_render_ctx *ctx, int tile, int size, bool ghost,
+	t_color backing)
+{
+	uint32_t	*out;
+	uint32_t	source;
+	unsigned	alpha;
+	int			source_x;
+	int			source_y;
+	int			x;
+	int			y;
+
+	out = ctx->mp_match_tile_scaled + (size_t)((ghost ? TILE_ATLAS_COUNT : 0)
+			+ tile) * (size_t)size * (size_t)size;
+	y = 0;
+	while (y < size)
+	{
+		source_y = y * TILE_SOURCE_SIZE / size;
+		x = 0;
+		while (x < size)
+		{
+			source_x = x * TILE_SOURCE_SIZE / size;
+			source = ctx->mp_match_tile_atlas[(size_t)(tile
+					* TILE_SOURCE_STRIDE + source_y) * TILE_SOURCE_SIZE
+				+ source_x];
+			if (ghost)
+				source = solo_canvas_ghost_tile_pixel(source, source_x,
+						source_y);
+			alpha = ncpixel_a(source);
+			out[(size_t)y * size + x] = ncpixel(
+					(ncpixel_r(source) * alpha + backing.r * (255u - alpha))
+					/ 255u,
+					(ncpixel_g(source) * alpha + backing.g * (255u - alpha))
+					/ 255u,
+					(ncpixel_b(source) * alpha + backing.b * (255u - alpha))
+					/ 255u);
+			ncpixel_set_a(&out[(size_t)y * size + x], 255u);
+			x++;
+		}
+		y++;
+	}
+}
+
+/**
+ * @brief Makes sure every board tile is baked at this cell size.
+ *
+ * The cell size only changes when the terminal is resized, so this is a
+ * once-per-layout cost that replaces a per-pixel rescale on every cell of
+ * every frame.
+ */
+static bool tile_cache_ensure(t_render_ctx *ctx, int size, t_color backing)
+{
+	uint32_t	key;
+	size_t		count;
+	int			tile;
+
+	if (size <= 0 || ctx->mp_match_tile_atlas == NULL)
+		return (false);
+	key = ncpixel(backing.r, backing.g, backing.b);
+	if (ctx->mp_match_tile_scaled != NULL
+		&& ctx->mp_match_tile_scaled_size == size
+		&& ctx->mp_match_tile_scaled_backing == key)
+		return (true);
+	count = (size_t)TILE_ATLAS_COUNT * 2u * (size_t)size * (size_t)size;
+	if (ctx->mp_match_tile_scaled == NULL
+		|| ctx->mp_match_tile_scaled_size != size)
+	{
+		free(ctx->mp_match_tile_scaled);
+		ctx->mp_match_tile_scaled_size = 0;
+		ctx->mp_match_tile_scaled = malloc(count
+				* sizeof(*ctx->mp_match_tile_scaled));
+		if (ctx->mp_match_tile_scaled == NULL)
+			return (false);
+	}
+	tile = 0;
+	while (tile < TILE_ATLAS_COUNT)
+	{
+		tile_cache_bake(ctx, tile, size, false, backing);
+		tile_cache_bake(ctx, tile, size, true, backing);
+		tile++;
+	}
+	ctx->mp_match_tile_scaled_size = size;
+	ctx->mp_match_tile_scaled_backing = key;
+	return (true);
+}
+
+/**
+ * @brief Paints one baked board tile by copying its rows.
+ *
+ * Falls back to the blending path when the cache is not available, so a failed
+ * allocation costs frame time rather than the picture.
+ */
+static void draw_board_tile(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, int tile, int x, int y, int size, bool ghost, t_color backing)
+{
+	const uint32_t	*source;
+	int				span;
+	int				rows;
+	int				row;
+
+	if (tile < 0 || tile >= TILE_ATLAS_COUNT
+		|| !tile_cache_ensure(ctx, size, backing))
+	{
+		draw_tile(ctx, pixels, width, height, tile, x, y, size, 255, ghost);
+		return ;
+	}
+	source = ctx->mp_match_tile_scaled + (size_t)((ghost ? TILE_ATLAS_COUNT : 0)
+			+ tile) * (size_t)size * (size_t)size;
+	span = min_int(size, width - x);
+	rows = min_int(size, height - y);
+	if (x < 0 || y < 0 || span <= 0 || rows <= 0)
+		return ;
+	row = 0;
+	while (row < rows)
+	{
+		memcpy(&pixels[(size_t)(y + row) * width + x],
+			source + (size_t)row * size, (size_t)span * sizeof(*pixels));
+		row++;
+	}
+}
+
+/**
+ * @brief Reads the tetromino atlas out of its visual into plain memory.
+ *
+ * One pass over 16 by 180 pixels, done when the visual is loaded, so the
+ * per-pixel path in draw_tile() is an array index.
+ */
+static bool load_tile_atlas(t_render_ctx *ctx)
+{
+	uint32_t pixel;
+	int rows;
+	int y;
+	int x;
+
+	if (ctx->mp_match_tile_atlas != NULL)
+		return (true);
+	rows = TILE_SOURCE_STRIDE * TILE_ATLAS_COUNT;
+	ctx->mp_match_tile_atlas = malloc((size_t)rows * TILE_SOURCE_SIZE
+			* sizeof(*ctx->mp_match_tile_atlas));
+	if (ctx->mp_match_tile_atlas == NULL)
+		return (false);
+	y = 0;
+	while (y < rows)
+	{
+		x = 0;
+		while (x < TILE_SOURCE_SIZE)
+		{
+			pixel = 0;
+			(void)ncvisual_at_yx(ctx->mp_match_tile_visual, (unsigned)y,
+				(unsigned)x, &pixel);
+			ctx->mp_match_tile_atlas[(size_t)y * TILE_SOURCE_SIZE + x] = pixel;
+			x++;
+		}
+		y++;
+	}
+	return (true);
 }
 
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
@@ -1389,6 +2367,12 @@ static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 	unsigned green;
 	unsigned blue;
 
+	if (alpha >= 255u)
+	{
+		*pixel = ncpixel(tint.r, tint.g, tint.b);
+		ncpixel_set_a(pixel, 255u);
+		return ;
+	}
 	old_alpha = ncpixel_a(*pixel);
 	out_alpha = alpha + old_alpha * (255u - alpha) / 255u;
 	if (out_alpha == 0)

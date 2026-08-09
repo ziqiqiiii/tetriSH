@@ -22,6 +22,14 @@ int	main(void)
 	return (0);
 }
 
+/**
+ * @brief A match routes movement through Solo's handling without altering it.
+ *
+ * Every assertion here is a property of solo_handling_event() itself, which is
+ * the point: the match is required to hand the terminal's event type over
+ * unchanged, so holding a key charges DAS and repeats on the application's
+ * clock exactly as it does in single player.
+ */
 static void	test_multiplayer_movement_matches_solo_at_wall(void)
 {
 	t_app_profile_view_model	profile;
@@ -40,39 +48,60 @@ static void	test_multiplayer_movement_matches_solo_at_wall(void)
 	state.local_game.countdown_active = false;
 	config = solo_handling_default_config();
 	solo_handling_reset(&handling);
+	/* A press moves once and takes the key held, charging DAS. */
 	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
 		NCTYPE_PRESS, &action));
 	assert(action == SOLO_MOVE_LEFT);
-	assert(handling.horizontal_direction == 0);
+	assert(handling.horizontal_direction == -1);
 	assert(solo_game_apply_action(&state.local_game, action));
+	/* Nothing repeats before DAS elapses; afterwards ARR owns the rate. */
 	assert(solo_handling_update(&handling, &config,
-		gravity_interval_ms(state.local_game.level), 1000, repeats,
-		SOLO_HANDLING_ACTION_CAP) == 0);
+			gravity_interval_ms(state.local_game.level), config.das_ms - 1,
+			repeats, SOLO_HANDLING_ACTION_CAP) == 0);
+	assert(solo_handling_update(&handling, &config,
+			gravity_interval_ms(state.local_game.level), 1, repeats,
+			SOLO_HANDLING_ACTION_CAP) == 1);
+	assert(repeats[0] == SOLO_MOVE_LEFT);
+	/* The host's own key repeat is ignored while the key is already held. */
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+			NCTYPE_REPEAT, &action));
+	assert(handling.horizontal_direction == -1);
 	while (solo_game_apply_action(&state.local_game, SOLO_MOVE_LEFT))
 		;
 	wall_col = state.local_game.active.col;
+	/* Pressing the opposite direction at the wall takes the axis over. */
 	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
 		NCTYPE_PRESS, &action));
 	assert(action == SOLO_MOVE_RIGHT);
-	assert(handling.horizontal_direction == 0);
+	assert(handling.horizontal_direction == 1);
 	assert(solo_game_apply_action(&state.local_game, action));
 	assert(state.local_game.active.col == wall_col + 1);
-	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+	/* Releasing it hands the axis back to the key still held. */
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+		NCTYPE_RELEASE, &action));
+	assert(action == SOLO_MOVE_LEFT);
+	assert(handling.horizontal_direction == -1);
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
 		NCTYPE_RELEASE, &action));
 	assert(handling.horizontal_direction == 0);
-	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
-		NCTYPE_REPEAT, &action));
-	assert(handling.horizontal_direction == -1);
-	assert(solo_handling_update(&handling, &config,
-		gravity_interval_ms(state.local_game.level), config.das_ms,
-		repeats, SOLO_HANDLING_ACTION_CAP) == 1);
-	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+	/* Soft drop is held the same way, and a release ends it. */
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_DOWN,
 		NCTYPE_PRESS, &action));
-	assert(action == SOLO_MOVE_RIGHT);
+	assert(action == SOLO_SOFT_DROP && handling.down_held);
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_DOWN,
+		NCTYPE_RELEASE, &action));
+	assert(!handling.down_held);
+	/* A board that is not the player's to move still clears held keys. */
+	solo_handling_reset(&handling);
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+		NCTYPE_PRESS, &action));
+	state.local_game.paused = true;
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+		NCTYPE_PRESS, &action));
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+		NCTYPE_RELEASE, &action));
 	assert(handling.horizontal_direction == 0);
-	assert(solo_handling_update(&handling, &config,
-		gravity_interval_ms(state.local_game.level), 1000, repeats,
-		SOLO_HANDLING_ACTION_CAP) == 0);
+	state.local_game.paused = false;
 	printf("PASS test_multiplayer_movement_matches_solo_at_wall\n");
 }
 

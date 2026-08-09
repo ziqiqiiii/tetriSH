@@ -47,7 +47,8 @@ static void	draw_abilities(struct ncplane *plane, const t_mp_rect *rect,
 static void	draw_result(struct ncplane *plane,
 				const t_mp_match_state *state, const t_mp_rect *rect);
 static bool	piece_at(const t_piece *piece, int col, int row);
-static void	set_cell_colour(struct ncplane *plane, t_cell cell, bool active);
+static void	set_cell_colour(struct ncplane *plane, t_cell cell, bool active,
+				int clear_step);
 static void	draw_box(struct ncplane *plane, const t_mp_rect *rect,
 				int red, int green, int blue);
 static void	fill_rect(struct ncplane *plane, const t_mp_rect *rect,
@@ -329,10 +330,23 @@ static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
 	int		row;
 	int		col;
 	int		cell_width;
+	int		clear_step;
+	int		danger;
 	int		x;
 
-	fill_rect(plane, rect, MATCH_BG_R, MATCH_BG_G, MATCH_BG_B);
-	draw_box(plane, rect, MATCH_PINK_R, MATCH_PINK_G, MATCH_PINK_B);
+	/*
+	 * The same danger signal the bitmap tier reddens the board with, so a
+	 * player on the compatibility tier gets the same warning.
+	 */
+	danger = (int)solo_game_danger_dim(game);
+	fill_rect(plane, rect, MATCH_BG_R + (74 - MATCH_BG_R) * danger
+		/ SOLO_DANGER_DIM_MAX, MATCH_BG_G + (10 - MATCH_BG_G) * danger
+		/ SOLO_DANGER_DIM_MAX, MATCH_BG_B + (20 - MATCH_BG_B) * danger
+		/ SOLO_DANGER_DIM_MAX);
+	draw_box(plane, rect, MATCH_PINK_R, MATCH_PINK_G
+		+ (MATCH_RED_G - MATCH_PINK_G) * danger / SOLO_DANGER_DIM_MAX,
+		MATCH_PINK_B + (MATCH_RED_B - MATCH_PINK_B) * danger
+		/ SOLO_DANGER_DIM_MAX);
 	set_fg(plane, MATCH_GOLD_R, MATCH_GOLD_G, MATCH_GOLD_B);
 	if ((int)strlen(title) + 2 <= rect->width)
 		put_centered(plane, rect->y, rect->x, rect->width, title, true);
@@ -340,6 +354,9 @@ static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
 		put_centered(plane, rect->y - 1, rect->x - 6,
 			rect->width + 12, title, true);
 	cell_width = rect->width >= BOARD_WIDTH * 2 + 2 ? 2 : 1;
+	clear_step = 1;
+	if (game->clear_elapsed_ms >= solo_clear_duration_ms(game->level) / 2)
+		clear_step = 2;
 	row = 0;
 	while (row < BOARD_HEIGHT && row + 1 < rect->height)
 	{
@@ -349,7 +366,8 @@ static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
 			cell = board_get(&game->board, col, row);
 			set_cell_colour(plane, cell,
 				game->phase != SOLO_GAME_OVER
-				&& piece_at(&game->active, col, row));
+				&& piece_at(&game->active, col, row),
+				solo_game_row_is_clearing(game, row) ? clear_step : 0);
 			x = rect->x + 1 + col * cell_width;
 			(void)ncplane_putchar_yx(plane, rect->y + 1 + row, x, ' ');
 			if (cell_width == 2)
@@ -459,7 +477,7 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 				{
 					board_cell = mini_sample(&opponent->board, draw_x, draw_y,
 						cell.width - 2, board_height);
-					set_cell_colour(plane, board_cell, false);
+					set_cell_colour(plane, board_cell, false, 0);
 					(void)ncplane_putchar_yx(plane, board_y + draw_y,
 						x + 1 + draw_x, ' ');
 					draw_x++;
@@ -560,7 +578,13 @@ static bool	piece_at(const t_piece *piece, int col, int row)
 	return (false);
 }
 
-static void	set_cell_colour(struct ncplane *plane, t_cell cell, bool active)
+/*
+ * clear_step carries the same two-frame flash the bitmap tier draws with
+ * TILE_CLEAR_FIRST / TILE_CLEAR_SECOND, so a player on the compatibility tier
+ * sees a line clear rather than rows that vanish between two frames.
+ */
+static void	set_cell_colour(struct ncplane *plane, t_cell cell, bool active,
+	int clear_step)
 {
 	static const int	colours[8][3] = {
 		{MATCH_BG_R, MATCH_BG_G, MATCH_BG_B}, {55, 207, 225},
@@ -569,6 +593,15 @@ static void	set_cell_colour(struct ncplane *plane, t_cell cell, bool active)
 	};
 	int	index;
 
+	if (clear_step == 1 || clear_step == 2)
+	{
+		if (clear_step == 1)
+			(void)ncplane_set_bg_rgb8(plane, 250, 242, 221);
+		else
+			(void)ncplane_set_bg_rgb8(plane, 148, 140, 128);
+		(void)ncplane_set_bg_alpha(plane, NCALPHA_OPAQUE);
+		return ;
+	}
 	if (active)
 		index = 3;
 	else if (cell.type == CELL_GARBAGE)

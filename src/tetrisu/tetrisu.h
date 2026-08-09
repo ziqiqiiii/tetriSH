@@ -458,15 +458,15 @@
 
 /* Mode select: one opaque panel over the home artwork, one focus region. */
 # define MP_MODE_REF_PANEL_X	120
-# define MP_MODE_REF_PANEL_Y	560
+# define MP_MODE_REF_PANEL_Y	320
 # define MP_MODE_REF_PANEL_WIDTH	1208
 # define MP_MODE_REF_PANEL_HEIGHT	480
-# define MP_MODE_REF_TITLE_Y	592
+# define MP_MODE_REF_TITLE_Y	352
 # define MP_MODE_REF_TITLE_HEIGHT	54
-# define MP_MODE_REF_SUBTITLE_Y	652
+# define MP_MODE_REF_SUBTITLE_Y	412
 # define MP_MODE_REF_SUBTITLE_HEIGHT	34
 # define MP_MODE_REF_CARDS_X	160
-# define MP_MODE_REF_CARDS_Y	700
+# define MP_MODE_REF_CARDS_Y	460
 # define MP_MODE_REF_CARDS_WIDTH	1128
 # define MP_MODE_REF_CARDS_HEIGHT	240
 /*
@@ -484,7 +484,7 @@
 # define MP_MODE_REF_CARD_BODY_Y	150
 # define MP_MODE_REF_CARD_BODY_GLYPH	11
 # define MP_MODE_REF_CARD_BODY_STEP	26
-# define MP_MODE_REF_CONTROLS_Y	968
+# define MP_MODE_REF_CONTROLS_Y	728
 # define MP_MODE_REF_CONTROLS_HEIGHT	48
 
 /* Lobby: room table on the left, join-by-id on the right, status underneath. */
@@ -497,13 +497,13 @@
 # define LOBBY_REF_DIVIDER_Y	114
 # define LOBBY_REF_ROOMS_X	120
 # define LOBBY_REF_ROOMS_Y	160
-# define LOBBY_REF_ROOMS_WIDTH	700
+# define LOBBY_REF_ROOMS_WIDTH	792
 # define LOBBY_REF_ROOMS_HEIGHT	580
 # define LOBBY_REF_ROOMS_TITLE_Y	178
 # define LOBBY_REF_ROOMS_HEADER_Y	224
 # define LOBBY_REF_LIST_X	132
 # define LOBBY_REF_LIST_Y	168
-# define LOBBY_REF_LIST_WIDTH	676
+# define LOBBY_REF_LIST_WIDTH	768
 # define LOBBY_REF_LIST_HEIGHT	552
 /* Offsets inside the list region: its own heading, then the column names. */
 # define LOBBY_REF_LIST_TITLE_Y	10
@@ -511,21 +511,31 @@
 # define LOBBY_REF_LIST_FIRST_ROW_Y	88
 # define LOBBY_REF_LIST_ROW_STEP	56
 # define LOBBY_REF_LIST_ROW_HEIGHT	48
-/* Table columns, as offsets inside the list rectangle. */
+/*
+** Table columns, as offsets inside the list rectangle. Each column's own
+** width stops short of the next column's origin, so a value that has to be
+** shrunk to fit still leaves a readable gutter beside its neighbour; the last
+** one stops short of the list edge for the same reason.
+*/
 # define LOBBY_REF_COL_MARK	0
 # define LOBBY_REF_COL_ID	26
-# define LOBBY_REF_COL_MODE	228
-# define LOBBY_REF_COL_PLAYERS	330
-# define LOBBY_REF_COL_STATE	440
-# define LOBBY_REF_COL_OWNER	560
-# define LOBBY_REF_JOIN_X	880
+# define LOBBY_REF_COL_ID_WIDTH	200
+# define LOBBY_REF_COL_MODE	244
+# define LOBBY_REF_COL_MODE_WIDTH	72
+# define LOBBY_REF_COL_PLAYERS	336
+# define LOBBY_REF_COL_PLAYERS_WIDTH	108
+# define LOBBY_REF_COL_STATE	464
+# define LOBBY_REF_COL_STATE_WIDTH	136
+# define LOBBY_REF_COL_OWNER	620
+# define LOBBY_REF_COL_OWNER_WIDTH	136
+# define LOBBY_REF_JOIN_X	940
 # define LOBBY_REF_JOIN_Y	160
-# define LOBBY_REF_JOIN_WIDTH	448
+# define LOBBY_REF_JOIN_WIDTH	388
 # define LOBBY_REF_JOIN_HEIGHT	580
 # define LOBBY_REF_JOIN_TITLE_Y	178
-# define LOBBY_REF_FIELD_X	896
+# define LOBBY_REF_FIELD_X	956
 # define LOBBY_REF_FIELD_Y	256
-# define LOBBY_REF_FIELD_WIDTH	416
+# define LOBBY_REF_FIELD_WIDTH	356
 # define LOBBY_REF_FIELD_HEIGHT	170
 # define LOBBY_REF_FIELD_BOX_Y	36
 # define LOBBY_REF_FIELD_BOX_HEIGHT	62
@@ -1386,6 +1396,47 @@ typedef struct s_mp_rect
 	int	height;
 }	t_mp_rect;
 
+# define MP_MATCH_BOARD_CACHES 2
+/*
+** How many horizontal strips the local board is blitted as. Five is four board
+** rows per band: small enough that a moving piece dirties one or two of them,
+** large enough that the per-plane overhead stays negligible.
+*/
+# define MP_MATCH_BOARD_BANDS 5
+/*
+** Danger is quantised into this many steps between clear and full. The signal
+** itself is Solo's solo_game_danger_dim(), so the two modes enter and leave
+** danger on exactly the same rule; only the presentation differs, because the
+** match cannot dim the scenery the way Solo does - its stationary layer is a
+** cell plane that only a full recompose can repaint. Quantising bounds how
+** often the board region is redrawn during the fade.
+*/
+# define MP_MATCH_DANGER_STEPS 5
+/*
+** How tall the hovered-ability popover is drawn, in device pixels. It borrows
+** the HOLD/NEXT column, which is far taller than the four lines it shows.
+*/
+# define MP_MATCH_POPOVER_HEIGHT 190
+
+/*
+ * What a rendered board last showed, one number per cell with the falling
+ * piece and its ghost folded in. Comparing against it turns a board redraw -
+ * a million blended pixels at device resolution - into a repaint of the few
+ * cells that actually differ.
+ */
+typedef struct s_mp_board_cache
+{
+	int			cells[BOARD_HEIGHT][BOARD_WIDTH];
+	t_mp_rect	rect;
+	/*
+	 * The danger step the cached cells were painted at. A cell is painted over
+	 * the board's own backing, and danger changes that backing, so a step the
+	 * cache did not see has to redraw the board rather than diff against it.
+	 */
+	int			danger;
+	bool		valid;
+}	t_mp_board_cache;
+
 typedef enum e_mp_match_phase
 {
 	MP_MATCH_CHARACTER_SELECT,
@@ -1823,17 +1874,70 @@ typedef struct
 	struct ncvisual		*mp_font_visual;
 	struct ncvisual		*mp_match_tile_visual;
 	struct ncvisual		*mp_match_portrait_visual;
+	/*
+	 * The portrait read out into plain memory, for the same reason the tetromino
+	 * atlas is: sampling it through ncvisual_at_yx once per output pixel made
+	 * the loadout region cost 52 ms, and that region redraws on every lock
+	 * because HOLD and NEXT live in it.
+	 */
+	uint32_t			*mp_match_portrait_pixels;
+	int					mp_match_portrait_px_width;
+	int					mp_match_portrait_px_height;
 	char				mp_match_portrait_source[APP_ASSET_PATH_MAX];
-	struct ncplane		*mp_match_local_plane;
+	/*
+	 * The authored popover frame, read out the same way. The match shows the
+	 * hovered ability in Solo's shape - name, cost, effect, how to fire it -
+	 * over the same artwork, so the two modes teach the abilities identically.
+	 */
+	struct ncvisual		*mp_match_popover_visual;
+	uint32_t			*mp_match_popover_pixels;
+	int					mp_match_popover_px_width;
+	int					mp_match_popover_px_height;
+	/*
+	 * The local board is banded rather than held on one plane. A terminal
+	 * bitmap has no partial update: re-blitting the board region re-encodes
+	 * every pixel of it, which measured 13.8 ms on an empty board and 20.3 ms
+	 * on a full one - the whole of the input latency, and the whole of the
+	 * reported growth, because the encode scales with how much of the board is
+	 * occupied. A piece only ever touches two bands, and the settled rows a
+	 * filling board accumulates are exactly the rows that stop changing, so
+	 * banding turns the growing part of the board into the part nobody pays
+	 * for. Band boundaries are snapped to whole terminal cells: two planes that
+	 * round onto the same cell row blank each other on a stationary protocol.
+	 */
+	struct ncplane		*mp_match_local_bands[MP_MATCH_BOARD_BANDS];
+	uint64_t			mp_match_band_signatures[MP_MATCH_BOARD_BANDS];
 	struct ncplane		*mp_match_opponent_plane;
 	struct ncplane		*mp_match_left_plane;
 	struct ncplane		*mp_match_right_plane;
 	struct ncplane		*mp_match_loadout_plane;
 	struct ncplane		*mp_match_ability_plane;
 	struct ncplane		*mp_match_hud_plane;
-	struct ncplane		*mp_match_active_plane;
-	struct ncplane		*mp_match_ghost_plane;
+	struct ncplane		*mp_match_caption_plane;
 	struct ncplane		*mp_match_countdown_plane;
+	uint32_t			*mp_match_tile_atlas;
+	/*
+	 * Board tiles pre-scaled to the live cell size and pre-composited over the
+	 * board's own opaque backing, so painting one cell is a memcpy per row.
+	 * Scaling the 16 px source per output pixel measured at 1-3 ms for a single
+	 * 72 px cell, which made a 12-cell move cost 13-40 ms; the whole cache is
+	 * two variants (solid, ghost) of TILE_ATLAS_COUNT tiles and is rebuilt only
+	 * when the cell size changes.
+	 */
+	uint32_t			*mp_match_tile_scaled;
+	int					mp_match_tile_scaled_size;
+	/* The backing the bake was composited over; danger changes it. */
+	uint32_t			mp_match_tile_scaled_backing;
+	/*
+	 * The match canvas outlives the frame that composed it. Redrawing a board
+	 * at device resolution is millions of blended pixels; keeping the last
+	 * composition lets a frame repaint only the cells whose contents changed.
+	 */
+	uint32_t			*mp_match_canvas;
+	int					mp_match_canvas_width;
+	int					mp_match_canvas_height;
+	t_mp_board_cache	mp_match_boards[MP_MATCH_BOARD_CACHES];
+	uint64_t			mp_match_caption_signature;
 	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
@@ -1956,10 +2060,7 @@ typedef struct
 	uint64_t			mp_match_right_signature;
 	uint64_t			mp_match_loadout_signature;
 	uint64_t			mp_match_hud_signature;
-	uint64_t			mp_match_active_signature;
-	uint64_t			mp_match_ghost_signature;
 	uint64_t			mp_match_countdown_signature;
-	bool				mp_match_piece_planes_combined;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	t_tetrisu_pixel_policy	pixels;
@@ -2374,6 +2475,7 @@ void			menu_move_selection(t_menu_selection *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
 bool			app_ui_preview_enabled(void);
+t_app_screen	app_start_screen_override(void);
 
 /* APP_PROVIDER.C */
 void			app_fixture_provider_init(t_app_data_provider *provider);
@@ -2470,6 +2572,9 @@ bool				render_pixels_available(const t_render_ctx *ctx);
 bool				render_plane_geometry_matches(struct ncplane *plane, int y,
 					int x, unsigned rows, unsigned cols);
 bool				render_plane_blit_rgba(t_render_ctx *ctx,
+					struct ncplane *plane, const uint32_t *pixels, int width,
+					int height, int row_stride);
+bool				render_plane_blit_rgba_cells(t_render_ctx *ctx,
 					struct ncplane *plane, const uint32_t *pixels, int width,
 					int height, int row_stride);
 bool				render_compatibility_mode(const t_render_ctx *ctx);
@@ -2789,10 +2894,6 @@ void			render_multiplayer_match_destroy(t_render_ctx *ctx);
 bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 					const t_mp_match_state *state, bool rebuild_background);
 void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
-int				mp_match_piece_planes_update(t_render_ctx *ctx,
-					const t_mp_match_pixel_layout *layout,
-					const t_solo_game *game);
-void			mp_match_piece_planes_destroy(t_render_ctx *ctx);
 
 /* MULTIPLAYER_MATCH_MODE.C */
 int				multiplayer_match_mode_run(t_render_ctx *ctx,

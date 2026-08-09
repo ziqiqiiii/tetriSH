@@ -115,7 +115,15 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	assert(app_screen_view_load(&provider, APP_SCREEN_WAITING_ROOM, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.room.player_count == WAITING_ROOM_DOUBLE_PLAYERS);
-	assert(view.data.room.players[0].owner);
+	/*
+	 * The local player owns the room they are seated in. Asserting that slot 0
+	 * owned it locked in a room nobody present could start: Start is the
+	 * owner's to press, and a fixture has no other player to press it, so every
+	 * Battle Royale room answered ONLY THE ROOM OWNER CAN START forever.
+	 */
+	assert(view.data.room.local_slot >= 0
+		&& view.data.room.local_slot < view.data.room.player_count);
+	assert(view.data.room.players[view.data.room.local_slot].owner);
 	assert(app_screen_view_load(&provider, APP_SCREEN_MULTIPLAYER_MODE, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.profile.signed_in);
