@@ -279,9 +279,40 @@ void	test_catalogue_enumeration(void)
 	printf("PASS test_catalogue_enumeration\n");
 }
 
+// A username is written into every body that names a player, and those are
+// lines of space-separated fields - so the store refuses what the wire could
+// not carry back. The leaderboard is the sharp case: its rows are read with a
+// whitespace-delimited scan, so one player called "amber lee" shifted every
+// field of that row and the whole body was rejected as malformed, for
+// everybody. The name that would have caused it must not reach the log.
+void	test_a_username_the_wire_cannot_carry_is_refused(void)
+{
+	t_db		*db;
+	t_player_id	id;
+	char		toolong[DB_MAX_USERNAME + 4];
+
+	db = fresh_db();
+	assert(db_signup(db, "amber lee", "hashAAA", "saltAAA", &id) == DB_INVALID);
+	assert(db_signup(db, "amber\tlee", "hashAAA", "saltAAA", &id) == DB_INVALID);
+	assert(db_signup(db, "amber\nlee", "hashAAA", "saltAAA", &id) == DB_INVALID);
+	assert(db_signup(db, "\033[2Jamber", "hashAAA", "saltAAA", &id) == DB_INVALID);
+	assert(db_signup(db, "", "hashAAA", "saltAAA", &id) == DB_INVALID);
+	memset(toolong, 'x', sizeof(toolong) - 1);
+	toolong[sizeof(toolong) - 1] = '\0';
+	assert(db_signup(db, toolong, "hashAAA", "saltAAA", &id) == DB_INVALID);
+	// Everything printable is still a name, punctuation included.
+	assert(db_signup(db, "DarK-Sanjan", "hashAAA", "saltAAA", &id) == DB_OK);
+	assert(db_signup(db, "amber.lee_99", "hashAAA", "saltAAA", &id) == DB_OK);
+	assert(db_username_valid("amber") && !db_username_valid("amber lee"));
+	assert(!db_username_valid(NULL));
+	db_close(db);
+	printf("PASS test_a_username_the_wire_cannot_carry_is_refused\n");
+}
+
 int	main(void)
 {
 	test_signup_and_login();
+	test_a_username_the_wire_cannot_carry_is_refused();
 	test_get_salt();
 	test_buy_and_equip();
 	test_equipping_a_theme_leaves_the_character_alone();

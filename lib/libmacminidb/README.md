@@ -128,7 +128,7 @@ current one — wiping the data directory (`make reset`) is the migration.
 
 | Function | Description |
 |---|---|
-| `db_signup(db, username, password_hashed, salt, out_id)` | Create a player record; `DB_EXISTS` if the username is taken |
+| `db_signup(db, username, password_hashed, salt, out_id)` | Create a player record; `DB_EXISTS` if the username is taken, `DB_INVALID` if `db_username_valid` refuses it |
 | `db_buy_character(db, id, cid)` | Deduct `cost_points` and add a character to `owned_characters`; `DB_INSUFFICIENT` if the wallet is short |
 | `db_buy_theme(db, id, tid)` | Deduct `cost_points` and add a theme to `owned_themes`; `DB_INSUFFICIENT` if the wallet is short |
 | `db_equip_character(db, id, cid)` | Set `current_equipped_character`; `DB_NOT_OWNED` if the player lacks it |
@@ -152,6 +152,16 @@ current one — wiping the data directory (`make reset`) is the migration.
 | `db_themes(db, out, cap, out_count)` | Copy the whole theme catalogue; `DB_FULL` when `cap` cannot hold it |
 
 The by-id getters answer "what is this item"; a store front asks "what is for sale". Probing ids until one returns `NULL` would be wrong because catalogue ids carry gaps — ids are written into players' `owned_characters` / `owned_themes` lists and are never renumbered, so a gap is not the end of the roster.
+
+### Validation
+
+| Function | Description |
+|---|---|
+| `db_username_valid(username)` | Whether a name may be stored: non-empty, under `DB_MAX_USERNAME`, printable ASCII, **no space**. Takes no handle |
+
+The rule belongs to the wire format rather than to this store. Every body that names a player is a line of space-separated fields, and `libstatusbody`'s leaderboard decoder reads its rows with a whitespace-delimited scan — so one player called `amber lee` shifted every field of that row and had the **whole leaderboard body** rejected as malformed, for every client. The room and profile bodies refuse an embedded space outright, and the chat body refuses it in a sender, which is a line the sender was nevertheless told had been sent.
+
+It is enforced in two places. `db_signup` refuses `DB_INVALID`, so no new row can be written; `recovery_run` drops a row that predates the check rather than recovering it, so a store carrying one heals on the next boot instead of staying broken. A dropped row's `player_id` still counts towards `next_id` — the row is gone, but reissuing its number would be a second bug on top of the first.
 
 ---
 
@@ -242,6 +252,7 @@ libmacminidb/
 ├── src/
 │   ├── db.c                Lifecycle + rwlock-guarded shared helpers
 │   ├── db_signup.c         db_signup
+│   ├── username.c          db_username_valid — the charset the wire allows
 │   ├── db_buy.c            db_buy_character / db_buy_theme
 │   ├── db_equip.c          db_equip_character / db_equip_theme
 │   ├── db_record.c         db_record_game

@@ -166,9 +166,20 @@ Surface: `db_signup` / `db_login` / `db_get_player`, `db_buy_character` /
 `db_buy_theme` / `db_equip_character` / `db_equip_theme`,
 `db_player_owns_character` / `db_player_owns_theme`, `db_record_game`,
 `db_leaderboard` / `db_rank`, `db_get_character` / `db_get_theme`,
-`db_characters` / `db_themes`. The last pair enumerates a whole catalogue,
-which probing ids cannot do — ids carry gaps, so a `NULL` is not the end of
-the roster.
+`db_characters` / `db_themes`, `db_username_valid`. The `db_characters` /
+`db_themes` pair enumerates a whole catalogue, which probing ids cannot do —
+ids carry gaps, so a `NULL` is not the end of the roster.
+
+`db_username_valid` is the charset rule, asked without a handle: printable
+ASCII, no space. It is the *format's* rule and not a policy — every body that
+names a player is a line of space-separated fields, and the leaderboard's
+decoder reads its rows with a whitespace-delimited scan, so a single player
+called `amber lee` shifted every field of that row and had the whole
+leaderboard rejected as malformed for everybody. `db_signup` applies it, and
+`recovery_run` drops any row that predates it rather than recovering it (its
+id is still spent, so the number is never reissued). `tetrisu` keeps its own
+copy of the rule in `auth_form.c` — it cannot link this archive, and a
+refusal in the sign-up form beats a `400` after the fact.
 
 Indexes: hash map (`username → player`) for point lookups, skip list
 (`(score, id) → player`) for the leaderboard. Writes append to a

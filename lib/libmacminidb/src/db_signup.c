@@ -18,11 +18,16 @@ static t_player	*make_player(t_db *db, const char *username, const char *pw, con
 /**
  * @brief Create a new player under a unique username.
  *
- * Rejects an empty/oversized username (DB_INVALID) or one already taken
- * (DB_EXISTS), else builds the player, indexes it in both structures, persists
- * it, and returns its freshly allocated id. On a persist failure the in-memory
- * insert stands (it will be re-logged on the next write) but the id is still
- * reported so the caller sees the live player.
+ * Rejects a username the wire cannot carry (DB_INVALID, see
+ * db_username_valid) or one already taken (DB_EXISTS), else builds the
+ * player, indexes it in both structures, persists it, and returns its freshly
+ * allocated id. On a persist failure the in-memory insert stands (it will be
+ * re-logged on the next write) but the id is still reported so the caller
+ * sees the live player.
+ *
+ * The charset is checked here rather than left to the caller because this is
+ * where a name becomes durable: an edge that forgot to ask would put a row on
+ * disk that every later reader has to cope with.
  *
  * @param db The handle.
  * @param username Desired unique username.
@@ -34,12 +39,10 @@ static t_player	*make_player(t_db *db, const char *username, const char *pw, con
 t_db_result	db_signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id)
 {
 	t_player	*p;
-	size_t		len;
 
 	if (!db || !username || !password_hashed || !salt || !out_id)
 		return (DB_INVALID);
-	len = strnlen(username, DB_MAX_USERNAME);
-	if (len == 0 || len >= DB_MAX_USERNAME)
+	if (!db_username_valid(username))
 		return (DB_INVALID);
 	pthread_rwlock_wrlock(&db->lock);
 	if (hashmap_get(db->players, username))
