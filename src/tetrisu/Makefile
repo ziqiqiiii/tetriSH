@@ -106,6 +106,7 @@ OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 # main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
 # unit-test archive keeps only state and gameplay logic.
 LOGIC_SRC	:= $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/solo_mode.c \
+				   $(SRC_DIR)/multiplayer_match_mode.c \
 				   $(SRC_DIR)/render_%.c $(SRC_DIR)/audio.c, $(SRC))
 LOGIC_OBJ	:= $(LOGIC_SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 LOGIC_LIB	:= $(OBJ_DIR)/logic.a

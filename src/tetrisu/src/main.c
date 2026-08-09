@@ -105,8 +105,10 @@ int	main(void)
 	t_render_ctx		ctx;
 	t_audio_ctx			audio;
 	ncinput				input;
+	const char			*match_preview;
 	uint32_t			key;
 	int					hovered;
+	bool				direct_match_preview;
 
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
@@ -115,7 +117,12 @@ int	main(void)
 	mp_session.mode = APP_GAME_MODE_DOUBLE;
 	ctx = render_init(SPLASH_ASSET_PATH);
 	audio_init(&audio);
-	render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
+	match_preview = getenv("TETRISU_MATCH_PREVIEW");
+	direct_match_preview = match_preview != NULL
+		&& (strcmp(match_preview, "double") == 0
+			|| strcmp(match_preview, "battle") == 0);
+	if (!direct_match_preview)
+		render_intro_play(&ctx, &audio, INTRO_VIDEO_PATH, INTRO_AUDIO_PATH);
 	audio_set_music_volume(&audio, HOME_BGM_START_VOLUME);
 	audio_play_music(&audio, ctx.theme_assets.music);
 	audio_load_menu_sfx(&audio, MENU_MOVE_SFX_PATH, MENU_SELECT_SFX_PATH);
@@ -125,6 +132,14 @@ int	main(void)
 	else
 		app_fixture_provider_init(&provider);
 	app_navigation_init(&navigation, APP_SCREEN_LOGIN);
+	if (direct_match_preview)
+	{
+		navigation.current = strcmp(match_preview, "battle") == 0
+			? APP_SCREEN_BATTLE_ROYALE : APP_SCREEN_DOUBLE;
+		navigation.previous = APP_SCREEN_WAITING_ROOM;
+		snprintf(mp_session.room_id, sizeof(mp_session.room_id),
+			"KITTY-UI-PREVIEW");
+	}
 	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
 	while (navigation.current != APP_SCREEN_QUIT)
 	{
@@ -212,6 +227,25 @@ int	main(void)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			if (leave_multiplayer(&ctx, &navigation, &menu) < 0)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			continue ;
+		}
+		if (navigation.current == APP_SCREEN_DOUBLE
+			|| navigation.current == APP_SCREEN_BATTLE_ROYALE)
+		{
+			if (multiplayer_match_mode_run(&ctx, &audio, &provider,
+					navigation.current == APP_SCREEN_DOUBLE
+					? APP_GAME_MODE_DOUBLE : APP_GAME_MODE_BATTLE_ROYALE,
+					mp_session.room_id,
+					mp_session.room_view.screen == APP_SCREEN_WAITING_ROOM
+					? &mp_session.room_view.data.room : NULL) < 0)
+			{
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+				continue ;
+			}
+			if (direct_match_preview)
+				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
+			else
+				(void)app_navigation_dispatch(&navigation, APP_NAV_BACK);
 			continue ;
 		}
 		if (navigation.current != APP_SCREEN_HOME)

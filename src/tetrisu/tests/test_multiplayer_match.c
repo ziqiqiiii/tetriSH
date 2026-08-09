@@ -1,0 +1,287 @@
+#include "tetrisu.h"
+
+static void	load_fixture(t_app_profile_view_model *profile,
+				t_app_catalogue_view_model *characters);
+static void	test_character_selection_locks_and_times_out(void);
+static void	test_targeting_uses_wasd_diamond(void);
+static void	test_result_copy_includes_battle_rank(void);
+static void	test_match_layouts_follow_wireframes(void);
+static void	test_room_roster_controls_opponent_count(void);
+static void	test_pixel_ability_targets_follow_layout(void);
+static void	test_multiplayer_movement_matches_solo_at_wall(void);
+
+int	main(void)
+{
+	test_character_selection_locks_and_times_out();
+	test_targeting_uses_wasd_diamond();
+	test_result_copy_includes_battle_rank();
+	test_match_layouts_follow_wireframes();
+	test_room_roster_controls_opponent_count();
+	test_pixel_ability_targets_follow_layout();
+	test_multiplayer_movement_matches_solo_at_wall();
+	return (0);
+}
+
+static void	test_multiplayer_movement_matches_solo_at_wall(void)
+{
+	t_app_profile_view_model	profile;
+	t_app_catalogue_view_model	characters;
+	t_mp_match_state			state;
+	t_solo_handling_config		config;
+	t_solo_handling_state		handling;
+	t_solo_action				action;
+	t_solo_action				repeats[SOLO_HANDLING_ACTION_CAP];
+	int						wall_col;
+
+	load_fixture(&profile, &characters);
+	mp_match_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE, "tap-test",
+		&profile, &characters, 19u);
+	state.phase = MP_MATCH_PLAYING;
+	state.local_game.countdown_active = false;
+	config = solo_handling_default_config();
+	solo_handling_reset(&handling);
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+		NCTYPE_PRESS, &action));
+	assert(action == SOLO_MOVE_LEFT);
+	assert(handling.horizontal_direction == 0);
+	assert(solo_game_apply_action(&state.local_game, action));
+	assert(solo_handling_update(&handling, &config,
+		gravity_interval_ms(state.local_game.level), 1000, repeats,
+		SOLO_HANDLING_ACTION_CAP) == 0);
+	while (solo_game_apply_action(&state.local_game, SOLO_MOVE_LEFT))
+		;
+	wall_col = state.local_game.active.col;
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+		NCTYPE_PRESS, &action));
+	assert(action == SOLO_MOVE_RIGHT);
+	assert(handling.horizontal_direction == 0);
+	assert(solo_game_apply_action(&state.local_game, action));
+	assert(state.local_game.active.col == wall_col + 1);
+	assert(!mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+		NCTYPE_RELEASE, &action));
+	assert(handling.horizontal_direction == 0);
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_LEFT,
+		NCTYPE_REPEAT, &action));
+	assert(handling.horizontal_direction == -1);
+	assert(solo_handling_update(&handling, &config,
+		gravity_interval_ms(state.local_game.level), config.das_ms,
+		repeats, SOLO_HANDLING_ACTION_CAP) == 1);
+	assert(mp_match_movement_event(&state, &handling, &config, NCKEY_RIGHT,
+		NCTYPE_PRESS, &action));
+	assert(action == SOLO_MOVE_RIGHT);
+	assert(handling.horizontal_direction == 0);
+	assert(solo_handling_update(&handling, &config,
+		gravity_interval_ms(state.local_game.level), 1000, repeats,
+		SOLO_HANDLING_ACTION_CAP) == 0);
+	printf("PASS test_multiplayer_movement_matches_solo_at_wall\n");
+}
+
+static void	test_pixel_ability_targets_follow_layout(void)
+{
+	t_mp_match_pixel_layout layout;
+	int index;
+
+	mp_match_pixel_layout_build(APP_GAME_MODE_DOUBLE, 2400, 1350, &layout);
+	assert(layout.valid);
+	assert(layout.loadout.x < layout.local_board.x);
+	assert(layout.ability_bar.x + layout.ability_bar.width
+		< layout.local_board.x);
+	assert(layout.local_board.x - layout.ability_bar.x
+		< layout.ability_bar.width * 2);
+	assert(layout.local_board.x + layout.local_board.width
+		< layout.opponent_board.x);
+	index = 0;
+	while (index < APP_CHARACTER_ABILITY_COUNT)
+	{
+		assert(mp_match_ability_at_pixel(&layout,
+			layout.ability_center_x, layout.ability_center_y[index])
+			== index + 1);
+		index++;
+	}
+	assert(mp_match_ability_at_pixel(&layout, layout.local_board.x,
+		layout.local_board.y) == 0);
+	mp_match_pixel_layout_build(APP_GAME_MODE_BATTLE_ROYALE,
+		2400, 1350, &layout);
+	assert(layout.valid);
+	assert(layout.ability_bar.x + layout.ability_bar.width
+		< layout.local_board.x);
+	assert(layout.local_board.x - layout.ability_bar.x
+		< layout.ability_bar.width * 2);
+	assert(layout.left_opponents.x + layout.left_opponents.width
+		< layout.ability_bar.x);
+	assert(layout.local_board.x + layout.local_board.width
+		< layout.right_opponents.x);
+	printf("PASS test_pixel_ability_targets_follow_layout\n");
+}
+
+static void	load_fixture(t_app_profile_view_model *profile,
+	t_app_catalogue_view_model *characters)
+{
+	t_app_data_provider	provider;
+
+	app_fixture_provider_init(&provider);
+	assert(provider.load_profile(provider.userdata, profile) == APP_PROVIDER_OK);
+	assert(provider.load_catalogue(provider.userdata, APP_CATALOGUE_CHARACTERS,
+			characters) == APP_PROVIDER_OK);
+}
+
+/**
+ * Only owned characters cycle, Enter freezes the cursor, and timeout preserves
+ * that exact character and its four ability records for the match renderer.
+ */
+static void	test_character_selection_locks_and_times_out(void)
+{
+	t_app_profile_view_model	profile;
+	t_app_catalogue_view_model	characters;
+	t_mp_match_state		state;
+	const t_app_catalogue_item_view_model	*selected;
+	uint32_t				events;
+
+	load_fixture(&profile, &characters);
+	mp_match_state_init(&state, APP_GAME_MODE_DOUBLE, "duel-42", &profile,
+		&characters, 42u);
+	assert(state.phase == MP_MATCH_CHARACTER_SELECT);
+	assert(mp_match_character_seconds(&state) == 15);
+	assert(strcmp(mp_match_selected_character(&state)->name, "Mirurun") == 0);
+	assert(mp_match_character_handle_key(&state, NCKEY_RIGHT));
+	assert(strcmp(mp_match_selected_character(&state)->name, "Halloween") == 0);
+	/* Princess and Wolf-man are locked in the fixture and are skipped. */
+	assert(mp_match_character_handle_key(&state, NCKEY_RIGHT));
+	assert(strcmp(mp_match_selected_character(&state)->name, "Mirurun") == 0);
+	assert(mp_match_character_handle_key(&state, NCKEY_LEFT));
+	assert(strcmp(mp_match_selected_character(&state)->name, "Halloween") == 0);
+	assert(mp_match_character_handle_key(&state, NCKEY_ENTER));
+	assert(state.selection.locked);
+	assert(!mp_match_character_handle_key(&state, NCKEY_LEFT));
+	events = mp_match_character_update(&state, 9999);
+	assert(events == MP_SELECTION_EVENT_NONE);
+	assert(mp_match_character_seconds(&state) == 6);
+	events = mp_match_character_update(&state, 1);
+	assert((events & MP_SELECTION_EVENT_SECOND) != 0);
+	assert(mp_match_character_seconds(&state) == 5);
+	events = mp_match_character_update(&state, 5000);
+	assert((events & MP_SELECTION_EVENT_FINISHED) != 0);
+	assert(state.phase == MP_MATCH_PLAYING);
+	assert(state.local_game.countdown_active);
+	assert(state.opponent_game.countdown_active);
+	selected = mp_match_selected_character(&state);
+	assert(selected != NULL && strcmp(selected->name, "Halloween") == 0);
+	assert(strcmp(selected->abilities[2].name, "Vampire") == 0);
+	printf("PASS test_character_selection_locks_and_times_out\n");
+}
+
+static void	test_targeting_uses_wasd_diamond(void)
+{
+	t_app_profile_view_model	profile;
+	t_app_catalogue_view_model	characters;
+	t_mp_match_state		state;
+
+	load_fixture(&profile, &characters);
+	mp_match_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE, "arena-88",
+		&profile, &characters, 7u);
+	state.phase = MP_MATCH_PLAYING;
+	assert(state.target_mode == TARGET_RANDOM);
+	assert(mp_match_target_handle_key(&state, 'w'));
+	assert(state.target_mode == TARGET_KO);
+	assert(strcmp(mp_match_target_name(state.target_mode), "KOs") == 0);
+	assert(mp_match_target_handle_key(&state, 'a'));
+	assert(state.target_mode == TARGET_RANDOM);
+	assert(mp_match_target_handle_key(&state, 's'));
+	assert(state.target_mode == TARGET_ATTACKERS);
+	assert(mp_match_target_handle_key(&state, 'd'));
+	assert(state.target_mode == TARGET_TOP_SCORE);
+	assert(strcmp(mp_match_target_name(state.target_mode), "Badges") == 0);
+	state.mode = APP_GAME_MODE_DOUBLE;
+	assert(!mp_match_target_handle_key(&state, 'w'));
+	printf("PASS test_targeting_uses_wasd_diamond\n");
+}
+
+static void	test_result_copy_includes_battle_rank(void)
+{
+	t_mp_match_state	state;
+	char				text[MP_MATCH_STATUS_MAX];
+
+	memset(&state, 0, sizeof(state));
+	state.mode = APP_GAME_MODE_BATTLE_ROYALE;
+	mp_match_finish(&state, false, 17);
+	assert(state.phase == MP_MATCH_FINISHED);
+	assert(state.final_rank == 17);
+	assert(strstr(mp_match_result_text(&state, text, sizeof(text)),
+			"RANK #17") != NULL);
+	mp_match_finish(&state, true, 99);
+	assert(state.final_rank == 1);
+	assert(strcmp(mp_match_result_text(&state, text, sizeof(text)),
+			"WOW, YOU WON!") == 0);
+	state.mode = APP_GAME_MODE_DOUBLE;
+	mp_match_finish(&state, false, 2);
+	assert(strcmp(mp_match_result_text(&state, text, sizeof(text)),
+			"SO SAD, YOU LOST") == 0);
+	printf("PASS test_result_copy_includes_battle_rank\n");
+}
+
+static void	test_match_layouts_follow_wireframes(void)
+{
+	t_mp_match_layout	layout;
+
+	mp_match_layout_build(APP_GAME_MODE_DOUBLE, 40, 120, &layout);
+	assert(layout.valid);
+	assert(layout.local_board.x < layout.opponent_board.x);
+	assert(layout.local_board.width == 22);
+	assert(layout.opponent_board.width == 22);
+	assert(layout.local_board.height == BOARD_HEIGHT + 2);
+	assert(layout.abilities.x < layout.local_board.x);
+	mp_match_layout_build(APP_GAME_MODE_BATTLE_ROYALE, 60, 210, &layout);
+	assert(layout.valid);
+	assert(layout.abilities.x < layout.left_opponents.x);
+	assert(layout.left_opponents.x + layout.left_opponents.width
+		< layout.local_board.x);
+	assert(layout.local_board.x + layout.local_board.width
+		< layout.right_opponents.x);
+	assert(layout.targeting.y < layout.local_board.y);
+	mp_match_layout_build(APP_GAME_MODE_BATTLE_ROYALE, 24, 80, &layout);
+	assert(!layout.valid);
+	printf("PASS test_match_layouts_follow_wireframes\n");
+}
+
+static void	test_room_roster_controls_opponent_count(void)
+{
+	t_app_profile_view_model	profile;
+	t_app_catalogue_view_model	characters;
+	t_app_room_view_model		room;
+	t_mp_match_state		state;
+	int					index;
+	int					present;
+
+	load_fixture(&profile, &characters);
+	memset(&room, 0, sizeof(room));
+	room.mode = APP_GAME_MODE_BATTLE_ROYALE;
+	room.player_count = 4;
+	room.local_slot = 1;
+	index = 0;
+	while (index < room.player_count)
+	{
+		snprintf(room.players[index].username,
+			sizeof(room.players[index].username), "roster-%d", index);
+		index++;
+	}
+	snprintf(room.players[room.local_slot].username,
+		sizeof(room.players[room.local_slot].username), "%s", profile.username);
+	mp_match_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE, "arena",
+		&profile, &characters, 9u);
+	mp_match_apply_room(&state, &room, 99);
+	assert(state.players_total == 4);
+	present = 0;
+	index = 0;
+	while (index < APP_ROOM_MAX_PLAYERS - 1)
+	{
+		present += state.opponents[index].present;
+		index++;
+	}
+	assert(present == 3);
+	assert(strcmp(state.opponents[0].name, "roster-0") == 0);
+	assert(strcmp(state.opponents[1].name, "roster-2") == 0);
+	mp_match_apply_room(&state, NULL, 99);
+	assert(state.players_total == 99);
+	assert(state.opponents[97].present);
+	printf("PASS test_room_roster_controls_opponent_count\n");
+}

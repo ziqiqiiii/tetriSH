@@ -631,6 +631,15 @@
 /* The authored waiting-room roster has room for eight legible rows. */
 # define WAITING_ROOM_VISIBLE_PLAYERS	8
 
+/* MULTIPLAYER_MATCH.C / RENDER_MULTIPLAYER_MATCH.C */
+# define MP_CHARACTER_SELECT_MS	15000
+# define MP_CHARACTER_TICK_AUDIO_SECONDS	5
+# define MP_MATCH_FRAME_MS	16
+# define MP_MATCH_MAX_CATCHUP_MS	1000
+# define MP_MATCH_INPUT_BATCH_MAX	64
+# define MP_BR_OPPONENT_COUNT	98
+# define MP_MATCH_STATUS_MAX	96
+
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
 # define MENU_PANEL_Y_RATIO		0.700
@@ -1377,6 +1386,71 @@ typedef struct s_mp_rect
 	int	height;
 }	t_mp_rect;
 
+typedef enum e_mp_match_phase
+{
+	MP_MATCH_CHARACTER_SELECT,
+	MP_MATCH_PLAYING,
+	MP_MATCH_FINISHED
+}	t_mp_match_phase;
+
+typedef enum e_mp_match_result
+{
+	MP_MATCH_RESULT_NONE,
+	MP_MATCH_RESULT_WON,
+	MP_MATCH_RESULT_LOST
+}	t_mp_match_result;
+
+typedef enum e_mp_selection_event
+{
+	MP_SELECTION_EVENT_NONE = 0,
+	MP_SELECTION_EVENT_SECOND = 1u << 0,
+	MP_SELECTION_EVENT_FINISHED = 1u << 1
+}	t_mp_selection_event;
+
+typedef struct s_mp_character_selection
+{
+	int	selected;
+	int	remaining_ms;
+	int	last_second;
+	bool	locked;
+}	t_mp_character_selection;
+
+typedef struct s_mp_match_layout
+{
+	bool		valid;
+	int		rows;
+	int		cols;
+	t_mp_rect	local_board;
+	t_mp_rect	opponent_board;
+	t_mp_rect	left_opponents;
+	t_mp_rect	right_opponents;
+	t_mp_rect	character_card;
+	t_mp_rect	abilities;
+	t_mp_rect	targeting;
+	t_mp_rect	result;
+}	t_mp_match_layout;
+
+typedef struct s_mp_match_pixel_layout
+{
+	bool		valid;
+	int		width;
+	int		height;
+	t_mp_rect	loadout;
+	t_mp_rect	portrait;
+	t_mp_rect	ability_bar;
+	t_mp_rect	ability_popover;
+	t_mp_rect	local_board;
+	t_mp_rect	opponent_board;
+	t_mp_rect	left_opponents;
+	t_mp_rect	right_opponents;
+	t_mp_rect	targeting;
+	t_mp_rect	hud;
+	t_mp_rect	controls;
+	int		ability_center_x;
+	int		ability_center_y[APP_CHARACTER_ABILITY_COUNT];
+	int		ability_hit_radius;
+}	t_mp_match_pixel_layout;
+
 /* Reference-coordinate geometry shared by every multiplayer compositor. */
 typedef struct s_mp_layout
 {
@@ -1747,6 +1821,19 @@ typedef struct
 	struct ncvisual		*settings_font_visual;
 	struct ncvisual		*marketplace_font_visual;
 	struct ncvisual		*mp_font_visual;
+	struct ncvisual		*mp_match_tile_visual;
+	struct ncvisual		*mp_match_portrait_visual;
+	char				mp_match_portrait_source[APP_ASSET_PATH_MAX];
+	struct ncplane		*mp_match_local_plane;
+	struct ncplane		*mp_match_opponent_plane;
+	struct ncplane		*mp_match_left_plane;
+	struct ncplane		*mp_match_right_plane;
+	struct ncplane		*mp_match_loadout_plane;
+	struct ncplane		*mp_match_ability_plane;
+	struct ncplane		*mp_match_hud_plane;
+	struct ncplane		*mp_match_active_plane;
+	struct ncplane		*mp_match_ghost_plane;
+	struct ncplane		*mp_match_countdown_plane;
 	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
@@ -1861,6 +1948,18 @@ typedef struct
 	uint64_t			mp_options_signature;
 	uint64_t			mp_slots_signature;
 	uint64_t			mp_chat_signature;
+	uint64_t			mp_match_signature;
+	uint64_t			mp_match_static_signature;
+	uint64_t			mp_match_local_signature;
+	uint64_t			mp_match_opponent_signature;
+	uint64_t			mp_match_left_signature;
+	uint64_t			mp_match_right_signature;
+	uint64_t			mp_match_loadout_signature;
+	uint64_t			mp_match_hud_signature;
+	uint64_t			mp_match_active_signature;
+	uint64_t			mp_match_ghost_signature;
+	uint64_t			mp_match_countdown_signature;
+	bool				mp_match_piece_planes_combined;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	t_tetrisu_pixel_policy	pixels;
@@ -2035,6 +2134,43 @@ typedef struct s_solo_game
 	bool			countdown_active;
 	t_solo_ability	ready_ability;
 }	t_solo_game;
+
+/*
+ * The match model intentionally owns only presentation-ready snapshots. A
+ * future multiplayer provider can replace local_game/opponent_game and the
+ * compact opponent metadata without changing the renderer or its layout.
+ */
+typedef struct s_mp_match_state
+{
+	t_app_game_mode		mode;
+	t_mp_match_phase	phase;
+	t_mp_match_result	result;
+	t_mp_character_selection	selection;
+	t_app_catalogue_view_model	characters;
+	t_app_profile_view_model	profile;
+	t_solo_game		local_game;
+	t_solo_game		opponent_game;
+	t_target_mode		target_mode;
+	int				players_total;
+	int				players_alive;
+	int				final_rank;
+	int				ko_count;
+	int				incoming_attackers;
+	int				opponent_charge;
+	int				hovered_ability;
+	struct s_mp_opponent_snapshot
+	{
+		t_board		board;
+		bool		present;
+		bool		alive;
+		bool		targeting_local;
+		int			garbage_pending;
+		char		name[APP_TEXT_MAX];
+	} opponents[APP_ROOM_MAX_PLAYERS - 1];
+	char				opponent_name[APP_TEXT_MAX];
+	char				room_id[APP_TEXT_MAX];
+	char				status[MP_MATCH_STATUS_MAX];
+}	t_mp_match_state;
 
 /*
 ** Who owns the board this Solo game is played on. `net` is the app's session
@@ -2599,6 +2735,38 @@ void			mp_layout_build(t_app_screen screen, int origin_y, int origin_x,
 					int rows, int cols, int cell_px_y, int cell_px_x,
 					t_mp_layout *layout);
 
+/* MULTIPLAYER_MATCH.C */
+void			mp_match_state_init(t_mp_match_state *state,
+					t_app_game_mode mode, const char *room_id,
+					const t_app_profile_view_model *profile,
+					const t_app_catalogue_view_model *characters,
+					uint32_t seed);
+bool			mp_match_character_handle_key(t_mp_match_state *state,
+					uint32_t key);
+uint32_t		mp_match_character_update(t_mp_match_state *state,
+					int elapsed_ms);
+int				mp_match_character_seconds(const t_mp_match_state *state);
+const t_app_catalogue_item_view_model	*mp_match_selected_character(
+					const t_mp_match_state *state);
+bool			mp_match_target_handle_key(t_mp_match_state *state,
+					uint32_t key);
+const char		*mp_match_target_name(t_target_mode mode);
+void			mp_match_finish(t_mp_match_state *state, bool won, int rank);
+const char		*mp_match_result_text(const t_mp_match_state *state,
+					char *out, size_t size);
+void			mp_match_layout_build(t_app_game_mode mode, int rows, int cols,
+					t_mp_match_layout *layout);
+void			mp_match_pixel_layout_build(t_app_game_mode mode, int width,
+					int height, t_mp_match_pixel_layout *layout);
+int				mp_match_ability_at_pixel(
+					const t_mp_match_pixel_layout *layout, int x, int y);
+bool			mp_match_movement_event(const t_mp_match_state *state,
+					t_solo_handling_state *handling,
+					const t_solo_handling_config *config, uint32_t key,
+					ncintype_e event_type, t_solo_action *action);
+void			mp_match_apply_room(t_mp_match_state *state,
+					const t_app_room_view_model *room, int preview_players);
+
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,
 					const t_app_screen_view_model *view,
@@ -2613,6 +2781,24 @@ bool			render_waiting_room_show(t_render_ctx *ctx,
 					const t_app_screen_view_model *view,
 					const t_waiting_room_state *state, bool rebuild_background);
 void			render_multiplayer_destroy(t_render_ctx *ctx);
+
+/* RENDER_MULTIPLAYER_MATCH.C */
+bool			render_multiplayer_match_show(t_render_ctx *ctx,
+					const t_mp_match_state *state, bool rebuild_background);
+void			render_multiplayer_match_destroy(t_render_ctx *ctx);
+bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
+					const t_mp_match_state *state, bool rebuild_background);
+void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+int				mp_match_piece_planes_update(t_render_ctx *ctx,
+					const t_mp_match_pixel_layout *layout,
+					const t_solo_game *game);
+void			mp_match_piece_planes_destroy(t_render_ctx *ctx);
+
+/* MULTIPLAYER_MATCH_MODE.C */
+int				multiplayer_match_mode_run(t_render_ctx *ctx,
+					t_audio_ctx *audio, const t_app_data_provider *provider,
+					t_app_game_mode mode, const char *room_id,
+					const t_app_room_view_model *room);
 
 /* RENDER_MULTIPLAYER_FONT.C */
 bool			render_mp_pixel_show(t_render_ctx *ctx,
