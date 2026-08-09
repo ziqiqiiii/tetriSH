@@ -82,7 +82,7 @@ TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd \
 #                                   BUILD                                      #
 ################################################################################
 
-all: deps libs shell daemons
+all: deps libs shell daemons bin-link
 
 # --- libraries (self-contained archives under lib/) -------------------------
 libs: | deps
@@ -102,22 +102,32 @@ daemons: libs | deps
 # to PATH, and tetrisctl resolves each daemon through PATH exactly as execvp
 # does, so a daemon missing from ./bin cannot be launched by name at all. Each
 # component's binary is named after its directory; unbuilt ones are skipped.
+# Both layouts are searched, because the daemons build their binary beside
+# their Makefile and tetrisu builds its own into bin/ - looking only for the
+# first is what left ./bin/tetrisu missing after a successful build.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
 	@ ln -sf $(CURDIR)/$(SHELL_DIR)/bin/* $(BIN)/ 2>/dev/null || true
 	@ for d in $(DAEMON_DIRS); do \
 		n=`basename $$d`; \
-		if [ -x $$d/$$n ]; then ln -sf $(CURDIR)/$$d/$$n $(BIN)/; fi; \
+		for p in $$d/$$n $$d/$(BIN)/$$n; do \
+			if [ -x $$p ]; then ln -sf $(CURDIR)/$$p $(BIN)/; break; fi; \
+		done; \
 	done
 
 # Idiomatic launch: the shell sources .tetrishrc, whose last line is
 # `tetrisctl start` - so the daemons come up before the first prompt.
-run: all bin-link
+#
+# certs is a prerequisite for the same reason it is one of `stack`: that
+# `tetrisctl start` boots tetrisd, and tetrisd treats missing certificates as
+# a fatal boot error. certs/ is git-ignored, so on a fresh clone this is the
+# difference between a shell with a game server behind it and one without.
+run: all bin-link certs
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
 # Development credentials for the secure session. tetrisd refuses to boot
-# without them, so `stack` depends on this; the directory is git-ignored and
-# the script is a no-op while the current certificate is still valid.
+# without them, so `run` and `stack` depend on this; the directory is
+# git-ignored and the script is a no-op while the certificate is still valid.
 certs:
 	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
 
