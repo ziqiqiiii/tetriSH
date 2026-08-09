@@ -175,14 +175,15 @@ static void	test_fixture_marketplace_model(void)
 	assert(view.status == APP_DATA_READY);
 	assert(view.data.marketplace.signed_in);
 	assert(!view.data.marketplace.offline);
-	assert(view.data.marketplace.profile.wallet_points == 3200);
+	assert(view.data.marketplace.profile.wallet_points == 20);
 	assert(view.data.marketplace.characters.count == 4);
 	assert(view.data.marketplace.themes.count == 7);
 	assert(view.data.marketplace.characters.items[0].owned);
 	assert(!view.data.marketplace.characters.items[2].owned);
-	assert(view.data.marketplace.characters.items[2].price == 1400);
+	/* The shelf quotes the catalogue's price, not one the fixture made up. */
+	assert(view.data.marketplace.characters.items[2].price == 10);
 	assert(!view.data.marketplace.themes.items[6].owned);
-	assert(view.data.marketplace.themes.items[6].price == 1600);
+	assert(view.data.marketplace.themes.items[6].price == 7);
 	printf("PASS test_fixture_marketplace_model\n");
 }
 
@@ -365,25 +366,25 @@ static void	test_buying_debits_the_wallet(void)
 	state.character_slot = 0;
 	assert(marketplace_buy_focused(&view.data.marketplace, &state)
 		== MARKETPLACE_PURCHASE_OWNED);
-	assert(view.data.marketplace.profile.wallet_points == 3200);
-	/* Princess costs 1400 of the 3200 on hand. */
+	assert(view.data.marketplace.profile.wallet_points == 20);
+	/* Princess costs 10 of the 20 on hand. */
 	state.character_slot = 2;
 	assert(marketplace_can_afford(&view.data.marketplace,
 			marketplace_focused_item(&view.data.marketplace, &state)));
 	assert(marketplace_buy_focused(&view.data.marketplace, &state)
 		== MARKETPLACE_PURCHASE_BOUGHT);
-	assert(view.data.marketplace.profile.wallet_points == 1800);
+	assert(view.data.marketplace.profile.wallet_points == 10);
 	assert(view.data.marketplace.characters.items[2].owned);
 	/* A second purchase of the same slot is refused and charges nothing. */
 	assert(marketplace_buy_focused(&view.data.marketplace, &state)
 		== MARKETPLACE_PURCHASE_OWNED);
-	assert(view.data.marketplace.profile.wallet_points == 1800);
-	/* Wolf-man costs 1800; buying it empties the wallet exactly. */
+	assert(view.data.marketplace.profile.wallet_points == 10);
+	/* Wolf-man costs 10; buying it empties the wallet exactly. */
 	state.character_slot = 3;
 	assert(marketplace_buy_focused(&view.data.marketplace, &state)
 		== MARKETPLACE_PURCHASE_BOUGHT);
 	assert(view.data.marketplace.profile.wallet_points == 0);
-	/* Clauding costs 1600 with nothing left, so the wallet is untouched. */
+	/* Clauding costs 7 with nothing left, so the wallet is untouched. */
 	state.section = MARKETPLACE_SECTION_THEMES;
 	state.preview = MARKETPLACE_SECTION_THEMES;
 	state.theme_slot = 6;

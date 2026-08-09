@@ -1782,6 +1782,7 @@ static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
 	const t_solo_game *game)
 {
 	char		countdown[12];
+	char		best[SOLO_BEST_CAPTION_MAX];
 	const char	*title;
 	const char	*help;
 	unsigned	best_opacity;
@@ -1812,22 +1813,23 @@ static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
 			32, 1, g_pink, countdown_opacity);
 		return ;
 	}
+	best_opacity = 0;
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";
 		help = "R RESTART";
-		best_opacity = solo_game_personal_best_opacity(game);
+		if (solo_game_best_caption(game, best, sizeof(best)))
+			best_opacity = solo_game_personal_best_opacity(game);
 	}
 	else
 	{
 		title = "PAUSED";
 		help = "P RESUME";
-		best_opacity = 0;
 	}
 	draw_text_centered(canvas, solo, title, x + 64, y + 6,
 		16, 16, 1, g_pink);
 	if (best_opacity > 0)
-		draw_text_centered_opacity(canvas, solo, "NEW PERSONAL BEST",
+		draw_text_centered_opacity(canvas, solo, best,
 			x + 64, y + 25, 5, 7, 1, g_pink, best_opacity);
 	draw_text_centered(canvas, solo, help, x + 64, y + 38,
 		8, 8, 1, g_white);

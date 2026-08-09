@@ -81,8 +81,9 @@ void	test_deserialise_rejects_oversized_owned_count(void)
 	in = sample_player();
 	n = player_serialise(&in, buf, sizeof(buf));
 	// owned_characters count sits right after the two equipped u32s, which
-	// follow id(8) + username + hash + salt + two score u64s.
-	owned_off = 8 + DB_MAX_USERNAME + DB_HASH_LEN + DB_SALT_LEN + 16 + 8;
+	// follow id(8) + username + hash + salt + the three running-total u64s
+	// (leaderboard_score, lifetime_points, wallet_points).
+	owned_off = 8 + DB_MAX_USERNAME + DB_HASH_LEN + DB_SALT_LEN + 24 + 8;
 	buf[owned_off] = 0xFF;
 	buf[owned_off + 1] = 0xFF;
 	buf[owned_off + 2] = 0xFF;
@@ -112,6 +113,7 @@ static t_player	sample_player(void)
 	memset(p.password_hashed, 'h', DB_HASH_LEN);
 	memset(p.salt, 's', DB_SALT_LEN);
 	p.leaderboard_score = -42;
+	p.lifetime_points = 918273645;
 	p.wallet_points = 1337;
 	p.current_equipped_character = 3;
 	p.current_equipped_theme = 7;

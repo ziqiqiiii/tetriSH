@@ -293,9 +293,10 @@ static void	test_fixture_settings_model(void)
 	assert(view.data.settings.characters.items[0].equipped);
 	assert(view.data.settings.themes.items[1].owned);
 	assert(!view.data.settings.characters.items[2].owned);
-	assert(view.data.settings.characters.items[2].price == 1400);
+	/* Both prices are the shipped catalogue's, not the fixture's invention. */
+	assert(view.data.settings.characters.items[2].price == 10);
 	assert(!view.data.settings.themes.items[3].owned);
-	assert(view.data.settings.themes.items[3].price == 1200);
+	assert(view.data.settings.themes.items[3].price == 8);
 	assert(strcmp(view.data.settings.characters.items[1].name,
 		"Halloween") == 0);
 	assert(strcmp(view.data.settings.characters.items[1].portrait_asset,
@@ -304,7 +305,7 @@ static void	test_fixture_settings_model(void)
 		"Fry") == 0);
 	assert(strstr(view.data.settings.characters.items[3]
 		.abilities[3].description, "cascade") != NULL);
-	assert(view.data.settings.profile.wallet_points == 3200);
+	assert(view.data.settings.profile.wallet_points == 20);
 	assert(view.data.settings.profile.score == 125400);
 	assert(view.data.settings.profile.rank == 7);
 	app_settings_apply_local_controls(&view.data.settings, 40,

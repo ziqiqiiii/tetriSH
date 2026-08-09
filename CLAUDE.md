@@ -13,16 +13,16 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. The Double and Battle Royale match screens are real and playable on the Solo pipeline (`multiplayer_match.c`, `multiplayer_match_mode.c`, and a bitmap plus a compatibility renderer), with the rivals modelled in-process because `tetrisd` does not serve these modes yet (ADR-0009 steps 6-7). The local board is blitted as `MP_MATCH_BOARD_BANDS` horizontal strips so a moving piece only re-encodes the strips it touches — a terminal bitmap has no partial update, and re-encoding the whole board was the entire input latency. There is deliberately no pause in a match |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. Settings and the Marketplace are server-authoritative too (`tests/integration/test_net_store.sh`): the catalogue and its prices come from `LIST /store`, the wallet, rank, inventory and loadout from `PROFILE`, and buying and equipping are `BUY` and `EQUIP` — the client sends an item id and nothing else. Artwork is keyed by catalogue id in `catalogue_art.c`, because that is the only field both ends agree on. The Double and Battle Royale match screens are real and playable on the Solo pipeline (`multiplayer_match.c`, `multiplayer_match_mode.c`, and a bitmap plus a compatibility renderer), with the rivals modelled in-process because `tetrisd` does not serve these modes yet (ADR-0009 steps 6-7). The local board is blitted as `MP_MATCH_BOARD_BANDS` horizontal strips so a moving piece only re-encodes the strips it touches — a terminal bitmap has no partial update, and re-encoding the whole board was the entire input latency. There is deliberately no pause in a match |
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
-| `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests |
+| `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests. A Player carries three running numbers that answer three different questions and must not be conflated: `leaderboard_score` is the best single game (what the board ranks on, moved only by being beaten), `lifetime_points` is every point ever scored (what the wallet's rate is charged against), `wallet_points` is what is left to spend |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
 | `lib/libcoreipc` | implemented — log records, ring buffer, `AF_UNIX` dgram/stream, self-pipe, mqueue + tests (7 of 7 suites pass) |
 | `lib/libcoredaemon` | implemented — detach + readiness pipe, pidfile claim/probe/wait + tests (3 of 3 suites pass, valgrind-clean) |
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, profile, leaderboard + tests (5 of 5 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (13 of 13 suites pass). ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (14 of 14 suites pass). A game that reaches game-over or is forfeited is recorded once through `award_game` in `room.c`, which credits the wallet at `TETRISD_POINTS_PER_WALLET_POINT` (100) game points each — as the difference between what the player's `lifetime_points` were worth before the game and after, so a game worth less than the rate carries its remainder rather than rounding to nothing. The same call ranks the player on their **best single game**, never on that total. ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -165,7 +165,10 @@ so never test these against `DB_OK`. The catalogue getters `db_get_character` /
 Surface: `db_signup` / `db_login` / `db_get_player`, `db_buy_character` /
 `db_buy_theme` / `db_equip_character` / `db_equip_theme`,
 `db_player_owns_character` / `db_player_owns_theme`, `db_record_game`,
-`db_leaderboard` / `db_rank`, `db_get_character` / `db_get_theme`.
+`db_leaderboard` / `db_rank`, `db_get_character` / `db_get_theme`,
+`db_characters` / `db_themes`. The last pair enumerates a whole catalogue,
+which probing ids cannot do — ids carry gaps, so a `NULL` is not the end of
+the roster.
 
 Indexes: hash map (`username → player`) for point lookups, skip list
 (`(score, id) → player`) for the leaderboard. Writes append to a
@@ -255,9 +258,14 @@ wrong thread.
 See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–5 are
 implemented. Steps 6 and 7 are Double mode and Battle Royale (ADR-0009).
 
-M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST`, `JOIN` (`/rooms` creates,
-`/room/<name>` joins), `LEAVE`, `START`, `MOVE`, `ROTATE`, `DROP`,
-`LEADERBOARD`, plus pushed `STATE`. A player holds at most one connection — a second `LOGIN` displaces the
+M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST` (`/rooms` and `/store`),
+`JOIN` (`/rooms` creates, `/room/<name>` joins), `LEAVE`, `START`, `MOVE`,
+`ROTATE`, `DROP`, `LEADERBOARD`, `PROFILE`, `BUY`, `EQUIP`, plus pushed
+`STATE`. The marketplace is the store's: prices come from `config/*.cfg`,
+`db_buy_*` / `db_equip_*` enforce affordability and ownership atomically, and
+`BUY`/`EQUIP` answer with the updated profile so a client never draws a wallet
+it has not been told. Catalogue ids are never renumbered — they live in
+players' owned lists — so they carry gaps and are never a position. A player holds at most one connection — a second `LOGIN` displaces the
 first (ADR-0004). Inputs are rate limited per connection, answering `429` with
 `Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
 own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.

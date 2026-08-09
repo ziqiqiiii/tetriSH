@@ -97,7 +97,7 @@ static void	test_fixture_models_are_marked_and_populated(void)
 			"Mirurun") == 0);
 	assert(view.data.marketplace.characters.items[0].owned);
 	assert(view.data.marketplace.themes.count == 7);
-	assert(view.data.marketplace.profile.wallet_points == 3200);
+	assert(view.data.marketplace.profile.wallet_points == 20);
 	assert(app_screen_view_load(&provider, APP_SCREEN_LEADERBOARD, &view)
 		== APP_PROVIDER_OK);
 	assert(view.local_preview

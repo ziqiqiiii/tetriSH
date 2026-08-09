@@ -18,6 +18,12 @@
 NAME		:= tetrisd
 CC			:= gcc
 FLAGS		:= -Wall -Wextra -Werror
+# Header prerequisites, generated per object. A struct in a CoreStack header is
+# part of this daemon's ABI the moment it is compiled in, so a library header
+# that changes shape without rebuilding its callers gets stale objects linked
+# against fresh ones - which is memory corruption, not a build error, and it
+# presented as a stack smash in a suite that had nothing to do with the edit.
+DEPFLAGS	:= -MMD -MP
 LDLIBS		:= -lssl -lcrypto -lpthread -lrt
 RM			:= rm -rf
 MAKE_FLAGS	:= --no-print-directory -s
@@ -57,6 +63,7 @@ INC			:= -I./$(INC_DIR) $(LIB_INC)
 # Every .c under src/ is part of the daemon -> tetrisd
 SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+DEP			:= $(OBJ:.o=.d)
 
 ################################################################################
 #                                   BUILD                                      #
@@ -65,18 +72,34 @@ OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 all: $(NAME)
 
 # --- corestack archives -------------------------------------------------------
-# An order-only gate: the archives must exist before compiling, but a sibling
-# library's timestamp must not force every tetrisd object to rebuild.
-libs:
-	@ for d in $(LIB_DIRS); do $(MAKE) $(MAKE_FLAGS) -C $$d || exit 1; done
+# Each archive is built by the library that owns it, and FORCE is what lets
+# that sub-make decide whether it is stale - only it knows that library's
+# sources. The archive's own timestamp is then what tells this Makefile whether
+# to relink.
+#
+# That timestamp has to reach the link rules as a real prerequisite, not an
+# order-only gate. As a gate it was invisible: a fix inside a library rebuilt
+# the archive and nothing here relinked, so the daemon and - worse - every test
+# binary kept asserting against the code as it was before the fix.
+libs: $(LIB_ARCS)
+
+$(LIB_ARCS): FORCE
+	@ $(MAKE) $(MAKE_FLAGS) -C $(dir $@)
 
 # --- daemon binary ------------------------------------------------------------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER) | libs
+# The objects keep the order-only gate: the archives must exist before a
+# tetrisd source compiles against their headers, but a sibling library's
+# timestamp must not force every object to rebuild.
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | libs
 	@ mkdir -p $(dir $@)
-	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
+	@ $(CC) $(FLAGS) $(DEPFLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 
-$(NAME): $(OBJ) | libs
+# Every header each object actually included, tetrisd's and the libraries'.
+# Absent on a first build, when everything compiles anyway.
+-include $(DEP)
+
+$(NAME): $(OBJ) $(LIB_ARCS)
 	@ echo "\n$(GREEN)Compilation $(CLR_RMV)of $(BLUE)$(NAME)$(CLR_RMV)..."
 	@ $(CC) $(FLAGS) $(OBJ) $(LIB_ARCS) $(LDLIBS) -o $(NAME)
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) created ✔️"
@@ -105,7 +128,7 @@ TEST_RUNNER		:= ./scripts/run_tests.sh
 TEST_OBJ		:= $(filter-out $(OBJ_DIR)/main.o, $(OBJ))
 
 $(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(TEST_HELPERS) $(HEADER) \
-						$(wildcard $(TESTS_DIR)/*.h) $(TEST_OBJ)
+						$(wildcard $(TESTS_DIR)/*.h) $(TEST_OBJ) $(LIB_ARCS)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $(INC) -I$(TESTS_DIR) $< $(TEST_HELPERS) $(TEST_OBJ) \
@@ -136,6 +159,6 @@ re: fclean all
 #                              PHONY && PRECIOUS                               #
 ################################################################################
 
-.PHONY:		all libs run test clean fclean re
+.PHONY:		all libs run test clean fclean re FORCE
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

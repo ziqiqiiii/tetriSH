@@ -1,13 +1,15 @@
 #include "tetrisu.h"
 
-static void	test_load_profile_reflects_session_cache(void);
+static void	test_profile_is_asked_for_not_remembered(void);
+static void	test_store_writes_need_a_session(void);
 static void	test_unserved_screens_are_unavailable(void);
 static void	test_login_failure_is_invalid(void);
 static void	test_lobby_create_room_unauthed_returns_unavailable(void);
 
 int	main(void)
 {
-	test_load_profile_reflects_session_cache();
+	test_profile_is_asked_for_not_remembered();
+	test_store_writes_need_a_session();
 	test_unserved_screens_are_unavailable();
 	test_login_failure_is_invalid();
 	test_lobby_create_room_unauthed_returns_unavailable();
@@ -15,27 +17,57 @@ int	main(void)
 	return (0);
 }
 
-static void	test_load_profile_reflects_session_cache(void)
+/*
+** The profile used to be answered out of the session: score and wallet were
+** whatever LOGIN happened to mention and rank was a hardcoded -1, so the
+** Marketplace spent a balance nobody had checked. It is a read now, which
+** means a connection that cannot make one has no profile to give rather than
+** a remembered one.
+**
+** The socket is deliberately left unconnected here - what is under test is
+** that the provider refuses before it reaches for it. A profile that really
+** arrives is what tests/integration/test_net_store.sh asserts, against a
+** real tetrisd.
+*/
+static void	test_profile_is_asked_for_not_remembered(void)
 {
 	t_app_data_provider		provider;
 	t_app_net_session		session;
 	t_app_profile_view_model	view;
 
 	memset(&session, 0, sizeof(session));
-	session.net.state = NET_AUTHED;
-	snprintf(session.net.username, sizeof(session.net.username), "amber");
+	session.net.state = NET_CONNECTED;
 	snprintf(session.username, sizeof(session.username), "amber");
 	session.score = 500;
 	session.wallet = 200;
 	app_net_provider_init(&provider, &session);
 	assert(provider.load_profile != NULL);
-	assert(provider.load_profile(&session, &view) == APP_PROVIDER_OK);
-	assert(view.signed_in == true);
-	assert(strcmp(view.username, "amber") == 0);
-	assert(view.score == 500);
-	assert(view.wallet_points == 200);
-	assert(view.rank == -1);
-	printf("PASS test_load_profile_reflects_session_cache\n");
+	assert(provider.load_profile(&session, &view) == APP_PROVIDER_UNAVAILABLE);
+	printf("PASS test_profile_is_asked_for_not_remembered\n");
+}
+
+/*
+** Buying and equipping are wired to the provider, and both refuse a
+** connection that has not signed in - the client never decides either of them
+** locally, so there is nothing it can do without a server.
+*/
+static void	test_store_writes_need_a_session(void)
+{
+	t_app_data_provider			provider;
+	t_app_net_session			session;
+	t_app_settings_view_model	view;
+
+	memset(&session, 0, sizeof(session));
+	session.net.state = NET_CONNECTED;
+	app_net_provider_init(&provider, &session);
+	assert(provider.buy_item != NULL && provider.equip_item != NULL);
+	assert(provider.buy_item(&session, APP_CATALOGUE_CHARACTERS, 2, &view)
+		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.equip_item(&session, APP_CATALOGUE_THEMES, 3, &view)
+		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.buy_item(&session, APP_CATALOGUE_CHARACTERS, 2, NULL)
+		== APP_PROVIDER_INVALID);
+	printf("PASS test_store_writes_need_a_session\n");
 }
 
 static void	test_unserved_screens_are_unavailable(void)

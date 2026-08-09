@@ -9,15 +9,21 @@ do not add theme gameplay behavior.
 
 ## Theme List
 
-| # | Theme |
-|---|---|
-| 1 | Classic |
-| 2 | Design AI University |
-| 3 | Do You Wanna Build a Snowman |
-| 4 | Haaland |
-| 5 | Al Merqaedes F1 Team |
-| 6 | Nuclear Ghandi |
-| 7 | Clauding |
+The **catalogue id** is the one that travels: it is what `BUY` and `EQUIP`
+name, what is written into a player's `owned_themes`, and what `tetrisu` keys
+artwork on. It is never reused or renumbered, so it carries a gap — id `5` was
+the John Cena theme, cut before it was drawn — and it is therefore not a
+position in this table. The catalogue's spelling is `config/themes.cfg`'s.
+
+| Catalogue id | Theme (catalogue spelling) | Cost |
+|---|---|---|
+| 1 | Default | Free (starting theme) |
+| 2 | Design and AI | Free for SUTDents |
+| 3 | Do u wanna build a snowman? | 5 |
+| 4 | Haaland | 8 |
+| 6 | Claude-ing | 7 |
+| 7 | Al-Merqaedes | 15 |
+| 8 | Nuclear Gandhi | 15 |
 
 ## Classic character and power reference
 

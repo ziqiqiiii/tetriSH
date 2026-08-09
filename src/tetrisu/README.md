@@ -47,6 +47,13 @@ waiting room with chat and a pre-match countdown — while the authoritative
   `libtetrisbrain` so the offline rules and `tetrisd` cannot disagree),
   modern scoring, and a guaranteed 350 ms
   view of the final board before any top-out panel appears
+- Top-out panel that states the result: `NEW PERSONAL BEST` on a record,
+  `BEST <score>` otherwise. The record pulses once to announce itself and then
+  rests lit for as long as the panel is up, rather than fading away while the
+  player is still reading it. Signed in, the record is the account's — read
+  from `PROFILE`, written by `tetrisd` when it records the game, and the same
+  number the leaderboard ranks on. Offline it falls back to this machine's own
+  file under `$XDG_STATE_HOME`
 - Responsive 4:3 Solo layout built from one 512 x 384 master canvas, fitted to
   the terminal without changing the HUD aspect ratio
 - Transparent image HUD with exact `#2E222F` authored borders, 16 x 16
@@ -115,6 +122,9 @@ waiting room with chat and a pre-match countdown — while the authoritative
   what its caption and the Buy button's second line both promise. A purchase
   debits the wallet exactly once and never changes the equipped loadout;
   equipping stays a separate, deliberate step.
+- Both go to `tetrisd` and the screen redraws from the profile it answers with,
+  so the wallet, the owned flags and the equipped flags always move together
+  and a purchase survives the screen closing. A refusal writes nothing at all.
 - Results are reported on a line inside the control row rather than on a
   floating notification card, and volume changes are reported there too. A
   notification is a plane raised over the screen, and raising or dropping one
@@ -382,8 +392,21 @@ against the server.
 
 | Screen | Server reach today |
 |---|---|
-| Login / Sign Up, Settings profile, Single Player, Leaderboard, Multiplayer lobby & create/join | Driven by `tetrisd` |
-| Marketplace, catalogues, waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+| Login / Sign Up, Settings, Marketplace, catalogues, Single Player, Leaderboard, Multiplayer lobby & create/join | Driven by `tetrisd` |
+| Waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+
+Settings and the Marketplace read `LIST /store` for the catalogue and its
+prices and `PROFILE` for the wallet, rank, inventory and loadout; `Enter` on a
+shelf tile sends `BUY` or `EQUIP` and redraws from the profile the server
+answers with. The client sends an item id and nothing else — it never names a
+price, asserts what it owns, or decides what is equipped, because the equipped
+character is what `tetrisd` reads to decide which Gaiden abilities a player
+has.
+
+Artwork is the one half that stays local: portraits, theme previews and
+ability copy are files on this machine, matched to catalogue rows by id in
+`catalogue_art.c`. Id rather than name, because a theme can be renamed
+server-side, and rather than position, because catalogue ids carry gaps.
 
 Signing in twice is a supported path, not an accident of backing out: identity
 belongs to the connection, so `tetrisd` refuses a second `LOGIN` on a bound
@@ -677,7 +700,7 @@ backdrop appears with the wallet, both shelves, the detail card, and the
 control row drawn over its dark centre rather than over the shelf artwork.
 Step across both grids and confirm the detail card follows the cursor and
 keeps describing the same item after `↓` drops focus to the control row. Buy
-Princess, confirm the wallet drops by exactly 1400, the tile turns `OWNED`,
+Princess, confirm the wallet drops by exactly 10, the tile turns `OWNED`,
 and the equipped character does **not** change; press `E` to equip it. Then
 buy Wolf-man to empty the wallet and confirm a further purchase is refused
 with the `NOT ENOUGH` card and no balance change. Resize mid-screen, then

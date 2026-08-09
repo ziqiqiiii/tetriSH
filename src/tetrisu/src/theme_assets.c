@@ -18,6 +18,9 @@ static const t_theme_definition	g_theme_definitions[] = {
 };
 
 static const t_theme_definition	*find_theme(const char *name);
+static void					build_from(t_theme_assets *assets,
+						const t_theme_definition *definition,
+						const char *display_name);
 static bool					name_is(const char *value, const char *first,
 						const char *second);
 static void					set_character_path(char *out, size_t size,
@@ -35,13 +38,61 @@ static void					invalidate_theme_caches(t_render_ctx *ctx);
  */
 void	tetrisu_theme_assets_build(t_theme_assets *assets, const char *theme_name)
 {
-	const t_theme_definition	*definition;
+	if (assets == NULL)
+		return ;
+	build_from(assets, find_theme(theme_name), NULL);
+}
+
+/**
+ * @brief Resolves the artwork set for a theme by its catalogue id.
+ *
+ * The id is what tetrisd equips, and it is the only key that survives the trip:
+ * matching on the display name meant carrying an alias for every spelling the
+ * store used, and the one that was missing - "Nuclear Gandhi" against this
+ * file's "Nuclear Ghandi" - silently fell through to Classic, so a player who
+ * bought that theme got the default artwork and no error anywhere.
+ *
+ * @param assets Receives the resolved paths.
+ * @param theme_id The catalogue id of the equipped theme.
+ * @param display_name The store's name for it, used as the label; may be NULL.
+ */
+void	tetrisu_theme_assets_build_by_id(t_theme_assets *assets,
+	uint32_t theme_id, const char *display_name)
+{
+	t_theme_definition	resolved;
+	const char			*directory;
 
 	if (assets == NULL)
 		return ;
-	definition = find_theme(theme_name);
+	directory = catalogue_theme_directory(theme_id);
+	if (directory == NULL)
+	{
+		build_from(assets, find_theme(NULL), display_name);
+		return ;
+	}
+	resolved.name = catalogue_theme_slug(theme_id);
+	resolved.directory = directory;
+	/* Theme 1 is the one that ships inside default_theme/, where the files
+	** carry the default_ prefix and the music is the bundled Tetris theme. */
+	resolved.classic = (theme_id == 1);
+	build_from(assets, &resolved, display_name);
+}
+
+/**
+ * @brief Fills one artwork set from a resolved theme definition.
+ *
+ * @param assets Receives the resolved paths.
+ * @param definition The theme whose directory the paths are built from.
+ * @param display_name Label to record, or NULL to use the definition's name.
+ */
+static void	build_from(t_theme_assets *assets,
+	const t_theme_definition *definition, const char *display_name)
+{
 	memset(assets, 0, sizeof(*assets));
-	snprintf(assets->name, sizeof(assets->name), "%s", definition->name);
+	if (display_name != NULL && display_name[0] != '\0')
+		snprintf(assets->name, sizeof(assets->name), "%s", display_name);
+	else
+		snprintf(assets->name, sizeof(assets->name), "%s", definition->name);
 	snprintf(assets->homepage, sizeof(assets->homepage), "%s/%s/%s",
 		ASSET_DIR, definition->directory, "default_homepage.png");
 	snprintf(assets->solo_background, sizeof(assets->solo_background),
@@ -128,6 +179,34 @@ void	tetrisu_theme_apply(t_render_ctx *ctx, const char *theme_name)
 }
 
 /**
+ * @brief Applies the theme tetrisd says is equipped, by its catalogue id.
+ *
+ * The caches are keyed on the label rather than the id because that is what
+ * the renderers compare, but the artwork behind it is resolved from the id -
+ * so a theme whose store name this file spells differently still gets its own
+ * backdrops instead of quietly falling back to Classic.
+ *
+ * @param ctx Render context whose theme is being set.
+ * @param theme_id The catalogue id of the equipped theme.
+ * @param display_name The store's name for it; may be NULL.
+ */
+void	tetrisu_theme_apply_by_id(t_render_ctx *ctx, uint32_t theme_id,
+	const char *display_name)
+{
+	t_theme_assets	assets;
+
+	if (ctx == NULL)
+		return ;
+	tetrisu_theme_assets_build_by_id(&assets, theme_id, display_name);
+	if (strcmp(ctx->theme_assets.name, assets.name) != 0)
+	{
+		ctx->theme_assets = assets;
+		invalidate_theme_caches(ctx);
+	}
+	ctx->visual_selection_initialized = true;
+}
+
+/**
  * @brief Records the equipped character used by new visual surfaces.
  */
 void	tetrisu_character_apply(t_render_ctx *ctx, const char *character_name)
@@ -140,11 +219,48 @@ void	tetrisu_character_apply(t_render_ctx *ctx, const char *character_name)
 }
 
 /**
+ * @brief Points the renderer and the music at whatever loadout is in force.
+ *
+ * Which way that resolves is the whole difference this makes. Against a
+ * server, the model already carries the equipped ids tetrisd persisted, so
+ * this only reads them and writes nothing back - the account decides what is
+ * on screen. Against the stateless fixture provider there is nobody to ask,
+ * so the older sync still carries the choice between screens.
+ *
+ * @param ctx Render context whose theme and character are being set.
+ * @param provider Data provider; a NULL equip_item means fixtures.
+ * @param settings The loaded Settings or Marketplace model.
+ */
+void	tetrisu_visual_selection_bind(t_render_ctx *ctx,
+	const t_app_data_provider *provider, t_app_settings_view_model *settings)
+{
+	const t_app_catalogue_item_view_model	*equipped;
+
+	if (ctx == NULL || settings == NULL || !settings->signed_in
+		|| settings->offline)
+		return ;
+	if (provider == NULL || provider->equip_item == NULL)
+	{
+		tetrisu_visual_selection_sync(ctx, settings);
+		return ;
+	}
+	equipped = app_catalogue_equipped(&settings->themes);
+	if (equipped != NULL)
+		tetrisu_theme_apply_by_id(ctx, equipped->item_id, equipped->name);
+	equipped = app_catalogue_equipped(&settings->characters);
+	if (equipped != NULL)
+		tetrisu_character_apply(ctx, equipped->id);
+	ctx->visual_selection_initialized = true;
+}
+
+/**
  * @brief Keeps loaded Settings/Marketplace models aligned with visual state.
  *
- * The current fixture provider is intentionally stateless. This small bridge
- * preserves an equip choice while navigating between screens without changing
- * the provider or the tetrisd connection contract.
+ * The fixture provider is intentionally stateless. This small bridge preserves
+ * an equip choice while navigating between screens without giving the preview
+ * build a server. It is the fixture path only - against tetrisd the loadout
+ * comes back from the account, and writing the renderer's idea of it back into
+ * the model would overwrite the server's answer with the client's.
  */
 void	tetrisu_visual_selection_sync(t_render_ctx *ctx,
 	t_app_settings_view_model *settings)
@@ -226,6 +342,9 @@ static const t_theme_definition	*find_theme(const char *name)
 		return (&g_theme_definitions[4]);
 	if (name_is(name, "Claude-ing", NULL))
 		return (&g_theme_definitions[6]);
+	/* themes.cfg spells it "Gandhi"; this file's table spells it "Ghandi". */
+	if (name_is(name, "Nuclear Gandhi", NULL))
+		return (&g_theme_definitions[5]);
 	return (&classic);
 }
 

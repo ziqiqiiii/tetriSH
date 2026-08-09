@@ -38,15 +38,20 @@ bool	request_is_authorised(t_request_context *ctx)
 }
 
 /**
- * @brief LIST /rooms - the lobby as the client displays it.
+ * @brief LIST /rooms - the lobby as the client displays it, or LIST /store.
  *
  * Every room is listed, in-game ones included: the status field is what tells
  * a player whether they can join, and hiding rooms would only make the lobby
  * look emptier than it is.
  *
+ * The store front answers here rather than under a method of its own, because
+ * "list the collection at this path" is what LIST already means; the two
+ * collections differ in what they hold, not in what is being asked.
+ *
  * @param msg The request (unused).
  * @param context The request context.
- * @return 200 with the room rows, or 401 when unauthenticated.
+ * @return 200 with the room rows or the catalogue, 401 when unauthenticated,
+ *         404 for any other path.
  */
 int	list_handler(const t_htttp_message *msg, void *context)
 {
@@ -59,6 +64,12 @@ int	list_handler(const t_htttp_message *msg, void *context)
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
+	if (ctx->msg->path != NULL
+		&& strcmp(ctx->msg->path, TETRISD_ROUTE_STORE) == 0)
+		return (store_list_catalogue(ctx));
+	if (ctx->msg->path == NULL
+		|| strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) != 0)
+		return (404);
 	count = list_rooms(ctx->srv, rows);
 	len = body_rooms_encode(rows, count, ctx->body, sizeof(ctx->body));
 	if (len < 0)

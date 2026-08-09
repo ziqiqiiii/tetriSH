@@ -14,7 +14,7 @@ static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
-static int64_t	coins_earned(const t_game *game);
+static void		award_game(t_server *srv, const t_game *game, bool won);
 
 /*
 ** The Room, both halves of it. The domain library owns the pure t_room; the
@@ -404,8 +404,7 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 	}
 	if (finished.player_id != 0)
-		db_record_game(srv->db, finished.player_id,
-			(int64_t)finished.score.total, coins_earned(&finished), false);
+		award_game(srv, &finished, false);
 	if (server_room != NULL)
 		room_close(server_room);
 	server_room_unbind(cli);
@@ -757,9 +756,7 @@ static void	record_and_reset(t_server_room *server_room)
 	while (n > 0)
 	{
 		n--;
-		db_record_game(server_room->srv->db, played[n].player_id,
-			(int64_t)played[n].score.total, coins_earned(&played[n]),
-			!played[n].topped_out);
+		award_game(server_room->srv, &played[n], !played[n].topped_out);
 	}
 }
 
@@ -787,15 +784,40 @@ static void	forfeit_slot(t_server_room *server_room, int slot, t_game *out)
 }
 
 /**
- * @brief Converts a finished game's score into wallet points.
+ * @brief Records one finished game and pays its player what it earned.
  *
- * The economy's one rule, in one place: a thousand points buys one wallet
- * point (docs/game-economics.md).
+ * The economy's one rule, in one place (docs/game-economics.md), and it is
+ * charged against the player's running total rather than each game on its own.
+ * That difference is the whole reason this is two divisions and not one: a
+ * game worth less than the exchange rate would otherwise round to nothing and
+ * stay nothing, so a player having a bad night could play all evening and earn
+ * zero. Taking the difference between the total before and after leaves the
+ * remainder on the account, where the next game picks it up.
  *
+ * The running total it charges against is `lifetime_points`, read back out of
+ * the store. It is deliberately not `leaderboard_score`: that one is the
+ * player's best single game, so it stops moving the moment they stop beating
+ * it, and a wallet charged against it would stop paying at the same moment.
+ *
+ * The read and the write are separate locks, and that is safe because a player
+ * holds one connection (ADR-0004) and the reactor is the only thread that
+ * records a game - nobody else can be crediting this account in between.
+ *
+ * @param srv Server holding the store.
  * @param game The finished game.
- * @return Wallet points earned by that game.
+ * @param won Whether this game counts as a win.
  */
-static int64_t	coins_earned(const t_game *game)
+static void	award_game(t_server *srv, const t_game *game, bool won)
 {
-	return ((int64_t)(game->score.total / 1000));
+	t_player	before;
+	int64_t		scored;
+	int64_t		earned;
+
+	scored = (int64_t)game->score.total;
+	earned = scored / TETRISD_POINTS_PER_WALLET_POINT;
+	if (db_get_player(srv->db, game->player_id, &before) == DB_OK)
+		earned = (before.lifetime_points + scored)
+			/ TETRISD_POINTS_PER_WALLET_POINT
+			- before.lifetime_points / TETRISD_POINTS_PER_WALLET_POINT;
+	db_record_game(srv->db, game->player_id, scored, earned, won);
 }

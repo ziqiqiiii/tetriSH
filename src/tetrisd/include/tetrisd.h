@@ -151,12 +151,24 @@
 */
 # define TD_MAX_GAMES							16
 
+/*
+** Game points that buy one wallet point (docs/game-economics.md). It is the
+** whole of the economy's exchange rate, and it is charged against a player's
+** running total rather than each game on its own - see room.c's award_game.
+*/
+# define TETRISD_POINTS_PER_WALLET_POINT			100
+
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
 # define TETRISD_ROUTE_SESSION					"/session"
 # define TETRISD_ROUTE_ROOMS					"/rooms"
 # define TETRISD_ROUTE_ROOM_PREFIX				"/room/"
 # define TETRISD_ROUTE_LEADERBOARD				"/leaderboard"
+# define TETRISD_ROUTE_STORE					"/store"
+# define TETRISD_ROUTE_STORE_PREFIX				"/store/"
+# define TETRISD_ROUTE_PLAYER_PREFIX			"/player/"
+# define TETRISD_SEGMENT_CHARACTER				"character/"
+# define TETRISD_SEGMENT_THEME					"theme/"
 
 /*
 ** How many leaderboard lines one answer carries. The store's skip list is
@@ -602,6 +614,17 @@ struct s_server
 	uint64_t		started_ms;
 };
 
+/*
+** Which catalogue a store request addresses. The two kinds are bought and
+** equipped by different store calls but through identical paths, so the path
+** parser reports the kind rather than each handler spelling out both routes.
+*/
+typedef enum e_item_kind
+{
+	ITEM_CHARACTER,
+	ITEM_THEME
+}	t_item_kind;
+
 /* one request in flight: what a handler answers with */
 typedef struct s_request_context
 {
@@ -710,8 +733,18 @@ bool			request_is_authorised(t_request_context *ctx);
 /* HANDLERS_LEADERBOARD.C */
 int				leaderboard_handler(const t_htttp_message *msg, void *context);
 
+/* HANDLERS_PROFILE.C */
+int				profile_handler(const t_htttp_message *msg, void *context);
+int				request_profile_body(t_request_context *ctx);
+
+/* HANDLERS_STORE.C */
+int				buy_handler(const t_htttp_message *msg, void *context);
+int				equip_handler(const t_htttp_message *msg, void *context);
+int				store_list_catalogue(t_request_context *ctx);
+
 /* REQUEST_TARGET.C */
 int				request_input_target(t_request_context *ctx, t_server_room **out);
+t_player_id		request_player_id(const char *text, const char **end);
 int				request_body_token(t_request_context *ctx, char *out, size_t cap);
 bool			rate_limit_take_token(t_client *cli);
 
