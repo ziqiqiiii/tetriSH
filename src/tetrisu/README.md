@@ -733,9 +733,9 @@ screen: on a Sixel terminal a full-screen bitmap re-emitted over the region
 planes blanks them until the next keystroke, which is the fifth bug in
 `docs/adding-a-screen.md`.
 
-The unit suite covers the notcurses/SDL-free app and Solo game state. Three
+The unit suite covers the notcurses/SDL-free app and Solo game state. Six
 integration suites boot a throwaway `tetrisd` — one server bring-up, shared by
-all three as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
+all of them as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
 and drive a real socket against it:
 
 | Suite | Client | What it covers |
@@ -744,6 +744,8 @@ and drive a real socket against it:
 | `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join, live roster refresh, owner-only start, leave, and room re-entry |
 | `test_solo_authority.sh` | `solo_authority_smoke` | The layer `solo_mode.c` calls: who owns the board, and the hold that stops `tetrisd`'s clock for the length of the client's 3-2-1 |
 | `test_net_chat.sh` | `chat_smoke` | The room feed: narration nobody asked for, a line echoed back to its sender, a line that crosses a reply still being filed, the server's refusals, and the provider seam the waiting room calls |
+| `test_net_store.sh` | `store_smoke` | The Marketplace's half of the account: the catalogue and its prices, a fresh account's starters, affordability, `BUY`/`EQUIP` outliving the screen, and artwork keyed by catalogue id |
+| `test_net_session.sh` | `session_smoke` | What a session leaves behind — a descriptor returned on every disconnect, `SIGNUP` claiming no identity of its own, and a refused solo start changing nothing. All three are regressions; none is visible without a real socket |
 
 The fixture walks its port upward from the suite's base rather than using a
 fixed one: a fixed port inside the kernel's ephemeral range collides with

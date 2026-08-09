@@ -282,7 +282,7 @@ unit: $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
-			 $(TEST_BIN_DIR)/chat_smoke
+			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
