@@ -37,8 +37,7 @@ int	fx_start(t_fixture *fx)
 	fx->cfg.log_level = COREIPC_LOG_ERROR;
 	snprintf(path, sizeof(path), "%s/data", fx->dir);
 	snprintf(fx->cfg.data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s",
-		"../../lib/libmacminidb/config");
+	snprintf(fx->cfg.config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", "../../lib/libmacminidb/config");
 	snprintf(path, sizeof(path), "%s/certs/server.crt", fx->dir);
 	snprintf(fx->cfg.cert_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
 	snprintf(path, sizeof(path), "%s/certs/server.key", fx->dir);
@@ -120,8 +119,7 @@ void	hc_close(t_harness *hc)
  * @param out Receives the response; the caller frees it.
  * @return 0 on success, -1 on a send, receive, or parse failure.
  */
-int	hc_request(t_harness *hc, const char *method, const char *path,
-		const char *body, t_htttp_message *out)
+int	hc_request(t_harness *hc, const char *method, const char *path, const char *body, t_htttp_message *out)
 {
 	t_htttp_message	req;
 	char			pid[32];
@@ -133,14 +131,12 @@ int	hc_request(t_harness *hc, const char *method, const char *path,
 	{
 		if (hc->authed)
 		{
-			snprintf(pid, sizeof(pid), "%llu",
-				(unsigned long long)hc->player_id);
+			snprintf(pid, sizeof(pid), "%llu", (unsigned long long)hc->player_id);
 			htttp_message_set_header(&req, "Player-Id", pid);
 		}
 		if (body != NULL)
 		{
-			htttp_message_set_header(&req, "Content-Type",
-				HTTTP_CONTENT_TYPE_COMMAND);
+			htttp_message_set_header(&req, "Content-Type", HTTTP_CONTENT_TYPE_COMMAND);
 			htttp_message_set_body(&req, body, strlen(body));
 		}
 		rc = send_message(hc, &req);
@@ -152,8 +148,7 @@ int	hc_request(t_harness *hc, const char *method, const char *path,
 			return (-1);
 		if (out->type == HTTTP_MESSAGE_RESPONSE)
 			return (0);
-		if (body_state_decode((const char *)out->body, out->body_len,
-				&hc->last_state) == 0)
+		if (body_state_decode((const char *)out->body, out->body_len, &hc->last_state) == 0)
 			hc->has_state = true;
 		htttp_message_free(out);
 	}
@@ -206,8 +201,7 @@ int	hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms)
 
 	while (hc_recv(hc, &msg, timeout_ms) == 0)
 	{
-		if (msg.type == HTTTP_MESSAGE_REQUEST && msg.method != NULL
-			&& strcmp(msg.method, "STATE") == 0)
+		if (msg.type == HTTTP_MESSAGE_REQUEST && msg.method != NULL && strcmp(msg.method, "STATE") == 0)
 		{
 			rc = body_state_decode((const char *)msg.body, msg.body_len, out);
 			htttp_message_free(&msg);
@@ -232,8 +226,7 @@ int	hc_signup(t_harness *hc, const char *username, const char *password)
 	char			body[256];
 	int				status;
 
-	snprintf(body, sizeof(body), "username %s\npassword %s\n", username,
-		password);
+	snprintf(body, sizeof(body), "username %s\npassword %s\n", username, password);
 	if (hc_request(hc, "SIGNUP", TETRISD_ROUTE_ACCOUNT, body, &resp) != 0)
 		return (-1);
 	status = (int)resp.status_code;
@@ -256,13 +249,11 @@ int	hc_login(t_harness *hc, const char *username, const char *password)
 	char			value[64];
 	int				status;
 
-	snprintf(body, sizeof(body), "username %s\npassword %s\n", username,
-		password);
+	snprintf(body, sizeof(body), "username %s\npassword %s\n", username, password);
 	if (hc_request(hc, "LOGIN", TETRISD_ROUTE_SESSION, body, &resp) != 0)
 		return (-1);
 	status = (int)resp.status_code;
-	if (status == 200 && body_field(&resp, "player-id", value,
-			sizeof(value)) == 0)
+	if (status == 200 && body_field(&resp, "player-id", value, sizeof(value)) == 0)
 	{
 		hc->player_id = (t_player_id)strtoull(value, NULL, 10);
 		hc->authed = true;
@@ -310,9 +301,7 @@ static int	generate_certs(t_fixture *fx)
 	char	cmd[512];
 
 	snprintf(fx->ca_path, sizeof(fx->ca_path), "%s/certs/ca.crt", fx->dir);
-	snprintf(cmd, sizeof(cmd),
-		"sh ../../lib/libtetrissh/scripts/generate_test_certs.sh %s/certs",
-		fx->dir);
+	snprintf(cmd, sizeof(cmd), "sh ../../lib/libtetrissh/scripts/generate_test_certs.sh %s/certs", fx->dir);
 	if (system(cmd) != 0)
 		return (-1);
 	return (0);
@@ -382,8 +371,7 @@ static int	body_field(const t_htttp_message *msg, const char *key, char *out,
 	const char	*line;
 	size_t		key_len;
 
-	if (msg->body == NULL || msg->body_len == 0
-		|| msg->body_len >= sizeof(text))
+	if (msg->body == NULL || msg->body_len == 0 || msg->body_len >= sizeof(text))
 		return (-1);
 	memcpy(text, msg->body, msg->body_len);
 	text[msg->body_len] = '\0';

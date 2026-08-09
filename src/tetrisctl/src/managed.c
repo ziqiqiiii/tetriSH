@@ -128,7 +128,6 @@ static void	spawn(const t_managed *d, const char *rc_path)
 		argv[1] = rc;
 	}
 	execvp(name, argv);
-	fprintf(stderr, "%s: cannot run %s: %s\n",
-		TETRISCTL_COMPONENT_NAME, name, strerror(errno));
+	daemon_report_error(TETRISCTL_COMPONENT_NAME, name, strerror(errno));
 	_exit(EXIT_FAILURE);
 }

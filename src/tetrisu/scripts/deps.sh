@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_deps() {
     CC="${CC:-gcc}" PKG_CONFIG="${PKG_CONFIG:-pkg-config}" \
+        NOTCURSES_MIN_VERSION="${NOTCURSES_MIN_VERSION:-3.0.5}" \
         bash "$SCRIPT_DIR/check_deps.sh"
 }
 
@@ -26,7 +27,8 @@ if [ "$AUTO_INSTALL_DEPS" != "1" ]; then
 fi
 
 INSTALL_NOTCURSES_FROM_SOURCE="${INSTALL_NOTCURSES_FROM_SOURCE:-1}" \
-NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.17}" \
+NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.12}" \
+NOTCURSES_MIN_VERSION="${NOTCURSES_MIN_VERSION:-3.0.5}" \
 NOTCURSES_PREFIX="${NOTCURSES_PREFIX:-/usr/local}" \
     bash "$SCRIPT_DIR/install_deps.sh"
 check_deps

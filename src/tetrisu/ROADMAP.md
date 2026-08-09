@@ -17,8 +17,8 @@ a real terminal, committed, and pushed before work begins on the next one.
 
 ## Current state
 
-Phases 1 through 3 are complete. Phase 4 continues with the login, sign-up,
-and offline entry screens in item 16.
+Phases 1 through 3 are complete. Phase 4 continues with item 19 complete and
+item 20 next.
 
 - Item 1 was approved in `94a42b8 [tetrisu] stabilize the five-item home menu`.
 - Items 2 and 3 landed in
@@ -39,8 +39,8 @@ and offline entry screens in item 16.
   protocols keep a terminal-side image registry that can leak. So foot, XTerm,
   mlterm, VTE-based terminals, Konsole, and contour all keep the authored
   bitmaps under a stationary tier that never moves or restacks a sprixel.
-  Cells are reserved for terminals reporting no bitmap support and for the two
-  registry terminals measured to retain every replaced frame.
+  WezTerm and iTerm2 use that same bounded-retransmission tier. Cells are
+  reserved for terminals reporting no bitmap support.
 - Item 8 adds a reusable notification stack with a cutesy authored Mirurun
   music card. Music changes show a crisp live percentage and 16-step crystal
   bar on Home and Solo, including compatibility mode and builds without SDL
@@ -72,6 +72,29 @@ and offline entry screens in item 16.
   leaderboard, lobby, room, and match models sit behind a provider interface;
   deterministic fixture-backed scaffolds are visibly marked
   `LOCAL UI PREVIEW`.
+- Item 16 makes Login the first interactive screen after the splash.
+  Bitmap-capable rendering uses authored pixel artwork with real bold Mononoki
+  typography for headings, labels, and actions. Editable values, live status,
+  and focus marks use small reusable pixel sprites from the same generated font
+  atlas, so every visible word stays sharp without repainting the full screen.
+  Login and account
+  creation stay visibly disabled through unverified, checking, and offline
+  server states, while the future network seam is isolated behind one semantic
+  check action. The current no-server fixture resolves checks to offline and
+  leaves Play Offline available. Bitmap-capable terminals load precomposed
+  Login and Sign Up PNGs at the exact 1448 x 1086 source resolution in one
+  background bitmap plane. Persistent compact overlay planes update only
+  changed text without moving the background, including on stationary Sixel
+  terminals. This avoids the incomplete rows and input lag caused by rebuilding
+  a full-screen RGBA visual per key. Supported-mode fields show no placeholder
+  copy and display only a fixed left-edge caret when empty and focused.
+- Item 18 adds the dedicated leaderboard. Bitmap-capable terminals compose its
+  1448 x 1086 competition artwork, live data, podium cards, and controls into a
+  complete shared-font pixel surface; entry and resize rebuild the backdrop
+  while focus and data refreshes reuse it. Cell mode and failed artwork loads
+  use the themed, bitmap-free layout. Both render all ten fixture ranks,
+  top-three emphasis, loading/empty/unavailable/error states, mouse input,
+  and resize-safe reflow.
 
 ## Phase 1 — fix the currently broken experience
 
@@ -152,8 +175,8 @@ and offline entry screens in item 16.
    - Work on home, gameplay, future screens, and silent-audio builds.
    - Repeated volume changes refresh one notification instead of creating
      duplicates; the shared stack retains room for future notification types.
-   - Kitty uses the authored bitmap; WezTerm compatibility mode renders the
-     same PNG through dense terminal cells with crisp native text above it.
+   - Kitty uses the authored moving bitmap; stationary bitmap terminals render
+     the same card without moving its image plane.
 
 9. **Replace ability help with a fading popover** — complete
 
@@ -165,8 +188,8 @@ and offline entry screens in item 16.
      existing one-second game deadline, then return to hovered help or fade.
    - Mouse and keyboard activation use the same feedback card.
    - Kitty's pixel renderer adds a generated Mirurun-and-crystals pixel-art
-     badge beside the crisp native-text card. WezTerm compatibility mode keeps
-     the terminal-only fallback; score events remain independent underneath.
+     badge beside the crisp native-text card. Stationary bitmap terminals keep
+     the terminal-only card; score events remain independent underneath.
 
 10. **Add event-driven retro sound effects** — complete
 
@@ -234,31 +257,78 @@ and offline entry screens in item 16.
       and every state has a native-terminal scaffold pending its dedicated
       screen item.
 
-16. **Add login, sign-up, and offline entry screens**
+16. **Add login, sign-up, and offline entry screens** — complete
 
     - Startup: Login, Sign Up, Play Offline.
     - UTF-8 field editing, password masking, focus order, validation, loading,
       error, back, and resize support.
+    - Login accepts username, password, and domain/server; Sign Up adds
+      password confirmation and returns to Login after account creation.
+    - Bitmap-capable terminals load exact-size authored Login and Sign Up PNGs
+      with bold Mononoki copy. Editable values, dynamic server status, and focus
+      marks use reusable pixel-font sprites without painting cell bars over the
+      artwork or moving stationary Sixel planes.
+    - Server availability is explicit: unverified, checking, online, and
+      offline states drive the status row and disable server-backed primary
+      actions until online. The current network stub resolves to offline.
+    - Compatibility mode keeps the same controls and disabled states in a
+      compact high-contrast terminal-only frame.
 
-17. **Route all five home actions**
+17. **Route all five home actions** — complete
 
-    - Offline Single Player works locally.
-    - Offline Multiplayer, Marketplace, and Leaderboard show a polished
-      sign-in-required notification.
-    - Settings stays available locally.
-    - Fixture mode opens server-dependent UIs with a visible
+    - Offline Single Player routes to local Solo exactly as before.
+    - Offline Multiplayer, Marketplace, and Leaderboard show the same compact,
+      dismissible terminal-native sign-in-required modal on every terminal.
+      It deliberately avoids bitmap loading so it opens instantly and remains
+      responsive on long-running Kitty and compatibility-mode sessions.
+      All title, body, and button text is live terminal text.
+    - Settings stays available locally in both offline and fixture modes.
+    - Fixture mode (navigation.offline == false) routes all five items to
+      their existing scaffold view models, preserving the visible
       `LOCAL UI PREVIEW` marker.
+    - Pure routing policy extracted into `home_menu_route()` with unit tests
+      covering all five menu items in both offline and fixture modes.
+    - Modal input handling tested without an interactive terminal:
+      Escape dismisses, Enter on focused Dismiss button dismisses, Enter on
+      focused Sign In button navigates to Login via the validated graph,
+      Tab and arrow keys toggle focus between the two buttons.
+    - Resize while the modal is open destroys and recreates planes safely.
+    - No polling or busy loops; the modal loop blocks on `render_wait_input`.
+    - Mouse consistently supported: click on buttons confirms, hover changes
+      focus.
+    - Going to Login uses the validated `APP_NAV_BACK` action to reach the
+      login screen through the app navigation graph.
 
-18. **Add the leaderboard screen**
+18. **Add the leaderboard screen** — complete
 
-    - Top-three podium; positions 4–10; loading, empty, unavailable, refresh,
-      and back states.
+    - The top three use distinct gold, silver, and bronze podium cards while
+      positions 4–10 remain a compact aligned table.
+    - Bitmap-capable renderers draw loading, empty, unavailable, and error
+      models with the shared pixel font on the live composed surface; cell mode
+      retains readable terminal text.
+    - Refresh and Back support keyboard shortcuts, focus traversal, pointer
+      hover/click, menu SFX, resize, and the global volume controls.
+    - Kitty, Sixel, and other bitmap-capable renderers use one complete
+      exact-pixel leaderboard surface and rebuild it after terminal resize.
+      `TETRISU_RENDERER=cell`, or an artwork load failure, uses a themed,
+      bitmap-free 80 x 24 layout; forced cell mode includes the compatibility
+      badge.
 
-19. **Add the settings and profile screen**
+19. **Add the settings and profile screen** — complete
 
     - Profile portrait, username, equipped character/theme, owned lists,
       wallet points, score, rank, and marketplace routing.
     - Offline mode shows local settings without invented account statistics.
+    - The combined Settings view model loads profile data plus character and
+      theme catalogues through one provider seam. All fixture data remains
+      live terminal text and is marked `LOCAL UI PREVIEW`.
+    - Settings has Back, Marketplace, volume controls, focus traversal,
+      keyboard shortcuts, pointer hover/click, resize reflow, loading/empty/
+      unavailable/error states, compatibility mode, and the existing
+      stationary/pixel portrait tiers.
+    - `TETRISU_UI_PREVIEW=1` exposes an explicit Login `PREVIEW` action that
+      signs into the fixture with `navigation.offline=false`; without the
+      gate, real/offline auth behavior is unchanged.
 
 20. **Add the character and theme marketplace**
 

@@ -9,6 +9,7 @@ static bool	start_looping_music(t_audio_ctx *audio, const char *path,
 				int fade_ms);
 static const char	*game_sfx_path(t_audio_sfx sfx);
 static int	game_sfx_volume(t_audio_sfx sfx);
+static int	scaled_volume(const t_audio_ctx *audio, int base);
 static void	free_chunk(void **chunk);
 static void	play_chunk(void *chunk);
 
@@ -63,13 +64,11 @@ void	audio_play_music(t_audio_ctx *audio, const char *path)
 	if (audio == NULL || !audio->enabled || path == NULL)
 		return ;
 #if TETRISU_ENABLE_AUDIO
-	free_music(audio);
 	audio->music_transition_phase = 0;
 	audio->music_transition_elapsed_ms = 0;
 	audio->music_transition_duration_ms = 0;
 	audio->pending_music_path[0] = '\0';
-	if (!start_looping_music(audio, path, 0))
-		audio->music_path[0] = '\0';
+	(void)start_looping_music(audio, path, 0);
 #else
 	(void)path;
 #endif
@@ -141,7 +140,6 @@ bool	audio_update(t_audio_ctx *audio, int elapsed_ms)
 	if (audio->music_transition_phase == 1
 		&& audio->music_transition_elapsed_ms >= midpoint_ms)
 	{
-		free_music(audio);
 		fade_in_ms = audio->music_transition_duration_ms - midpoint_ms;
 		if (!start_looping_music(audio,
 				audio->pending_music_path, fade_in_ms))
@@ -271,12 +269,7 @@ void	audio_load_menu_sfx(t_audio_ctx *audio, const char *move_path,
 		audio->menu_move_sfx = Mix_LoadWAV(move_path);
 	if (select_path != NULL)
 		audio->menu_select_sfx = Mix_LoadWAV(select_path);
-	if (audio->menu_move_sfx != NULL)
-		Mix_VolumeChunk((Mix_Chunk *)audio->menu_move_sfx,
-			AUDIO_MENU_MOVE_VOLUME);
-	if (audio->menu_select_sfx != NULL)
-		Mix_VolumeChunk((Mix_Chunk *)audio->menu_select_sfx,
-			AUDIO_MENU_SELECT_VOLUME);
+	audio_apply_effect_volume(audio);
 #else
 	(void)move_path;
 	(void)select_path;
@@ -306,11 +299,9 @@ void	audio_load_game_sfx(t_audio_ctx *audio)
 		path = game_sfx_path((t_audio_sfx)index);
 		if (path != NULL)
 			audio->game_sfx[index] = Mix_LoadWAV(path);
-		if (audio->game_sfx[index] != NULL)
-			Mix_VolumeChunk((Mix_Chunk *)audio->game_sfx[index],
-				game_sfx_volume((t_audio_sfx)index));
 		index++;
 	}
+	audio_apply_effect_volume(audio);
 #else
 	(void)audio;
 #endif
@@ -361,6 +352,18 @@ void	audio_play_menu_select(t_audio_ctx *audio)
 }
 
 /**
+ * @brief Plays the short, restrained cue used when entering a room.
+ *
+ * The existing 300 ms dialog clip is intentionally reused: its mix level is
+ * 48 rather than the normal gameplay level of 72, so the acknowledgement is
+ * audible without competing with room chat or music.
+ */
+void	audio_play_room_entry(t_audio_ctx *audio)
+{
+	audio_play_menu_select(audio);
+}
+
+/**
  * @brief Sets music volume to an absolute level, clamped to the mixer range.
  *
  * @param audio Audio context returned by audio_init().
@@ -378,6 +381,44 @@ void	audio_set_music_volume(t_audio_ctx *audio, int volume)
 #if TETRISU_ENABLE_AUDIO
 	if (audio->enabled)
 		Mix_VolumeMusic(audio->music_volume);
+#endif
+	audio_apply_effect_volume(audio);
+}
+
+
+/**
+ * @brief Rescales every loaded effect to follow the single volume control.
+ *
+ * There is one volume in the UI, so effects track it rather than sitting at
+ * fixed levels: turning the music down and still being shouted at by the menu
+ * is worse than having no control at all. The per-effect constants stay as the
+ * mix balance and are scaled together, so at full volume nothing changes.
+ *
+ * @param audio Audio context returned by audio_init().
+ */
+void	audio_apply_effect_volume(t_audio_ctx *audio)
+{
+#if TETRISU_ENABLE_AUDIO
+	int	index;
+
+	if (audio == NULL || !audio->enabled)
+		return ;
+	if (audio->menu_move_sfx != NULL)
+		Mix_VolumeChunk((Mix_Chunk *)audio->menu_move_sfx,
+			scaled_volume(audio, AUDIO_MENU_MOVE_VOLUME));
+	if (audio->menu_select_sfx != NULL)
+		Mix_VolumeChunk((Mix_Chunk *)audio->menu_select_sfx,
+			scaled_volume(audio, AUDIO_MENU_SELECT_VOLUME));
+	index = 0;
+	while (index < AUDIO_SFX_COUNT)
+	{
+		if (audio->game_sfx[index] != NULL)
+			Mix_VolumeChunk((Mix_Chunk *)audio->game_sfx[index],
+				scaled_volume(audio, game_sfx_volume((t_audio_sfx)index)));
+		index++;
+	}
+#else
+	(void)audio;
 #endif
 }
 
@@ -397,6 +438,7 @@ void	audio_volume_up(t_audio_ctx *audio)
 	if (audio->enabled)
 		Mix_VolumeMusic(audio->music_volume);
 #endif
+	audio_apply_effect_volume(audio);
 }
 
 /**
@@ -415,6 +457,7 @@ void	audio_volume_down(t_audio_ctx *audio)
 	if (audio->enabled)
 		Mix_VolumeMusic(audio->music_volume);
 #endif
+	audio_apply_effect_volume(audio);
 }
 
 /**
@@ -486,25 +529,37 @@ static void	free_music(t_audio_ctx *audio)
 static bool	start_looping_music(t_audio_ctx *audio, const char *path,
 	int fade_ms)
 {
-	int	result;
+	Mix_Music	*next;
+	Mix_Music	*previous;
+	int			result;
 
-	audio->music = Mix_LoadMUS(path);
-	if (audio->music == NULL)
+	next = Mix_LoadMUS(path);
+	if (next == NULL)
 	{
 		log_mix_error("Mix_LoadMUS failed");
+		if (audio->music != NULL && Mix_PlayingMusic() == 0
+			&& Mix_PlayMusic((Mix_Music *)audio->music, -1) != 0)
+			log_mix_error("Mix_PlayMusic restore failed");
 		return (false);
 	}
+	previous = (Mix_Music *)audio->music;
+	Mix_HaltMusic();
 	Mix_VolumeMusic(audio->music_volume);
 	if (fade_ms > 0)
-		result = Mix_FadeInMusic((Mix_Music *)audio->music, -1, fade_ms);
+		result = Mix_FadeInMusic(next, -1, fade_ms);
 	else
-		result = Mix_PlayMusic((Mix_Music *)audio->music, -1);
+		result = Mix_PlayMusic(next, -1);
 	if (result != 0)
 	{
 		log_mix_error("Mix_PlayMusic failed");
-		free_music(audio);
+		Mix_FreeMusic(next);
+		if (previous != NULL && Mix_PlayMusic(previous, -1) != 0)
+			log_mix_error("Mix_PlayMusic restore failed");
 		return (false);
 	}
+	audio->music = next;
+	if (previous != NULL)
+		Mix_FreeMusic(previous);
 	snprintf(audio->music_path, sizeof(audio->music_path), "%s", path);
 	return (true);
 }
@@ -553,6 +608,16 @@ static const char	*game_sfx_path(t_audio_sfx sfx)
  * @param sfx Effect identifier.
  * @return SDL_mixer chunk volume.
  */
+/**
+ * @brief Scales one mix-balance constant by the current volume setting.
+ */
+static int	scaled_volume(const t_audio_ctx *audio, int base)
+{
+	if (audio == NULL || AUDIO_MAX_VOLUME <= 0)
+		return (0);
+	return (base * audio->music_volume / AUDIO_MAX_VOLUME);
+}
+
 static int	game_sfx_volume(t_audio_sfx sfx)
 {
 	if (sfx == AUDIO_SFX_MOVE || sfx == AUDIO_SFX_ROTATE

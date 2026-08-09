@@ -3,7 +3,7 @@
 // Static Functions
 static int	read_credentials(t_request_context *ctx, char *username, char *password);
 static int	signup_status(t_db_result res);
-static int	displace_previous(t_request_context *ctx, t_player_id pid);
+static void	displace_previous(t_request_context *ctx, t_player_id pid);
 static void	bind_identity(t_request_context *ctx, const t_player *player);
 static void	to_hex(const unsigned char *bytes, size_t len, char *out);
 
@@ -81,8 +81,7 @@ int	login_handler(const t_htttp_message *msg, void *context)
 			username);
 		return (401);
 	}
-	if (displace_previous(ctx, player.player_id) != 0)
-		return (503);
+	displace_previous(ctx, player.player_id);
 	bind_identity(ctx, &player);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "login %s -> player %llu",
 		username, (unsigned long long)player.player_id);
@@ -186,31 +185,26 @@ static int	signup_status(t_db_result res)
  * without closing its socket would lock its own account out for as long as
  * the kernel takes to notice, which is hours.
  *
- * The wait is the load-bearing part: the displaced connection forfeits its
- * room before it unlinks itself, so returning only once it is gone is what
- * stops that forfeit from evicting the room this connection joins next.
+ * Displacement is one call because the reactor owns both connections and is
+ * the thread running this handler: the old one forfeits its room and unlinks
+ * itself before this function returns, so its forfeit cannot reach whatever
+ * room the new connection joins next. Under threads that ordering had to be
+ * waited for; here it is what the code does (docs/adr/0008).
  *
  * @param ctx Request context of the connection claiming the player.
  * @param pid Player being claimed.
- * @return 0 when the player is free to bind, -1 when the old connection would
- *         not go away in time.
  */
-static int	displace_previous(t_request_context *ctx, t_player_id pid)
+static void	displace_previous(t_request_context *ctx, t_player_id pid)
 {
-	if (!registry_displace(&ctx->srv->reg, pid, ctx->cli))
-		return (0);
+	t_client	*previous;
+
+	previous = registry_find_other(&ctx->srv->reg, pid, ctx->cli);
+	if (previous == NULL)
+		return ;
 	logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING,
 		"player %llu logged in again; closing the previous connection",
 		(unsigned long long)pid);
-	if (registry_wait_absent(&ctx->srv->reg, pid, ctx->cli,
-			TD_DISPLACE_WAIT_MS) != 0)
-	{
-		logger_emit(&ctx->srv->log, COREIPC_LOG_ERROR,
-			"player %llu still bound after %d ms; refusing the login",
-			(unsigned long long)pid, TD_DISPLACE_WAIT_MS);
-		return (-1);
-	}
-	return (0);
+	client_kill(previous);
 }
 
 /**

@@ -31,12 +31,11 @@ keyboard
   -> tetrisu serialises one action with libhtttp
   -> libtetrissh encrypts and frames it
   -> TCP
-  -> tetrisd client_thread validates session/player/room
-  -> lock room->mutex
+  -> tetrisd reactor validates session/player/room
   -> apply libtetrisbrain operation to server-owned state
-  -> copy a STATE snapshot
-  -> unlock room->mutex
-  -> session_send(snapshot) with no room mutex held
+  -> mark the game dirty
+  -> the next tick encodes a STATE snapshot and queues it in the outbox
+  -> the reactor seals and writes it; a slow socket never blocks the tick
   -> tetrisu replaces its view model and redraws
 ```
 
@@ -84,35 +83,66 @@ that calculation is visual-only and cannot alter the game.
 
 ## Thread and blocking rules
 
-The room ticker owns gravity, lock delay, line-clear completion, level changes,
-and spawning. A `client_thread` owns action dispatch. Both mutate the same
-server game value only while holding `room->mutex`.
+`tetrisd` has exactly one owner of all mutable game state
+([ADR-0008](adr/0008-tetrisd-is-event-driven.md)). Gravity, lock delay,
+line-clear completion, level changes, spawning and action dispatch all happen
+on the reactor thread, so a move and a gravity tick cannot interleave and there
+is no lock to take. Do not add one: if a change here seems to need a mutex, the
+work has been put on the wrong thread.
 
-Always use this broadcast pattern:
+The pattern is therefore:
 
-1. lock `room->mutex`;
-2. validate and mutate with `libtetrisbrain`;
-3. copy a complete snapshot to local/owned memory;
-4. unlock `room->mutex`;
-5. serialise, encrypt, and call `send()`.
+1. validate and mutate with `libtetrisbrain`;
+2. mark the game dirty;
+3. let the tick encode the snapshot and queue it in the player's outbox.
 
-Never hold `room->mutex` across `send()`: TCP backpressure from one terminal
-must not freeze the room ticker. Social/log datagrams triggered by scoring must
-use `MSG_DONTWAIT` and drop on a full or missing destination.
+Nothing on this path calls `send()`. The reactor writes when the socket is
+ready, and a peer that stops reading loses intermediate snapshots to the
+one-slot `STATE` mailbox rather than delaying anyone's gravity. Social/log
+datagrams triggered by scoring must use `MSG_DONTWAIT` and drop on a full or
+missing destination.
+
+## Where this stands
+
+Steps 1 to 6 are applied, and step 8 is applied as its "explicitly selected
+offline mode" option rather than as a deletion.
+
+- `libhtttp` and the `STATE` schema are finalised and implemented, and `STATE`
+  gained the `hold` field the Solo HUD needs.
+- `tetrisd` owns the server game session, its tick, every action, and the
+  ability route — including `HOLD`, `PAUSE`/`RESTART`, and the four abilities
+  a room with no Target can serve.
+- `src/tetrisu/tetrisu_net.h` plus `net_client.c`, `net_session.c` and
+  `net_solo.c` are the client's network/view-model module. `net_solo_apply`
+  decodes a snapshot into `t_solo_game`, which is what `render_solo.c` already
+  consumed — so the renderer needed no change, and the fields the server has
+  no opinion about (countdown, clear animation, personal best, danger tint,
+  ability popover) stay exactly where this document puts them.
+- `solo_authority.c` is the one place that knows who owns the board.
+  `solo_mode.c` no longer calls `solo_game_apply_action` or
+  `solo_game_update`; it asks the authority, which is either `tetrisd` or the
+  local rules.
+- `tests/integration/test_net_solo.sh` drives the whole path against a real
+  server and checks the acceptance list below.
+
+What is left is step 7's `ABILITY` targeting for Double and Battle Royale
+(which need those modes first), step 9, and one wiring step: the sign-in
+screen still uses its preview fixtures, so nothing hands Solo a session yet
+and it plays offline until it does.
 
 ## Migration sequence
 
 1. Finalise `libhtttp` action and `STATE` schemas with both members reviewing.
 2. Add server game-session storage and initialise it with the same pure helpers
    used by `solo_game_init()`.
-3. Move elapsed-time calls from `solo_game_update()` into the room ticker.
+3. Move elapsed-time calls from `solo_game_update()` into the server's tick.
 4. Map validated HTTTP actions to the same pure movement/rotation/drop calls.
-5. Snapshot under the room mutex and broadcast after unlocking.
+5. Mark the game dirty and let the server's tick snapshot and queue it.
 6. Add a `tetrisu` network/view-model module; make `render_solo.c` consume it.
 7. Route `1`-`4` and meter clicks through an HTTTP `ABILITY` request. Validate
    charge, equipped character, target, and phase inside `tetrisd/ability.c`;
-   then apply Mirurun through the pure `board_cut_bottom()` transform while
-   holding `room->mutex`. Never trust or deduct the client-side charge value.
+   then apply Mirurun through the pure `board_cut_bottom()` transform on the
+   reactor. Never trust or deduct the client-side charge value.
 8. Remove all calls from `tetrisu` input to `solo_game_apply_action()` and
    `solo_game_activate_ability()`, plus all local gravity updates. Keep the
    local implementation only as an explicitly selected offline test mode, or
@@ -124,7 +154,7 @@ use `MSG_DONTWAIT` and drop on a full or missing destination.
 
 - Two identical seeds produce identical server queues in unit tests.
 - A client cannot change its board by withholding or fabricating a `STATE`.
-- A move racing a gravity tick is serialised by `room->mutex`.
+- A move cannot race a gravity tick: both run on the reactor.
 - A slow client cannot delay another player's gravity.
 - Replayed/out-of-order snapshots are ignored by sequence number.
 - Disconnect/reconnect never reconstructs authority from client state.

@@ -46,6 +46,9 @@ t_db_result	player_deserialise(const uint8_t *buf, size_t len, t_player *out)
 	out->leaderboard_score = (int64_t)scratch;
 	if (!get_u64(buf, len, &off, &scratch))
 		return (DB_INVALID);
+	out->lifetime_points = (int64_t)scratch;
+	if (!get_u64(buf, len, &off, &scratch))
+		return (DB_INVALID);
 	out->wallet_points = (int64_t)scratch;
 	if (!get_u32(buf, len, &off, &out->current_equipped_character)
 		|| !get_u32(buf, len, &off, &out->current_equipped_theme))

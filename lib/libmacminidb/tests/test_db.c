@@ -94,6 +94,37 @@ void	test_buy_and_equip(void)
 	printf("PASS test_buy_and_equip\n");
 }
 
+// The two equips write two different fields. db_equip_theme used to set
+// current_equipped_character, so choosing a theme silently swapped the
+// player's character - and the character is what decides which Gaiden
+// abilities they have, so a cosmetic choice changed how the game played.
+// Nothing caught it because no test had ever equipped a theme.
+void	test_equipping_a_theme_leaves_the_character_alone(void)
+{
+	t_db		*db;
+	t_player_id	id;
+	t_player	out;
+
+	db = fresh_db();
+	assert(db_signup(db, "zoe", "h", "s", &id) == DB_OK);
+	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
+	assert(db_buy_character(db, id, 2) == DB_OK);
+	assert(db_equip_character(db, id, 2) == DB_OK);
+	assert(db_buy_theme(db, id, 3) == DB_OK);
+	assert(db_equip_theme(db, id, 3) == DB_OK);
+	assert(db_get_player(db, id, &out) == DB_OK);
+	assert(out.current_equipped_theme == 3);
+	assert(out.current_equipped_character == 2);
+	// And the reverse: equipping a character leaves the theme alone.
+	assert(db_equip_character(db, id, 1) == DB_OK);
+	assert(db_get_player(db, id, &out) == DB_OK);
+	assert(out.current_equipped_character == 1);
+	assert(out.current_equipped_theme == 3);
+	assert(db_equip_theme(db, id, 4) == DB_NOT_OWNED);
+	db_close(db);
+	printf("PASS test_equipping_a_theme_leaves_the_character_alone\n");
+}
+
 // record_game re-sorts the leaderboard; rank and top-N reflect the scores.
 void	test_leaderboard_and_rank(void)
 {
@@ -120,6 +151,55 @@ void	test_leaderboard_and_rank(void)
 	assert(db_rank(db, a, &rank) == DB_OK && rank == 3);
 	db_close(db);
 	printf("PASS test_leaderboard_and_rank\n");
+}
+
+// leaderboard_score is a personal best, not a running total. It used to add
+// every game to it, which ranked whoever played most rather than whoever
+// played best: a player grinding 100-point games passed one who had scored
+// 5,000 once, and no amount of skill could catch up with somebody who simply
+// kept playing. lifetime_points is where the running total went, because the
+// wallet still needs one.
+void	test_the_board_ranks_your_best_game_not_your_total(void)
+{
+	t_db			*db;
+	t_player_id		grinder;
+	t_player_id		ace;
+	t_rank_entry	top[8];
+	t_player		out;
+	size_t			n;
+	size_t			rank;
+	int				i;
+
+	db = fresh_db();
+	assert(db_signup(db, "grinder", "h", "s", &grinder) == DB_OK);
+	assert(db_signup(db, "ace", "h", "s", &ace) == DB_OK);
+	i = 0;
+	while (i < 20)
+	{
+		assert(db_record_game(db, grinder, 100, 0, false) == DB_OK);
+		i++;
+	}
+	assert(db_record_game(db, ace, 500, 0, true) == DB_OK);
+	// 20 x 100 = 2000 scored in total, but the best of them is still 100.
+	assert(db_get_player(db, grinder, &out) == DB_OK);
+	assert(out.leaderboard_score == 100);
+	assert(out.lifetime_points == 2000);
+	assert(out.games_played == 20);
+	assert(db_leaderboard(db, top, 8, &n) == DB_OK && n == 2);
+	assert(strcmp(top[0].username, "ace") == 0);
+	assert(db_rank(db, ace, &rank) == DB_OK && rank == 1);
+	// A worse game afterwards cannot take the record away.
+	assert(db_record_game(db, ace, 10, 0, false) == DB_OK);
+	assert(db_get_player(db, ace, &out) == DB_OK);
+	assert(out.leaderboard_score == 500);
+	assert(out.lifetime_points == 510);
+	// A better one replaces it outright rather than adding to it.
+	assert(db_record_game(db, ace, 800, 0, true) == DB_OK);
+	assert(db_get_player(db, ace, &out) == DB_OK);
+	assert(out.leaderboard_score == 800);
+	assert(out.lifetime_points == 1310);
+	db_close(db);
+	printf("PASS test_the_board_ranks_your_best_game_not_your_total\n");
 }
 
 // The durability contract: state written before close is recovered on reopen,
@@ -165,14 +245,51 @@ void	test_catalogue_passthrough(void)
 	printf("PASS test_catalogue_passthrough\n");
 }
 
+// The whole roster comes out in one read, gaps in the numbering included: a
+// caller that probed ids until one came back NULL would stop at the cut theme
+// (id 5) and never see the three after it.
+void	test_catalogue_enumeration(void)
+{
+	t_db		*db;
+	t_character	chars[8];
+	t_theme		themes[8];
+	t_theme		tight[2];
+	size_t		count;
+
+	db = fresh_db();
+	count = 0;
+	assert(db_characters(db, chars, 8, &count) == DB_OK);
+	assert(count == 4);
+	assert(strcmp(chars[0].name, "Halloween") == 0);
+	assert(chars[0].cost_points == 10);
+	count = 0;
+	assert(db_themes(db, themes, 8, &count) == DB_OK);
+	assert(count == 7);
+	assert(themes[0].theme_id == 1 && themes[0].cost_points == 0);
+	// The row after Haaland is id 6, not id 5: enumeration is positional in
+	// the array but not in the ids.
+	assert(themes[3].theme_id == 4);
+	assert(themes[4].theme_id == 6);
+	// A buffer too small for the roster is refused whole; a truncated
+	// catalogue would be indistinguishable from a short one.
+	assert(db_themes(db, tight, 2, &count) == DB_FULL);
+	assert(db_characters(NULL, chars, 8, &count) == DB_INVALID);
+	assert(db_themes(db, themes, 8, NULL) == DB_INVALID);
+	db_close(db);
+	printf("PASS test_catalogue_enumeration\n");
+}
+
 int	main(void)
 {
 	test_signup_and_login();
 	test_get_salt();
 	test_buy_and_equip();
+	test_equipping_a_theme_leaves_the_character_alone();
 	test_leaderboard_and_rank();
+	test_the_board_ranks_your_best_game_not_your_total();
 	test_durability_roundtrip();
 	test_catalogue_passthrough();
+	test_catalogue_enumeration();
 	return (0);
 }
 

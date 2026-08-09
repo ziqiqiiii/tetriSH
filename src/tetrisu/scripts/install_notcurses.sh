@@ -4,14 +4,15 @@
 # there. Called by install_deps.sh (and directly by the Makefile target).
 #
 # Environment:
-#   NOTCURSES_VERSION  git tag to build (default v3.0.17)
+#   NOTCURSES_VERSION  git tag to build (default v3.0.12, the newest release
+#                       supported by Debian 11's CMake 3.18)
 #   NOTCURSES_PREFIX   install prefix (default /usr/local)
 #
 # Privilege is resolved once, at the top; sudo performs its own password prompt.
 
 set -euo pipefail
 
-NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.17}"
+NOTCURSES_VERSION="${NOTCURSES_VERSION:-v3.0.12}"
 NOTCURSES_PREFIX="${NOTCURSES_PREFIX:-/usr/local}"
 
 if [ "$(uname -s)" != "Linux" ]; then

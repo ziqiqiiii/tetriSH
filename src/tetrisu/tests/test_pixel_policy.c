@@ -4,23 +4,25 @@
 
 static void	test_animated_and_selfref_are_movable(void);
 static void	test_ghostty_static_is_movable(void);
-static void	test_wezterm_and_iterm_registries_use_cells(void);
+static void	test_registry_backends_keep_bitmaps(void);
 static void	test_unmeasured_registry_terminals_are_stationary(void);
 static void	test_sixel_and_framebuffer_are_stationary(void);
 static void	test_only_no_bitmap_backend_uses_cells(void);
 static void	test_forced_modes_override_the_probe(void);
 static void	test_renderer_mode_value_parsing(void);
+static void	test_notification_art_and_reemit_policy(void);
 
 int	main(void)
 {
 	test_animated_and_selfref_are_movable();
 	test_ghostty_static_is_movable();
-	test_wezterm_and_iterm_registries_use_cells();
+	test_registry_backends_keep_bitmaps();
 	test_unmeasured_registry_terminals_are_stationary();
 	test_sixel_and_framebuffer_are_stationary();
 	test_only_no_bitmap_backend_uses_cells();
 	test_forced_modes_override_the_probe();
 	test_renderer_mode_value_parsing();
+	test_notification_art_and_reemit_policy();
 	return (0);
 }
 
@@ -61,16 +63,16 @@ static void	test_ghostty_static_is_movable(void)
 }
 
 /**
- * @brief Image-registry terminals measured to never free fall back to cells.
+ * @brief Every detected image backend keeps bitmap rendering available.
  */
-static void	test_wezterm_and_iterm_registries_use_cells(void)
+static void	test_registry_backends_keep_bitmaps(void)
 {
 	assert(tetrisu_pixel_policy_for(NCPIXEL_KITTY_STATIC,
 			"WezTerm 20240203-110809-5046fc22", TETRISU_RENDERER_AUTO)
-		== TETRISU_PIXELS_NONE);
+		== TETRISU_PIXELS_STATIONARY);
 	assert(tetrisu_pixel_policy_for(NCPIXEL_ITERM2, "iTerm2 3.6.11",
-			TETRISU_RENDERER_AUTO) == TETRISU_PIXELS_NONE);
-	printf("PASS test_wezterm_and_iterm_registries_use_cells\n");
+			TETRISU_RENDERER_AUTO) == TETRISU_PIXELS_STATIONARY);
+	printf("PASS test_registry_backends_keep_bitmaps\n");
 }
 
 /**
@@ -130,7 +132,7 @@ static void	test_forced_modes_override_the_probe(void)
 			TETRISU_RENDERER_CELL) == TETRISU_PIXELS_NONE);
 	assert(tetrisu_pixel_policy_for(NCPIXEL_KITTY_SELFREF, "kitty",
 			TETRISU_RENDERER_STATIONARY) == TETRISU_PIXELS_STATIONARY);
-	/* pixel is the documented escape hatch for a demoted registry. */
+	/* pixel explicitly upgrades a stationary registry backend. */
 	assert(tetrisu_pixel_policy_for(NCPIXEL_KITTY_STATIC, "WezTerm",
 			TETRISU_RENDERER_PIXEL) == TETRISU_PIXELS_MOVABLE);
 	/* Sixel cannot move a sprixel at all, so the probe is not the limit
@@ -155,4 +157,24 @@ static void	test_renderer_mode_value_parsing(void)
 	assert(tetrisu_renderer_mode_from_value("pixel")
 		== TETRISU_RENDERER_PIXEL);
 	printf("PASS test_renderer_mode_value_parsing\n");
+}
+
+/**
+ * @brief Bitmap tiers show authored art; only stationary tiers retransmit it.
+ */
+static void	test_notification_art_and_reemit_policy(void)
+{
+	assert(!tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_NONE));
+	assert(tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_STATIONARY));
+	assert(tetrisu_pixel_policy_supports_notification_art(
+			TETRISU_PIXELS_MOVABLE));
+	assert(!tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_NONE));
+	assert(tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_STATIONARY));
+	assert(!tetrisu_pixel_policy_notification_needs_reemit(
+			TETRISU_PIXELS_MOVABLE));
+	printf("PASS test_notification_art_and_reemit_policy\n");
 }

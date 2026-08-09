@@ -96,3 +96,70 @@ const t_theme	*db_get_theme(t_db *db, t_item_id tid)
 		return (NULL);
 	return (catalogue_theme(db->cat, tid));
 }
+
+/**
+ * @brief Copy the whole character catalogue into out, up to cap rows.
+ *
+ * The by-id accessors answer "what is this item", which is the only question a
+ * caller who already knows the id can ask. A store front asks the other one —
+ * "what is for sale" — and could only reach it by probing ids until one came
+ * back NULL, which turns a gap in the numbering into the end of the roster.
+ *
+ * No lock, for the same reason as db_get_character: the catalogue is immutable
+ * after db_open. Rows are copied rather than borrowed so the answer cannot
+ * outlive the handle.
+ *
+ * @param db The handle.
+ * @param out Destination array of at least cap character rows.
+ * @param cap Maximum rows to write.
+ * @param out_count Receives the number of rows written.
+ * @return DB_OK, DB_INVALID on a NULL argument, DB_FULL when cap is too small
+ *         to hold the whole roster (nothing is written).
+ */
+t_db_result	db_characters(t_db *db, t_character *out, size_t cap, size_t *out_count)
+{
+	size_t	i;
+
+	if (!db || !out || !out_count)
+		return (DB_INVALID);
+	if (db->cat->char_count > cap)
+		return (DB_FULL);
+	i = 0;
+	while (i < db->cat->char_count)
+	{
+		out[i] = db->cat->characters[i];
+		i++;
+	}
+	*out_count = db->cat->char_count;
+	return (DB_OK);
+}
+
+/**
+ * @brief Copy the whole theme catalogue into out, up to cap rows.
+ *
+ * The counterpart to db_characters; same reasoning, same lock-free read.
+ *
+ * @param db The handle.
+ * @param out Destination array of at least cap theme rows.
+ * @param cap Maximum rows to write.
+ * @param out_count Receives the number of rows written.
+ * @return DB_OK, DB_INVALID on a NULL argument, DB_FULL when cap is too small
+ *         to hold the whole roster (nothing is written).
+ */
+t_db_result	db_themes(t_db *db, t_theme *out, size_t cap, size_t *out_count)
+{
+	size_t	i;
+
+	if (!db || !out || !out_count)
+		return (DB_INVALID);
+	if (db->cat->theme_count > cap)
+		return (DB_FULL);
+	i = 0;
+	while (i < db->cat->theme_count)
+	{
+		out[i] = db->cat->themes[i];
+		i++;
+	}
+	*out_count = db->cat->theme_count;
+	return (DB_OK);
+}

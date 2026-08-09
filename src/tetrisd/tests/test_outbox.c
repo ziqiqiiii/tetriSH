@@ -4,8 +4,9 @@
 /*                                                                            */
 /*   The outbox is the seam that keeps one slow client from hurting anybody   */
 /*   else: responses queue in order and overflow closes the connection,       */
-/*   while STATE snapshots overwrite a single mailbox so a room's ticker      */
-/*   never waits. These cases pin exactly that behaviour.                     */
+/*   while STATE snapshots overwrite a single mailbox so a slow client never  */
+/*   holds up the tick that produced them. Popping never blocks, so an empty  */
+/*   outbox answers exactly the way a closed one does.                        */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,7 +19,7 @@ static void	test_responses_come_out_in_order(void);
 static void	test_overflow_is_reported_not_grown(void);
 static void	test_state_mailbox_keeps_only_the_latest(void);
 static void	test_responses_outrank_state(void);
-static void	test_close_wakes_the_writer_and_frees_pending(void);
+static void	test_close_frees_everything_pending(void);
 
 static int	push_text(t_outbox *ob, const char *text, bool as_state);
 static void	expect_text(t_outbox *ob, const char *text);
@@ -29,7 +30,7 @@ int	main(void)
 	test_overflow_is_reported_not_grown();
 	test_state_mailbox_keeps_only_the_latest();
 	test_responses_outrank_state();
-	test_close_wakes_the_writer_and_frees_pending();
+	test_close_frees_everything_pending();
 	return (0);
 }
 
@@ -59,7 +60,7 @@ static void	test_overflow_is_reported_not_grown(void)
 		i++;
 	}
 	assert(push_text(&ob, "one too many", false) == -1);
-	assert(atomic_load(&ob.overflowed) == true);
+	assert(ob.overflowed == true);
 	expect_text(&ob, "payload");
 	assert(push_text(&ob, "room again", false) == 0);
 	outbox_destroy(&ob);
@@ -92,7 +93,7 @@ static void	test_responses_outrank_state(void)
 	printf("PASS test_responses_outrank_state\n");
 }
 
-static void	test_close_wakes_the_writer_and_frees_pending(void)
+static void	test_close_frees_everything_pending(void)
 {
 	t_outbox	ob;
 	t_outbound_message	msg;
@@ -104,7 +105,7 @@ static void	test_close_wakes_the_writer_and_frees_pending(void)
 	assert(outbox_pop(&ob, &msg) == -1);
 	assert(push_text(&ob, "after close", false) == -1);
 	outbox_destroy(&ob);
-	printf("PASS test_close_wakes_the_writer_and_frees_pending\n");
+	printf("PASS test_close_frees_everything_pending\n");
 }
 
 static int	push_text(t_outbox *ob, const char *text, bool as_state)

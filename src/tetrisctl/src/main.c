@@ -33,8 +33,7 @@ int	main(int argc, char **argv)
 		return (usage());
 	if (config_load(&ctl, rc) != 0)
 	{
-		fprintf(stderr, "%s: cannot read the roster from %s\n",
-			TETRISCTL_COMPONENT_NAME, ctl.rc_path);
+		daemon_report_error(TETRISCTL_COMPONENT_NAME, ctl.rc_path, "cannot read the roster");
 		return (EXIT_FAILURE);
 	}
 	if (dispatch(&ctl, argv[i], i + 1 < argc ? argv[i + 1] : NULL) != 0)
@@ -60,7 +59,7 @@ static int	dispatch(const t_ctl *ctl, const char *verb, const char *only)
 		return (stop_command(ctl, only));
 	if (strcmp(verb, "restart") == 0)
 		return (restart_command(ctl, only));
-	fprintf(stderr, "%s: unknown command '%s'\n", TETRISCTL_COMPONENT_NAME, verb);
+	daemon_report_error(TETRISCTL_COMPONENT_NAME, verb, "unknown command");
 	usage();
 	return (-1);
 }

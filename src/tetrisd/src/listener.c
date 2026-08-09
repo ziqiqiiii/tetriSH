@@ -26,16 +26,14 @@ int	listener_open(int port, int *out_port)
 		return (-1);
 	on = 1;
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-	if (bind_any(fd, port) != 0 || listen(fd, SOMAXCONN) != 0
-		|| unixsock_set_nonblock(fd) != 0)
+	if (bind_any(fd, port) != 0 || listen(fd, SOMAXCONN) != 0 || unixsock_set_nonblock(fd) != 0)
 	{
 		close(fd);
 		return (-1);
 	}
 	len = sizeof(addr);
 	memset(&addr, 0, sizeof(addr));
-	if (out_port != NULL && getsockname(fd, (struct sockaddr *)&addr,
-			&len) == 0)
+	if (out_port != NULL && getsockname(fd, (struct sockaddr *)&addr, &len) == 0)
 		*out_port = (int)ntohs(addr.sin_port);
 	return (fd);
 }

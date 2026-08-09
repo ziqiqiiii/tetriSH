@@ -118,10 +118,10 @@ bool	solo_canvas_load(t_solo_render *solo)
 	memset(&tiles, 0, sizeof(tiles));
 	memset(&font, 0, sizeof(font));
 	memset(&numbers, 0, sizeof(numbers));
-	loaded = pixel_asset_load(SOLO_BACKGROUND_PATH, &background);
+	loaded = pixel_asset_load(solo->background_path, &background);
 	if (!loaded)
 		solo_canvas_set_error(solo, "Could not load Solo background",
-			SOLO_BACKGROUND_PATH);
+			solo->background_path);
 	if (loaded)
 		repair_background_alpha(&background);
 	if (loaded && !pixel_asset_load(DEFAULT_HUD_PATH, &hud))
@@ -135,11 +135,11 @@ bool	solo_canvas_load(t_solo_render *solo)
 		loaded = false;
 		solo_canvas_set_error(solo, "HUD must be 512x384", DEFAULT_HUD_PATH);
 	}
-	if (loaded && !pixel_asset_load(DEFAULT_MIRURUN_PATH, &mirurun))
+	if (loaded && !pixel_asset_load(solo->character_path, &mirurun))
 	{
 		loaded = false;
 		solo_canvas_set_error(solo, "Could not load Mirurun",
-			DEFAULT_MIRURUN_PATH);
+			solo->character_path);
 	}
 	if (loaded && !pixel_asset_load(DEFAULT_TILE_PATH, &tiles))
 	{
@@ -1385,11 +1385,18 @@ static void	draw_text(uint32_t *canvas, const t_solo_render *solo,
 		if (codepoint < 32 || codepoint >= 32 + FONT_COLUMNS * FONT_ROWS)
 			codepoint = '?';
 		glyph = (int)codepoint - 32;
+		/*
+		 * The source band covers the atlas ink, not just the cap band, so
+		 * descenders survive. Shifting the destination up by the rows added
+		 * above the cap row keeps the baseline where the layout put it.
+		 */
 		draw_mask(canvas, solo->font_pixels, solo->font_width,
 			(glyph % FONT_COLUMNS) * FONT_GLYPH_WIDTH,
-			(glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_Y,
-			FONT_GLYPH_WIDTH, FONT_INK_HEIGHT, draw_x, y,
-			glyph_width, glyph_height, tint, opacity);
+			(glyph / FONT_COLUMNS) * FONT_GLYPH_HEIGHT + FONT_INK_TOP,
+			FONT_GLYPH_WIDTH, FONT_INK_BOTTOM - FONT_INK_TOP, draw_x,
+			y - (FONT_INK_Y - FONT_INK_TOP) * glyph_height / FONT_INK_HEIGHT,
+			glyph_width, (FONT_INK_BOTTOM - FONT_INK_TOP) * glyph_height
+			/ FONT_INK_HEIGHT, tint, opacity);
 		draw_x += glyph_width + spacing;
 		text++;
 	}
@@ -1774,7 +1781,8 @@ static void	draw_piece(uint32_t *canvas, const t_solo_render *solo,
 static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
 	const t_solo_game *game)
 {
-	char		countdown[8];
+	char		countdown[12];
+	char		best[SOLO_BEST_CAPTION_MAX];
 	const char	*title;
 	const char	*help;
 	unsigned	best_opacity;
@@ -1805,22 +1813,23 @@ static void	draw_overlays(uint32_t *canvas, const t_solo_render *solo,
 			32, 1, g_pink, countdown_opacity);
 		return ;
 	}
+	best_opacity = 0;
 	if (game->phase == SOLO_GAME_OVER)
 	{
 		title = "TOP OUT";
 		help = "R RESTART";
-		best_opacity = solo_game_personal_best_opacity(game);
+		if (solo_game_best_caption(game, best, sizeof(best)))
+			best_opacity = solo_game_personal_best_opacity(game);
 	}
 	else
 	{
 		title = "PAUSED";
 		help = "P RESUME";
-		best_opacity = 0;
 	}
 	draw_text_centered(canvas, solo, title, x + 64, y + 6,
 		16, 16, 1, g_pink);
 	if (best_opacity > 0)
-		draw_text_centered_opacity(canvas, solo, "NEW PERSONAL BEST",
+		draw_text_centered_opacity(canvas, solo, best,
 			x + 64, y + 25, 5, 7, 1, g_pink, best_opacity);
 	draw_text_centered(canvas, solo, help, x + 64, y + 38,
 		8, 8, 1, g_white);

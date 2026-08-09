@@ -27,6 +27,7 @@ static void	test_gameplay_events_are_one_shot(void);
 static void	test_personal_best_only_finishes_once_at_game_over(void);
 static void	test_countdown_blocks_play_and_emits_cues(void);
 static void	test_score_and_ready_animations_expire(void);
+static void	test_presentation_tick_runs_without_the_rules(void);
 static void	test_rotation_stress_preserves_valid_state(void);
 static int	filled_cells(const t_board *board);
 static void	prepare_single_line_clear(t_solo_game *game, uint32_t seed);
@@ -66,6 +67,7 @@ int	main(void)
 	test_personal_best_only_finishes_once_at_game_over();
 	test_countdown_blocks_play_and_emits_cues();
 	test_score_and_ready_animations_expire();
+	test_presentation_tick_runs_without_the_rules();
 	test_rotation_stress_preserves_valid_state();
 	return (0);
 }
@@ -641,6 +643,45 @@ static void	test_clear_animation_then_level_and_meter_update(void)
 }
 
 /**
+ * @brief Exercises the presentation tick the online path runs on its own.
+ *
+ * Online, tetrisd owns gravity, locking and clears, so the client runs the
+ * animation timers and nothing else. This is that split: the countdown runs
+ * down and the piece does not move, because a client that advanced the rules
+ * here would be simulating a board the server already decided.
+ */
+static void	test_presentation_tick_runs_without_the_rules(void)
+{
+	t_solo_game	game;
+	int			row;
+	int			steps;
+
+	solo_game_init(&game, 4242u);
+	solo_game_start_countdown(&game);
+	row = game.active.row;
+	steps = 0;
+	while (game.countdown_active && steps < 16)
+	{
+		assert(solo_game_update_presentation(&game,
+				SOLO_COUNTDOWN_STEP_MS / 2));
+		steps++;
+	}
+	assert(!game.countdown_active);
+	assert(solo_game_countdown_value(&game) == -1);
+	assert(game.active.row == row);
+	assert(game.total_lines == 0 && game.scoring.total == 0);
+	/* The presentation tick does not even accrue gravity, let alone spend
+	 * it: two seconds of animation leave the piece's fall deadline where
+	 * the countdown found it, and only the rules move it. */
+	assert(!solo_game_update_presentation(&game, 0));
+	assert(game.active.row == row);
+	assert(!solo_game_update(&game, 0));
+	assert(solo_game_update(&game, gravity_interval_ms(game.level)));
+	assert(game.active.row == row + 1);
+	printf("PASS test_presentation_tick_runs_without_the_rules\n");
+}
+
+/**
  * @brief Exercises rotation stress preserves valid state.
  *
  * One hundred thousand alternating rotations must preserve a valid empty-board
@@ -758,6 +799,7 @@ static void	test_gameplay_events_are_one_shot(void)
 static void	test_personal_best_only_finishes_once_at_game_over(void)
 {
 	t_solo_game	game;
+	char		caption[SOLO_BEST_CAPTION_MAX];
 	unsigned	opacity;
 
 	solo_game_init(&game, 802u);
@@ -772,11 +814,15 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
 	assert(!solo_game_finish_personal_best(&game));
 	opacity = solo_game_personal_best_opacity(&game);
 	assert(opacity == 255);
+	assert(solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(strcmp(caption, "NEW PERSONAL BEST") == 0);
 	assert(solo_game_next_wake_ms(&game) == SOLO_PERSONAL_BEST_FRAME_MS);
+	/* The pulse ends lit and stays there: the panel it sits on is still up,
+	** and the score is the thing the player stayed to read. */
 	assert(solo_game_update(&game, SOLO_PERSONAL_BEST_PULSE_MS));
 	assert(solo_game_personal_best_opacity(&game) == 255);
-	assert(solo_game_update(&game, SOLO_PERSONAL_BEST_FADE_MS));
-	assert(solo_game_personal_best_opacity(&game) == 0);
+	assert(!solo_game_update(&game, 5000));
+	assert(solo_game_personal_best_opacity(&game) == 255);
 	solo_game_init(&game, 803u);
 	solo_game_set_personal_best(&game, UINT64_C(1000));
 	game.phase = SOLO_GAME_OVER;
@@ -784,6 +830,15 @@ static void	test_personal_best_only_finishes_once_at_game_over(void)
 	assert(!solo_game_finish_personal_best(&game));
 	assert(game.personal_best_checked);
 	assert(!game.new_personal_best);
+	/* Falling short still says what the record is, solid and unannounced. */
+	assert(solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(strcmp(caption, "BEST 1000") == 0);
+	assert(solo_game_personal_best_opacity(&game) == 255);
+	/* A player with no record yet is told nothing rather than "BEST 0". */
+	solo_game_init(&game, 804u);
+	game.phase = SOLO_GAME_OVER;
+	assert(!solo_game_best_caption(&game, caption, sizeof(caption)));
+	assert(solo_game_personal_best_opacity(&game) == 0);
 	printf("PASS test_personal_best_only_finishes_once_at_game_over\n");
 }
 

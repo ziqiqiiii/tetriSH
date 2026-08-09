@@ -39,6 +39,20 @@ typedef enum e_db_bool
 typedef uint64_t	t_player_id;
 typedef uint32_t	t_item_id;
 
+/*
+** The three running numbers are three different questions, and conflating any
+** two of them is a bug that has already happened here once:
+**
+**   leaderboard_score  the best single game this player has ever had. It is
+**                      what the board ranks on, and it only ever goes up by
+**                      being beaten - never by being played more.
+**   lifetime_points    every point ever scored, added up. Nothing ranks on it;
+**                      it exists so the wallet's exchange rate can be charged
+**                      against a running total instead of one game at a time,
+**                      which is what keeps a game worth less than the rate
+**                      from rounding away to nothing.
+**   wallet_points      what is left to spend, after everything bought.
+*/
 typedef struct s_player
 {
 	t_player_id	player_id;
@@ -46,6 +60,7 @@ typedef struct s_player
 	char		password_hashed[DB_HASH_LEN];
 	char		salt[DB_SALT_LEN];
 	int64_t		leaderboard_score;
+	int64_t		lifetime_points;
 	int64_t		wallet_points;
 	t_item_id	current_equipped_character;
 	t_item_id	current_equipped_theme;
@@ -91,7 +106,7 @@ t_db_result			db_buy_character(t_db *db, t_player_id id, t_item_id cid);
 t_db_result			db_buy_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_equip_character(t_db *db, t_player_id id, t_item_id cid);
 t_db_result			db_equip_theme(t_db *db, t_player_id id, t_item_id tid);
-t_db_result			db_record_game(t_db *db, t_player_id id, int64_t score_delta, int64_t points_delta, bool won);
+t_db_result			db_record_game(t_db *db, t_player_id id, int64_t game_score, int64_t points_delta, bool won);
 t_db_result			db_login(t_db *db, const char *username, const char *password_hashed, t_player *out);
 t_db_result			db_get_player(t_db *db, t_player_id id, t_player *out);
 
@@ -115,5 +130,19 @@ t_db_result			db_leaderboard(t_db *db, t_rank_entry *out, size_t cap, size_t *ou
 t_db_result			db_rank(t_db *db, t_player_id id, size_t *out_rank);
 const t_character	*db_get_character(t_db *db, t_item_id cid);
 const t_theme		*db_get_theme(t_db *db, t_item_id tid);
+
+/*
+** Enumerate the whole catalogue rather than one row of it. The by-id getters
+** answer "what is this item"; a store front asks "what is for sale", and could
+** only reach that by probing ids until one came back NULL — which would read a
+** gap in the numbering as the end of the roster. Ids are never renumbered
+** (they are written into players' owned lists), so gaps are expected.
+**
+** Rows are copied, so the answer does not borrow from the handle. DB_FULL
+** means cap could not hold the whole roster; nothing is written, because a
+** truncated catalogue would be indistinguishable from a short one.
+*/
+t_db_result			db_characters(t_db *db, t_character *out, size_t cap, size_t *out_count);
+t_db_result			db_themes(t_db *db, t_theme *out, size_t cap, size_t *out_count);
 
 #endif

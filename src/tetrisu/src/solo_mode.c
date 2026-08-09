@@ -7,36 +7,47 @@ static uint64_t	monotonic_ms(void);
 static int	milliseconds_until_render(uint64_t now_ms,
 	uint64_t last_render_ms);
 static bool	solo_display_ready(const t_solo_render *solo);
-static uint32_t	wait_solo_input(t_render_ctx *ctx, int timeout_ms,
+static uint32_t	wait_solo_input(t_render_ctx *ctx,
+	const t_solo_authority *authority, int timeout_ms,
 	ncinput *input, int *input_errno);
-static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
-	t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
+static bool	handle_solo_key(t_solo_authority *authority, t_solo_game *game,
+	t_audio_ctx *audio, t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed,
 	t_solo_handling_state *handling,
 	const t_solo_handling_config *handling_config);
-static bool	handle_solo_mouse(t_render_ctx *ctx, t_solo_render *solo,
-	t_solo_game *game, uint32_t key, const ncinput *input,
-	bool display_ready, bool resize_pending, bool *state_changed);
-static bool	dispatch_game_key(t_solo_game *game, uint32_t key);
-static bool	apply_handling_actions(t_solo_game *game,
-				t_solo_handling_state *handling,
+static bool	handle_solo_mouse(t_solo_authority *authority, t_render_ctx *ctx,
+	t_solo_render *solo, t_solo_game *game, uint32_t key,
+	const ncinput *input, bool display_ready, bool resize_pending,
+	bool *state_changed);
+static bool	dispatch_game_key(t_solo_authority *authority,
+				t_solo_game *game, uint32_t key);
+static bool	apply_handling_actions(t_solo_authority *authority,
+				t_solo_game *game, t_solo_handling_state *handling,
 				const t_solo_handling_config *config, int elapsed_ms);
 static void	play_solo_events(t_audio_ctx *audio, uint32_t events);
+static uint64_t	load_personal_best(const t_solo_authority *authority);
 
 /**
- * @brief Runs the temporary local-authority Solo game loop.
+ * @brief Runs the Solo game loop.
  *
- * AI-assisted: this loop owns input timing and rendering only. Migration to
- * `tetrisd` replaces local apply/update calls with HTTTP actions and STATE
- * responses without changing the render lifecycle.
+ * This loop owns input timing and rendering, and nothing else: who owns the
+ * board is solo_authority.c's question, and it answers either "tetrisd" or
+ * "the local rules" depending on whether the app has a session. The render
+ * lifecycle is the same either way, which is what the migration was for.
+ *
+ * The wait is over the terminal *and* the session when there is one, so a
+ * pushed snapshot wakes the loop as promptly as a keypress does rather than
+ * waiting out a poll interval.
  *
  * @param ctx Pointer to the initialized render context.
  * @param audio Pointer to the initialized audio context.
+ * @param net The app's session, or NULL to play offline.
  * @return 0 after restoring the home screen, or -1 when restoration fails.
  */
-int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
+int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 {
+	t_solo_authority	authority;
 	t_solo_game	game;
 	t_solo_render	solo;
 	t_solo_handling_config	handling_config;
@@ -73,8 +84,8 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 		(void)restore_home(ctx);
 		return (-1);
 	}
-	solo_game_init(&game, new_game_seed());
-	solo_game_set_personal_best(&game, solo_best_load());
+	solo_authority_open(&authority, net, &game, new_game_seed());
+	solo_game_set_personal_best(&game, load_personal_best(&authority));
 	solo_game_start_countdown(&game);
 	play_solo_events(audio, solo_game_take_events(&game));
 	handling_config = solo_handling_default_config();
@@ -130,7 +141,8 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 			input_errno = errno;
 		}
 		else
-			key = wait_solo_input(ctx, wait_ms, &input, &input_errno);
+			key = wait_solo_input(ctx, &authority, wait_ms, &input,
+					&input_errno);
 		if (render_notification_next_wake_ms(ctx) == 0)
 			render_notification_tick(ctx);
 		now_ms = monotonic_ms();
@@ -145,19 +157,24 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 		needs_draw = false;
 		force_render = false;
 		if (display_ready)
-			needs_draw = solo_game_update(&game, elapsed_ms);
+			needs_draw = solo_authority_update(&authority, &game,
+					elapsed_ms);
 		if (display_ready && solo_game_finish_personal_best(&game))
 		{
-			(void)solo_best_store(game.personal_best);
+			/* Online the record is the account's, and tetrisd already wrote
+			** it when it recorded the game; writing the file too would leave
+			** this machine claiming a score nobody playing offline set. */
+			if (!solo_authority_is_online(&authority))
+				(void)solo_best_store(game.personal_best);
 			needs_draw = true;
 		}
 		if (display_ready && solo_game_update_danger(&game, elapsed_ms))
 		{
 			if (game.danger_active)
-				audio_transition_music(audio, DANGER_BGM_PATH,
+				audio_transition_music(audio, ctx->theme_assets.danger_music,
 					AUDIO_MUSIC_TRANSITION_MS);
 			else
-				audio_transition_music(audio, HOME_BGM_PATH,
+				audio_transition_music(audio, ctx->theme_assets.music,
 					AUDIO_MUSIC_TRANSITION_MS);
 			needs_draw = true;
 		}
@@ -165,7 +182,7 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 			|| needs_draw;
 		if (display_ready && !game.paused && !game.countdown_active
 			&& game.phase == SOLO_ACTIVE)
-			needs_draw = apply_handling_actions(&game, &handling,
+			needs_draw = apply_handling_actions(&authority, &game, &handling,
 					&handling_config, elapsed_ms) || needs_draw;
 		resize_pending = render_terminal_geometry_changed(ctx);
 		if (key == (uint32_t)-1)
@@ -179,8 +196,8 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 		input_batch = 0;
 		while (key != 0)
 		{
-			if (handle_solo_key(&game, audio, ctx, &solo, key, &input,
-					display_ready,
+			if (handle_solo_key(&authority, &game, audio, ctx, &solo, key,
+					&input, display_ready,
 					&resize_pending, &needs_draw, &handling,
 					&handling_config))
 			{
@@ -228,8 +245,9 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 	}
 	if (mouse_enabled)
 		(void)notcurses_mice_disable(ctx->nc);
+	solo_authority_close(&authority);
 	render_solo_destroy(&solo);
-	audio_transition_music(audio, HOME_BGM_PATH, 0);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
 	return (restore_home(ctx));
 }
 
@@ -242,7 +260,7 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio)
 static int	restore_home(t_render_ctx *ctx)
 {
 	ncplane_erase(ctx->std);
-	if (render_background_replace(ctx, SPLASH_ASSET_PATH, false) < 0)
+	if (render_background_replace(ctx, ctx->theme_assets.homepage, false) < 0)
 		return (-1);
 	render_menu_create(ctx);
 	return (0);
@@ -319,33 +337,36 @@ static bool	solo_display_ready(const t_solo_render *solo)
  * @param input_errno Output errno captured beside the result.
  * @return A key code, 0 on timeout, or `(uint32_t)-1` on failure.
  */
-static uint32_t	wait_solo_input(t_render_ctx *ctx, int timeout_ms,
+static uint32_t	wait_solo_input(t_render_ctx *ctx,
+	const t_solo_authority *authority, int timeout_ms,
 	ncinput *input, int *input_errno)
 {
-	struct pollfd	poll_fd;
+	struct pollfd	poll_fd[2];
 	uint32_t		key;
+	int				count;
 	int				result;
 
-	poll_fd.fd = notcurses_inputready_fd(ctx->nc);
-	poll_fd.events = POLLIN;
-	poll_fd.revents = 0;
-	if (poll_fd.fd < 0)
+	poll_fd[0].fd = notcurses_inputready_fd(ctx->nc);
+	poll_fd[0].events = POLLIN;
+	poll_fd[0].revents = 0;
+	if (poll_fd[0].fd < 0)
 	{
 		*input_errno = EIO;
 		return ((uint32_t)-1);
 	}
+	count = 1;
+	poll_fd[1].fd = solo_authority_fd(authority);
+	poll_fd[1].events = POLLIN;
+	poll_fd[1].revents = 0;
+	if (poll_fd[1].fd >= 0)
+		count = 2;
 	errno = 0;
-	result = poll(&poll_fd, 1, timeout_ms);
+	result = poll(poll_fd, (nfds_t)count, timeout_ms);
 	*input_errno = errno;
 	if (result < 0)
 		return ((uint32_t)-1);
-	if (result == 0)
+	if (result == 0 || (poll_fd[0].revents & POLLIN) == 0)
 		return (0);
-	if ((poll_fd.revents & POLLIN) == 0)
-	{
-		*input_errno = EIO;
-		return ((uint32_t)-1);
-	}
 	errno = 0;
 	key = notcurses_get_nblock(ctx->nc, input);
 	*input_errno = errno;
@@ -366,8 +387,8 @@ static uint32_t	wait_solo_input(t_render_ctx *ctx, int timeout_ms,
  * @param state_changed In/out redraw request flag.
  * @return true when the Solo loop should return to the home screen.
  */
-static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
-	t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
+static bool	handle_solo_key(t_solo_authority *authority, t_solo_game *game,
+	t_audio_ctx *audio, t_render_ctx *ctx, t_solo_render *solo, uint32_t key,
 	const ncinput *input, bool display_ready,
 	bool *resize_pending, bool *state_changed,
 	t_solo_handling_state *handling,
@@ -376,7 +397,7 @@ static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
 	t_solo_action	action;
 
 	if (nckey_mouse_p(key))
-		return (handle_solo_mouse(ctx, solo, game, key, input,
+		return (handle_solo_mouse(authority, ctx, solo, game, key, input,
 				display_ready, *resize_pending, state_changed));
 	if (key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_DOWN)
 	{
@@ -391,14 +412,21 @@ static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
 		}
 		if (solo_handling_event(handling, handling_config, key,
 				input->evtype, &action))
-			*state_changed = solo_game_apply_action(game, action)
+			*state_changed = solo_authority_action(authority, game, action)
 				|| *state_changed;
 		return (false);
 	}
 	if (input->evtype == NCTYPE_RELEASE)
 		return (false);
-	if (key == NCKEY_ESC || key == NCKEY_EOF || key == 'q' || key == 'Q')
+	if (key == NCKEY_EOF)
 		return (true);
+	if (key == NCKEY_ESC || key == 'q' || key == 'Q')
+	{
+		if (confirmation_prompt_run(ctx, audio, CONFIRM_LEAVE_MATCH))
+			return (true);
+		*state_changed = true;
+		return (false);
+	}
 	if (key == NCKEY_RESIZE || key == 12u)
 	{
 		*resize_pending = true;
@@ -418,27 +446,23 @@ static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
 	{
-		uint64_t	personal_best;
-
-		personal_best = game->personal_best;
-		solo_game_init(game, new_game_seed());
-		solo_game_set_personal_best(game, personal_best);
-		solo_game_start_countdown(game);
-		audio_transition_music(audio, HOME_BGM_PATH,
+		*state_changed = solo_authority_restart(authority, game,
+				new_game_seed()) || *state_changed;
+		audio_transition_music(audio, ctx->theme_assets.music,
 			AUDIO_MUSIC_TRANSITION_MS);
 		solo_handling_reset(handling);
-		*state_changed = true;
 		return (false);
 	}
 	if (key == 'p' || key == 'P')
 	{
-		solo_game_toggle_pause(game);
+		*state_changed = solo_authority_pause(authority, game)
+			|| *state_changed;
 		solo_handling_reset(handling);
-		*state_changed = true;
 		return (false);
 	}
 	if (display_ready && !*resize_pending)
-		*state_changed = dispatch_game_key(game, key) || *state_changed;
+		*state_changed = dispatch_game_key(authority, game, key)
+			|| *state_changed;
 	return (false);
 }
 
@@ -459,14 +483,14 @@ static bool	handle_solo_key(t_solo_game *game, t_audio_ctx *audio,
  * @param state_changed In/out redraw request flag.
  * @return false; mouse input never exits Solo mode.
  */
-static bool	handle_solo_mouse(t_render_ctx *ctx, t_solo_render *solo,
-	t_solo_game *game, uint32_t key, const ncinput *input,
-	bool display_ready, bool resize_pending, bool *state_changed)
+static bool	handle_solo_mouse(t_solo_authority *authority, t_render_ctx *ctx,
+	t_solo_render *solo, t_solo_game *game, uint32_t key,
+	const ncinput *input, bool display_ready, bool resize_pending,
+	bool *state_changed)
 {
-	t_solo_ability_result	result;
-	t_solo_ability			ability;
-	int						canvas_x;
-	int						canvas_y;
+	t_solo_ability	ability;
+	int				canvas_x;
+	int				canvas_y;
 
 	ability = SOLO_ABILITY_NONE;
 	if (display_ready && !resize_pending
@@ -480,39 +504,35 @@ static bool	handle_solo_mouse(t_render_ctx *ctx, t_solo_render *solo,
 		return (false);
 	if (game->countdown_active)
 		return (false);
-	result = solo_game_activate_ability(game, ability);
-	if (result != SOLO_ABILITY_RESULT_INVALID)
+	if (solo_authority_ability(authority, game, ability))
 		*state_changed = true;
 	return (false);
 }
 
 /**
- * @brief Maps a gameplay key to one local game action.
+ * @brief Maps a gameplay key to one action, whoever ends up applying it.
  *
- * @param game Pointer to the local Solo state.
+ * @param authority Whoever owns the board.
+ * @param game Solo view model.
  * @param key Notcurses key code or Unicode code point.
- * @return true when the action changed the game state, otherwise false.
+ * @return true when the renderer has something new to draw.
  */
-static bool	dispatch_game_key(t_solo_game *game, uint32_t key)
+static bool	dispatch_game_key(t_solo_authority *authority,
+	t_solo_game *game, uint32_t key)
 {
-	t_solo_ability_result	result;
-
 	if (game->countdown_active)
 		return (false);
 	if (key >= '1' && key <= '4')
-	{
-		result = solo_game_activate_ability(game,
-			(t_solo_ability)(SOLO_ABILITY_MIRURUN + key - '1'));
-		return (result != SOLO_ABILITY_RESULT_INVALID);
-	}
+		return (solo_authority_ability(authority, game,
+				(t_solo_ability)(SOLO_ABILITY_MIRURUN + key - '1')));
 	if (key == NCKEY_UP || key == 'x' || key == 'X')
-		return (solo_game_apply_action(game, SOLO_ROTATE_CW));
+		return (solo_authority_action(authority, game, SOLO_ROTATE_CW));
 	else if (key == 'z' || key == 'Z')
-		return (solo_game_apply_action(game, SOLO_ROTATE_CCW));
+		return (solo_authority_action(authority, game, SOLO_ROTATE_CCW));
 	else if (key == ' ')
-		return (solo_game_apply_action(game, SOLO_HARD_DROP));
+		return (solo_authority_action(authority, game, SOLO_HARD_DROP));
 	else if (key == 'c' || key == 'C')
-		return (solo_game_apply_action(game, SOLO_HOLD));
+		return (solo_authority_action(authority, game, SOLO_HOLD));
 	return (false);
 }
 
@@ -525,8 +545,8 @@ static bool	dispatch_game_key(t_solo_game *game, uint32_t key)
  * @param elapsed_ms Elapsed monotonic time.
  * @return true when at least one action changed visible game state.
  */
-static bool	apply_handling_actions(t_solo_game *game,
-	t_solo_handling_state *handling,
+static bool	apply_handling_actions(t_solo_authority *authority,
+	t_solo_game *game, t_solo_handling_state *handling,
 	const t_solo_handling_config *config, int elapsed_ms)
 {
 	t_solo_action	actions[SOLO_HANDLING_ACTION_CAP];
@@ -541,7 +561,8 @@ static bool	apply_handling_actions(t_solo_game *game,
 	index = 0;
 	while (index < count)
 	{
-		changed = solo_game_apply_action(game, actions[index]) || changed;
+		changed = solo_authority_action(authority, game, actions[index])
+			|| changed;
 		index++;
 	}
 	return (changed);
@@ -596,4 +617,27 @@ static void	play_solo_events(t_audio_ctx *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_TICK);
 	if ((events & SOLO_EVENT_COUNTDOWN_GO) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_GO);
+}
+
+/**
+ * @brief Loads the best score this game is to be measured against.
+ *
+ * Online the record belongs to the account, so it comes out of the same
+ * PROFILE the Marketplace reads and follows the player to whatever terminal
+ * they sign in at. Offline there is no account to ask and the machine's own
+ * file stands in, which is also the fallback when the server will not answer -
+ * starting a signed-in player at zero would announce their next bad game as a
+ * personal best.
+ *
+ * @param authority Authority running this game.
+ * @return The best score to compare this game against.
+ */
+static uint64_t	load_personal_best(const t_solo_authority *authority)
+{
+	t_body_profile	profile;
+
+	if (solo_authority_is_online(authority)
+		&& net_profile(authority->net, &profile) == 0)
+		return (profile.score);
+	return (solo_best_load());
 }

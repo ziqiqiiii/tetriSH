@@ -41,8 +41,8 @@ t_sessionio_result	sessionio_read_exact(int fd, void *buf, size_t len)
  * @brief Writes exactly len bytes to a socket, retrying short writes.
  *
  * Loops over send(2) until the full length is written, restarting on EINTR.
- * MSG_NOSIGNAL converts a closed-peer SIGPIPE into EPIPE so one broken
- * connection cannot terminate its daemon process.
+ * Uses MSG_NOSIGNAL per send when available, or enables SO_NOSIGPIPE on the
+ * socket when supported, so a closed peer cannot raise SIGPIPE.
  *
  * @param fd The connected socket descriptor.
  * @param buf Source buffer of at least len bytes.
@@ -54,12 +54,28 @@ int	sessionio_write_exact(int fd, const void *buf, size_t len)
 	const unsigned char	*in;
 	size_t				done;
 	ssize_t				n;
+	int					send_flags;
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+	int					one;
+#endif
 
 	in = buf;
 	done = 0;
+	if (len == 0)
+		return (0);
+#ifdef MSG_NOSIGNAL
+	send_flags = MSG_NOSIGNAL;
+#else
+	send_flags = 0;
+# ifdef SO_NOSIGPIPE
+	one = 1;
+	if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)) < 0)
+		return (-1);
+# endif
+#endif
 	while (done < len)
 	{
-		n = send(fd, in + done, len - done, MSG_NOSIGNAL);
+		n = send(fd, in + done, len - done, send_flags);
 		if (n <= 0)
 		{
 			if (n < 0 && errno == EINTR)

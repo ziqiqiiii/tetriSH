@@ -149,7 +149,7 @@ static void	test_sighup_rereads_the_configuration(void)
 	assert(raise(SIGHUP) == 0);
 	assert(player(&fx, &hc, "amber") == 0);
 	assert(simple(&hc, "LIST", TETRISD_ROUTE_ROOMS, NULL) == 200);
-	assert(atomic_load(&fx.srv->tick_ms) == 25);
+	assert(fx.srv->tick_ms == 25);
 	assert(fx.srv->cfg.log_level == COREIPC_LOG_ERROR);
 	signals_restore();
 	hc_close(&hc);

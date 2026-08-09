@@ -81,7 +81,7 @@ db_open("data/", "lib/libmacminidb/config/", &db);
 db_signup(db, "amber", hashed_password, salt, &id);
 db_buy_character(db, id, 2);
 db_equip_character(db, id, 2);
-db_record_game(db, id, /* score_delta */ 120, /* points_delta */ 50, /* won */ true);
+db_record_game(db, id, /* game_score */ 120, /* points_delta */ 50, /* won */ true);
 
 t_rank_entry top[10];
 size_t count;
@@ -96,9 +96,22 @@ db_close(db);
 
 | Document | Fields |
 |---|---|
-| **Player** | `player_id`, `username`, `password_hashed`, `salt`, `leaderboard_score`, `wallet_points`, `current_equipped_character`, `current_equipped_theme`, `owned_characters`, `owned_themes`, `games_played`, `games_won` |
+| **Player** | `player_id`, `username`, `password_hashed`, `salt`, `leaderboard_score`, `lifetime_points`, `wallet_points`, `current_equipped_character`, `current_equipped_theme`, `owned_characters`, `owned_themes`, `games_played`, `games_won` |
 | **Character** | `character_id`, `name`, `abilities` (bitfield), `cost_points` |
 | **Theme** | `theme_id`, `name`, `description` |
+
+A Player carries three running numbers and they answer three different
+questions — conflating any two is a bug that has happened here already:
+
+| Field | Is | Moves when |
+|---|---|---|
+| `leaderboard_score` | the best single game ever played | that game is beaten — never by playing more |
+| `lifetime_points` | every point ever scored, added up | every recorded game |
+| `wallet_points` | what is left to spend | earning, and every purchase |
+
+The board ranks on the first. The record format is positional and unversioned,
+so a log written before `lifetime_points` existed does not decode against the
+current one — wiping the data directory (`make reset`) is the migration.
 
 ---
 
@@ -120,7 +133,7 @@ db_close(db);
 | `db_buy_theme(db, id, tid)` | Deduct `cost_points` and add a theme to `owned_themes`; `DB_INSUFFICIENT` if the wallet is short |
 | `db_equip_character(db, id, cid)` | Set `current_equipped_character`; `DB_NOT_OWNED` if the player lacks it |
 | `db_equip_theme(db, id, tid)` | Set `current_equipped_theme`; `DB_NOT_OWNED` if the player lacks it |
-| `db_record_game(db, id, score_delta, points_delta, won)` | Post-game update: leaderboard score, wallet points, games played/won — the only write that touches the skip list |
+| `db_record_game(db, id, game_score, points_delta, won)` | Post-game update: ranks the player on their **best** single game, adds `game_score` to `lifetime_points`, applies the wallet delta, bumps games played/won — the only write that touches the skip list |
 
 ### Reads
 
@@ -135,6 +148,10 @@ db_close(db);
 | `db_rank(db, id, out_rank)` | Player's 1-based leaderboard rank |
 | `db_get_character(db, cid)` | Look up a catalogue character by id, or `NULL` |
 | `db_get_theme(db, tid)` | Look up a catalogue theme by id, or `NULL` |
+| `db_characters(db, out, cap, out_count)` | Copy the whole character catalogue; `DB_FULL` when `cap` cannot hold it |
+| `db_themes(db, out, cap, out_count)` | Copy the whole theme catalogue; `DB_FULL` when `cap` cannot hold it |
+
+The by-id getters answer "what is this item"; a store front asks "what is for sale". Probing ids until one returns `NULL` would be wrong because catalogue ids carry gaps — ids are written into players' `owned_characters` / `owned_themes` lists and are never renumbered, so a gap is not the end of the roster.
 
 ---
 
