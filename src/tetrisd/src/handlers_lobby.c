@@ -4,7 +4,6 @@
 static size_t		list_rooms(t_server *srv, t_body_room_row *rows);
 static int			read_mode(t_request_context *ctx, t_game_mode *out);
 static int			create_room(t_request_context *ctx, t_game_mode mode);
-static const char	*room_name_from_path(const t_request_context *ctx);
 static int			join_room(t_request_context *ctx, const char *name);
 static t_server_room	*addressed_room(t_request_context *ctx, const char **name);
 static int			start_status(t_request_context *ctx, t_start_verdict verdict);
@@ -150,7 +149,7 @@ int	join_handler(const t_htttp_message *msg, void *context)
 			return (400);
 		return (create_room(ctx, mode));
 	}
-	name = room_name_from_path(ctx);
+	name = request_room_name(ctx);
 	if (name == NULL)
 		return (404);
 	return (join_room(ctx, name));
@@ -264,26 +263,6 @@ static int	join_room(t_request_context *ctx, const char *name)
 }
 
 /**
- * @brief Extracts the room name from a /room/<name> path.
- *
- * @param ctx Request context holding the path.
- * @return Borrowed pointer to the name, or NULL when the path is not a room.
- */
-static const char	*room_name_from_path(const t_request_context *ctx)
-{
-	const char	*name;
-
-	if (ctx->msg->path == NULL
-		|| strncmp(ctx->msg->path, TETRISD_ROUTE_ROOM_PREFIX, strlen(TETRISD_ROUTE_ROOM_PREFIX)) != 0)
-		return (NULL);
-	name = ctx->msg->path + strlen(TETRISD_ROUTE_ROOM_PREFIX);
-	if (name[0] == '\0' || strchr(name, '/') != NULL
-		|| strlen(name) >= ROOM_NAME_MAX)
-		return (NULL);
-	return (name);
-}
-
-/**
  * @brief Reads the requested mode from a create request's body.
  *
  * @param ctx Request context.
@@ -352,7 +331,7 @@ static int	start_status(t_request_context *ctx, t_start_verdict verdict)
 static t_server_room	*addressed_room(t_request_context *ctx,
 			const char **name)
 {
-	*name = room_name_from_path(ctx);
+	*name = request_room_name(ctx);
 	if (*name == NULL)
 		return (NULL);
 	return (server_room_resolve(ctx->srv, ctx->cli, *name));

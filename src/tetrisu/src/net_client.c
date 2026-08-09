@@ -21,6 +21,7 @@ static int	send_message(t_net_client *net, t_htttp_message *msg);
 static int	receive_message(t_net_client *net, t_htttp_message *out,
 				int timeout_ms);
 static bool	take_state(t_net_client *net, const t_htttp_message *msg);
+static void	take_chat(t_net_client *net, const t_htttp_message *msg);
 static void	take_player_id(t_net_client *net, const t_htttp_message *msg);
 static void	take_reason(const t_htttp_message *msg, t_net_result *out);
 static void	take_body(const t_htttp_message *msg, t_net_result *out);
@@ -197,6 +198,7 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 			return (0);
 		}
 		take_state(net, &msg);
+		take_chat(net, &msg);
 		htttp_message_free(&msg);
 	}
 	return (rc);
@@ -226,6 +228,7 @@ int	net_pump(t_net_client *net)
 	{
 		if (take_state(net, &msg))
 			fresh = 1;
+		take_chat(net, &msg);
 		htttp_message_free(&msg);
 	}
 	if (net->state == NET_OFFLINE)
@@ -369,6 +372,32 @@ static bool	take_state(t_net_client *net, const t_htttp_message *msg)
 	net->last_seq = snap.seq;
 	net->has_state = true;
 	return (true);
+}
+
+/**
+ * @brief Files a server-pushed CHAT into the room's feed.
+ *
+ * Called from both readers. A chat line that crosses a reply is read here by
+ * net_request, not by net_pump, and dropping it because the wrong function
+ * happened to see it is the mistake `applied_seq` already documents for
+ * snapshots.
+ *
+ * Unlike a snapshot a line is never superseded, so nothing is compared: every
+ * message that decodes is kept, and the ring decides what falls off the end.
+ *
+ * @param net Client whose feed receives the line.
+ * @param msg The message that arrived.
+ */
+static void	take_chat(t_net_client *net, const t_htttp_message *msg)
+{
+	t_body_chat	line;
+
+	if (msg->type != HTTTP_MESSAGE_REQUEST || msg->method == NULL
+		|| strcmp(msg->method, "CHAT") != 0 || msg->body == NULL)
+		return ;
+	if (body_chat_decode((const char *)msg->body, msg->body_len, &line) != 0)
+		return ;
+	net_chat_take(net, &line);
 }
 
 /**

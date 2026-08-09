@@ -18,7 +18,8 @@ static const t_htttp_route	g_routes[] = {
 	{"LEADERBOARD", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, leaderboard_handler},
 	{"PROFILE", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, profile_handler},
 	{"BUY", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, buy_handler},
-	{"EQUIP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, equip_handler}
+	{"EQUIP", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, equip_handler},
+	{"CHAT", HTTTP_VALIDATE_AUTHENTICATED_REQUEST, chat_handler}
 };
 
 // Static Functions

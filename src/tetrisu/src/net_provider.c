@@ -63,6 +63,11 @@ static t_app_provider_result	net_leave_room(void *userdata,
 				const char *room_id);
 static t_app_provider_result	net_start_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
+static t_app_provider_result	net_send_chat(void *userdata,
+				const char *room_id, const char *text,
+				t_app_room_view_model *view);
+static void			fill_chat(const t_net_client *net,
+				t_app_room_view_model *view);
 static t_app_game_mode		map_body_mode(t_body_mode mode);
 static t_app_room_state		map_body_status(t_body_room_status status);
 static bool			map_room_snapshot(t_app_net_session *session,
@@ -91,6 +96,7 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->refresh_room = net_refresh_room;
 	provider->leave_room = net_leave_room;
 	provider->start_room = net_start_room;
+	provider->send_chat = net_send_chat;
 	provider->buy_item = net_buy_item;
 	provider->equip_item = net_equip_item;
 }
@@ -794,7 +800,87 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 	if (body_room_decode(result.body, strlen(result.body), &snapshot) != 0
 		|| !map_room_snapshot(session, &snapshot, view))
 		return (APP_PROVIDER_INVALID);
+	fill_chat(&session->net, view);
 	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Posts one line to the room's feed and re-reads the room.
+ *
+ * Nothing is appended locally. The server sends the sender their own line
+ * along with everybody else's, so the refresh below is what puts it on the
+ * screen - in the server's order, with the server's sequence number, exactly
+ * as the other players will see it.
+ *
+ * @param userdata Network session.
+ * @param room_id Room the message is for.
+ * @param text The message.
+ * @param view Receives the room as it stands afterwards, feed included.
+ * @return Provider result; INVALID when the server refused the message.
+ */
+static t_app_provider_result	net_send_chat(void *userdata,
+	const char *room_id, const char *text, t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| text == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (net_chat_send(&session->net, room_id, text, &result) != 0)
+	{
+		if (result.status == 0)
+			return (APP_PROVIDER_UNAVAILABLE);
+		return (APP_PROVIDER_INVALID);
+	}
+	return (net_refresh_room(userdata, room_id, view));
+}
+
+/**
+ * @brief Copies the client's feed ring onto the room a screen will draw.
+ *
+ * The ring is longer than the panel, so the tail is what is taken: a feed
+ * shows what was said most recently, and dropping the top of it is what the
+ * ring itself already does one line at a time.
+ *
+ * @param net Client holding the received lines.
+ * @param view Room model receiving them, oldest of the kept lines first.
+ */
+static void	fill_chat(const t_net_client *net, t_app_room_view_model *view)
+{
+	const t_body_chat	*line;
+	size_t				held;
+	size_t				first;
+	size_t				index;
+
+	held = net_chat_held(net);
+	first = 0;
+	if (held > APP_ROOM_CHAT_MAX)
+		first = held - APP_ROOM_CHAT_MAX;
+	view->chat_count = 0;
+	index = first;
+	while (index < held)
+	{
+		line = net_chat_at(net, index);
+		if (line == NULL)
+			break ;
+		view->chat[view->chat_count].system = line->system;
+		snprintf(view->chat[view->chat_count].author,
+			sizeof(view->chat[view->chat_count].author), "%s", line->sender);
+		/*
+		 * A line the server will carry is longer than one the panel draws, so
+		 * the cut is stated here rather than left to snprintf. It is the
+		 * display that is short, not the message.
+		 */
+		snprintf(view->chat[view->chat_count].text,
+			sizeof(view->chat[view->chat_count].text), "%.*s",
+			APP_ROOM_CHAT_TEXT_MAX - 1, line->text);
+		view->chat_count++;
+		index++;
+	}
 }
 
 /**

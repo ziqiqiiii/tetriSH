@@ -125,9 +125,12 @@ Input is an explicit pointer and length — no NUL terminator required.
 
 ## Method Table
 
-Only `STATE` is server-originated, pushed in *request* form and arriving
-between ordinary replies. Every other method is client-initiated
-request/response. Auth means a non-empty `Player-Id` header.
+Two methods are server-originated, pushed in *request* form and arriving
+between ordinary replies: `STATE`, and `CHAT` when the server is delivering a
+line of a room's feed. `CHAT` is the only method that travels both ways under
+one name — a player sends one to post, and the server sends one to everybody
+seated in the room, its own narration included. Every other method is
+client-initiated request/response. Auth means a non-empty `Player-Id` header.
 
 | Method | Path | Auth | Purpose |
 |---|---|:---:|---|
@@ -295,8 +298,14 @@ without mutating the message.
 | Response | RFC 1123 UTC `Date` naming a real Gregorian date whose weekday matches |
 | Request with body | `Content-Type: application/tetris-command` |
 | `STATE` request with body | `Content-Type: application/tetris-state` |
+| `CHAT` request with body | Either `application/tetris-command` or `application/tetris-chat` |
 | Response with body | `Content-Type: application/tetris-status` |
 | Authenticated request | Non-empty `Player-Id`, when `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` is set |
+
+`CHAT` takes two types because it is the one method that travels both ways:
+`tetris-command` going up, `tetris-chat` coming down. A validator cannot see
+which direction a message is going, so it accepts either for that method and
+exactly one for every other.
 
 `SIGNUP`, `LOGIN`, the initial `JOIN`, and server-originated `STATE` omit the
 authenticated-request flag. `htttp_format_date()` writes a deterministic
@@ -389,6 +398,7 @@ Single public header, `include/htttp.h`. Handler signature is
 | `HTTTP_CONTENT_TYPE_COMMAND` | `"application/tetris-command"` |
 | `HTTTP_CONTENT_TYPE_STATE` | `"application/tetris-state"` |
 | `HTTTP_CONTENT_TYPE_STATUS` | `"application/tetris-status"` |
+| `HTTTP_CONTENT_TYPE_CHAT` | `"application/tetris-chat"` |
 | `HTTTP_VALIDATE_AUTHENTICATED_REQUEST` | `0x01` |
 
 ---

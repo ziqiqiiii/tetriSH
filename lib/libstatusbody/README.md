@@ -10,7 +10,7 @@ receives.
 - [Build And Test](#build-and-test)
 - [Usage](#usage)
 - [Codec Contract](#codec-contract)
-- [The Five Codecs](#the-five-codecs)
+- [The Six Codecs](#the-six-codecs)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 
@@ -80,7 +80,7 @@ On failure both return `-1` and set `errno`:
 
 
 ---
-## The Five Codecs
+## The Six Codecs
 
 One codec per HTTTP body type, each its own `.c` file. Every subsection below
 gives the pair's functions, then the wire format those functions read and write.
@@ -155,6 +155,35 @@ occupied-seat count. Each following row carries the server slot, player id,
 owner/player role, ready/waiting state, and username. Rows must be in strictly
 increasing server-slot order; refreshes therefore preserve a stable roster.
 
+### Chat — `application/tetris-chat` (`chat.c`)
+
+| Function | Description |
+|---|---|
+| `body_chat_encode(in, out, cap)` | Serialise one line of a room's feed; rejects an empty or unprintable `text`, and a sender that disagrees with the kind |
+| `body_chat_decode(buf, len, out)` | Parse one feed line; requires the schema order, a non-zero `seq`, and no trailing bytes |
+
+Player chat and system narration are **one type with two authors**, not two
+mechanisms. Narration is a line the server wrote, so `kind` is `system` and
+there is no `sender` line at all — an absent key rather than an empty one, so
+"who wrote this" has exactly one representation per kind.
+
+```
+seq 7
+at 1786294796099
+kind player
+sender amber          (absent when kind is system)
+text good luck all
+```
+
+- `text` runs to end of line and may contain spaces, so it is last and nothing
+  follows it. A newline or any other control character would end the line early
+  and re-decode as a different message, so the codec **rejects** them rather
+  than escaping — one message has one representation. The same rule keeps an
+  escape sequence arriving as chat from being somebody else's cursor.
+- `seq` is the room's own counter, starting at 1. `tetrisd`'s chat lane drops
+  its oldest message rather than closing a slow client, and this is what makes
+  that gap visible instead of silent.
+
 ### Profile — ProfileView (`profile.c`)
 
 | Function | Description |
@@ -224,6 +253,7 @@ libstatusbody/
 │   ├── state.c             application/tetris-state encode/decode
 │   ├── rooms.c             LIST /rooms row encode/decode
 │   ├── room.c              LIST /room/<name> snapshot encode/decode
+│   ├── chat.c              application/tetris-chat encode/decode
 │   ├── profile.c           ProfileView encode/decode
 │   ├── leaderboard.c       leaderboard row encode/decode
 │   ├── catalogue.c         LIST /store catalogue encode/decode

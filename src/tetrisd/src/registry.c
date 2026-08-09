@@ -110,6 +110,33 @@ int	registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
 }
 
 /**
+ * @brief Hands one line of a room's feed to a player's outbox.
+ *
+ * Kept apart from registry_enqueue rather than added to it as a third mode,
+ * because the two differ in the one thing that matters: a response that will
+ * not fit closes the connection, and a chat line never does. Chat therefore
+ * cannot reach the code above that calls shutdown, which is the whole point.
+ *
+ * @param rg Registry to look in.
+ * @param pid Player the message is addressed to.
+ * @param bytes Serialised CHAT push; owned by the outbox once accepted.
+ * @param len Length of bytes.
+ * @return 0 when queued, -1 when the player is gone or the outbox is closed.
+ */
+int	registry_enqueue_chat(t_registry *rg, t_player_id pid,
+		unsigned char *bytes, size_t len)
+{
+	t_client	*cli;
+
+	if (rg == NULL || bytes == NULL)
+		return (-1);
+	cli = find_by_player(rg, pid);
+	if (cli == NULL)
+		return (-1);
+	return (outbox_push_chat(&cli->outbox, bytes, len));
+}
+
+/**
  * @brief Publishes a connection's identity.
  *
  * A player id and the CLI_AUTHED state together are what every lookup matches

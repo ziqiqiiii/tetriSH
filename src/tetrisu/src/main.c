@@ -77,6 +77,9 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 					const t_app_data_provider *provider,
 					t_app_navigation *navigation, t_mp_session *session,
 					t_room_action action);
+static bool	send_room_chat(const t_app_data_provider *provider,
+					t_app_room_view_model *room,
+					t_waiting_room_state *state);
 static void	refresh_waiting_room(const t_app_data_provider *provider,
 					t_mp_session *session, bool *changed);
 static int	waiting_room_wait_ms(const t_waiting_room_state *state,
@@ -1880,7 +1883,7 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	}
 	if (action == ROOM_ACTION_SEND_CHAT)
 	{
-		if (waiting_room_send_chat(room, &session->room_state))
+		if (send_room_chat(provider, room, &session->room_state))
 			audio_play_menu_select(audio);
 		return (true);
 	}
@@ -1940,6 +1943,47 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
  * @param session Multiplayer screen session.
  * @param changed Receives whether anything renderable changed.
  */
+/**
+ * @brief Sends the composed line, through the server when there is one.
+ *
+ * A provider that serves a feed owns it entirely: the line goes up, and the
+ * copy that comes back down is what gets drawn. Appending locally as well
+ * would put the message on screen twice, and the local copy would be the one
+ * without the server's ordering.
+ *
+ * With no such provider - an offline room - the local append is the feed,
+ * which is what waiting_room_send_chat has always done.
+ *
+ * @param provider Data provider, possibly serving no feed.
+ * @param room Room model, updated with the server's answer on success.
+ * @param state Waiting-room state holding the composed line.
+ * @return true when the line was sent and the composer should clear.
+ */
+static bool	send_room_chat(const t_app_data_provider *provider,
+	t_app_room_view_model *room, t_waiting_room_state *state)
+{
+	if (provider == NULL || provider->send_chat == NULL)
+		return (waiting_room_send_chat(room, state));
+	if (state->compose_length == 0)
+	{
+		state->feedback = ROOM_FEEDBACK_CHAT_EMPTY;
+		state->feedback_value = 0;
+		return (false);
+	}
+	if (provider->send_chat(provider->userdata, room->id, state->compose,
+			room) != APP_PROVIDER_OK)
+	{
+		state->feedback = ROOM_FEEDBACK_UNAVAILABLE;
+		state->feedback_value = 0;
+		return (false);
+	}
+	state->compose[0] = '\0';
+	state->compose_length = 0;
+	state->feedback = ROOM_FEEDBACK_CHAT_SENT;
+	state->feedback_value = 0;
+	return (true);
+}
+
 static void	refresh_waiting_room(const t_app_data_provider *provider,
 	t_mp_session *session, bool *changed)
 {

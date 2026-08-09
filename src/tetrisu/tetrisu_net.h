@@ -34,6 +34,13 @@
 # define NET_CONNECT_TIMEOUT_MS	5000
 # define NET_REPLY_TIMEOUT_MS	4000
 # define TETRISU_PASSWORD_MAX	128
+/*
+** How much of a room's feed this client keeps. tetrisd holds no history at
+** all - a player who joins late has missed what was said - so this is the
+** whole of the backlog anybody has, and it is sized to what a panel can show
+** rather than to what was sent.
+*/
+# define NET_CHAT_HISTORY		32
 
 /* the routes tetrisd serves, spelled once (src/tetrisd/README.md) */
 # define TETRISU_ROUTE_ACCOUNT	"/account"
@@ -112,6 +119,20 @@ typedef struct s_net_client
 	** input, which during play is most of them.
 	*/
 	uint64_t		applied_seq;
+	/*
+	** The room's feed, oldest first, dropping its oldest when full - the same
+	** bargain tetrisd's chat lane makes, for the same reason: a feed is worth
+	** having incompletely and never worth stalling for.
+	**
+	** `received` counts every line that ever arrived, not the ones still held.
+	** A screen compares it against what it last drew, which is the only way to
+	** notice a line that came in during net_request rather than net_pump - the
+	** same trap `applied_seq` exists for above.
+	*/
+	t_body_chat		chat[NET_CHAT_HISTORY];
+	size_t			chat_head;
+	size_t			chat_held;
+	uint64_t		chat_received;
 	char			error[NET_REASON_MAX];
 }	t_net_client;
 
@@ -150,6 +171,23 @@ int		net_signup(t_net_client *net, const char *username,
 			const char *password, t_net_result *out);
 int		net_login(t_net_client *net, const char *username,
 			const char *password, t_net_result *out);
+
+/*
+** NET_CHAT.C - the room feed, both authors.
+**
+** net_chat_take is how a line reaches the ring; net_client.c calls it for
+** every pushed CHAT it reads, from net_pump and net_request alike, because a
+** message that crosses a reply is as real as one that does not.
+**
+** The two readers hand back the ring rather than a view model, for the same
+** reason the store does: what tetrisd said is one thing, and what a screen
+** draws is another.
+*/
+void	net_chat_take(t_net_client *net, const t_body_chat *line);
+size_t	net_chat_held(const t_net_client *net);
+const t_body_chat	*net_chat_at(const t_net_client *net, size_t index);
+int		net_chat_send(t_net_client *net, const char *room, const char *text,
+			t_net_result *out);
 
 /*
 ** NET_STORE.C - the Marketplace half of the account.

@@ -1623,6 +1623,18 @@ typedef struct s_app_data_provider
 	t_app_provider_result	(*start_room)(void *userdata, const char *room_id,
 				t_app_room_view_model *view);
 	/*
+	 * Posting to the room's feed. It answers with the room rather than with a
+	 * verdict for the same reason buy_item does: the sender's own line comes
+	 * back from the server with everybody else's, in the order the server
+	 * chose, so a screen that appended its own copy would draw it twice and
+	 * draw the wrong one first.
+	 *
+	 * A provider that serves no feed leaves this NULL, and the waiting room
+	 * falls back to appending locally - which is all an offline room can do.
+	 */
+	t_app_provider_result	(*send_chat)(void *userdata, const char *room_id,
+				const char *text, t_app_room_view_model *view);
+	/*
 	 * Spending and equipping. Both answer with the whole model as it stands
 	 * afterwards rather than with a verdict the caller applies to its own
 	 * copy: the wallet, the owned flags and the equipped flags all move

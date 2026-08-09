@@ -157,6 +157,21 @@ waiting room with chat and a pre-match countdown — while the authoritative
   roster. It also has a status line and a chat column on the right. `C` opens
   the composer, and while it is open every printable key is text - so a message
   containing "s" cannot start the match.
+- That chat column is the server's when there is a server. `net_chat.c` holds
+  every pushed `CHAT` in a drop-oldest ring, and the panel draws the tail of
+  it. Posting sends and appends **nothing** locally: `tetrisd` echoes the
+  sender their own line along with everybody else's, so a client that also
+  appended it would draw the message twice, and the copy it drew first would
+  be the one without the server's ordering. The same column carries the
+  server's own narration - who joined, who left, who owns the room now - with
+  no author, because it is one feed with two writers rather than two lists to
+  merge. With no such provider - an offline room - the local append is the
+  feed, which is all an offline room can have.
+- A line that crosses a reply is still filed. `net_request` reads the socket
+  too, so a loop that only asked `net_pump` "did anything arrive?" would lose
+  most of the feed - the same trap `applied_seq` documents for snapshots. The
+  ring therefore counts every line ever received rather than the ones it still
+  holds, and a screen compares that against what it last drew.
 - A Double room auto-starts when both seats are filled and ready. Battle Royale
   supports capacities from 4 through 99, requires every occupied player to be
   ready, and waits for the room owner to press `S`. Both paths run the same
@@ -602,6 +617,7 @@ Modules (each a `.c` under `src/`):
 | `multiplayer_screen.c` | Pure mode-picker and create-room state, actions, and card copy |
 | `lobby_screen.c` | Pure room-browser state: filter, cursor, join-by-id field, and join guards |
 | `waiting_room_screen.c` | Pure ready/start policy, chat transcript, and the pre-match countdown |
+| `net_chat.c` | The room feed: the drop-oldest ring pushed lines land in, and posting one |
 | `confirmation.c` | Pure safe-default Yes/No confirmation state and copy |
 | `render_confirmation.c` | Persistent confirmation plane and keyboard interaction loop |
 | `multiplayer_layout.c` | Reference-space geometry for all four multiplayer surfaces |
@@ -643,6 +659,7 @@ tetrisu/
 │   ├── multiplayer_screen.c   Pure mode-picker + create-room state → logic.a
 │   ├── lobby_screen.c         Pure room-browser state → logic.a
 │   ├── waiting_room_screen.c  Pure ready/chat/countdown policy → logic.a
+│   ├── net_chat.c             Room feed ring + CHAT send → logic.a
 │   ├── multiplayer_layout.c   Pure multiplayer bitmap geometry → logic.a
 │   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
@@ -726,6 +743,7 @@ and drive a real socket against it:
 | `test_net_solo.sh` | `net_smoke` | The wire: `JOIN`/`START`, every gameplay action, `STATE` decoded into the Solo view model |
 | `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join, live roster refresh, owner-only start, leave, and room re-entry |
 | `test_solo_authority.sh` | `solo_authority_smoke` | The layer `solo_mode.c` calls: who owns the board, and the hold that stops `tetrisd`'s clock for the length of the client's 3-2-1 |
+| `test_net_chat.sh` | `chat_smoke` | The room feed: narration nobody asked for, a line echoed back to its sender, a line that crosses a reply still being filed, the server's refusals, and the provider seam the waiting room calls |
 
 The fixture walks its port upward from the suite's base rather than using a
 fixed one: a fixed port inside the kernel's ephemeral range collides with

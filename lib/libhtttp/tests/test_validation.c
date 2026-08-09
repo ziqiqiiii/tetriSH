@@ -161,6 +161,33 @@ static void	test_state_body_requires_state_type(void)
 	printf("PASS test_state_body_requires_state_type\n");
 }
 
+static void	test_chat_body_takes_either_direction(void)
+{
+	t_htttp_message	message;
+
+	htttp_message_init(&message);
+	assert(htttp_message_make_request(&message, "CHAT", "/room/a") == HTTTP_OK);
+	assert(htttp_message_set_body(&message, "hi", 2u) == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_ERR_MISSING_REQUIRED_HEADER);
+	assert(htttp_message_set_header(&message, "Content-Type",
+			HTTTP_CONTENT_TYPE_COMMAND) == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_OK);
+	assert(htttp_message_set_header(&message, "Content-Type",
+			HTTTP_CONTENT_TYPE_CHAT) == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_OK);
+	assert(htttp_message_set_header(&message, "Content-Type",
+			HTTTP_CONTENT_TYPE_STATE) == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_ERR_MISSING_REQUIRED_HEADER);
+	htttp_message_free(&message);
+	assert(htttp_message_make_request(&message, "MOVE", "/room/a") == HTTTP_OK);
+	assert(htttp_message_set_body(&message, "LEFT", 4u) == HTTTP_OK);
+	assert(htttp_message_set_header(&message, "Content-Type",
+			HTTTP_CONTENT_TYPE_CHAT) == HTTTP_OK);
+	assert(htttp_validate(&message, 0u) == HTTTP_ERR_MISSING_REQUIRED_HEADER);
+	htttp_message_free(&message);
+	printf("PASS test_chat_body_takes_either_direction\n");
+}
+
 static void	test_authenticated_request_requires_player_id(void)
 {
 	t_htttp_message	message;
@@ -301,6 +328,7 @@ int	main(void)
 	test_response_requires_date();
 	test_command_body_requires_command_type();
 	test_state_body_requires_state_type();
+	test_chat_body_takes_either_direction();
 	test_authenticated_request_requires_player_id();
 	test_validation_arguments_and_immutability();
 	test_reject_malformed_message_shapes();

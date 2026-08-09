@@ -123,10 +123,26 @@ of the system.
 ### Protocol
 
 **STATE**:
-The server-pushed snapshot describing one player's board and progress. The
-only server-originated message; everything else is request/response.
+The server-pushed snapshot describing one player's board and progress. One of
+the two server-originated messages, the other being a pushed CHAT; everything
+else is request/response.
 _Avoid_: update, broadcast
 
 **Subject**:
 The player whose board a STATE snapshot describes, named by the snapshot's
 resource path.
+
+**Feed**:
+The ordered list of messages belonging to one Room, numbered by that Room's
+own counter. It holds both authors — what players said and what the server
+said — and it is not kept: a Room's feed exists only as the lines its members
+have already been sent.
+_Avoid_: chat log, history, transcript
+
+**Narration**:
+A message on the Feed that the server wrote, describing something that
+happened to the Room — somebody joined, somebody left, ownership passed. It
+has no author. Narration is not a separate mechanism from chat: it is a chat
+message with the server as its writer, which is why the two are numbered
+together and drawn as one list.
+_Avoid_: system message, announcement, event log
