@@ -11,6 +11,8 @@ void	test_all_decoders_reject_empty_buffer(void)
 {
 	t_body_state		st;
 	t_body_profile	pr;
+	t_body_room		room;
+	t_body_chat		chat;
 	t_body_room_row	rooms[2];
 	t_body_leaderboard_row		lb[2];
 	size_t			count;
@@ -18,6 +20,10 @@ void	test_all_decoders_reject_empty_buffer(void)
 	assert(body_state_decode("", 0, &st) == -1);
 	assert(errno == EBADMSG);
 	assert(body_profile_decode("", 0, &pr) == -1);
+	assert(errno == EBADMSG);
+	assert(body_room_decode("", 0, &room) == -1);
+	assert(errno == EBADMSG);
+	assert(body_chat_decode("", 0, &chat) == -1);
 	assert(errno == EBADMSG);
 	assert(body_rooms_decode("", 0, rooms, 2, &count) == 0);
 	assert(count == 0);
@@ -30,6 +36,8 @@ void	test_all_codecs_reject_null_arguments(void)
 {
 	t_body_state		st;
 	t_body_profile	pr;
+	t_body_room		room;
+	t_body_chat		chat;
 	t_body_room_row	rooms[2];
 	t_body_leaderboard_row		lb[2];
 	size_t			count;
@@ -37,6 +45,8 @@ void	test_all_codecs_reject_null_arguments(void)
 
 	memset(&st, 0, sizeof(st));
 	memset(&pr, 0, sizeof(pr));
+	memset(&room, 0, sizeof(room));
+	memset(&chat, 0, sizeof(chat));
 	assert(body_state_encode(NULL, out, sizeof(out)) == -1);
 	assert(errno == EINVAL);
 	assert(body_state_encode(&st, NULL, 64) == -1);
@@ -55,6 +65,22 @@ void	test_all_codecs_reject_null_arguments(void)
 	assert(errno == EINVAL);
 	assert(body_profile_decode("x", 1, NULL) == -1);
 	assert(errno == EINVAL);
+	assert(body_room_encode(NULL, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_room_encode(&room, NULL, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_room_decode(NULL, 1, &room) == -1);
+	assert(errno == EINVAL);
+	assert(body_room_decode("x", 1, NULL) == -1);
+	assert(errno == EINVAL);
+	assert(body_chat_encode(NULL, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_chat_encode(&chat, NULL, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_chat_decode(NULL, 1, &chat) == -1);
+	assert(errno == EINVAL);
+	assert(body_chat_decode("x", 1, NULL) == -1);
+	assert(errno == EINVAL);
 	assert(body_leaderboard_encode(lb, 2, NULL, 64) == -1);
 	assert(errno == EINVAL);
 	assert(body_leaderboard_decode("x", 1, NULL, 2, &count) == -1);
@@ -66,6 +92,7 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 {
 	static t_body_state		st;
 	static t_body_profile		pr;
+	static t_body_room		room;
 	static t_body_room_row	rooms[99];
 	static t_body_leaderboard_row		lb[10];
 	int						row;
@@ -106,6 +133,25 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 	}
 	n = body_rooms_encode(rooms, 99, g_out, sizeof(g_out));
 	assert(n > 0 && n < 65536);
+	memset(&room, 0, sizeof(room));
+	snprintf(room.name, sizeof(room.name), "BR-99");
+	room.mode = BODY_MODE_BATTLE_ROYALE;
+	room.status = BODY_ROOM_READY;
+	room.min_to_start = 4;
+	room.slot_count = BODY_ROOM_MEMBERS_MAX;
+	room.member_count = BODY_ROOM_MEMBERS_MAX;
+	i = 0;
+	while (i < BODY_ROOM_MEMBERS_MAX)
+	{
+		room.members[i].slot = i + 1;
+		room.members[i].player_id = UINT64_MAX - (uint64_t)i;
+		room.members[i].owner = i == 0;
+		room.members[i].ready = true;
+		memset(room.members[i].username, 'u', BODY_USER_MAX - 1);
+		i++;
+	}
+	n = body_room_encode(&room, g_out, sizeof(g_out));
+	assert(n > 0 && n < 8192);
 	memset(&pr, 0, sizeof(pr));
 	memset(pr.username, 'u', BODY_USER_MAX - 1);
 	pr.wallet = UINT64_MAX;
@@ -139,6 +185,8 @@ void	test_decode_is_bounded_on_hostile_input(void)
 {
 	t_body_state		st;
 	t_body_profile	pr;
+	t_body_room		room;
+	t_body_chat		chat;
 	t_body_room_row	rooms[4];
 	t_body_leaderboard_row		lb[4];
 	size_t			count;
@@ -146,11 +194,14 @@ void	test_decode_is_bounded_on_hostile_input(void)
 	memset(g_big, 'A', sizeof(g_big)); // 64 KiB+, no newline, no NUL
 	assert(body_state_decode(g_big, 65536, &st) == -1);
 	assert(body_profile_decode(g_big, 65536, &pr) == -1);
+	assert(body_room_decode(g_big, 65536, &room) == -1);
+	assert(body_chat_decode(g_big, 65536, &chat) == -1);
 	assert(body_rooms_decode(g_big, 65536, rooms, 4, &count) == -1);
 	assert(body_leaderboard_decode(g_big, 65536, lb, 4, &count) == -1);
 	memset(g_big, 0, 64); // a line of NULs
 	assert(body_state_decode(g_big, 64, &st) == -1);
 	assert(body_profile_decode(g_big, 64, &pr) == -1);
+	assert(body_chat_decode(g_big, 64, &chat) == -1);
 	strcpy(g_big, "seq 42"); // valid-ish start, no trailing newline
 	assert(body_state_decode(g_big, 6, &st) == -1);
 	printf("PASS test_decode_is_bounded_on_hostile_input\n");

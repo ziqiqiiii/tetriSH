@@ -472,15 +472,15 @@
 
 /* Mode select: one opaque panel over the home artwork, one focus region. */
 # define MP_MODE_REF_PANEL_X	120
-# define MP_MODE_REF_PANEL_Y	560
+# define MP_MODE_REF_PANEL_Y	320
 # define MP_MODE_REF_PANEL_WIDTH	1208
 # define MP_MODE_REF_PANEL_HEIGHT	480
-# define MP_MODE_REF_TITLE_Y	592
+# define MP_MODE_REF_TITLE_Y	352
 # define MP_MODE_REF_TITLE_HEIGHT	54
-# define MP_MODE_REF_SUBTITLE_Y	652
+# define MP_MODE_REF_SUBTITLE_Y	412
 # define MP_MODE_REF_SUBTITLE_HEIGHT	34
 # define MP_MODE_REF_CARDS_X	160
-# define MP_MODE_REF_CARDS_Y	700
+# define MP_MODE_REF_CARDS_Y	460
 # define MP_MODE_REF_CARDS_WIDTH	1128
 # define MP_MODE_REF_CARDS_HEIGHT	240
 /*
@@ -498,7 +498,7 @@
 # define MP_MODE_REF_CARD_BODY_Y	150
 # define MP_MODE_REF_CARD_BODY_GLYPH	11
 # define MP_MODE_REF_CARD_BODY_STEP	26
-# define MP_MODE_REF_CONTROLS_Y	968
+# define MP_MODE_REF_CONTROLS_Y	728
 # define MP_MODE_REF_CONTROLS_HEIGHT	48
 
 /* Lobby: room table on the left, join-by-id on the right, status underneath. */
@@ -511,13 +511,13 @@
 # define LOBBY_REF_DIVIDER_Y	114
 # define LOBBY_REF_ROOMS_X	120
 # define LOBBY_REF_ROOMS_Y	160
-# define LOBBY_REF_ROOMS_WIDTH	700
+# define LOBBY_REF_ROOMS_WIDTH	792
 # define LOBBY_REF_ROOMS_HEIGHT	580
 # define LOBBY_REF_ROOMS_TITLE_Y	178
 # define LOBBY_REF_ROOMS_HEADER_Y	224
 # define LOBBY_REF_LIST_X	132
 # define LOBBY_REF_LIST_Y	168
-# define LOBBY_REF_LIST_WIDTH	676
+# define LOBBY_REF_LIST_WIDTH	768
 # define LOBBY_REF_LIST_HEIGHT	552
 /* Offsets inside the list region: its own heading, then the column names. */
 # define LOBBY_REF_LIST_TITLE_Y	10
@@ -525,21 +525,31 @@
 # define LOBBY_REF_LIST_FIRST_ROW_Y	88
 # define LOBBY_REF_LIST_ROW_STEP	56
 # define LOBBY_REF_LIST_ROW_HEIGHT	48
-/* Table columns, as offsets inside the list rectangle. */
+/*
+** Table columns, as offsets inside the list rectangle. Each column's own
+** width stops short of the next column's origin, so a value that has to be
+** shrunk to fit still leaves a readable gutter beside its neighbour; the last
+** one stops short of the list edge for the same reason.
+*/
 # define LOBBY_REF_COL_MARK	0
 # define LOBBY_REF_COL_ID	26
-# define LOBBY_REF_COL_MODE	228
-# define LOBBY_REF_COL_PLAYERS	330
-# define LOBBY_REF_COL_STATE	440
-# define LOBBY_REF_COL_OWNER	560
-# define LOBBY_REF_JOIN_X	880
+# define LOBBY_REF_COL_ID_WIDTH	200
+# define LOBBY_REF_COL_MODE	244
+# define LOBBY_REF_COL_MODE_WIDTH	72
+# define LOBBY_REF_COL_PLAYERS	336
+# define LOBBY_REF_COL_PLAYERS_WIDTH	108
+# define LOBBY_REF_COL_STATE	464
+# define LOBBY_REF_COL_STATE_WIDTH	136
+# define LOBBY_REF_COL_OWNER	620
+# define LOBBY_REF_COL_OWNER_WIDTH	136
+# define LOBBY_REF_JOIN_X	940
 # define LOBBY_REF_JOIN_Y	160
-# define LOBBY_REF_JOIN_WIDTH	448
+# define LOBBY_REF_JOIN_WIDTH	388
 # define LOBBY_REF_JOIN_HEIGHT	580
 # define LOBBY_REF_JOIN_TITLE_Y	178
-# define LOBBY_REF_FIELD_X	896
+# define LOBBY_REF_FIELD_X	956
 # define LOBBY_REF_FIELD_Y	256
-# define LOBBY_REF_FIELD_WIDTH	416
+# define LOBBY_REF_FIELD_WIDTH	356
 # define LOBBY_REF_FIELD_HEIGHT	170
 # define LOBBY_REF_FIELD_BOX_Y	36
 # define LOBBY_REF_FIELD_BOX_HEIGHT	62
@@ -640,10 +650,27 @@
 /* One second per step, matching the visible "starting in N" copy. */
 # define WAITING_ROOM_COUNTDOWN_START	5
 # define WAITING_ROOM_COUNTDOWN_STEP_MS	1000
+# define WAITING_ROOM_REFRESH_MS	500
 # define WAITING_ROOM_DOUBLE_PLAYERS	2
 # define WAITING_ROOM_ROYALE_MIN_PLAYERS	4
 /* The authored waiting-room roster has room for eight legible rows. */
 # define WAITING_ROOM_VISIBLE_PLAYERS	8
+
+/* MULTIPLAYER_MATCH.C / RENDER_MULTIPLAYER_MATCH.C */
+# define MP_CHARACTER_SELECT_MS	15000
+# define MP_CHARACTER_TICK_AUDIO_SECONDS	5
+# define MP_MATCH_FRAME_MS	16
+# define MP_MATCH_MAX_CATCHUP_MS	1000
+# define MP_MATCH_INPUT_BATCH_MAX	64
+# define MP_BR_OPPONENT_COUNT	98
+# define MP_MATCH_STATUS_MAX	96
+/* " SELECTED - AWAITING SERVER TARGET AUTHORITY" - the fixed half of the
+** ability banner, so the name in front of it can be cut to fit */
+# define MP_MATCH_SELECTED_SUFFIX_LEN	44
+/* How much of an ability name a loadout row shows. Four APP_TEXT_MAX names
+** do not fit one APP_ABILITY_TEXT_MAX line, and the row is centred and
+** clipped anyway, so the cut is stated here rather than left to snprintf */
+# define MP_MATCH_POWER_NAME_MAX	40
 
 /* RENDER_MENU.C */
 # define MENU_PANEL_X_RATIO		0.425
@@ -1400,6 +1427,112 @@ typedef struct s_mp_rect
 	int	height;
 }	t_mp_rect;
 
+# define MP_MATCH_BOARD_CACHES 2
+/*
+** How many horizontal strips the local board is blitted as. Five is four board
+** rows per band: small enough that a moving piece dirties one or two of them,
+** large enough that the per-plane overhead stays negligible.
+*/
+# define MP_MATCH_BOARD_BANDS 5
+/*
+** Danger is quantised into this many steps between clear and full. The signal
+** itself is Solo's solo_game_danger_dim(), so the two modes enter and leave
+** danger on exactly the same rule; only the presentation differs, because the
+** match cannot dim the scenery the way Solo does - its stationary layer is a
+** cell plane that only a full recompose can repaint. Quantising bounds how
+** often the board region is redrawn during the fade.
+*/
+# define MP_MATCH_DANGER_STEPS 5
+/*
+** How tall the hovered-ability popover is drawn, in device pixels. It borrows
+** the HOLD/NEXT column, which is far taller than the four lines it shows.
+*/
+# define MP_MATCH_POPOVER_HEIGHT 190
+
+/*
+ * What a rendered board last showed, one number per cell with the falling
+ * piece and its ghost folded in. Comparing against it turns a board redraw -
+ * a million blended pixels at device resolution - into a repaint of the few
+ * cells that actually differ.
+ */
+typedef struct s_mp_board_cache
+{
+	int			cells[BOARD_HEIGHT][BOARD_WIDTH];
+	t_mp_rect	rect;
+	/*
+	 * The danger step the cached cells were painted at. A cell is painted over
+	 * the board's own backing, and danger changes that backing, so a step the
+	 * cache did not see has to redraw the board rather than diff against it.
+	 */
+	int			danger;
+	bool		valid;
+}	t_mp_board_cache;
+
+typedef enum e_mp_match_phase
+{
+	MP_MATCH_CHARACTER_SELECT,
+	MP_MATCH_PLAYING,
+	MP_MATCH_FINISHED
+}	t_mp_match_phase;
+
+typedef enum e_mp_match_result
+{
+	MP_MATCH_RESULT_NONE,
+	MP_MATCH_RESULT_WON,
+	MP_MATCH_RESULT_LOST
+}	t_mp_match_result;
+
+typedef enum e_mp_selection_event
+{
+	MP_SELECTION_EVENT_NONE = 0,
+	MP_SELECTION_EVENT_SECOND = 1u << 0,
+	MP_SELECTION_EVENT_FINISHED = 1u << 1
+}	t_mp_selection_event;
+
+typedef struct s_mp_character_selection
+{
+	int	selected;
+	int	remaining_ms;
+	int	last_second;
+	bool	locked;
+}	t_mp_character_selection;
+
+typedef struct s_mp_match_layout
+{
+	bool		valid;
+	int		rows;
+	int		cols;
+	t_mp_rect	local_board;
+	t_mp_rect	opponent_board;
+	t_mp_rect	left_opponents;
+	t_mp_rect	right_opponents;
+	t_mp_rect	character_card;
+	t_mp_rect	abilities;
+	t_mp_rect	targeting;
+	t_mp_rect	result;
+}	t_mp_match_layout;
+
+typedef struct s_mp_match_pixel_layout
+{
+	bool		valid;
+	int		width;
+	int		height;
+	t_mp_rect	loadout;
+	t_mp_rect	portrait;
+	t_mp_rect	ability_bar;
+	t_mp_rect	ability_popover;
+	t_mp_rect	local_board;
+	t_mp_rect	opponent_board;
+	t_mp_rect	left_opponents;
+	t_mp_rect	right_opponents;
+	t_mp_rect	targeting;
+	t_mp_rect	hud;
+	t_mp_rect	controls;
+	int		ability_center_x;
+	int		ability_center_y[APP_CHARACTER_ABILITY_COUNT];
+	int		ability_hit_radius;
+}	t_mp_match_pixel_layout;
+
 /* Reference-coordinate geometry shared by every multiplayer compositor. */
 typedef struct s_mp_layout
 {
@@ -1483,7 +1616,24 @@ typedef struct s_app_data_provider
 	 * split, so the seam is the same shape now as it will be then.
 	 */
 	t_app_provider_result	(*create_room)(void *userdata, t_app_game_mode mode,
-			t_app_room_view_model *view);
+				t_app_room_view_model *view);
+	t_app_provider_result	(*refresh_room)(void *userdata, const char *room_id,
+				t_app_room_view_model *view);
+	t_app_provider_result	(*leave_room)(void *userdata, const char *room_id);
+	t_app_provider_result	(*start_room)(void *userdata, const char *room_id,
+				t_app_room_view_model *view);
+	/*
+	 * Posting to the room's feed. It answers with the room rather than with a
+	 * verdict for the same reason buy_item does: the sender's own line comes
+	 * back from the server with everybody else's, in the order the server
+	 * chose, so a screen that appended its own copy would draw it twice and
+	 * draw the wrong one first.
+	 *
+	 * A provider that serves no feed leaves this NULL, and the waiting room
+	 * falls back to appending locally - which is all an offline room can do.
+	 */
+	t_app_provider_result	(*send_chat)(void *userdata, const char *room_id,
+				const char *text, t_app_room_view_model *view);
 	/*
 	 * Spending and equipping. Both answer with the whole model as it stands
 	 * afterwards rather than with a verdict the caller applies to its own
@@ -1790,6 +1940,72 @@ typedef struct
 	struct ncvisual		*settings_font_visual;
 	struct ncvisual		*marketplace_font_visual;
 	struct ncvisual		*mp_font_visual;
+	struct ncvisual		*mp_match_tile_visual;
+	struct ncvisual		*mp_match_portrait_visual;
+	/*
+	 * The portrait read out into plain memory, for the same reason the tetromino
+	 * atlas is: sampling it through ncvisual_at_yx once per output pixel made
+	 * the loadout region cost 52 ms, and that region redraws on every lock
+	 * because HOLD and NEXT live in it.
+	 */
+	uint32_t			*mp_match_portrait_pixels;
+	int					mp_match_portrait_px_width;
+	int					mp_match_portrait_px_height;
+	char				mp_match_portrait_source[APP_ASSET_PATH_MAX];
+	/*
+	 * The authored popover frame, read out the same way. The match shows the
+	 * hovered ability in Solo's shape - name, cost, effect, how to fire it -
+	 * over the same artwork, so the two modes teach the abilities identically.
+	 */
+	struct ncvisual		*mp_match_popover_visual;
+	uint32_t			*mp_match_popover_pixels;
+	int					mp_match_popover_px_width;
+	int					mp_match_popover_px_height;
+	/*
+	 * The local board is banded rather than held on one plane. A terminal
+	 * bitmap has no partial update: re-blitting the board region re-encodes
+	 * every pixel of it, which measured 13.8 ms on an empty board and 20.3 ms
+	 * on a full one - the whole of the input latency, and the whole of the
+	 * reported growth, because the encode scales with how much of the board is
+	 * occupied. A piece only ever touches two bands, and the settled rows a
+	 * filling board accumulates are exactly the rows that stop changing, so
+	 * banding turns the growing part of the board into the part nobody pays
+	 * for. Band boundaries are snapped to whole terminal cells: two planes that
+	 * round onto the same cell row blank each other on a stationary protocol.
+	 */
+	struct ncplane		*mp_match_local_bands[MP_MATCH_BOARD_BANDS];
+	uint64_t			mp_match_band_signatures[MP_MATCH_BOARD_BANDS];
+	struct ncplane		*mp_match_opponent_plane;
+	struct ncplane		*mp_match_left_plane;
+	struct ncplane		*mp_match_right_plane;
+	struct ncplane		*mp_match_loadout_plane;
+	struct ncplane		*mp_match_ability_plane;
+	struct ncplane		*mp_match_hud_plane;
+	struct ncplane		*mp_match_caption_plane;
+	struct ncplane		*mp_match_countdown_plane;
+	uint32_t			*mp_match_tile_atlas;
+	/*
+	 * Board tiles pre-scaled to the live cell size and pre-composited over the
+	 * board's own opaque backing, so painting one cell is a memcpy per row.
+	 * Scaling the 16 px source per output pixel measured at 1-3 ms for a single
+	 * 72 px cell, which made a 12-cell move cost 13-40 ms; the whole cache is
+	 * two variants (solid, ghost) of TILE_ATLAS_COUNT tiles and is rebuilt only
+	 * when the cell size changes.
+	 */
+	uint32_t			*mp_match_tile_scaled;
+	int					mp_match_tile_scaled_size;
+	/* The backing the bake was composited over; danger changes it. */
+	uint32_t			mp_match_tile_scaled_backing;
+	/*
+	 * The match canvas outlives the frame that composed it. Redrawing a board
+	 * at device resolution is millions of blended pixels; keeping the last
+	 * composition lets a frame repaint only the cells whose contents changed.
+	 */
+	uint32_t			*mp_match_canvas;
+	int					mp_match_canvas_width;
+	int					mp_match_canvas_height;
+	t_mp_board_cache	mp_match_boards[MP_MATCH_BOARD_CACHES];
+	uint64_t			mp_match_caption_signature;
 	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
@@ -1904,6 +2120,15 @@ typedef struct
 	uint64_t			mp_options_signature;
 	uint64_t			mp_slots_signature;
 	uint64_t			mp_chat_signature;
+	uint64_t			mp_match_signature;
+	uint64_t			mp_match_static_signature;
+	uint64_t			mp_match_local_signature;
+	uint64_t			mp_match_opponent_signature;
+	uint64_t			mp_match_left_signature;
+	uint64_t			mp_match_right_signature;
+	uint64_t			mp_match_loadout_signature;
+	uint64_t			mp_match_hud_signature;
+	uint64_t			mp_match_countdown_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
 	int					auth_overlay_count;
 	t_tetrisu_pixel_policy	pixels;
@@ -2078,6 +2303,43 @@ typedef struct s_solo_game
 	bool			countdown_active;
 	t_solo_ability	ready_ability;
 }	t_solo_game;
+
+/*
+ * The match model intentionally owns only presentation-ready snapshots. A
+ * future multiplayer provider can replace local_game/opponent_game and the
+ * compact opponent metadata without changing the renderer or its layout.
+ */
+typedef struct s_mp_match_state
+{
+	t_app_game_mode		mode;
+	t_mp_match_phase	phase;
+	t_mp_match_result	result;
+	t_mp_character_selection	selection;
+	t_app_catalogue_view_model	characters;
+	t_app_profile_view_model	profile;
+	t_solo_game		local_game;
+	t_solo_game		opponent_game;
+	t_target_mode		target_mode;
+	int				players_total;
+	int				players_alive;
+	int				final_rank;
+	int				ko_count;
+	int				incoming_attackers;
+	int				opponent_charge;
+	int				hovered_ability;
+	struct s_mp_opponent_snapshot
+	{
+		t_board		board;
+		bool		present;
+		bool		alive;
+		bool		targeting_local;
+		int			garbage_pending;
+		char		name[APP_TEXT_MAX];
+	} opponents[APP_ROOM_MAX_PLAYERS - 1];
+	char				opponent_name[APP_TEXT_MAX];
+	char				room_id[APP_TEXT_MAX];
+	char				status[MP_MATCH_STATUS_MAX];
+}	t_mp_match_state;
 
 /*
 ** Who owns the board this Solo game is played on. `net` is the app's session
@@ -2281,6 +2543,7 @@ void			menu_move_selection(t_menu_selection *m, uint32_t key);
 const char		*menu_item_label(int index);
 const char		*menu_stub_text(int selected_index);
 bool			app_ui_preview_enabled(void);
+t_app_screen	app_start_screen_override(void);
 
 /* APP_PROVIDER.C */
 void			app_fixture_provider_init(t_app_data_provider *provider);
@@ -2327,6 +2590,14 @@ t_app_provider_result	app_room_view_load(
 					t_app_screen_view_model *view);
 t_app_provider_result	app_room_view_create(
 					const t_app_data_provider *provider, t_app_game_mode mode,
+					t_app_screen_view_model *view);
+t_app_provider_result	app_room_view_refresh(
+					const t_app_data_provider *provider, const char *room_id,
+					t_app_screen_view_model *view);
+t_app_provider_result	app_room_view_leave(
+					const t_app_data_provider *provider, const char *room_id);
+t_app_provider_result	app_room_view_start(
+					const t_app_data_provider *provider, const char *room_id,
 					t_app_screen_view_model *view);
 const char		*app_data_status_name(t_app_data_status status);
 const char		*app_game_mode_name(t_app_game_mode mode);
@@ -2435,6 +2706,9 @@ bool				render_pixels_available(const t_render_ctx *ctx);
 bool				render_plane_geometry_matches(struct ncplane *plane, int y,
 					int x, unsigned rows, unsigned cols);
 bool				render_plane_blit_rgba(t_render_ctx *ctx,
+					struct ncplane *plane, const uint32_t *pixels, int width,
+					int height, int row_stride);
+bool				render_plane_blit_rgba_cells(t_render_ctx *ctx,
 					struct ncplane *plane, const uint32_t *pixels, int width,
 					int height, int row_stride);
 bool				render_compatibility_mode(const t_render_ctx *ctx);
@@ -2700,6 +2974,38 @@ void			mp_layout_build(t_app_screen screen, int origin_y, int origin_x,
 					int rows, int cols, int cell_px_y, int cell_px_x,
 					t_mp_layout *layout);
 
+/* MULTIPLAYER_MATCH.C */
+void			mp_match_state_init(t_mp_match_state *state,
+					t_app_game_mode mode, const char *room_id,
+					const t_app_profile_view_model *profile,
+					const t_app_catalogue_view_model *characters,
+					uint32_t seed);
+bool			mp_match_character_handle_key(t_mp_match_state *state,
+					uint32_t key);
+uint32_t		mp_match_character_update(t_mp_match_state *state,
+					int elapsed_ms);
+int				mp_match_character_seconds(const t_mp_match_state *state);
+const t_app_catalogue_item_view_model	*mp_match_selected_character(
+					const t_mp_match_state *state);
+bool			mp_match_target_handle_key(t_mp_match_state *state,
+					uint32_t key);
+const char		*mp_match_target_name(t_target_mode mode);
+void			mp_match_finish(t_mp_match_state *state, bool won, int rank);
+const char		*mp_match_result_text(const t_mp_match_state *state,
+					char *out, size_t size);
+void			mp_match_layout_build(t_app_game_mode mode, int rows, int cols,
+					t_mp_match_layout *layout);
+void			mp_match_pixel_layout_build(t_app_game_mode mode, int width,
+					int height, t_mp_match_pixel_layout *layout);
+int				mp_match_ability_at_pixel(
+					const t_mp_match_pixel_layout *layout, int x, int y);
+bool			mp_match_movement_event(const t_mp_match_state *state,
+					t_solo_handling_state *handling,
+					const t_solo_handling_config *config, uint32_t key,
+					ncintype_e event_type, t_solo_action *action);
+void			mp_match_apply_room(t_mp_match_state *state,
+					const t_app_room_view_model *room, int preview_players);
+
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,
 					const t_app_screen_view_model *view,
@@ -2714,6 +3020,20 @@ bool			render_waiting_room_show(t_render_ctx *ctx,
 					const t_app_screen_view_model *view,
 					const t_waiting_room_state *state, bool rebuild_background);
 void			render_multiplayer_destroy(t_render_ctx *ctx);
+
+/* RENDER_MULTIPLAYER_MATCH.C */
+bool			render_multiplayer_match_show(t_render_ctx *ctx,
+					const t_mp_match_state *state, bool rebuild_background);
+void			render_multiplayer_match_destroy(t_render_ctx *ctx);
+bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
+					const t_mp_match_state *state, bool rebuild_background);
+void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+
+/* MULTIPLAYER_MATCH_MODE.C */
+int				multiplayer_match_mode_run(t_render_ctx *ctx,
+					t_audio_ctx *audio, const t_app_data_provider *provider,
+					t_app_game_mode mode, const char *room_id,
+					const t_app_room_view_model *room);
 
 /* RENDER_MULTIPLAYER_FONT.C */
 bool			render_mp_pixel_show(t_render_ctx *ctx,

@@ -963,24 +963,24 @@ static bool	compose_list(t_render_ctx *ctx,
 		LOBBY_REF_HEADING_GLYPH, g_mp_pink, false);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "ID", LOBBY_REF_LIST_X + LOBBY_REF_COL_ID,
-		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 190, 11, g_mp_lavender,
-		false);
+		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, LOBBY_REF_COL_ID_WIDTH, 11,
+		g_mp_lavender, false);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "MODE", LOBBY_REF_LIST_X + LOBBY_REF_COL_MODE,
-		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 96, 11, g_mp_lavender,
-		false);
+		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, LOBBY_REF_COL_MODE_WIDTH,
+		11, g_mp_lavender, false);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "PLAYERS", LOBBY_REF_LIST_X + LOBBY_REF_COL_PLAYERS,
-		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 104, 11, g_mp_lavender,
-		false);
+		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y,
+		LOBBY_REF_COL_PLAYERS_WIDTH, 11, g_mp_lavender, false);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "STATE", LOBBY_REF_LIST_X + LOBBY_REF_COL_STATE,
-		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 114, 11, g_mp_lavender,
-		false);
+		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, LOBBY_REF_COL_STATE_WIDTH,
+		11, g_mp_lavender, false);
 	draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 		font, "OWNER", LOBBY_REF_LIST_X + LOBBY_REF_COL_OWNER,
-		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, 110, 11, g_mp_lavender,
-		false);
+		LOBBY_REF_LIST_Y + LOBBY_REF_LIST_HEADER_Y, LOBBY_REF_COL_OWNER_WIDTH,
+		11, g_mp_lavender, false);
 	row = 0;
 	while (row < LOBBY_VISIBLE_ROOMS)
 	{
@@ -1035,22 +1035,24 @@ static void	draw_list_row(uint32_t *pixels, int width, int height,
 		tint = g_mp_gold;
 	}
 	draw_text_ref(pixels, width, height, layout, font, nonempty(room->id),
-		LOBBY_REF_LIST_X + LOBBY_REF_COL_ID, y, 190, LOBBY_REF_ROW_GLYPH, tint,
-		false);
+		LOBBY_REF_LIST_X + LOBBY_REF_COL_ID, y, LOBBY_REF_COL_ID_WIDTH,
+		LOBBY_REF_ROW_GLYPH, tint, false);
 	draw_text_ref(pixels, width, height, layout, font,
 		lobby_mode_tag(room->mode), LOBBY_REF_LIST_X + LOBBY_REF_COL_MODE, y,
-		90, LOBBY_REF_ROW_GLYPH, g_mp_lavender, false);
+		LOBBY_REF_COL_MODE_WIDTH, LOBBY_REF_ROW_GLYPH, g_mp_lavender, false);
 	snprintf(cell, sizeof(cell), "%d/%d", room->players, room->capacity);
 	draw_text_ref(pixels, width, height, layout, font, cell,
-		LOBBY_REF_LIST_X + LOBBY_REF_COL_PLAYERS, y, 100, LOBBY_REF_ROW_GLYPH,
+		LOBBY_REF_LIST_X + LOBBY_REF_COL_PLAYERS, y,
+		LOBBY_REF_COL_PLAYERS_WIDTH, LOBBY_REF_ROW_GLYPH,
 		room->capacity > 0 && room->players >= room->capacity
 		? g_mp_red : g_mp_green, false);
 	draw_text_ref(pixels, width, height, layout, font,
 		lobby_state_tag(room->state), LOBBY_REF_LIST_X + LOBBY_REF_COL_STATE, y,
-		114, LOBBY_REF_ROW_GLYPH, room_state_colour(room), false);
+		LOBBY_REF_COL_STATE_WIDTH, LOBBY_REF_ROW_GLYPH, room_state_colour(room),
+		false);
 	draw_text_ref(pixels, width, height, layout, font, nonempty(room->owner),
-		LOBBY_REF_LIST_X + LOBBY_REF_COL_OWNER, y, 116, LOBBY_REF_ROW_GLYPH,
-		g_mp_cream, false);
+		LOBBY_REF_LIST_X + LOBBY_REF_COL_OWNER, y, LOBBY_REF_COL_OWNER_WIDTH,
+		LOBBY_REF_ROW_GLYPH, g_mp_cream, false);
 }
 
 /**

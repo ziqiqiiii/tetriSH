@@ -15,6 +15,7 @@ static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
 static void		award_game(t_server *srv, const t_game *game, bool won);
+static void		narrate_departure(t_server_room *server_room, const char *who, const char *name, const t_release_result *res);
 
 /*
 ** The Room, both halves of it. The domain library owns the pure t_room; the
@@ -219,6 +220,14 @@ int	server_room_open(t_server *srv, t_client *cli, t_game_mode mode)
 		return (-1);
 	}
 	bind_client(cli, server_room, slot);
+	/*
+	 * Two lines, in this order, because the creator is both things at once
+	 * and a feed that only said one of them would leave the room without a
+	 * visible owner (UC-04.7).
+	 */
+	room_narrate(server_room, "PLAYER %s joined the room %s", cli->username,
+		room->name);
+	room_narrate(server_room, "PLAYER %s set as owner", cli->username);
 	return (slot);
 }
 
@@ -245,7 +254,11 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
 	*slot = room_seat(server_room->room, cli->player_id, cli->username,
 			room_probe, server_room->srv);
 	if (*slot >= 0)
+	{
 		bind_client(cli, server_room, *slot);
+		room_narrate(server_room, "PLAYER %s joined the room %s",
+			cli->username, server_room->room->name);
+	}
 	return (verdict);
 }
 
@@ -392,6 +405,7 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	t_release_result	res;
 	t_server_room		*server_room;
 	t_game				finished;
+	char				name[ROOM_NAME_MAX];
 
 	if (srv == NULL || cli == NULL)
 		return ;
@@ -399,9 +413,11 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	game_reset(&finished);
 	if (server_room != NULL)
 	{
+		snprintf(name, sizeof(name), "%s", server_room->room->name);
 		forfeit_slot(server_room, cli->binding.slot_index, &finished);
 		memset(&res, 0, sizeof(res));
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
+		narrate_departure(server_room, cli->username, name, &res);
 	}
 	if (finished.player_id != 0)
 		award_game(srv, &finished, false);
@@ -433,6 +449,85 @@ bool	server_room_describe(const t_server_room *server_room,
 	out->slot_count = server_room->room->slot_count;
 	out->ticking = server_room->ticking;
 	return (true);
+}
+
+/**
+ * @brief Projects an authoritative room and its occupied seats for a client.
+ *
+ * The wire model is compact but preserves server slot order. Keeping the
+ * projection here maintains room.c's ownership of the domain object while
+ * allowing the waiting-room handler to encode a stable snapshot.
+ *
+ * @param server_room Room to project.
+ * @param out Receives the complete wire-facing snapshot.
+ * @return true when the room exists and the projection fits.
+ */
+bool	server_room_snapshot(const t_server_room *server_room,
+	t_body_room *out)
+{
+	const t_slot	*slot;
+	int			index;
+
+	if (server_room == NULL || out == NULL || server_room->room == NULL)
+		return (false);
+	memset(out, 0, sizeof(*out));
+	snprintf(out->name, sizeof(out->name), "%s", server_room->room->name);
+	out->mode = (t_body_mode)server_room->room->mode;
+	out->status = (t_body_room_status)server_room->room->status;
+	out->min_to_start = server_room->room->min_to_start;
+	out->slot_count = server_room->room->slot_count;
+	index = 0;
+	while (index < server_room->room->slot_count)
+	{
+		slot = &server_room->room->slots[index];
+		if (slot->occupied)
+		{
+			if (out->member_count >= BODY_ROOM_MEMBERS_MAX)
+				return (false);
+			out->members[out->member_count].slot = slot->index;
+			out->members[out->member_count].player_id
+				= slot->membership.player_id;
+			out->members[out->member_count].owner
+				= membership_is_owner(&slot->membership);
+			out->members[out->member_count].ready
+				= slot->status == SLOT_READY;
+			snprintf(out->members[out->member_count].username,
+				sizeof(out->members[out->member_count].username), "%s",
+				slot->membership.username);
+			out->member_count++;
+		}
+		index++;
+	}
+	return (true);
+}
+
+/**
+ * @brief Reports whether a room has silenced one of its members.
+ *
+ * Asked of the Room rather than read off the domain object, because muting is
+ * a fact about a seat and seats are this file's - the same reason every other
+ * question about a membership is answered here (UC-09.4b).
+ *
+ * @param server_room Room to ask.
+ * @param pid Player whose seat is in question.
+ * @return true when that player is seated here and muted.
+ */
+bool	server_room_is_muted(const t_server_room *server_room, t_player_id pid)
+{
+	const t_slot	*slot;
+	int				index;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (false);
+	index = 0;
+	while (index < server_room->room->slot_count)
+	{
+		slot = &server_room->room->slots[index];
+		if (slot->occupied && slot->membership.player_id == pid)
+			return (slot->membership.muted);
+		index++;
+	}
+	return (false);
 }
 
 /**
@@ -491,6 +586,7 @@ static void	room_blank(t_server_room *server_room)
 	int	slot;
 
 	server_room->ticking = false;
+	server_room->chat_seq = 0;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
@@ -820,4 +916,32 @@ static void	award_game(t_server *srv, const t_game *game, bool won)
 			/ TETRISD_POINTS_PER_WALLET_POINT
 			- before.lifetime_points / TETRISD_POINTS_PER_WALLET_POINT;
 	db_record_game(srv->db, game->player_id, scored, earned, won);
+}
+
+/**
+ * @brief Tells the room who left it and who owns it now.
+ *
+ * Called after room_release and before room_close, which is the only window
+ * where both facts are known and the room still exists: release is what fills
+ * in the successor, and close is what destroys a room the last player just
+ * left. The leaver is already out of their seat and so does not hear either
+ * line - they know.
+ *
+ * A room emptied by this departure has nobody to tell, and the broadcast is
+ * simply delivered to no one rather than guarded against here.
+ *
+ * @param server_room Room the player left.
+ * @param who The departing player's name.
+ * @param name The room's name, read before release in case it is destroyed.
+ * @param res What release decided, including any owner succession.
+ */
+static void	narrate_departure(t_server_room *server_room, const char *who,
+	const char *name, const t_release_result *res)
+{
+	if (!res->released)
+		return ;
+	room_narrate(server_room, "PLAYER %s left the room %s", who, name);
+	if (res->owner_changed)
+		room_narrate(server_room, "PLAYER %s set as the owner",
+			res->new_owner_name);
 }

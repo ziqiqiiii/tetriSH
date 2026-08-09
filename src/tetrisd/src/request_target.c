@@ -57,6 +57,34 @@ int	request_input_target(t_request_context *ctx, t_server_room **out)
 }
 
 /**
+ * @brief Extracts the room name from a /room/<name> path.
+ *
+ * Shared rather than duplicated because three families of handler address a
+ * room by name now - the lobby's LEAVE and START, LIST's room snapshot, and
+ * CHAT - and two spellings of "which room is this" would eventually disagree
+ * about a trailing slash.
+ *
+ * @param ctx Request context holding the path.
+ * @return Borrowed pointer to the name, or NULL when the path is not a room.
+ */
+const char	*request_room_name(const t_request_context *ctx)
+{
+	const char	*name;
+	size_t		prefix_len;
+
+	prefix_len = strlen(TETRISD_ROUTE_ROOM_PREFIX);
+	if (ctx->msg->path == NULL
+		|| strncmp(ctx->msg->path, TETRISD_ROUTE_ROOM_PREFIX,
+			prefix_len) != 0)
+		return (NULL);
+	name = ctx->msg->path + prefix_len;
+	if (name[0] == '\0' || strchr(name, '/') != NULL
+		|| strlen(name) >= ROOM_NAME_MAX)
+		return (NULL);
+	return (name);
+}
+
+/**
  * @brief Reads a decimal player id off the front of a path segment.
  *
  * Ids are issued from 1, so 0 is free to mean "that was not an id" and every

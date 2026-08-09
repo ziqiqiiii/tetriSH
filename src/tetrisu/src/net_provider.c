@@ -57,9 +57,21 @@ static t_app_provider_result	net_load_room(void *userdata,
 static t_app_provider_result	net_create_room(void *userdata,
 				t_app_game_mode mode,
 				t_app_room_view_model *view);
+static t_app_provider_result	net_refresh_room(void *userdata,
+				const char *room_id, t_app_room_view_model *view);
+static t_app_provider_result	net_leave_room(void *userdata,
+				const char *room_id);
+static t_app_provider_result	net_start_room(void *userdata,
+				const char *room_id, t_app_room_view_model *view);
+static t_app_provider_result	net_send_chat(void *userdata,
+				const char *room_id, const char *text,
+				t_app_room_view_model *view);
+static void			fill_chat(const t_net_client *net,
+				t_app_room_view_model *view);
 static t_app_game_mode		map_body_mode(t_body_mode mode);
 static t_app_room_state		map_body_status(t_body_room_status status);
-static t_app_game_mode		mode_from_room_name(const char *name);
+static bool			map_room_snapshot(t_app_net_session *session,
+				const t_body_room *body, t_app_room_view_model *view);
 static bool			session_ready_for_credentials(t_app_net_session *session);
 
 void	app_net_provider_init(t_app_data_provider *provider,
@@ -81,6 +93,10 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->load_lobby = net_load_lobby;
 	provider->load_room = net_load_room;
 	provider->create_room = net_create_room;
+	provider->refresh_room = net_refresh_room;
+	provider->leave_room = net_leave_room;
+	provider->start_room = net_start_room;
+	provider->send_chat = net_send_chat;
 	provider->buy_item = net_buy_item;
 	provider->equip_item = net_equip_item;
 }
@@ -647,17 +663,6 @@ static bool	session_ready_for_credentials(t_app_net_session *session)
 	return (session->connected);
 }
 
-static t_app_game_mode	mode_from_room_name(const char *name)
-{
-	if (name == NULL)
-		return (APP_GAME_MODE_NONE);
-	if (strncmp(name, "BR-", 3) == 0 || strncmp(name, "arena", 5) == 0)
-		return (APP_GAME_MODE_BATTLE_ROYALE);
-	if (strncmp(name, "D-", 2) == 0 || strncmp(name, "duel", 4) == 0)
-		return (APP_GAME_MODE_DOUBLE);
-	return (APP_GAME_MODE_NONE);
-}
-
 static t_app_provider_result	net_load_lobby(void *userdata,
 			t_app_lobby_view_model *view)
 {
@@ -707,9 +712,9 @@ static t_app_provider_result	net_load_lobby(void *userdata,
 }
 
 static t_app_provider_result	net_create_room(void *userdata,
-			t_app_game_mode mode, t_app_room_view_model *view)
+				t_app_game_mode mode, t_app_room_view_model *view)
 {
-t_app_net_session	*session;
+	t_app_net_session	*session;
 	t_net_result		result;
 	char			body[32];
 
@@ -730,36 +735,19 @@ t_app_net_session	*session;
 		return (APP_PROVIDER_UNAVAILABLE);
 	if (result.status != 201)
 		return (APP_PROVIDER_INVALID);
-	memset(view, 0, sizeof(*view));
 	if (net_result_field(&result, "room", session->net.room,
 			sizeof(session->net.room)) == NULL)
 		return (APP_PROVIDER_INVALID);
-	snprintf(view->id, sizeof(view->id), "%s", session->net.room);
-	view->mode = mode;
-	view->state = APP_ROOM_STATE_WAITING;
-	view->capacity = (mode == APP_GAME_MODE_DOUBLE)
-		? WAITING_ROOM_DOUBLE_PLAYERS : APP_ROOM_MAX_PLAYERS;
-	view->required_players = (mode == APP_GAME_MODE_DOUBLE)
-		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
-	view->player_count = 1;
-	view->local_slot = 0;
-	snprintf(view->players[0].username, sizeof(view->players[0].username),
-		"%s", session->username);
-	view->players[0].owner = true;
-	view->players[0].ready = false;
 	session->net.state = NET_IN_ROOM;
-	return (APP_PROVIDER_OK);
+	return (net_refresh_room(userdata, session->net.room, view));
 }
 
 static t_app_provider_result	net_load_room(void *userdata,
-			const char *room_id, t_app_room_view_model *view)
+				const char *room_id, t_app_room_view_model *view)
 {
-t_app_net_session	*session;
+	t_app_net_session	*session;
 	t_net_result		result;
 	char			path[NET_PATH_MAX];
-	char			field[32];
-	const char		*role;
-	int			slot;
 
 	if (userdata == NULL || view == NULL || room_id == NULL
 		|| room_id[0] == '\0')
@@ -773,38 +761,241 @@ t_app_net_session	*session;
 		return (APP_PROVIDER_UNAVAILABLE);
 	if (result.status != 200 && result.status != 201)
 		return (APP_PROVIDER_INVALID);
-	memset(view, 0, sizeof(*view));
 	if (net_result_field(&result, "room", session->net.room,
 			sizeof(session->net.room)) == NULL)
 		snprintf(session->net.room, sizeof(session->net.room), "%s",
 			room_id);
-	snprintf(view->id, sizeof(view->id), "%s", session->net.room);
-	view->mode = mode_from_room_name(session->net.room);
-	if (net_result_field(&result, "slot", field, sizeof(field)) != NULL)
-		slot = (int)strtol(field, NULL, 10);
-	else
-		slot = 0;
-	view->local_slot = slot;
-	if (slot >= 0 && slot < APP_ROOM_MAX_PLAYERS)
-	{
-		snprintf(view->players[slot].username,
-			sizeof(view->players[slot].username), "%s", session->username);
-		role = net_result_field(&result, "role", field, sizeof(field));
-		view->players[slot].owner = (role != NULL && strcmp(role, "owner")
-			== 0);
-		view->players[slot].ready = false;
-	}
-	view->state = APP_ROOM_STATE_WAITING;
-	view->capacity = (view->mode == APP_GAME_MODE_DOUBLE)
-		? WAITING_ROOM_DOUBLE_PLAYERS : APP_ROOM_MAX_PLAYERS;
-	view->required_players = (view->mode == APP_GAME_MODE_DOUBLE)
-		? WAITING_ROOM_DOUBLE_PLAYERS : WAITING_ROOM_ROYALE_MIN_PLAYERS;
-	/*
-	 * tetrisd does not expose the full waiting-room roster; only the local
-	 * slot is known. The remaining seats stay empty and the screen renders
-	 * them as unoccupied, which is honest about what the server serves.
-	 */
-	view->player_count = 1;
 	session->net.state = NET_IN_ROOM;
+	return (net_refresh_room(userdata, session->net.room, view));
+}
+
+/**
+ * @brief Reads an authoritative waiting-room snapshot without joining again.
+ *
+ * @param userdata Network session.
+ * @param room_id Room currently occupied by this client.
+ * @param view Receives the decoded room model.
+ * @return Provider result.
+ */
+static t_app_provider_result	net_refresh_room(void *userdata,
+	const char *room_id, t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+	t_body_room			snapshot;
+	char				path[NET_PATH_MAX];
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "LIST", path, NULL, &result) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (result.status != 200)
+		return (APP_PROVIDER_INVALID);
+	if (body_room_decode(result.body, strlen(result.body), &snapshot) != 0
+		|| !map_room_snapshot(session, &snapshot, view))
+		return (APP_PROVIDER_INVALID);
+	fill_chat(&session->net, view);
 	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Posts one line to the room's feed and re-reads the room.
+ *
+ * Nothing is appended locally. The server sends the sender their own line
+ * along with everybody else's, so the refresh below is what puts it on the
+ * screen - in the server's order, with the server's sequence number, exactly
+ * as the other players will see it.
+ *
+ * @param userdata Network session.
+ * @param room_id Room the message is for.
+ * @param text The message.
+ * @param view Receives the room as it stands afterwards, feed included.
+ * @return Provider result; INVALID when the server refused the message.
+ */
+static t_app_provider_result	net_send_chat(void *userdata,
+	const char *room_id, const char *text, t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| text == NULL || view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (net_chat_send(&session->net, room_id, text, &result) != 0)
+	{
+		if (result.status == 0)
+			return (APP_PROVIDER_UNAVAILABLE);
+		return (APP_PROVIDER_INVALID);
+	}
+	return (net_refresh_room(userdata, room_id, view));
+}
+
+/**
+ * @brief Copies the client's feed ring onto the room a screen will draw.
+ *
+ * The ring is longer than the panel, so the tail is what is taken: a feed
+ * shows what was said most recently, and dropping the top of it is what the
+ * ring itself already does one line at a time.
+ *
+ * @param net Client holding the received lines.
+ * @param view Room model receiving them, oldest of the kept lines first.
+ */
+static void	fill_chat(const t_net_client *net, t_app_room_view_model *view)
+{
+	const t_body_chat	*line;
+	size_t				held;
+	size_t				first;
+	size_t				index;
+
+	held = net_chat_held(net);
+	first = 0;
+	if (held > APP_ROOM_CHAT_MAX)
+		first = held - APP_ROOM_CHAT_MAX;
+	view->chat_count = 0;
+	index = first;
+	while (index < held)
+	{
+		line = net_chat_at(net, index);
+		if (line == NULL)
+			break ;
+		view->chat[view->chat_count].system = line->system;
+		snprintf(view->chat[view->chat_count].author,
+			sizeof(view->chat[view->chat_count].author), "%s", line->sender);
+		/*
+		 * A line the server will carry is longer than one the panel draws, so
+		 * the cut is stated here rather than left to snprintf. It is the
+		 * display that is short, not the message.
+		 */
+		snprintf(view->chat[view->chat_count].text,
+			sizeof(view->chat[view->chat_count].text), "%.*s",
+			APP_ROOM_CHAT_TEXT_MAX - 1, line->text);
+		view->chat_count++;
+		index++;
+	}
+}
+
+/**
+ * @brief Leaves the server room and clears the client-side binding.
+ *
+ * @param userdata Network session.
+ * @param room_id Room currently occupied by this client.
+ * @return Provider result.
+ */
+static t_app_provider_result	net_leave_room(void *userdata,
+	const char *room_id)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+	char				path[NET_PATH_MAX];
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0')
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "LEAVE", path, NULL, &result) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (result.status != 200)
+		return (APP_PROVIDER_INVALID);
+	session->net.room[0] = '\0';
+	session->net.play_path[0] = '\0';
+	session->net.state = NET_AUTHED;
+	session->net.has_state = false;
+	net_chat_reset(&session->net);
+	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Starts the room on the server and returns its post-start snapshot.
+ *
+ * @param userdata Network session.
+ * @param room_id Room the owner is starting.
+ * @param view Receives the authoritative in-game room model.
+ * @return Provider result.
+ */
+static t_app_provider_result	net_start_room(void *userdata,
+	const char *room_id, t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+	char				path[NET_PATH_MAX];
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state != NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "START", path, NULL, &result) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (result.status != 200)
+		return (APP_PROVIDER_INVALID);
+	session->net.state = NET_IN_GAME;
+	return (net_refresh_room(userdata, room_id, view));
+}
+
+/**
+ * @brief Maps a shared room body into the waiting-room presentation model.
+ *
+ * Members are compacted in server slot order. The UI needs stable ordering,
+ * not the sparse server index; the local member is found by authenticated id.
+ *
+ * @param session Authenticated network session.
+ * @param body Decoded shared room body.
+ * @param view Presentation model to replace.
+ * @return true when the body fits and contains the local player.
+ */
+static bool	map_room_snapshot(t_app_net_session *session,
+	const t_body_room *body, t_app_room_view_model *view)
+{
+	size_t	index;
+
+	if (body->member_count > APP_ROOM_MAX_PLAYERS
+		|| body->slot_count > APP_ROOM_MAX_PLAYERS)
+		return (false);
+	memset(view, 0, sizeof(*view));
+	snprintf(view->id, sizeof(view->id), "%s", body->name);
+	view->mode = map_body_mode(body->mode);
+	view->state = map_body_status(body->status);
+	view->required_players = body->min_to_start;
+	view->capacity = body->slot_count;
+	view->player_count = (int)body->member_count;
+	view->local_slot = -1;
+	index = 0;
+	while (index < body->member_count)
+	{
+		snprintf(view->players[index].username,
+			sizeof(view->players[index].username), "%s",
+			body->members[index].username);
+		view->players[index].owner = body->members[index].owner;
+		view->players[index].ready = body->members[index].ready;
+		if (body->members[index].player_id == session->net.player_id)
+			view->local_slot = (int)index;
+		index++;
+	}
+	if (view->local_slot < 0)
+		return (false);
+	if (view->state == APP_ROOM_STATE_IN_GAME)
+	{
+		session->net.state = NET_IN_GAME;
+		snprintf(session->net.play_path, sizeof(session->net.play_path),
+			"%s%s/player/%llu", TETRISU_ROUTE_ROOM, body->name,
+			(unsigned long long)session->net.player_id);
+	}
+	else
+		session->net.state = NET_IN_ROOM;
+	return (true);
 }

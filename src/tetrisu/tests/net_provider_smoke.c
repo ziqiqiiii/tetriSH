@@ -34,7 +34,6 @@ static int	check_a_dead_session_redials(t_app_data_provider *provider,
 				t_app_net_session *session, const char *name);
 static int	check_leaderboard_lists_the_account(t_app_data_provider *provider,
 				t_app_net_session *session, const char *name);
-static int	leave_room(t_app_net_session *session);
 static int	sign_in_raw(t_net_client *net, const char *name);
 static void	report(const char *name, int ok, int *failures);
 
@@ -195,7 +194,7 @@ static int	check_lobby_lists_the_room(t_app_data_provider *provider,
 	}
 	if (!found)
 		return (0);
-	if (leave_room(session) != 0)
+	if (provider->leave_room(session, room.id) != APP_PROVIDER_OK)
 		return (0);
 	return (1);
 }
@@ -213,6 +212,7 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 {
 	t_app_room_view_model	created;
 	t_app_room_view_model	joined;
+	t_app_room_view_model	refreshed;
 	t_net_config		cfg;
 	char			helper_name[NET_USER_MAX];
 
@@ -231,7 +231,8 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 		return (0);
 	if (created.id[0] == '\0' || created.mode != APP_GAME_MODE_DOUBLE)
 		return (0);
-	if (created.player_count != 1 || !created.players[0].owner)
+	if (created.player_count != 1 || !created.players[0].owner
+		|| !created.players[0].ready)
 		return (0);
 	memset(&joined, 0, sizeof(joined));
 	if (provider->load_room(session, created.id, &joined) != APP_PROVIDER_OK)
@@ -240,46 +241,35 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 		return (0);
 	if (joined.mode != APP_GAME_MODE_DOUBLE)
 		return (0);
-	if (joined.player_count != 1)
+	if (joined.player_count != 2)
 		return (0);
 	if (strcmp(joined.players[joined.local_slot].username, session->username)
 		!= 0)
 		return (0);
 	if (joined.players[joined.local_slot].owner)
 		return (0);
-	(void)leave_room(session);
-	(void)leave_room(helper);
+	memset(&refreshed, 0, sizeof(refreshed));
+	if (provider->refresh_room(helper, created.id, &refreshed)
+		!= APP_PROVIDER_OK || refreshed.player_count != 2)
+		return (0);
+	if (provider->start_room(session, created.id, &joined)
+		!= APP_PROVIDER_INVALID)
+		return (0);
+	if (provider->start_room(helper, created.id, &refreshed)
+		!= APP_PROVIDER_OK || refreshed.state != APP_ROOM_STATE_IN_GAME)
+		return (0);
+	if (provider->leave_room(session, created.id) != APP_PROVIDER_OK)
+		return (0);
+	if (provider->leave_room(helper, created.id) != APP_PROVIDER_OK)
+		return (0);
+	memset(&joined, 0, sizeof(joined));
+	if (provider->create_room(session, APP_GAME_MODE_DOUBLE, &joined)
+		!= APP_PROVIDER_OK)
+		return (0);
+	if (provider->leave_room(session, joined.id) != APP_PROVIDER_OK)
+		return (0);
 	net_disconnect(&helper->net);
 	return (1);
-}
-
-/**
- * @brief Sends LEAVE /room/<name> on the session's current room, raw.
- *
- * The provider vtable has no leave slot (the UI's Back action drives it
- * elsewhere), so the test reaches past the provider for this one control
- * message. It clears the binding so the next JOIN is not refused as
- * already-in-room.
- */
-static int	leave_room(t_app_net_session *session)
-{
-	char	path[NET_PATH_MAX];
-	t_net_result	result;
-
-	if (session->net.state < NET_IN_ROOM || session->net.room[0] == '\0')
-		return (0);
-	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM,
-		session->net.room);
-	memset(&result, 0, sizeof(result));
-	if (net_request(&session->net, "LEAVE", path, NULL, &result) != 0)
-		return (-1);
-	if (result.status != 200)
-		return (-1);
-	session->net.state = NET_AUTHED;
-	session->net.room[0] = '\0';
-	session->net.play_path[0] = '\0';
-	session->net.has_state = false;
-	return (0);
 }
 
 /**

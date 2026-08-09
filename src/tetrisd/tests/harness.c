@@ -213,6 +213,37 @@ int	hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms)
 }
 
 /**
+ * @brief Waits for the next pushed CHAT and decodes the feed line in it.
+ *
+ * Anything else that arrives first is discarded, exactly as hc_wait_state
+ * discards chat: a test that is waiting for one kind of push has already
+ * asserted whatever it cared about in the others.
+ *
+ * @param hc Connected client.
+ * @param out Receives the decoded message.
+ * @param timeout_ms How long to wait.
+ * @return 0 on success, -1 on timeout or a body that would not decode.
+ */
+int	hc_wait_chat(t_harness *hc, t_body_chat *out, int timeout_ms)
+{
+	t_htttp_message	msg;
+	int				rc;
+
+	while (hc_recv(hc, &msg, timeout_ms) == 0)
+	{
+		if (msg.type == HTTTP_MESSAGE_REQUEST && msg.method != NULL
+			&& strcmp(msg.method, "CHAT") == 0)
+		{
+			rc = body_chat_decode((const char *)msg.body, msg.body_len, out);
+			htttp_message_free(&msg);
+			return (rc);
+		}
+		htttp_message_free(&msg);
+	}
+	return (-1);
+}
+
+/**
  * @brief Registers an account.
  *
  * @param hc Connected client.

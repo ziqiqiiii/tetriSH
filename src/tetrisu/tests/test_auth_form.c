@@ -6,6 +6,7 @@ static void	test_utf8_editing_and_masking(void);
 static void	test_server_check_state(void);
 static void	test_refused_primary_explains_itself(void);
 static void	test_validation_and_submission(void);
+static void	test_a_username_the_server_would_refuse_is_caught_here(void);
 static void	test_secondary_actions(void);
 
 int	main(void)
@@ -17,6 +18,7 @@ int	main(void)
 	test_server_check_state();
 	test_refused_primary_explains_itself();
 	test_validation_and_submission();
+	test_a_username_the_server_would_refuse_is_caught_here();
 	test_secondary_actions();
 	return (0);
 }
@@ -168,6 +170,39 @@ static void	test_validation_and_submission(void)
 	assert(form.feedback == AUTH_FEEDBACK_SUCCESS);
 	assert(view.signed_in);
 	printf("PASS test_validation_and_submission\n");
+}
+
+/*
+** The server refuses a name it could not put back on the wire, so the form
+** refuses it first. This is about where the player finds out: submitted, the
+** same name comes back as a 400 with the field already behind them.
+**
+** The multi-byte space is checked because the composer accepts it as text -
+** it is the same character the domain field already had to refuse.
+*/
+static void	test_a_username_the_server_would_refuse_is_caught_here(void)
+{
+	t_auth_form	form;
+	char		toolong[NET_USER_MAX + 8];
+
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	snprintf(form.password, sizeof(form.password), "cute-pass");
+	snprintf(form.domain, sizeof(form.domain), "play.example.com");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, true);
+	snprintf(form.username, sizeof(form.username), "amber lee");
+	assert(!auth_form_validate(&form));
+	assert(strstr(form.status, "WITHOUT SPACES") != NULL);
+	snprintf(form.username, sizeof(form.username), "amber　lee");
+	assert(!auth_form_validate(&form));
+	memset(toolong, 'x', sizeof(toolong) - 1);
+	toolong[sizeof(toolong) - 1] = '\0';
+	snprintf(form.username, sizeof(form.username), "%s", toolong);
+	assert(!auth_form_validate(&form));
+	// Punctuation is still a name; only what the wire cannot carry is out.
+	snprintf(form.username, sizeof(form.username), "DarK-Sanjan");
+	assert(auth_form_validate(&form));
+	printf("PASS test_a_username_the_server_would_refuse_is_caught_here\n");
 }
 
 static void	test_secondary_actions(void)

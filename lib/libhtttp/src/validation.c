@@ -12,6 +12,7 @@ static t_htttp_result	validate_response(const t_htttp_message *message);
 static t_htttp_result	validate_request(const t_htttp_message *message,
 						unsigned int flags);
 static int	nonempty_non_ows(const char *value);
+static int	body_type_allowed(const char *method, const char *content_type);
 static int	valid_rfc1123_date(const char *value);
 static int	token_index(const char *value, const char *const *table,
 				size_t count);
@@ -241,16 +242,13 @@ static t_htttp_result	validate_request(const t_htttp_message *message,
 		unsigned int flags)
 {
 	const char	*content_type;
-	const char	*expected_type;
 	const char	*player_id;
 
 	if (message->body_len > 0u)
 	{
 		content_type = htttp_message_get_header(message, "Content-Type");
-		expected_type = HTTTP_CONTENT_TYPE_COMMAND;
-		if (strcmp(message->method, "STATE") == 0)
-			expected_type = HTTTP_CONTENT_TYPE_STATE;
-		if (content_type == NULL || strcmp(content_type, expected_type) != 0)
+		if (content_type == NULL
+			|| !body_type_allowed(message->method, content_type))
 			return (HTTTP_ERR_MISSING_REQUIRED_HEADER);
 	}
 	if ((flags & HTTTP_VALIDATE_AUTHENTICATED_REQUEST) != 0u)
@@ -274,6 +272,29 @@ static int	nonempty_non_ows(const char *value)
 		i++;
 	}
 	return (0);
+}
+
+/**
+ * @brief Decides whether a body's Content-Type suits the method carrying it.
+ *
+ * Most methods are a client's command. STATE is only ever pushed, so it is
+ * only ever a board snapshot. CHAT travels in both directions with the same
+ * name - up as a command a player typed, down as a line of the room's feed -
+ * and a validator cannot see which way a message is going, so it accepts
+ * either for that one method.
+ *
+ * @param method The message's method.
+ * @param content_type The Content-Type header, already known non-NULL.
+ * @return 1 when the pair is allowed, 0 otherwise.
+ */
+static int	body_type_allowed(const char *method, const char *content_type)
+{
+	if (strcmp(method, "STATE") == 0)
+		return (strcmp(content_type, HTTTP_CONTENT_TYPE_STATE) == 0);
+	if (strcmp(method, "CHAT") == 0)
+		return (strcmp(content_type, HTTTP_CONTENT_TYPE_COMMAND) == 0
+			|| strcmp(content_type, HTTTP_CONTENT_TYPE_CHAT) == 0);
+	return (strcmp(content_type, HTTTP_CONTENT_TYPE_COMMAND) == 0);
 }
 
 static int	valid_rfc1123_date(const char *value)

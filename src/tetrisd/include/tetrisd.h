@@ -127,6 +127,12 @@
 # define TETRISD_BODY_MAX_BYTES					8192
 # define TETRISD_CONFIG_LINE_MAX				512
 # define TETRISD_OUTBOX_CAPACITY				32
+/*
+** The chat lane is its own ring and its own size. It is small because a
+** client that has fallen this far behind wants the newest of the feed, not
+** all of it, and because chat must never be able to crowd out a response.
+*/
+# define TETRISD_CHAT_CAPACITY					16
 # define TETRISD_LOG_RING_CAPACITY				1024
 # define TETRISD_LOG_DRAIN_MAX					64
 # define TETRISD_LOG_SHIPPER_WAIT_MS			20
@@ -265,14 +271,29 @@ typedef struct s_outbound_message
 }	t_outbound_message;
 
 /*
-** A bounded FIFO of responses plus a one-slot mailbox holding the latest
-** STATE. Responses that overflow the FIFO close the client (it cannot keep
-** up); STATE snapshots overwrite instead, so a stalled client loses
-** intermediate frames but never holds up the tick that produced them.
+** Three lanes, because three kinds of message fail differently.
 **
-** That split is the load-bearing idea and has nothing to do with threading,
+** A bounded FIFO of responses: a response belongs to a request the client is
+** waiting on, so losing one is not an option and overflow closes the client
+** instead (it cannot keep up).
+**
+** A one-slot mailbox holding the latest STATE: a snapshot supersedes the one
+** before it, so it overwrites and a stalled client loses intermediate frames
+** but never holds up the tick that produced them.
+**
+** A small ring of chat: best-effort by specification (UC-09 E1), so it drops
+** its oldest message and **never closes the client**. It cannot share the
+** response FIFO - a room narrating a Battle Royale's knockouts would fill it
+** and the next genuine response would kill a connection whose only fault was
+** being slow, which is the opposite of what that FIFO's rule is for.
+**
+** The split is the load-bearing idea and has nothing to do with threading,
 ** which is why it outlived the writer thread, the condition variable and the
 ** mutex unchanged.
+**
+** Three lanes means there is no total order between a response, a snapshot
+** and a chat line. Chat is ordered within itself and against nothing else,
+** which is why every message carries its own `seq`.
 */
 typedef struct s_outbox
 {
@@ -281,6 +302,10 @@ typedef struct s_outbox
 	size_t				count;
 	t_outbound_message	state;
 	bool				state_pending;
+	t_outbound_message	chat[TETRISD_CHAT_CAPACITY];
+	size_t				chat_head;
+	size_t				chat_count;
+	uint64_t			chat_dropped;
 	bool				closed;
 	bool				overflowed;
 }	t_outbox;
@@ -388,6 +413,13 @@ typedef struct s_server_room
 	bool			ticking;
 	t_server		*srv;
 	int				index;
+	/*
+	** The feed's own counter, numbering every line this room has sent. It is
+	** part of the runtime and so is blanked with it: a room is destroyed when
+	** its last player leaves, and the next room handed this index is a
+	** different room whose feed starts again at one.
+	*/
+	uint64_t		chat_seq;
 }	t_server_room;
 
 /* everything a reader outside room.c may know about a room, in one read */
@@ -670,6 +702,7 @@ void			buffer_free(t_buffer *b);
 int				outbox_init(t_outbox *ob);
 int				outbox_push(t_outbox *ob, unsigned char *bytes, size_t len);
 int				outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
+int				outbox_push_chat(t_outbox *ob, unsigned char *bytes, size_t len);
 int				outbox_pop(t_outbox *ob, t_outbound_message *out);
 bool			outbox_idle(t_outbox *ob);
 void			outbox_close(t_outbox *ob);
@@ -680,6 +713,7 @@ int				registry_init(t_registry *rg, size_t cap);
 int				registry_add(t_registry *rg, t_client *cli);
 void			registry_remove(t_registry *rg, t_client *cli);
 int				registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len, bool is_state);
+int				registry_enqueue_chat(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len);
 void			registry_bind(t_registry *rg, t_client *cli, t_player_id pid, const char *username);
 void			registry_mark_state(t_registry *rg, t_client *cli, t_client_state state);
 t_client		*registry_find_other(t_registry *rg, t_player_id pid, const t_client *keep);
@@ -730,6 +764,9 @@ int				leave_handler(const t_htttp_message *msg, void *context);
 int				start_handler(const t_htttp_message *msg, void *context);
 bool			request_is_authorised(t_request_context *ctx);
 
+/* HANDLERS_CHAT.C */
+int				chat_handler(const t_htttp_message *msg, void *context);
+
 /* HANDLERS_LEADERBOARD.C */
 int				leaderboard_handler(const t_htttp_message *msg, void *context);
 
@@ -744,6 +781,7 @@ int				store_list_catalogue(t_request_context *ctx);
 
 /* REQUEST_TARGET.C */
 int				request_input_target(t_request_context *ctx, t_server_room **out);
+const char		*request_room_name(const t_request_context *ctx);
 t_player_id		request_player_id(const char *text, const char **end);
 int				request_body_token(t_request_context *ctx, char *out, size_t cap);
 bool			rate_limit_take_token(t_client *cli);
@@ -794,7 +832,15 @@ t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
+bool			server_room_snapshot(const t_server_room *server_room,
+					t_body_room *out);
+bool			server_room_is_muted(const t_server_room *server_room, t_player_id pid);
 const t_game	*server_room_game_at(const t_server_room *server_room, int slot);
+
+/* NARRATE.C */
+bool			room_chat_broadcast(t_server_room *server_room, t_body_chat *chat);
+void			room_narrate(t_server_room *server_room, const char *fmt, ...)
+					__attribute__((format(printf, 2, 3)));
 
 /* SERVER.C */
 int				server_start(const t_config *cfg, t_server **out);

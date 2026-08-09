@@ -63,6 +63,13 @@ t_db_result	recovery_run(t_dblog *log, t_hashmap *hm, t_skiplist *sl, t_player_i
  * record frees the loser; an alloc failure flags the context so the caller
  * aborts the boot rather than coming up with a partial dataset.
  *
+ * A record whose username the wire cannot carry is dropped rather than
+ * recovered. Such a row can only predate db_signup's charset check, and one
+ * of them breaks a body that names every player at once — the leaderboard is
+ * refused as malformed for everybody, not just for its owner. Its id is still
+ * counted towards max_id: the row is gone, but reissuing the number it held
+ * would be a second bug on top of the first.
+ *
  * @param p The decoded record, owned by the replay loop (must be copied).
  * @param ctx The t_replay_ctx carrying the map, max id, and failure flag.
  */
@@ -75,6 +82,12 @@ static void	replay_cb(const t_player *p, void *ctx)
 	rc = ctx;
 	if (rc->failed)
 		return ;
+	if (!db_username_valid(p->username))
+	{
+		if (p->player_id > rc->max_id)
+			rc->max_id = p->player_id;
+		return ;
+	}
 	copy = malloc(sizeof(*copy));
 	if (!copy)
 		return ((void)(rc->failed = 1));

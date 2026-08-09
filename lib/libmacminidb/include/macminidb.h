@@ -102,6 +102,16 @@ typedef struct s_macminidb	t_db;
 t_db_result			db_open(const char *data_dir, const char *config_dir, t_db **out);
 void				db_close(t_db *db);
 t_db_result			db_signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id);
+
+/*
+** USERNAME.C
+**
+** What a username may contain, asked without a handle. db_signup applies it
+** itself, so a caller never has to; it is public so a server can refuse a
+** name at the edge with a reason of its own rather than reading DB_INVALID
+** and guessing which field was wrong.
+*/
+bool				db_username_valid(const char *username);
 t_db_result			db_buy_character(t_db *db, t_player_id id, t_item_id cid);
 t_db_result			db_buy_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_equip_character(t_db *db, t_player_id id, t_item_id cid);
