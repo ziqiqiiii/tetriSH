@@ -187,7 +187,7 @@ bool	render_plane_blit_rgba(t_render_ctx *ctx, struct ncplane *plane,
  * that actually animate stay bitmaps. This is the split Solo already runs.
  *
  * The surface is stretched to the plane because the caller composes at device
- * pixel resolution, which is several times what NCBLIT_4x2 addresses.
+ * pixel resolution, which is several times what TETRISU_BLIT_DENSE addresses.
  *
  * @param ctx Active render context.
  * @param plane Destination plane.
@@ -214,7 +214,7 @@ bool	render_plane_blit_rgba_cells(t_render_ctx *ctx, struct ncplane *plane,
 	memset(&vopts, 0, sizeof(vopts));
 	vopts.n = plane;
 	vopts.scaling = NCSCALE_STRETCH;
-	vopts.blitter = NCBLIT_4x2;
+	vopts.blitter = TETRISU_BLIT_DENSE;
 	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	ok = ncvisual_blit(ctx->nc, ncv, &vopts) != NULL;
 	ncvisual_destroy(ncv);
@@ -1273,7 +1273,7 @@ static int	max_int(int a, int b)
  * @param ctx Active render context (unused).
  * @param rows Destination row count (unused).
  * @param cols Destination column count (unused).
- * @return The 4x2 cell blitter.
+ * @return The densest cell blitter this notcurses has.
  */
 static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	int rows, int cols)
@@ -1283,7 +1283,7 @@ static ncblitter_e	preferred_blitter(const t_render_ctx *ctx,
 	(void)cols;
 	/* Decorative backdrops are intentionally cell-rendered. This leaves the
 	 * bitmap layer for stationary crisp characters, pieces, and text. */
-	return (NCBLIT_4x2);
+	return (TETRISU_BLIT_DENSE);
 }
 
 /**

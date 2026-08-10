@@ -424,7 +424,7 @@ static struct ncplane	*create_bunny_sprite(t_render_ctx *ctx, int y, int x)
 		vopts.scaling = NCSCALE_NONE;
 		vopts.y = y;
 		vopts.x = x;
-		vopts.blitter = NCBLIT_4x2;
+		vopts.blitter = TETRISU_BLIT_DENSE;
 		vopts.flags = NCVISUAL_OPTION_CHILDPLANE
 			| NCVISUAL_OPTION_NOINTERPOLATE;
 		plane = ncvisual_blit(ctx->nc, ncv, &vopts);

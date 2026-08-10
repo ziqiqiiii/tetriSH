@@ -51,9 +51,10 @@ int	render_intro_play(t_render_ctx *ctx, t_audio_ctx *audio,
 	/* NCBLIT_PIXEL was tried here and made playback slow-motion: every frame
 	 * becomes a full bitmap transfer instead of cheap glyph diffing, and the
 	 * terminal can't encode/send them fast enough to keep up with real time.
-	 * NCBLIT_4x2 (octants) stays glyph/cell-based like 2x2, just denser, so
-	 * it shouldn't carry that same cost. */
-	vopts.blitter = NCBLIT_4x2;
+	 * TETRISU_BLIT_DENSE (octants, or sextants on an older notcurses) stays
+	 * glyph/cell-based like 2x2, just denser, so it shouldn't carry that same
+	 * cost. */
+	vopts.blitter = TETRISU_BLIT_DENSE;
 	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
 	intro.ctx = ctx;
 	intro.skipped = 0;

@@ -19,8 +19,39 @@
 # include <sys/ioctl.h>
 # include <sys/stat.h>
 # include <notcurses/notcurses.h>
+/*
+ * notcurses.h does not pull in its own version header, and version.h is
+ * generated at build time rather than shipped in the source tree - so it is
+ * asked for rather than assumed. A packager who left it out loses the octant
+ * blitter below, not the build.
+ */
+# ifdef __has_include
+#  if __has_include(<notcurses/version.h>)
+#   include <notcurses/version.h>
+#  endif
+# endif
 # include "tetrisbrain.h"
 # include "tetrisu_net.h"
+
+/*
+ * The densest cell blitter this notcurses has. NCBLIT_4x2 (octants) needs the
+ * Unicode 16 characters notcurses only gained in 3.0.12, and the distributions
+ * still package older releases - so the enumerator is absent there and every
+ * use of it is a compile error, not a runtime fallback. Sextants are the
+ * densest blitter every supported release has, so an old notcurses coarsens
+ * the art instead of failing the build. The version test is nested rather than
+ * one expression, because #if expands NOTCURSES_VERSION_COMPARABLE even when a
+ * defined() guard beside it is false - and a notcurses without version.h has
+ * no such macro to expand.
+ */
+# ifdef NOTCURSES_VERNUM_ORDERED
+#  if NOTCURSES_VERNUM_ORDERED >= NOTCURSES_VERSION_COMPARABLE(3, 0, 12)
+#   define TETRISU_BLIT_DENSE	NCBLIT_4x2
+#  endif
+# endif
+# ifndef TETRISU_BLIT_DENSE
+#  define TETRISU_BLIT_DENSE	NCBLIT_3x2
+# endif
 
 # ifndef TETRISU_ENABLE_AUDIO
 # define TETRISU_ENABLE_AUDIO	0

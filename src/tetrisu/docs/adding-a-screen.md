@@ -514,8 +514,14 @@ to prevent, and it will not show up on your Kitty terminal.
 blitting the pixel backdrops took a swap from 15,386 ms to 2 ms — and it is not
 acceptable: cell blitters cap at two colours per cell, and A/B screenshots
 showed Settings lose its gilded panel frames, its plate icons and its circular
-buttons. Home's backdrop is `NCBLIT_4x2` because it was authored to survive it;
-the others were not. Fix the transmission, not the fidelity.
+buttons. Home's backdrop is `TETRISU_BLIT_DENSE` because it was authored to
+survive it; the others were not. Fix the transmission, not the fidelity.
+
+`TETRISU_BLIT_DENSE` is `NCBLIT_4x2` (octants) and `NCBLIT_3x2` (sextants) on a
+notcurses older than 3.0.12, which is the release that added the octant
+blitter — the enumerator does not exist before it, so naming it directly is a
+compile error rather than a runtime fallback on every distribution package
+still shipping 3.0.9.
 
 **Discard queued input on the way *in*, not just on the way out.** Step 5 says
 to call `discard_queued_input()` on actions that leave a screen. The transition

@@ -541,7 +541,7 @@ static bool	create_background_plane(t_render_ctx *ctx, t_solo_render *solo)
 		return (false);
 	if (!blit_surface(ctx, solo->background_plane, solo->background_pixels,
 			SOLO_CANVAS_WIDTH, SOLO_CONTENT_HEIGHT,
-			SOLO_CANVAS_WIDTH, NCBLIT_4x2))
+			SOLO_CANVAS_WIDTH, TETRISU_BLIT_DENSE))
 	{
 		destroy_plane(&solo->background_plane);
 		return (false);
@@ -567,7 +567,7 @@ static int	update_danger_background(t_render_ctx *ctx, t_solo_render *solo,
 	ncplane_erase(solo->background_plane);
 	if (!blit_surface(ctx, solo->background_plane, solo->background_pixels,
 			SOLO_CANVAS_WIDTH, SOLO_CONTENT_HEIGHT,
-			SOLO_CANVAS_WIDTH, NCBLIT_4x2))
+			SOLO_CANVAS_WIDTH, TETRISU_BLIT_DENSE))
 		return (-1);
 	solo->danger_signature = signature;
 	return (1);
@@ -1758,7 +1758,7 @@ static bool	update_pixel_region(t_render_ctx *ctx, t_solo_render *solo,
 		+ source_x];
 	blitter = NCBLIT_PIXEL;
 	if (solo->cell_board)
-		blitter = NCBLIT_4x2;
+		blitter = TETRISU_BLIT_DENSE;
 	if (!blit_surface(ctx, *plane, pixels, source_width, source_height,
 			SOLO_CANVAS_WIDTH, blitter))
 	{
