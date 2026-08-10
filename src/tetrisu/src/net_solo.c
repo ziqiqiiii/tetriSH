@@ -102,6 +102,8 @@ void	net_solo_leave(t_net_client *net)
 	net->room[0] = '\0';
 	net->play_path[0] = '\0';
 	net->has_state = false;
+	net->last_seq = 0;
+	net->applied_seq = 0;
 	net_chat_reset(net);
 }
 

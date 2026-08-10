@@ -912,6 +912,8 @@ static t_app_provider_result	net_leave_room(void *userdata,
 	session->net.play_path[0] = '\0';
 	session->net.state = NET_AUTHED;
 	session->net.has_state = false;
+	session->net.last_seq = 0;
+	session->net.applied_seq = 0;
 	net_chat_reset(&session->net);
 	return (APP_PROVIDER_OK);
 }

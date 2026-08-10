@@ -23,6 +23,7 @@ static void	test_an_ability_without_charge_is_refused_and_costs_nothing(void);
 static void	test_a_targeted_ability_is_refused_in_single(void);
 static void	test_a_paid_ability_spends_exactly_its_cost(void);
 static void	test_an_ability_is_the_character_and_the_level(void);
+static void	test_ability_numbers_are_strictly_parsed(void);
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static int		simple(t_harness *hc, const char *method, const char *path, const char *body);
@@ -43,6 +44,7 @@ int	main(void)
 	test_a_targeted_ability_is_refused_in_single();
 	test_a_paid_ability_spends_exactly_its_cost();
 	test_an_ability_is_the_character_and_the_level();
+	test_ability_numbers_are_strictly_parsed();
 	return (0);
 }
 
@@ -319,6 +321,29 @@ static void	test_an_ability_is_the_character_and_the_level(void)
 	assert(ability_is_playable_solo(ability_lookup(4, 4)));
 	assert(!ability_is_playable_solo(ability_lookup(3, 4)));
 	printf("PASS test_an_ability_is_the_character_and_the_level\n");
+}
+
+/*
+** ABILITY's numbers are protocol fields, not numeric prefixes. Trailing text
+** and non-numbers must be rejected, as must an aimed column off the board.
+*/
+static void	test_ability_numbers_are_strictly_parsed(void)
+{
+	t_fixture	fx;
+	t_harness	hc;
+	char		play[96];
+
+	assert(fx_start(&fx) == 0);
+	assert(player(&fx, &hc, "strict") == 0);
+	assert(start_single(&hc, play, sizeof(play)) == 0);
+	assert(simple(&hc, "ABILITY", play, "level 1junk\n") == 400);
+	assert(simple(&hc, "ABILITY", play, "level nope\n") == 400);
+	assert(simple(&hc, "ABILITY", play, "level 1\ncolumn 2junk\n") == 400);
+	assert(simple(&hc, "ABILITY", play, "level 1\ncolumn -1\n") == 400);
+	assert(simple(&hc, "ABILITY", play, "level 1\ncolumn 10\n") == 400);
+	hc_close(&hc);
+	fx_stop(&fx);
+	printf("PASS test_ability_numbers_are_strictly_parsed\n");
 }
 
 /**

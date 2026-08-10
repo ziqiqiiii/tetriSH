@@ -7,9 +7,8 @@ static t_body_clear_label	clear_label(int lines, bool perfect);
 static int				step_interval(const t_game *g);
 static bool				begin_clear(t_game *g);
 static void				finish_clear(t_game *g);
-static bool				advance_clear(t_game *g, int elapsed_ms);
-static bool				apply_fall(t_game *g, int elapsed_ms);
-static bool				apply_lockdown(t_game *g, int elapsed_ms);
+static bool				advance_clear(t_game *g, int *remaining_ms);
+static bool				advance_active(t_game *g, int *remaining_ms);
 
 /**
  * @brief Blanks a game slot back to "nobody is playing here".
@@ -77,9 +76,10 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
  * Every tick of it is a snapshot, so the client has the frames to animate it
  * with rather than one flash at each end.
  *
- * Falling and locking are two clocks, not one. A piece that has landed is
- * out of rows to fall but still has its lock delay to spend, so the same
- * elapsed milliseconds are charged against both.
+ * Falling, clearing and locking consume one real-time budget. If a piece
+ * touches down partway through a late tick, only the time after touchdown is
+ * charged to lock down; if a clear finishes partway through, the remainder is
+ * handed to the new piece.
  *
  * @param g Game to advance.
  * @param elapsed_ms Milliseconds since this game was last advanced.
@@ -88,13 +88,20 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 bool	game_gravity(t_game *g, int elapsed_ms)
 {
 	bool	changed;
+	int		remaining_ms;
 
 	if (g == NULL || !g->active || g->paused || elapsed_ms <= 0)
 		return (false);
-	if (g->clearing_count > 0)
-		return (advance_clear(g, elapsed_ms));
-	changed = apply_fall(g, elapsed_ms);
-	return (apply_lockdown(g, elapsed_ms) || changed);
+	changed = false;
+	remaining_ms = elapsed_ms;
+	while (remaining_ms > 0 && g->active && !g->paused)
+	{
+		if (g->clearing_count > 0)
+			changed = advance_clear(g, &remaining_ms) || changed;
+		else
+			changed = advance_active(g, &remaining_ms) || changed;
+	}
+	return (changed);
 }
 
 /**
@@ -472,15 +479,22 @@ static void	finish_clear(t_game *g)
  * and last frame would have nothing to interpolate and would flash.
  *
  * @param g Game holding completed rows.
- * @param elapsed_ms Milliseconds since the last tick.
+ * @param remaining_ms Time still unspent; reduced by the clear's portion.
  * @return true, always - a clear in progress always owes a snapshot.
  */
-static bool	advance_clear(t_game *g, int elapsed_ms)
+static bool	advance_clear(t_game *g, int *remaining_ms)
 {
 	int	duration_ms;
+	int	step_ms;
 
 	duration_ms = clear_duration_ms(g->level);
-	g->clearing_ms += elapsed_ms;
+	step_ms = duration_ms - g->clearing_ms;
+	if (step_ms > *remaining_ms)
+		step_ms = *remaining_ms;
+	if (step_ms < 0)
+		step_ms = 0;
+	g->clearing_ms += step_ms;
+	*remaining_ms -= step_ms;
 	if (g->clearing_ms >= duration_ms)
 	{
 		g->clearing_ms = duration_ms;
@@ -531,54 +545,51 @@ static int	step_interval(const t_game *g)
 }
 
 /**
- * @brief Drops the piece by however many rows the elapsed time bought.
+ * @brief Advances one falling or lock-down boundary from the time budget.
  *
- * The accumulator is emptied the moment the piece lands rather than left to
- * grow: the seconds a piece spends resting are not owed to it, and a piece
- * nudged back off a ledge should fall on the next step and not instantly.
+ * Only the milliseconds needed to reach the next event are consumed. The
+ * caller loops with whatever remains, which makes touchdown and lock-down two
+ * consecutive portions of one tick instead of charging that tick twice.
  *
- * @param g Game whose piece is falling.
- * @param elapsed_ms Milliseconds since the last tick.
- * @return true when the piece changed rows.
+ * @param g Game whose active piece is advancing.
+ * @param remaining_ms Time still unspent; reduced by this step.
+ * @return true when the piece moved or locked.
  */
-static bool	apply_fall(t_game *g, int elapsed_ms)
+static bool	advance_active(t_game *g, int *remaining_ms)
 {
-	bool	changed;
+	int	step_ms;
+	int	until_event_ms;
 
-	changed = false;
-	g->accum_ms += elapsed_ms;
-	while (g->accum_ms >= step_interval(g))
+	if (lockdown_grounded(&g->board, &g->piece))
 	{
-		g->accum_ms -= step_interval(g);
-		if (gravity_tick(&g->board, &g->piece) != BRAIN_OK)
-		{
-			g->accum_ms = 0;
-			break ;
-		}
-		lockdown_on_fall(&g->lockdown, &g->piece);
-		changed = true;
+		until_event_ms = LOCKDOWN_DELAY_MS - g->lockdown.elapsed_ms;
+		if (until_event_ms < 0)
+			until_event_ms = 0;
+		step_ms = until_event_ms;
+		if (step_ms > *remaining_ms)
+			step_ms = *remaining_ms;
+		*remaining_ms -= step_ms;
+		if (!lockdown_tick(&g->lockdown, true, step_ms))
+			return (false);
+		lock_piece(g);
+		return (true);
 	}
-	return (changed);
-}
-
-/**
- * @brief Charges the same elapsed time against a landed piece's lock delay.
- *
- * Only the expiry is a change worth a snapshot: while the delay runs the
- * board looks exactly as it did, so a client told about every tick of it
- * would be sent the same frame forty times.
- *
- * @param g Game whose piece may be resting.
- * @param elapsed_ms Milliseconds since the last tick.
- * @return true when the piece locked on this tick.
- */
-static bool	apply_lockdown(t_game *g, int elapsed_ms)
-{
-	bool	grounded;
-
-	grounded = lockdown_grounded(&g->board, &g->piece);
-	if (!lockdown_tick(&g->lockdown, grounded, elapsed_ms))
+	until_event_ms = step_interval(g) - g->accum_ms;
+	if (until_event_ms < 0)
+		until_event_ms = 0;
+	step_ms = until_event_ms;
+	if (step_ms > *remaining_ms)
+		step_ms = *remaining_ms;
+	g->accum_ms += step_ms;
+	*remaining_ms -= step_ms;
+	if (g->accum_ms < step_interval(g))
 		return (false);
-	lock_piece(g);
+	g->accum_ms -= step_interval(g);
+	if (gravity_tick(&g->board, &g->piece) != BRAIN_OK)
+	{
+		g->accum_ms = 0;
+		return (false);
+	}
+	lockdown_on_fall(&g->lockdown, &g->piece);
 	return (true);
 }

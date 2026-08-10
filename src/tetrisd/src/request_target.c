@@ -191,6 +191,40 @@ bool	rate_limit_take_chat_token(t_client *cli)
 }
 
 /**
+ * @brief Refills a scaled token level without overflowing its integer store.
+ *
+ * The ceiling is tested before multiplication. Once elapsed time can fill the
+ * missing part of the bucket, the exact product is irrelevant and returning
+ * the cap avoids narrowing a potentially enormous uint64_t product to int.
+ *
+ * @param tokens Current scaled token level.
+ * @param elapsed_ms Idle time to refill.
+ * @param cap Maximum scaled token level.
+ * @param rate Whole tokens added per second (one scaled unit per millisecond).
+ * @return The refilled level, clamped to the bucket's valid range.
+ */
+int	rate_limit_refill_level(int tokens, uint64_t elapsed_ms, int cap,
+		int rate)
+{
+	uint64_t	missing;
+	uint64_t	fill_ms;
+
+	if (cap <= 0)
+		return (0);
+	if (tokens < 0)
+		tokens = 0;
+	if (tokens >= cap)
+		return (cap);
+	if (rate <= 0 || elapsed_ms == 0)
+		return (tokens);
+	missing = (uint64_t)(cap - tokens);
+	fill_ms = (missing + (uint64_t)rate - 1) / (uint64_t)rate;
+	if (elapsed_ms >= fill_ms)
+		return (cap);
+	return (tokens + (int)(elapsed_ms * (uint64_t)rate));
+}
+
+/**
  * @brief Refills one token bucket by however long it has been idle, then
  *        spends a token from it.
  *
@@ -217,7 +251,7 @@ static bool	take_token(int *tokens, uint64_t *at_ms, int cap, int rate)
 	}
 	if (now > *at_ms)
 	{
-		*tokens += (int)((now - *at_ms) * (uint64_t)rate);
+		*tokens = rate_limit_refill_level(*tokens, now - *at_ms, cap, rate);
 		*at_ms = now;
 	}
 	if (*tokens > cap)

@@ -178,6 +178,7 @@ int		net_fd(const t_net_client *net);
 int		net_request(t_net_client *net, const char *method, const char *path,
 			const char *body, t_net_result *out);
 int		net_pump(t_net_client *net);
+bool	net_state_take(t_net_client *net, const t_htttp_message *msg);
 const char	*net_result_field(const t_net_result *result, const char *key,
 				char *out, size_t cap);
 

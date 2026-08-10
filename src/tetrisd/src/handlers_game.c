@@ -17,6 +17,7 @@
 static int	solo_only(t_request_context *ctx, t_server_room *server_room);
 static int	equipped_character(t_request_context *ctx, t_item_id *out);
 static int	ability_body(t_request_context *ctx, int *level, int *column);
+static int	parse_decimal(const char *text, int min, int max, int *out);
 static int	activate(t_request_context *ctx, t_server_room *server_room,
 				const t_ability_def *def, int column);
 
@@ -179,11 +180,41 @@ static int	ability_body(t_request_context *ctx, int *level, int *column)
 	*column = -1;
 	if (request_body_field(ctx, "level", value, sizeof(value)) == NULL)
 		return (-1);
-	*level = atoi(value);
-	if (*level < 1 || *level > 4)
+	if (parse_decimal(value, 1, 4, level) != 0)
 		return (-1);
 	if (request_body_field(ctx, "column", value, sizeof(value)) != NULL)
-		*column = atoi(value);
+	{
+		if (parse_decimal(value, 0, BOARD_WIDTH - 1, column) != 0)
+			return (-1);
+	}
+	return (0);
+}
+
+/**
+ * @brief Parses one complete bounded decimal field.
+ *
+ * strtol is used with its end pointer so values such as `1junk` and `none`
+ * are refusals rather than silently becoming levels 1 and 0 through atoi.
+ *
+ * @param text Field value to parse.
+ * @param min Smallest accepted value.
+ * @param max Largest accepted value.
+ * @param out Receives the parsed integer.
+ * @return 0 on success, -1 on syntax, range or conversion failure.
+ */
+static int	parse_decimal(const char *text, int min, int max, int *out)
+{
+	char	*end;
+	long	value;
+
+	if (text == NULL || text[0] < '0' || text[0] > '9')
+		return (-1);
+	errno = 0;
+	value = strtol(text, &end, 10);
+	if (errno != 0 || end == text || *end != '\0'
+		|| value < min || value > max)
+		return (-1);
+	*out = (int)value;
 	return (0);
 }
 

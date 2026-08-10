@@ -18,6 +18,7 @@
 #include "tetrisu.h"
 
 #include <dirent.h>
+#include <signal.h>
 
 // Static Functions
 static int	check_reconnecting_leaks_no_descriptor(const t_net_config *cfg);
@@ -25,6 +26,10 @@ static int	check_signup_alone_claims_no_identity(const t_net_config *cfg,
 				const char *name);
 static int	check_a_refused_solo_start_leaves_the_session_intact(
 				const t_net_config *cfg, const char *name);
+static int	check_a_reply_timeout_closes_the_session(
+				const t_net_config *cfg, const char *name);
+static pid_t	fixture_pid(void);
+static int	wait_until_stopped(pid_t pid);
 static int	open_descriptors(void);
 static int	sign_up_and_in(t_net_client *net, const char *name);
 static void	report(const char *name, int ok, int *failures);
@@ -59,6 +64,8 @@ int	main(void)
 	report("a refused solo start leaves the session intact",
 		check_a_refused_solo_start_leaves_the_session_intact(&cfg, name),
 		&failures);
+	report("a reply timeout closes the session",
+		check_a_reply_timeout_closes_the_session(&cfg, name), &failures);
 	return (failures != 0);
 }
 
@@ -194,6 +201,129 @@ static int	check_a_refused_solo_start_leaves_the_session_intact(
 	net_solo_leave(&net);
 	net_disconnect(&net);
 	return (ok);
+}
+
+/**
+ * @brief A timed-out request makes the stream unusable for later requests.
+ *
+ * HTTTP responses carry no request id. If the connection stayed open after a
+ * timeout, the delayed response could be consumed as the answer to the next
+ * request. The fixture daemon is stopped after login so the request reaches
+ * the socket but no answer can arrive before the client's deadline.
+ *
+ * @param cfg Where the server is.
+ * @param name Existing account used to authenticate the connection.
+ * @return 1 when timeout closes the descriptor and marks the client offline.
+ */
+static int	check_a_reply_timeout_closes_the_session(
+			const t_net_config *cfg, const char *name)
+{
+	t_net_client	net;
+	t_net_result	result;
+	pid_t		pid;
+	int			rc;
+	int			ok;
+
+	pid = fixture_pid();
+	if (pid <= 0)
+	{
+		printf("  timeout diagnostic: fixture pid unavailable\n");
+		return (0);
+	}
+	memset(&net, 0, sizeof(net));
+	if (net_connect(&net, cfg) != 0)
+	{
+		printf("  timeout diagnostic: connect failed\n");
+		return (0);
+	}
+	if (!sign_up_and_in(&net, name))
+	{
+		printf("  timeout diagnostic: authentication failed\n");
+		return (net_disconnect(&net), 0);
+	}
+	if (kill(pid, SIGSTOP) != 0)
+	{
+		printf("  timeout diagnostic: SIGSTOP failed (%d)\n", errno);
+		return (net_disconnect(&net), 0);
+	}
+	if (!wait_until_stopped(pid))
+	{
+		(void)kill(pid, SIGCONT);
+		printf("  timeout diagnostic: daemon did not stop\n");
+		return (net_disconnect(&net), 0);
+	}
+	memset(&result, 0, sizeof(result));
+	rc = net_request(&net, "LIST", TETRISU_ROUTE_ROOMS, NULL, &result);
+	(void)kill(pid, SIGCONT);
+	ok = rc == -1 && net.state == NET_OFFLINE && net.fd == -1;
+	if (!ok)
+		printf("  timeout diagnostic: rc=%d state=%d fd=%d status=%d\n",
+			rc, (int)net.state, net.fd, result.status);
+	net_disconnect(&net);
+	return (ok);
+}
+
+/**
+ * @brief Reads the daemon pid exported by the integration fixture.
+ *
+ * @return A positive pid, or -1 when the fixture did not provide one.
+ */
+static pid_t	fixture_pid(void)
+{
+	const char	*text;
+	char		*end;
+	long		value;
+
+	text = getenv("TETRISD_TEST_PID");
+	if (text == NULL || text[0] == '\0')
+		return (-1);
+	errno = 0;
+	value = strtol(text, &end, 10);
+	if (errno != 0 || end == text || *end != '\0' || value <= 0
+		|| value > INT_MAX)
+		return (-1);
+	return ((pid_t)value);
+}
+
+/**
+ * @brief Waits until Linux reports that SIGSTOP has actually taken effect.
+ *
+ * kill() confirms delivery, not scheduling. Sending the request immediately
+ * after it leaves a race in which the daemon can answer before the stop is
+ * observed, so the test waits on the process state instead of sleeping for an
+ * arbitrary interval.
+ *
+ * @param pid Daemon process to inspect.
+ * @return 1 once stopped, 0 if it did not stop within one second.
+ */
+static int	wait_until_stopped(pid_t pid)
+{
+	char	path[64];
+	char	line[128];
+	FILE	*status;
+	int		attempt;
+
+	snprintf(path, sizeof(path), "/proc/%ld/status", (long)pid);
+	attempt = 0;
+	while (attempt < 100)
+	{
+		status = fopen(path, "r");
+		if (status == NULL)
+			return (0);
+		while (fgets(line, sizeof(line), status) != NULL)
+		{
+			if (strncmp(line, "State:", strlen("State:")) == 0
+				&& strchr(line, 'T') != NULL)
+			{
+				fclose(status);
+				return (1);
+			}
+		}
+		fclose(status);
+		(void)poll(NULL, 0, 10);
+		attempt++;
+	}
+	return (0);
 }
 
 /**

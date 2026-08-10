@@ -26,6 +26,7 @@ static void	test_chat_drops_its_oldest_and_never_overflows(void);
 static void	test_chat_sits_between_responses_and_state(void);
 static void	test_chat_does_not_consume_the_response_queue(void);
 static void	test_close_frees_pending_chat(void);
+static void	test_leaving_drops_room_pushes_but_keeps_responses(void);
 
 static int	push_text(t_outbox *ob, const char *text, bool as_state);
 static int	push_chat_text(t_outbox *ob, const char *text);
@@ -42,6 +43,7 @@ int	main(void)
 	test_chat_sits_between_responses_and_state();
 	test_chat_does_not_consume_the_response_queue();
 	test_close_frees_pending_chat();
+	test_leaving_drops_room_pushes_but_keeps_responses();
 	return (0);
 }
 
@@ -211,6 +213,23 @@ static void	test_close_frees_pending_chat(void)
 	assert(push_chat_text(&ob, "after close") == -1);
 	outbox_destroy(&ob);
 	printf("PASS test_close_frees_pending_chat\n");
+}
+
+static void	test_leaving_drops_room_pushes_but_keeps_responses(void)
+{
+	t_outbox			ob;
+	t_outbound_message	msg;
+
+	assert(outbox_init(&ob) == 0);
+	assert(push_text(&ob, "leave response", false) == 0);
+	assert(push_chat_text(&ob, "old room chat") == 0);
+	assert(push_text(&ob, "old room state", true) == 0);
+	outbox_drop_room_pushes(&ob);
+	expect_text(&ob, "leave response");
+	assert(outbox_pop(&ob, &msg) == -1);
+	assert(outbox_idle(&ob));
+	outbox_destroy(&ob);
+	printf("PASS test_leaving_drops_room_pushes_but_keeps_responses\n");
 }
 
 static int	push_text(t_outbox *ob, const char *text, bool as_state)

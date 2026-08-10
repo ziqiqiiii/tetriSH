@@ -32,6 +32,7 @@ static void	test_a_lock_that_clears_nothing_does_not_hold(void);
 static void	test_a_pause_stops_the_clear_where_it_is(void);
 static void	test_the_snapshot_carries_the_held_rows(void);
 static void	test_the_held_rows_survive_the_wire(void);
+static void	test_clear_overshoot_advances_the_next_piece(void);
 
 static void	fill_bottom_row(t_game *g);
 static void	drop_to_lock(t_game *g);
@@ -47,6 +48,7 @@ int	main(void)
 	test_a_pause_stops_the_clear_where_it_is();
 	test_the_snapshot_carries_the_held_rows();
 	test_the_held_rows_survive_the_wire();
+	test_clear_overshoot_advances_the_next_piece();
 	return (0);
 }
 
@@ -242,6 +244,28 @@ static void	test_the_held_rows_survive_the_wire(void)
 	assert(received.clearing_rows[0] == sent.clearing_rows[0]);
 	assert(received.cells[BOARD_HEIGHT - 1][0].type != 0);
 	printf("PASS test_the_held_rows_survive_the_wire\n");
+}
+
+/*
+** A coalesced tick can finish the clear before its elapsed budget is spent.
+** The remainder belongs to the piece dealt at the end of the clear.
+*/
+static void	test_clear_overshoot_advances_the_next_piece(void)
+{
+	t_game	g;
+	t_piece	spawn;
+	int		incoming;
+	int		elapsed_ms;
+
+	arm_a_clear(&g);
+	incoming = g.next[0];
+	spawn = piece_spawn((t_piece_type)incoming);
+	elapsed_ms = clear_duration_ms(g.level) + gravity_interval_ms(g.level);
+	assert(game_gravity(&g, elapsed_ms));
+	assert(g.clearing_count == 0);
+	assert(g.piece.type == (t_piece_type)incoming);
+	assert(g.piece.row == spawn.row + 1);
+	printf("PASS test_clear_overshoot_advances_the_next_piece\n");
 }
 
 /**

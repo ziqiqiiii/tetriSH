@@ -176,6 +176,7 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s left %s",
 		ctx->cli->username, name);
 	server_room_forfeit(ctx->srv, ctx->cli);
+	outbox_drop_room_pushes(&ctx->cli->outbox);
 	request_body_printf(ctx, "room %s\nstatus left\n", name);
 	return (200);
 }

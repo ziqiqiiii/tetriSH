@@ -40,6 +40,7 @@ tetrisd_fixture_require_linux() {
 }
 
 tetrisd_fixture_cleanup() {
+  [ -n "$TETRISD_FIXTURE_PID" ] && kill -CONT "$TETRISD_FIXTURE_PID" 2>/dev/null
   [ -n "$TETRISD_FIXTURE_PID" ] && kill "$TETRISD_FIXTURE_PID" 2>/dev/null
   [ -n "$TETRISD_FIXTURE_PID" ] && wait "$TETRISD_FIXTURE_PID" 2>/dev/null
   [ -n "$TETRISD_FIXTURE_WORK" ] && rm -rf "$TETRISD_FIXTURE_WORK"
@@ -137,6 +138,7 @@ tetrisd_fixture_run_client() {
   TETRISU_HOST=127.0.0.1 \
   TETRISU_PORT=$TETRISD_FIXTURE_PORT \
   TETRISU_CA_PATH="$TETRISD_FIXTURE_WORK/certs/ca.crt" \
+  TETRISD_TEST_PID=$TETRISD_FIXTURE_PID \
     "$client" "$@"
 }
 

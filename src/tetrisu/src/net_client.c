@@ -23,9 +23,9 @@ static void	socket_deadline(int fd, int timeout_ms);
 static int	send_message(t_net_client *net, t_htttp_message *msg);
 static int	receive_message(t_net_client *net, t_htttp_message *out,
 				int timeout_ms);
-static bool	take_state(t_net_client *net, const t_htttp_message *msg);
 static void	take_chat(t_net_client *net, const t_htttp_message *msg);
 static bool	addressed_to_this_room(const t_net_client *net, const char *path);
+static bool	addressed_to_this_game(const t_net_client *net, const char *path);
 static void	take_player_id(t_net_client *net, const t_htttp_message *msg);
 static void	take_reason(const t_htttp_message *msg, t_net_result *out);
 static void	take_body(const t_htttp_message *msg, t_net_result *out);
@@ -135,6 +135,8 @@ void	net_disconnect(t_net_client *net)
 	net->fd = -1;
 	net->state = NET_OFFLINE;
 	net->has_state = false;
+	net->last_seq = 0;
+	net->applied_seq = 0;
 	net_chat_reset(net);
 }
 
@@ -201,7 +203,10 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 	while (rc == 0)
 	{
 		if (receive_message(net, &msg, NET_REPLY_TIMEOUT_MS) != 0)
+		{
+			net_disconnect(net);
 			return (-1);
+		}
 		if (msg.type == HTTTP_MESSAGE_RESPONSE)
 		{
 			take_player_id(net, &msg);
@@ -214,7 +219,7 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 			htttp_message_free(&msg);
 			return (0);
 		}
-		take_state(net, &msg);
+		net_state_take(net, &msg);
 		take_chat(net, &msg);
 		htttp_message_free(&msg);
 	}
@@ -243,7 +248,7 @@ int	net_pump(t_net_client *net)
 		return (-1);
 	while (receive_message(net, &msg, 0) == 0)
 	{
-		if (take_state(net, &msg))
+		if (net_state_take(net, &msg))
 			fresh = 1;
 		take_chat(net, &msg);
 		htttp_message_free(&msg);
@@ -447,14 +452,17 @@ static int	receive_message(t_net_client *net, t_htttp_message *out,
  *
  * @param net Client whose snapshot is being replaced.
  * @param msg The message that arrived.
- * @return true when this was a newer snapshot, false otherwise.
+ * @return true when the snapshot was accepted, false otherwise.
  */
-static bool	take_state(t_net_client *net, const t_htttp_message *msg)
+bool	net_state_take(t_net_client *net, const t_htttp_message *msg)
 {
 	t_body_state	snap;
 
-	if (msg->type != HTTTP_MESSAGE_REQUEST || msg->method == NULL
+	if (net == NULL || msg == NULL || msg->type != HTTTP_MESSAGE_REQUEST
+		|| msg->method == NULL
 		|| strcmp(msg->method, "STATE") != 0 || msg->body == NULL)
+		return (false);
+	if (!addressed_to_this_game(net, msg->path))
 		return (false);
 	if (body_state_decode((const char *)msg->body, msg->body_len, &snap) != 0)
 		return (false);
@@ -464,6 +472,24 @@ static bool	take_state(t_net_client *net, const t_htttp_message *msg)
 	net->last_seq = snap.seq;
 	net->has_state = true;
 	return (true);
+}
+
+/**
+ * @brief Checks that a pushed STATE belongs to the game this client renders.
+ *
+ * Room names are reusable, so the whole player path is compared rather than
+ * only the room segment. An empty play path means START has not yet established
+ * a game, or LEAVE has already torn it down, and no snapshot is accepted.
+ *
+ * @param net Client to ask.
+ * @param path The pushed message's path.
+ * @return true when the path is the client's current game path.
+ */
+static bool	addressed_to_this_game(const t_net_client *net, const char *path)
+{
+	if (net == NULL || path == NULL || net->play_path[0] == '\0')
+		return (false);
+	return (strcmp(path, net->play_path) == 0);
 }
 
 /**

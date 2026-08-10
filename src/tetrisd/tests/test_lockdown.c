@@ -28,6 +28,7 @@ static void	test_a_piece_can_be_slid_into_a_gap(void);
 static void	test_a_soft_drop_into_the_floor_no_longer_locks(void);
 static void	test_a_hard_drop_still_locks_at_once(void);
 static void	test_a_new_lowest_row_refills_the_budget(void);
+static void	test_touchdown_only_spends_the_time_after_touchdown(void);
 
 static void	open_game(t_game *g, int gap_cols);
 static void	settle(t_game *g);
@@ -44,6 +45,7 @@ int	main(void)
 	test_a_soft_drop_into_the_floor_no_longer_locks();
 	test_a_hard_drop_still_locks_at_once();
 	test_a_new_lowest_row_refills_the_budget();
+	test_touchdown_only_spends_the_time_after_touchdown();
 	return (0);
 }
 
@@ -210,6 +212,32 @@ static void	test_a_new_lowest_row_refills_the_budget(void)
 	assert(game_drop(&g, false));
 	assert(g.lockdown.resets == 0);
 	printf("PASS test_a_new_lowest_row_refills_the_budget\n");
+}
+
+/*
+** A late reactor tick can contain both the final airborne millisecond and
+** most of lock down. That millisecond belongs to gravity, so it cannot also
+** be counted as time spent resting.
+*/
+static void	test_touchdown_only_spends_the_time_after_touchdown(void)
+{
+	t_game	g;
+	int		interval_ms;
+
+	open_game(&g, 0);
+	settle(&g);
+	assert(piece_move(&g.board, &g.piece, 0, -1) == BRAIN_OK);
+	assert(!lockdown_grounded(&g.board, &g.piece));
+	interval_ms = gravity_interval_ms(g.level);
+	assert(interval_ms > 1);
+	g.accum_ms = interval_ms - 1;
+	assert(game_gravity(&g, LOCKDOWN_DELAY_MS));
+	assert(lockdown_grounded(&g.board, &g.piece));
+	assert(g.lockdown.elapsed_ms == LOCKDOWN_DELAY_MS - 1);
+	assert(!has_locked(&g));
+	assert(game_gravity(&g, 1));
+	assert(has_locked(&g));
+	printf("PASS test_touchdown_only_spends_the_time_after_touchdown\n");
 }
 
 /**

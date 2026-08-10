@@ -154,6 +154,34 @@ bool	outbox_idle(t_outbox *ob)
 }
 
 /**
+ * @brief Drops pushes owned by the room a client has just left.
+ *
+ * Responses remain queued: in particular, LEAVE still needs its answer. STATE
+ * and CHAT are scoped to the old room, though, and room names can be reused.
+ * Letting either lane survive the leave could therefore file an old room's
+ * data in a later room with the same name.
+ *
+ * @param ob Outbox whose room-scoped lanes are discarded.
+ */
+void	outbox_drop_room_pushes(t_outbox *ob)
+{
+	size_t	i;
+
+	if (ob == NULL)
+		return ;
+	i = 0;
+	while (i < ob->chat_count)
+	{
+		free_msg(&ob->chat[(ob->chat_head + i) % TETRISD_CHAT_CAPACITY]);
+		i++;
+	}
+	ob->chat_count = 0;
+	ob->chat_head = 0;
+	free_msg(&ob->state);
+	ob->state_pending = false;
+}
+
+/**
  * @brief Closes the outbox and drops whatever it was still holding.
  *
  * Everything still queued is dropped: the connection is going away, so the

@@ -733,6 +733,7 @@ int				outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
 int				outbox_push_chat(t_outbox *ob, unsigned char *bytes, size_t len);
 int				outbox_pop(t_outbox *ob, t_outbound_message *out);
 bool			outbox_idle(t_outbox *ob);
+void			outbox_drop_room_pushes(t_outbox *ob);
 void			outbox_close(t_outbox *ob);
 void			outbox_destroy(t_outbox *ob);
 
@@ -814,6 +815,8 @@ t_player_id		request_player_id(const char *text, const char **end);
 int				request_body_token(t_request_context *ctx, char *out, size_t cap);
 bool			rate_limit_take_token(t_client *cli);
 bool			rate_limit_take_chat_token(t_client *cli);
+int				rate_limit_refill_level(int tokens, uint64_t elapsed_ms,
+					int cap, int rate);
 
 /* HANDLERS_INPUT.C */
 int				move_handler(const t_htttp_message *msg, void *context);
