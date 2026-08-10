@@ -3,7 +3,7 @@
 **
 ** These two functions are the pure core beneath session_send / session_recv -
 ** they perform no I/O, so every case here runs on a session whose fd is -1.
-** That is the property the reactor depends on (ADR-0008): it owns the socket
+** That is the property the reactor depends on: it owns the socket
 ** and the read buffer, and the library only turns bytes into bytes.
 */
 

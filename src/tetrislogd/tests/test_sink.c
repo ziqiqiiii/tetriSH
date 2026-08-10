@@ -5,7 +5,7 @@
 /*   These cases pin the verbatim append, the rotation reopen, noticing that   */
 /*   the path no longer names the open file, and the rule that an unavailable  */
 /*   sink is a working state rather than a fatal one. What they no longer pin  */
-/*   is a lock: the single-instance guard moved to the pidfile (ADR-0007).    */
+/*   is a lock: the single-instance guard moved to the pidfile.               */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -61,9 +61,9 @@ static void	test_open_creates_file_and_parents(void)
 
 /*
 ** The sink used to hold the exclusive flock that was the single-instance
-** guard, and this case used to pin it. The guard is the pidfile now
-** (docs/adr/0007), so what is pinned here is the deliberate absence: opening
-** the sink excludes nobody, and the sink is only about the sink.
+** guard, and this case used to pin it. The guard is the pidfile now,
+** so what is pinned here is the deliberate absence: opening the sink
+** excludes nobody, and the sink is only about the sink.
 **
 ** This is not merely a relaxation. `make reset` deletes tmp/ under a running
 ** logger, and while the guard lived here the reclaim path had to restore a

@@ -57,7 +57,7 @@ int	signup_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief LOGIN /session - authenticates and binds the connection to a player.
  *
- * Identity is owned by the connection (ADR-0001): there are no tokens, so the
+ * Identity is owned by the connection: there are no tokens, so the
  * player bound here is the only identity this socket can ever act as, and
  * every later request's Player-Id is checked against it.
  *
@@ -190,7 +190,7 @@ static int	signup_status(t_db_result res)
 /**
  * @brief Ends any older connection still acting as the player logging in.
  *
- * A player has one connection at a time (ADR-0004), so this login takes the
+ * A player has one connection at a time, so this login takes the
  * identity back rather than being turned away - otherwise a client that died
  * without closing its socket would lock its own account out for as long as
  * the kernel takes to notice, which is hours.
@@ -199,7 +199,7 @@ static int	signup_status(t_db_result res)
  * the thread running this handler: the old one forfeits its room and unlinks
  * itself before this function returns, so its forfeit cannot reach whatever
  * room the new connection joins next. Under threads that ordering had to be
- * waited for; here it is what the code does (docs/adr/0008).
+ * waited for; here it is what the code does.
  *
  * @param ctx Request context of the connection claiming the player.
  * @param pid Player being claimed.

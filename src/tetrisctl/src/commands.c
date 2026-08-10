@@ -118,7 +118,7 @@ int	status_command(const t_ctl *ctl, const char *only)
  * The reversal is the point. Stopping the logger first would push tetrisd's
  * entire shutdown - every disconnect, every room torn down - into its error
  * file instead of the log, which is exactly the record an operator reaches
- * for after a shutdown goes wrong (docs/adr/0007).
+ * for after a shutdown goes wrong.
  *
  * @param ctl Resolved roster.
  * @param only One daemon's name, or NULL for all of them.

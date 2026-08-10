@@ -499,7 +499,7 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 			return (false);
 		if (provider->local_fixtures || provider->userdata == NULL)
 		{
-			auth_form_finish_server_check(form, false);
+			auth_form_finish_server_check(form, false, NULL);
 			return (true);
 		}
 		session = (t_app_net_session *)provider->userdata;
@@ -509,12 +509,17 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (net_connect(&session->net, &session->cfg) == 0)
 		{
 			session->connected = true;
-			auth_form_finish_server_check(form, true);
+			auth_form_finish_server_check(form, true, NULL);
 		}
 		else
 		{
 			session->connected = false;
-			auth_form_finish_server_check(form, false);
+			/*
+			** net.error, not a generic failure: it separates nothing
+			** listening from a server that answered and was not trusted,
+			** and those send you looking in different places.
+			*/
+			auth_form_finish_server_check(form, false, session->net.error);
 		}
 		return (true);
 	}

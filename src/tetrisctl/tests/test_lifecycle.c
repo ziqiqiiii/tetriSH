@@ -6,8 +6,7 @@
 /*   (tests/fakedaemon.c) rather than a stub, because what is being tested    */
 /*   is the handover between two processes: does start learn that the boot    */
 /*   failed, does status read the lock rather than the file, does stop block  */
-/*   until teardown has finished, and does it happen in the reverse of        */
-/*   launch order (docs/adr/0007)?                                            */
+/*   until teardown has finished, and does it happen in reverse launch order? */
 /*                                                                            */
 /* ************************************************************************** */
 

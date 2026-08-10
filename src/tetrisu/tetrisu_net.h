@@ -30,8 +30,23 @@
 # define NET_REASON_MAX			64
 # define NET_DEFAULT_HOST		"127.0.0.1"
 # define NET_DEFAULT_PORT		4242
-# define NET_DEFAULT_CA_PATH	"certs/ca.crt"
+/*
+** The demo server's CA, not this machine's. It is the committed one
+** (certs/demo-ca.crt, see .gitignore) because the default has to be right for
+** the client that was simply downloaded and pointed at a server somebody else
+** is running - that is the whole reason it is committed. certs/ca.crt beside it
+** is local scratch that `make certs` reissues, so it proves nothing about
+** anybody else's server, and a client defaulting to it fails the handshake on
+** every server but its own.
+**
+** A server on this machine is the case that needs the override, and `make play`
+** passes it: TETRISU_CA_PATH=certs/ca.crt. One CA per run - libtetrissh's
+** loader takes the first certificate in the file, so a bundle of both is not an
+** option.
+*/
+# define NET_DEFAULT_CA_PATH	"certs/demo-ca.crt"
 # define NET_CONNECT_TIMEOUT_MS	5000
+# define NET_HANDSHAKE_TIMEOUT_MS	10000
 # define NET_REPLY_TIMEOUT_MS	4000
 # define TETRISU_PASSWORD_MAX	128
 /*

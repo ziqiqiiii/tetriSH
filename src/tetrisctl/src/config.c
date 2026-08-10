@@ -7,7 +7,7 @@
 ** publishes its pidfile under. This is the only thing compiled in, and it is
 ** knowledge about the programs rather than about a deployment of them: which
 ** of them run, in what order, and where their pidfiles actually live are all
-** read from the start-up file (docs/adr/0007).
+** read from the start-up file.
 **
 ** No default path appears here on purpose. Repeating each daemon's own
 ** compiled default would put the same path in a third place and let the two

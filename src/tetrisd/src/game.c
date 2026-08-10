@@ -282,7 +282,7 @@ bool	game_restart(t_game *g)
  *
  * This is the domain-to-wire boundary: everything the client renders comes
  * from here, and nothing about rooms, connections, or identity does - the
- * subject rides in the request path instead (ADR-0003).
+ * subject rides in the request path instead.
  *
  * @param g Game to project.
  * @param out Snapshot to fill.

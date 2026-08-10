@@ -2,8 +2,8 @@
 /*                                                                            */
 /*   test_cfg.c - the roster, and where it is allowed to come from            */
 /*                                                                            */
-/*   The one thing ADR-0007 insists must not be compiled into this program    */
-/*   is which daemons run and in what order. These cases pin that it comes    */
+/*   The one thing that must not be compiled into this program is which       */
+/*   daemons run and in what order. These cases pin that it comes             */
 /*   from .tetrishrc, that teardown is that order reversed, and that the      */
 /*   pidfile each name resolves to is the one the daemon itself publishes.    */
 /*                                                                            */

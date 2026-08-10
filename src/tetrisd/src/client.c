@@ -79,13 +79,13 @@ void	client_adopt(t_client *cli)
  * @brief Ends a client: forfeit, unlink, and park it for the reaper.
  *
  * The order is the lifetime rule: the player leaves the room first (a
- * disconnect mid-game is a forfeit, ADR-0002), then the client is unlinked
+ * disconnect mid-game is a forfeit), then the client is unlinked
  * from the registry so nothing can address it as that player again, and only
  * then is the socket shut down.
  *
  * Nothing is freed here. A batch of epoll events may hold several pointers to
  * this client, so it goes on the zombie list and client_reap releases it once
- * the whole batch has been processed (docs/adr/0008).
+ * the whole batch has been processed.
  *
  * @param cli Client to end; a second call and a NULL are both ignored.
  */

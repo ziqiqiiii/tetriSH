@@ -327,9 +327,15 @@ docker-reset: docker-stop
 #
 # The server image, not the dev one: the client half of `play` is native on both
 # platforms, so nothing it starts in a container ever draws a board.
+#
+# HOST= plays on somebody else's server instead of starting one here, verifying
+# it against the committed demo CA:  make play HOST=10.27.229.33
+# PLAY_ARGS= passes anything else through: make play PLAY_ARGS=--rebuild
+PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
+
 play:
 	@ DOCKER_REF=$(DOCKER_SRV_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
-		bash ./scripts/play.sh
+		bash ./scripts/play.sh $(PLAY_HOST_ARG) $(PLAY_ARGS)
 
 ################################################################################
 #                                   CLEANUP                                    #

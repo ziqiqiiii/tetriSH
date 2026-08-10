@@ -83,8 +83,7 @@ that calculation is visual-only and cannot alter the game.
 
 ## Thread and blocking rules
 
-`tetrisd` has exactly one owner of all mutable game state
-([ADR-0008](adr/0008-tetrisd-is-event-driven.md)). Gravity, lock delay,
+`tetrisd` has exactly one owner of all mutable game state. Gravity, lock delay,
 line-clear completion, level changes, spawning and action dispatch all happen
 on the reactor thread, so a move and a gravity tick cannot interleave and there
 is no lock to take. Do not add one: if a change here seems to need a mutex, the
@@ -122,7 +121,7 @@ offline mode" option rather than as a deletion.
   `solo_mode.c` no longer calls `solo_game_apply_action` or
   `solo_game_update`; it asks the authority, which is either `tetrisd` or the
   local rules.
-- `tests/integration/test_net_solo.sh` drives the whole path against a real
+- `src/tetrisu/tests/integration/test_net_solo.sh` drives the whole path against a real
   server and checks the acceptance list below.
 
 What is left is step 7's `ABILITY` targeting for Double and Battle Royale

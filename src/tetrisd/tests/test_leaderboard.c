@@ -2,9 +2,9 @@
 /*                                                                            */
 /*   test_leaderboard.c - the ranking a finished game writes into             */
 /*                                                                            */
-/*   tetrisd has recorded every finished and forfeited game since M1          */
-/*   (ADR-0002), but nothing could read the result back, so a player's score  */
-/*   went into the store and out of sight. LEADERBOARD /leaderboard is the    */
+/*   tetrisd has recorded every finished and forfeited game since M1, but     */
+/*   nothing could read the result back, so a player's score went into the    */
+/*   store and out of sight. LEADERBOARD /leaderboard is the                  */
 /*   route that answers, and this is what has to be true of it: it is         */
 /*   authenticated, registering is what puts a player on the board rather     */
 /*   than winning, and a game that ended appears in it, in rank order.        */
@@ -105,7 +105,7 @@ static void	test_another_path_is_not_found(void)
 
 /*
 ** The end-to-end claim: play a Single game, leave it, and the score that
-** ADR-0002 says is recorded on the spot is the score the board reports.
+** is recorded on the spot is the score the board reports.
 */
 static void	test_a_finished_game_reaches_the_board(void)
 {
@@ -201,7 +201,7 @@ static size_t	read_board(t_harness *hc, t_body_leaderboard_row *rows,
 /**
  * @brief Plays a short Single game as one player and forfeits it.
  *
- * Leaving is one of the three ways a game ends (ADR-0002) and the quickest
+ * Leaving is one of the three ways a game ends and the quickest
  * to drive: the score is recorded on the spot, which is the only part the
  * leaderboard cares about. The harness is closed before returning, so the
  * next player gets a connection of their own.

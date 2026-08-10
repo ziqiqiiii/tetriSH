@@ -18,8 +18,8 @@
 **
 ** This first version drives both daemons by pidfile and signal: start forks
 ** and execs the binary and reports what its readiness pipe says, status reads
-** the pidfile lock, stop sends SIGTERM and waits for that lock to come free
-** (docs/adr/0007). tetrisd's control socket lands as a second step, buying an
+** the pidfile lock, stop sends SIGTERM and waits for that lock to come free.
+** tetrisd's control socket lands as a second step, buying an
 ** admin channel that still answers while the public port is flooded.
 **
 ** No deployment detail is compiled in: the daemon set and start order come

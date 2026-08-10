@@ -669,7 +669,7 @@ stateDiagram-v2
 
 **Extensions / Alternate Flows**
 - **3a. Invalid move (collision, `409` runtime):** Server rejects; board keeps the authoritative position.
-- **5a. Player quits mid-game:** Session ends **without** calling `db_record_game` — an abandoned game is not scored, so no points, score, or games_played change. (Only a game that reaches game-over is recorded.)
+- **5a. Player quits mid-game:** Quitting or disconnecting mid-game is a forfeit, and the game **is** recorded on the spot with the score reached so far and `won=false`: points earned are credited and `games_played` increments. The one case that is **not** recorded is a restart — `game_restart` deals a fresh game in the same slot and the abandoned one is discarded, because the Player decided it did not happen.
 
 **Exceptions**
 - **E1. Server disconnect:** Game ends; Server restart and game restart.
@@ -706,10 +706,10 @@ stateDiagram-v2
 - **5a. A Player quits/disconnects mid-game:**
     - Only one Player remains, so the match ends immediately.
     - If the departing Player owns the room, ownership is transferred to the remaining Player → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
-    - The **quitter is not recorded** (`db_record_game` is not called for them — an abandoned game is not scored). The remaining Player wins by default and **is** recorded (`won=true`).
+    - The **quitter is recorded** as a forfeit (`db_record_game` is called with `won=false` and their score so far). The remaining Player wins by default and **is** recorded (`won=true`).
 
 **Exceptions**
-- **E1. Server disconnect (whole match aborted):** No game-over is reached, so `db_record_game` is called for **no one**; handled per reconnection policy. Server restart and game restart.
+- **E1. Server disconnect (whole match aborted):** How much is recorded depends on how the Server went away. An orderly shutdown ends every connection through the same path a quit takes, so each participant's game **is** recorded as a forfeit (`won=false`); a crash records nobody, because nothing ran. Handled per reconnection policy. Server restart and game restart.
 
 **Related Use Cases**
 - `«include»` UC-13.
@@ -733,7 +733,7 @@ stateDiagram-v2
 **Main Success Scenario**
 1. System renders own **Board** (center) with piece queue, hold column, and live **Scores**, surrounded by grids showing other players' boards.
 2. Players control pieces concurrently.
-3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against a Target — a random other player still in the game, in the same room — and inserted at the bottom of that player's board at their next piece lock (server-routed; see [ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)).
+3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against a Target — a random other player still in the game, in the same room — and inserted at the bottom of that player's board at their next piece lock (server-routed).
 4. Server pushes `STATE` updates for all visible boards.
 5. Players are eliminated as they top out; play continues until a winner/last-standing remains.
 6. At game-over, System records the final ranking and calls `db_record_game(...)` once per **participant who was still in the game at game-over** (last-standing `won=true`, others `won=false`), crediting points (line clears / KOs / win) and updating the leaderboard.
@@ -746,11 +746,11 @@ stateDiagram-v2
 - **5b. Player quits/disconnects mid-game:**
     - Server removes them from the match; remaining players play on.
     - If the departing Player owns the room, ownership is transferred and the remaining players are notified → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
-    - The quitter is **not recorded** (`db_record_game` is not called for them). Each remaining player is recorded normally at game-over.
+    - The quitter **is** recorded as a forfeit (`db_record_game` with `won=false`, their score so far). Each remaining player is recorded normally at game-over.
     - **5b-i. Only one player remains:** They win by default; the match ends and they are recorded (`won=true`).
 
 **Exceptions**
-- **E1. Server disconnect (whole match aborted):** No game-over reached → `db_record_game` called for no one. Server restart and game restart.
+- **E1. Server disconnect (whole match aborted):** An orderly shutdown forfeits every participant, so each **is** recorded with `won=false`; a crash records nobody. Server restart and game restart.
 
 **Related Use Cases**
 - `«include»` UC-13.
@@ -815,7 +815,7 @@ The four selected characters retain their complete, four-level ability sets from
 | 3 | 6 | 12 |
 | 4 | 8 | 16 |
 
-A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.md)): Single mode has no Target and offensive abilities are unavailable there, Double implies the one other player, and Battle Royale draws one per resolution from the room's seeded random source among players still in the game. Every cross-player effect is queued against its Target and applied at that player's next piece lock ([ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md)). Ability text is kept in step with [`themes.md`](themes.md), which is its source of truth.
+A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.md)): Single mode has no Target and offensive abilities are unavailable there, Double implies the one other player, and Battle Royale draws one per resolution from the room's seeded random source among players still in the game. Every cross-player effect is queued against its Target and applied at that player's next piece lock. Ability text is kept in step with [`themes.md`](themes.md), which is its source of truth.
 
 | Character | Level | Ability | Server-enforced effect |
 |---|---:|---|---|
@@ -1458,7 +1458,7 @@ Every persisted use case, its `libmacminidb` call, and the `t_db_result → HTTT
 | UC-17 Deduct Points | *internal to* `db_buy_*` (atomic, write lock) | — |
 | UC-18 Set Default Character | `db_equip_character` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
 | UC-19 Set Default Theme | `db_equip_theme` | • `DB_OK`→200<br>• `DB_NOT_OWNED`→403 |
-| UC-10/11/12 Play (post-game) | `db_record_game` once per participant **at game-over** (all three modes; **not** called on mid-game quit) | credits points, updates score, increments `games_played` (and `games_won` on a win) |
+| UC-10/11/12 Play (post-game) | `db_record_game` once per participant — at game-over, and on forfeit (mid-game quit/disconnect, `won=false`); **not** called on restart | credits points, updates score, increments `games_played` (and `games_won` on a win) |
 | UC-20 View Settings | `db_get_player` + `db_rank` (+ catalogue lookups) | 200 |
 | UC-14 Activate Ability | `db_player_owns_character` + `db_get_character` (reads) | • valid→effect<br>• `DB_FALSE`→403 |
 | UC-21 View Leaderboard | `db_leaderboard` | 200 |

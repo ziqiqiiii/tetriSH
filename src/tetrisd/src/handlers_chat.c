@@ -2,6 +2,8 @@
 
 // Static Functions
 static bool	sayable(const char *text);
+static int	read_text(t_request_context *ctx, char *raw, size_t raw_cap,
+				char *out, size_t cap);
 
 /**
  * @brief CHAT /room/<name> - posts one line to the room's feed (UC-09).
@@ -30,12 +32,13 @@ int	chat_handler(const t_htttp_message *msg, void *context)
 	t_server_room		*server_room;
 	t_body_chat			chat;
 	const char			*name;
+	char				raw[TETRISD_CHAT_TEXT_RAW_MAX];
 
 	(void)msg;
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
-	if (!rate_limit_take_token(ctx->cli))
+	if (!rate_limit_take_chat_token(ctx->cli))
 		return (429);
 	name = request_room_name(ctx);
 	if (name == NULL)
@@ -50,12 +53,8 @@ int	chat_handler(const t_htttp_message *msg, void *context)
 	}
 	memset(&chat, 0, sizeof(chat));
 	snprintf(chat.sender, sizeof(chat.sender), "%s", ctx->cli->username);
-	if (request_body_field(ctx, "text", chat.text, sizeof(chat.text)) == NULL
-		|| !sayable(chat.text))
-	{
-		request_body_printf(ctx, "reason bad-text\n");
+	if (read_text(ctx, raw, sizeof(raw), chat.text, sizeof(chat.text)) != 0)
 		return (400);
-	}
 	if (!room_chat_broadcast(server_room, &chat))
 	{
 		request_body_printf(ctx, "reason unsendable\n");
@@ -64,6 +63,42 @@ int	chat_handler(const t_htttp_message *msg, void *context)
 	request_body_printf(ctx, "room %s\nseq %llu\n", name,
 		(unsigned long long)chat.seq);
 	return (200);
+}
+
+/**
+ * @brief Reads the message text and says which way it was unsendable.
+ *
+ * The line is read into a buffer twice the width of the field it has to fit,
+ * so a message that is merely too long arrives whole and can be named as such.
+ * "bad-text" and "too-long" ask a client for two different things - trim it,
+ * or stop sending control characters - and one status for both left it unable
+ * to tell which. A line longer even than the wide buffer is still bad-text:
+ * the server has not read enough of it to say anything more precise.
+ *
+ * @param ctx Request context holding the body.
+ * @param raw Wide scratch buffer the line is read into first.
+ * @param raw_cap Size of raw.
+ * @param out Receives the text once it is known to fit and be sayable.
+ * @param cap Size of out, which is the width the wire field really has.
+ * @return 0 when out holds a sendable message, -1 with the reason written into
+ *         the response body.
+ */
+static int	read_text(t_request_context *ctx, char *raw, size_t raw_cap,
+			char *out, size_t cap)
+{
+	if (request_body_field(ctx, "text", raw, raw_cap) == NULL
+		|| !sayable(raw))
+	{
+		request_body_printf(ctx, "reason bad-text\n");
+		return (-1);
+	}
+	if (strlen(raw) >= cap)
+	{
+		request_body_printf(ctx, "reason too-long\nlimit %zu\n", cap - 1);
+		return (-1);
+	}
+	memcpy(out, raw, strlen(raw) + 1);
+	return (0);
 }
 
 /**

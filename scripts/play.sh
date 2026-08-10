@@ -65,9 +65,6 @@ WANT_SERVER=1
 WANT_CLIENT=1
 DO_STOP=0
 PORT=""
-HOST=""
-CA=""
-CA_GIVEN=0
 
 say()  { printf '%b\n' "${BLU}==>${RST} ${BOLD}$*${RST}"; }
 ok()   { printf '%b\n' "    ${GRN}$*${RST}"; }
@@ -78,9 +75,6 @@ usage() {
     cat <<'EOF'
 Usage: bash scripts/play.sh [options]
 
-  --host H        play on a server already running at H, starting none here
-  --ca PATH       CA to verify that server against (default: deploy/vps-ca.crt
-                  with --host, certs/ca.crt without)
   --port N        port to serve and connect on (default: TETRISD_PORT in .tetrishrc)
   --server-only   bring the server up and stop, without launching a client
   --client-only   launch a client against a server that is already up
@@ -89,17 +83,14 @@ Usage: bash scripts/play.sh [options]
   -y, --yes       install anything missing without asking
   -h, --help      this text
 
-The server is left running when the client exits, so the next run starts a
-client immediately. `bash scripts/play.sh --stop` takes it down.
+With no --host a server is started here and the client connects to it; the
+server is left running when the client exits, so the next run starts a client
+immediately. `bash scripts/play.sh --stop` takes it down.
 EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --host)        HOST="${2:-}"; shift 2 || die "--host needs an address" ;;
-        --host=*)      HOST="${1#*=}"; shift ;;
-        --ca)          CA="${2:-}"; CA_GIVEN=1; shift 2 || die "--ca needs a path" ;;
-        --ca=*)        CA="${1#*=}"; CA_GIVEN=1; shift ;;
         --port)        PORT="${2:-}"; shift 2 || die "--port needs a number" ;;
         --port=*)      PORT="${1#*=}"; shift ;;
         --server-only) WANT_CLIENT=0; shift ;;
@@ -127,6 +118,24 @@ fi
 
 if [ "$WANT_SERVER" = "0" ] && [ "$WANT_CLIENT" = "0" ]; then
     die "--server-only and --client-only ask for opposite halves; pick one"
+fi
+
+# A named host is somebody else's machine, so there is nothing here to start,
+# stop or build an image for. Rather than quietly ignoring the flags that say
+# otherwise, refuse them: --server-only with a remote host asks this script to
+# start a server it has no reach into, and would otherwise appear to succeed.
+if [ -n "$HOST" ]; then
+    [ "$WANT_CLIENT" = "0" ] \
+        && die "--host names a server elsewhere; --server-only cannot start one there"
+    [ "$DO_STOP" = "1" ] \
+        && die "--host names a server elsewhere; --stop only reaches the local one"
+    [ "$DO_REBUILD" = "1" ] \
+        && die "--host needs no image; --rebuild only applies to a server started here"
+    WANT_SERVER=0
+    REMOTE=1
+else
+    HOST="$LOCAL_HOST"
+    REMOTE=0
 fi
 
 # Asks, unless --yes was given or nothing is attached to answer. A script that
@@ -181,23 +190,12 @@ resolve_target() {
 }
 
 # Is anything accepting connections there? nc where it exists, and bash's own
-# /dev/tcp otherwise; this is the same check for a container-published port, a
-# native daemon and a VPS, which is the point - it tests the path the client
-# will take, not whether a process exists.
-#
-# Every form of the probe is given a deadline. A local port answers or refuses
-# at once, but a firewall drops the packet rather than refusing it, so an
-# unreachable VPS is silence: without a timeout the check does not fail, it
-# hangs, and the address that most needs a clear answer is the one that never
-# gets one.
+# /dev/tcp otherwise; this is the same check for a container-published port and
+# a native daemon, which is the point - it tests the path the client will take,
+# not whether a process exists.
 port_open() {
     if command -v nc >/dev/null 2>&1; then
-        nc -z -w "$PROBE_TIMEOUT_S" "$HOST" "$PORT" >/dev/null 2>&1
-        return $?
-    fi
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "$PROBE_TIMEOUT_S" bash -c \
-            "exec 3<>/dev/tcp/$HOST/$PORT" >/dev/null 2>&1
+        nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1
         return $?
     fi
     (exec 3<>"/dev/tcp/$HOST/$PORT") >/dev/null 2>&1
@@ -350,32 +348,41 @@ check_terminal() {
     fi
 }
 
+# Which CA proves the server is the server. A remote host is the demo server, so
+# it is the committed demo-ca.crt; a local one was just signed by this machine's
+# own scratch CA. They are deliberately different files - see .gitignore - and
+# picking the wrong one fails the handshake rather than degrading, because
+# libtetrissh verifies the chain and refuses the session on any doubt.
+client_ca() {
+    if [ "$REMOTE" = "1" ]; then
+        printf '%s' "$ROOT/certs/demo-ca.crt"
+    else
+        printf '%s' "$ROOT/certs/ca.crt"
+    fi
+}
+
 launch_client() {
     local client="bin/tetrisu"
+    local ca
     [ -x "$client" ] || client="src/tetrisu/bin/tetrisu"
+    ca=$(client_ca)
     # The client verifies the server's certificate chain against this CA and
-    # refuses the session without it. Neither path that can reach here mints one:
-    # --client-only skips that step, and a remote server's CA is never minted
-    # locally at all - so this is where its absence has to be caught.
-    if [ ! -s "$CA" ]; then
-        if [ "$CA_GIVEN" = "1" ]; then
-            die "$CA is missing - --ca must name the CA of the server at $HOST"
-        fi
-        if is_remote; then
-            die "$CA is missing - it is the CA of the server at $HOST." \
-                "\n    Ask whoever runs it for its certs/ca.crt, or pass --ca PATH."
-        fi
-        die "$CA is missing - run 'make certs' (the server needs the same CA)"
-    fi
-    say "launching tetrisu against $HOST:$PORT"
+    # refuses the session without it. --client-only skips the step that mints it,
+    # so this is the one path where it can be absent.
+    [ -s certs/ca.crt ] \
+        || die "certs/ca.crt is missing - run 'make certs' (the server needs the same CA)"
+    say "launching tetrisu against 127.0.0.1:$PORT"
     printf '%b\n' "    ${BOLD}CHECK SERVER${RST} on the sign-in screen must report" \
         "    ${BOLD}SERVER ONLINE${RST} - without it Solo silently plays the local" \
         "    rules instead, and looks identical."
+    if [ "$REMOTE" = "1" ]; then
+        printf '%b\n' "    verifying that server against ${BOLD}certs/demo-ca.crt${RST}"
+    fi
     echo
     TETRISU_NET=1 \
     TETRISU_HOST="$HOST" \
     TETRISU_PORT="$PORT" \
-    TETRISU_CA_PATH="$CA" \
+    TETRISU_CA_PATH="$ROOT/certs/ca.crt" \
         "$client"
 }
 
@@ -418,12 +425,12 @@ if [ "$WANT_CLIENT" = "0" ]; then
     exit 0
 fi
 
+# Checked here rather than left to the client, because a client that cannot
+# reach the server does not say so plainly: Solo falls back to the local rules
+# and plays identically. The advice differs by whose server it is - a local one
+# this script can start, a remote one it can only report on.
 if [ "$WANT_SERVER" = "0" ] && ! port_open; then
-    if is_remote; then
-        die "nothing is serving $HOST:$PORT - check the address, the port," \
-            "\n    and that the server's firewall allows you in"
-    fi
-    die "nothing is serving $HOST:$PORT - drop --client-only to start one"
+    die "nothing is serving 127.0.0.1:$PORT - drop --client-only to start one"
 fi
 
 check_terminal
@@ -431,11 +438,6 @@ ensure_client
 launch_client
 
 echo
-if is_remote; then
-    ok "client closed; the server at $HOST:$PORT is not ours to stop"
-    printf '%b\n' "    play again: ${BOLD}bash scripts/play.sh --host $HOST${RST}"
-    exit 0
-fi
-ok "client closed; the server is still running on $HOST:$PORT"
+ok "client closed; the server is still running on 127.0.0.1:$PORT"
 printf '%b\n' "    play again: ${BOLD}bash scripts/play.sh${RST}" \
     "    stop it:    ${BOLD}bash scripts/play.sh --stop${RST}"

@@ -17,6 +17,9 @@
 
 // Static Functions
 static int	dial(const char *host, int port);
+static int	connect_within(int fd, const struct sockaddr *addr,
+				socklen_t len, int timeout_ms);
+static void	socket_deadline(int fd, int timeout_ms);
 static int	send_message(t_net_client *net, t_htttp_message *msg);
 static int	receive_message(t_net_client *net, t_htttp_message *out,
 				int timeout_ms);
@@ -92,9 +95,11 @@ int	net_connect(t_net_client *net, const t_net_config *cfg)
 		snprintf(net->error, sizeof(net->error), "no server");
 		return (-1);
 	}
+	socket_deadline(net->fd, NET_HANDSHAKE_TIMEOUT_MS);
 	console_mute(saved);
 	handshake = session_handshake_client(net->fd, &net->sess, cfg->ca_path);
 	console_unmute(saved);
+	socket_deadline(net->fd, 0);
 	if (handshake != 0)
 	{
 		close(net->fd);
@@ -279,7 +284,8 @@ static int	dial(const char *host, int port)
 	while (it != NULL && fd < 0)
 	{
 		fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-		if (fd >= 0 && connect(fd, it->ai_addr, it->ai_addrlen) != 0)
+		if (fd >= 0 && connect_within(fd, it->ai_addr, it->ai_addrlen,
+				NET_CONNECT_TIMEOUT_MS) != 0)
 		{
 			close(fd);
 			fd = -1;
@@ -291,6 +297,80 @@ static int	dial(const char *host, int port)
 	if (fd >= 0)
 		(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 	return (fd);
+}
+
+/**
+ * @brief Connects with a deadline of our own instead of the kernel's.
+ *
+ * A blocking connect() waits out the TCP SYN timeout, measured at 75 seconds
+ * on macOS, and this runs on the render loop - so a peer that drops the SYN
+ * rather than refusing it freezes the whole client on "CHECKING SERVER..."
+ * instead of reporting anything. Dropping the SYN is not the exotic case: it
+ * is what a host firewall does by default and what hotspot client isolation
+ * does to everything.
+ *
+ * The socket goes non-blocking for the attempt only, poll() bounds the wait,
+ * and SO_ERROR carries the verdict - a connect that is still in flight when
+ * poll returns is a failure, not something to wait longer for. Blocking is put
+ * back before returning, because the handshake above reads normally.
+ *
+ * @param fd Socket to connect.
+ * @param addr Address to reach.
+ * @param len Size of addr.
+ * @param timeout_ms How long to allow.
+ * @return 0 once connected, -1 on error or timeout.
+ */
+static int	connect_within(int fd, const struct sockaddr *addr,
+			socklen_t len, int timeout_ms)
+{
+	struct pollfd	pfd;
+	int				flags;
+	int				err;
+	socklen_t		errlen;
+
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+		return (-1);
+	if (connect(fd, addr, len) != 0 && errno != EINPROGRESS)
+		return (-1);
+	pfd.fd = fd;
+	pfd.events = POLLOUT;
+	pfd.revents = 0;
+	if (poll(&pfd, 1, timeout_ms) != 1)
+		return (-1);
+	err = 0;
+	errlen = sizeof(err);
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen) != 0 || err != 0)
+		return (-1);
+	return (fcntl(fd, F_SETFL, flags));
+}
+
+/**
+ * @brief Puts a receive and send deadline on a socket, or takes it off.
+ *
+ * session_handshake_client reads and writes straight through the descriptor
+ * with no deadline of its own, so a peer that accepts the connection and then
+ * says nothing hangs the client for good - not for 75 seconds, but forever.
+ * That is what a wrong port looks like, or a right port with something else
+ * behind it, or a published container port whose daemon has not finished
+ * booting.
+ *
+ * Taken off again once the handshake is through: every read after it is
+ * poll-gated by receive_message, and a timeout left on the socket would turn a
+ * message that merely arrives slowly into a dropped session. A zero timeval is
+ * how the kernel is told there is no deadline.
+ *
+ * @param fd Socket to bound.
+ * @param timeout_ms Deadline in milliseconds; 0 removes it.
+ */
+static void	socket_deadline(int fd, int timeout_ms)
+{
+	struct timeval	tv;
+
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	(void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	(void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
 /**

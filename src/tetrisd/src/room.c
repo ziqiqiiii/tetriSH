@@ -16,6 +16,9 @@ static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
 static void		award_game(t_server *srv, const t_game *game, bool won);
 static void		narrate_departure(t_server_room *server_room, const char *who, const char *name, const t_release_result *res);
+static void		rehome_successor(t_server_room *server_room, t_client *leaver, const t_release_result *res);
+static int		slot_holding(const t_server_room *server_room, t_player_id pid);
+static int		game_holding(const t_server_room *server_room, t_player_id pid);
 
 /*
 ** The Room, both halves of it. The domain library owns the pure t_room; the
@@ -393,8 +396,8 @@ bool	server_room_is_solo(const t_server_room *server_room)
 /**
  * @brief Removes a client from its room, forfeiting any game in progress.
  *
- * Leaving, topping out, and losing the connection are the same event
- * (ADR-0002): the game is recorded on the spot, the slot is released, and
+ * Leaving, topping out, and losing the connection are the same event:
+ * the game is recorded on the spot, the slot is released, and
  * ownership passes to a successor when the owner was the one who left.
  *
  * @param srv Server the client belongs to.
@@ -417,6 +420,7 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 		forfeit_slot(server_room, cli->binding.slot_index, &finished);
 		memset(&res, 0, sizeof(res));
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
+		rehome_successor(server_room, cli, &res);
 		narrate_departure(server_room, cli->username, name, &res);
 	}
 	if (finished.player_id != 0)
@@ -723,7 +727,7 @@ static void	push_all(t_server_room *server_room, int n,
 /**
  * @brief Pushes one player's snapshot as a server-originated STATE message.
  *
- * The subject rides in the request path (ADR-0003), so the body stays a pure
+ * The subject rides in the request path, so the body stays a pure
  * projection of one game and says nothing about whose it is.
  *
  * @param server_room Room the snapshot came from.
@@ -896,7 +900,7 @@ static void	forfeit_slot(t_server_room *server_room, int slot, t_game *out)
  * it, and a wallet charged against it would stop paying at the same moment.
  *
  * The read and the write are separate locks, and that is safe because a player
- * holds one connection (ADR-0004) and the reactor is the only thread that
+ * holds one connection and the reactor is the only thread that
  * records a game - nobody else can be crediting this account in between.
  *
  * @param srv Server holding the store.
@@ -944,4 +948,100 @@ static void	narrate_departure(t_server_room *server_room, const char *who,
 	if (res->owner_changed)
 		room_narrate(server_room, "PLAYER %s set as the owner",
 			res->new_owner_name);
+}
+
+/**
+ * @brief Follows a promoted owner into their new seat with everything of theirs
+ *        that is indexed by it.
+ *
+ * The room domain does not hand the successor the owner's role where they sit:
+ * room_release *moves* them into the seat the owner vacated and clears the one
+ * they were in (UC-07a asks for the lower slot). Two things on this side are
+ * indexed by that seat and knew nothing about the move - the room's games and
+ * dirty flags, and the client's own copy of its slot - so after a mid-game
+ * owner leave, room->slots[i] and games[i] described different players.
+ *
+ * Nothing broke immediately only because both of those wrong answers agreed
+ * with each other: server_room_game_of matches games[index].player_id against
+ * the connection, so a board reached its player through a stale index. The
+ * moment anything pairs a seat with the game in it - an opponent view, garbage
+ * against a Target - it would attribute a board to the wrong player, so the
+ * seat is made to mean one thing again here.
+ *
+ * The leaver's own binding is deliberately not consulted: both indices are
+ * looked up by player id, so this is correct even for a successor who was
+ * themselves promoted earlier, and it is what stops that ever being true again.
+ *
+ * @param server_room Room whose owner has just been replaced.
+ * @param leaver The departing client, excluded when finding the successor's.
+ * @param res What release decided; nothing is done unless it promoted somebody.
+ */
+static void	rehome_successor(t_server_room *server_room, t_client *leaver,
+	const t_release_result *res)
+{
+	t_client	*successor;
+	int			to;
+	int			from;
+
+	if (!res->owner_changed)
+		return ;
+	to = slot_holding(server_room, res->new_owner);
+	from = game_holding(server_room, res->new_owner);
+	successor = registry_find_other(&server_room->srv->reg, res->new_owner,
+			leaver);
+	if (successor != NULL && to >= 0)
+		successor->binding.slot_index = to + 1;
+	if (to < 0 || from < 0 || to == from || to >= TD_MAX_GAMES
+		|| server_room->games[to].player_id != 0)
+		return ;
+	server_room->games[to] = server_room->games[from];
+	server_room->dirty[to] = server_room->dirty[from];
+	game_reset(&server_room->games[from]);
+	server_room->dirty[from] = false;
+}
+
+/**
+ * @brief Finds which seat a player occupies now.
+ *
+ * @param server_room Room to search.
+ * @param pid Player to look for.
+ * @return The 0-based slot index, or -1 when that player holds no seat.
+ */
+static int	slot_holding(const t_server_room *server_room, t_player_id pid)
+{
+	int	index;
+
+	index = 0;
+	while (index < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[index].occupied
+			&& server_room->room->slots[index].membership.player_id == pid)
+			return (index);
+		index++;
+	}
+	return (-1);
+}
+
+/**
+ * @brief Finds which of the room's boards belongs to a player.
+ *
+ * Asked separately from slot_holding precisely because the two can disagree,
+ * which is the whole reason rehome_successor exists.
+ *
+ * @param server_room Room to search.
+ * @param pid Player to look for.
+ * @return The 0-based game index, or -1 when that player has no board here.
+ */
+static int	game_holding(const t_server_room *server_room, t_player_id pid)
+{
+	int	index;
+
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->games[index].player_id == pid)
+			return (index);
+		index++;
+	}
+	return (-1);
 }

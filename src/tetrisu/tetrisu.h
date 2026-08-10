@@ -2655,7 +2655,8 @@ void			auth_form_focus_next(t_auth_form *form);
 void			auth_form_focus_previous(t_auth_form *form);
 t_auth_action	auth_form_handle_key(t_auth_form *form, uint32_t key);
 bool			auth_form_begin_server_check(t_auth_form *form);
-void			auth_form_finish_server_check(t_auth_form *form, bool online);
+void			auth_form_finish_server_check(t_auth_form *form, bool online,
+					const char *reason);
 bool			auth_form_online_enabled(const t_auth_form *form);
 bool			auth_form_validate(t_auth_form *form);
 t_app_provider_result	auth_form_submit(t_auth_form *form,

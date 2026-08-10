@@ -64,8 +64,8 @@ int	pause_handler(const t_htttp_message *msg, void *context)
  * @brief RESTART /room/<name>/player/<pid> - deal this player a fresh game.
  *
  * The abandoned game is not recorded. Restarting is the player deciding it
- * did not happen; what a room records is what a player finishes or forfeits
- * (ADR-0002), and a discarded game is neither.
+ * did not happen; what a room records is what a player finishes or forfeits,
+ * and a discarded game is neither.
  *
  * @param msg The request (unused).
  * @param context The request context.

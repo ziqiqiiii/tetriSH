@@ -2,7 +2,7 @@
 ** Server credentials suite: session_credentials_load / session_credentials_free.
 **
 ** The certificate bytes and the parsed private key are loaded once, not once
-** per accepted connection (ADR-0008). The load-bearing case here is
+** per accepted connection. The load-bearing case here is
 ** test_handshake_survives_certificate_removal: it deletes both files after the
 ** load and still completes two handshakes, which only passes if the handshake
 ** has stopped touching the disk.

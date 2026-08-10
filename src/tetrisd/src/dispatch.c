@@ -205,10 +205,16 @@ int	request_refuse(t_request_context *ctx, const char *reason)
 /**
  * @brief Checks that a request carrying a body says what that body is.
  *
- * Content-Type is required on any message with a body, and the only body a
- * client ever sends is a command. Guessing instead of checking would mean the
+ * Content-Type is required on any message with a body, and nearly every body a
+ * client sends is a command. Guessing instead of checking would mean the
  * server decides what the client meant, which is exactly what a protocol is
  * for avoiding.
+ *
+ * CHAT is the exception, because it is the one method that travels in both
+ * directions and a receiver cannot see which way a message was going: libhtttp
+ * accepts either type for it (htttp_validate's body_type_allowed), so this
+ * pre-check has to as well. Refusing the feed's own type here made that
+ * allowance unreachable and left the two ends disagreeing about one method.
  *
  * @param msg The parsed request.
  * @return true when the message may proceed, false when it must be refused.
@@ -222,7 +228,10 @@ static bool	body_declares_itself(const t_htttp_message *msg)
 	type = htttp_message_get_header(msg, "Content-Type");
 	if (type == NULL)
 		return (false);
-	return (strcmp(type, HTTTP_CONTENT_TYPE_COMMAND) == 0);
+	if (strcmp(type, HTTTP_CONTENT_TYPE_COMMAND) == 0)
+		return (true);
+	return (msg->method != NULL && strcmp(msg->method, "CHAT") == 0
+		&& strcmp(type, HTTTP_CONTENT_TYPE_CHAT) == 0);
 }
 
 /**
