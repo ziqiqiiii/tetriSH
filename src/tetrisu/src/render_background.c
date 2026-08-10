@@ -176,6 +176,52 @@ bool	render_plane_blit_rgba(t_render_ctx *ctx, struct ncplane *plane,
 }
 
 /**
+ * @brief Blits an RGBA surface into a plane as quadrant cells, not a bitmap.
+ *
+ * A sprixel is a terminal-side object: anything drawn over one invalidates it,
+ * and notcurses has to push its whole bitmap again on the next frame. That
+ * makes a full-screen bitmap the wrong thing to put underneath the small
+ * bitmaps a game moves every frame - the chrome never changes, yet it pays the
+ * transfer cost of everything that does. Cells have no such coupling, so the
+ * stationary layer is blitted at quadrant resolution and only the surfaces
+ * that actually animate stay bitmaps. This is the split Solo already runs.
+ *
+ * The surface is stretched to the plane because the caller composes at device
+ * pixel resolution, which is several times what NCBLIT_4x2 addresses.
+ *
+ * @param ctx Active render context.
+ * @param plane Destination plane.
+ * @param pixels First pixel of the surface.
+ * @param width Surface width in pixels.
+ * @param height Surface height in pixels.
+ * @param row_stride Source row width in pixels.
+ * @return true when the surface reached the plane.
+ */
+bool	render_plane_blit_rgba_cells(t_render_ctx *ctx, struct ncplane *plane,
+	const uint32_t *pixels, int width, int height, int row_stride)
+{
+	struct ncvisual			*ncv;
+	struct ncvisual_options	vopts;
+	bool					ok;
+
+	if (ctx == NULL || plane == NULL || width <= 0 || height <= 0
+		|| row_stride < width)
+		return (false);
+	ncv = ncvisual_from_rgba(pixels, height,
+			row_stride * (int)sizeof(*pixels), width);
+	if (ncv == NULL)
+		return (false);
+	memset(&vopts, 0, sizeof(vopts));
+	vopts.n = plane;
+	vopts.scaling = NCSCALE_STRETCH;
+	vopts.blitter = NCBLIT_4x2;
+	vopts.flags = NCVISUAL_OPTION_NOINTERPOLATE;
+	ok = ncvisual_blit(ctx->nc, ncv, &vopts) != NULL;
+	ncvisual_destroy(ncv);
+	return (ok);
+}
+
+/**
  * @brief Reports whether this session uses the terminal-native renderer.
  *
  * Automatic mode only falls back to cells when the terminal reports no bitmap

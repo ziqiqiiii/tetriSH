@@ -6,6 +6,7 @@ static bool			append_codepoint(char *text, size_t capacity,
 static void			remove_codepoint(char *text);
 static size_t		codepoint_count(const char *text);
 static bool			domain_is_valid(const char *domain);
+static bool			username_is_valid(const char *username);
 static bool			next_codepoint(const unsigned char **cursor,
 						uint32_t *codepoint);
 static bool			codepoint_is_space(uint32_t codepoint);
@@ -222,6 +223,8 @@ bool	auth_form_validate(t_auth_form *form)
 	}
 	if (form->username[0] == '\0')
 		set_status(form, AUTH_FEEDBACK_ERROR, "USERNAME IS REQUIRED");
+	else if (!username_is_valid(form->username))
+		set_status(form, AUTH_FEEDBACK_ERROR, "USERNAME WITHOUT SPACES");
 	else if (codepoint_count(form->password) < AUTH_PASSWORD_MIN)
 		set_status(form, AUTH_FEEDBACK_ERROR,
 			"PASSWORD NEEDS 4+ CHARS");
@@ -383,6 +386,46 @@ static size_t	codepoint_count(const char *text)
 		text++;
 	}
 	return (count);
+}
+
+/**
+ * @brief Checks a username against what tetrisd will store and send.
+ *
+ * Printable ASCII with no space, which is the server's rule (db_username_valid)
+ * kept in step by hand: the client cannot link that archive, so this is a copy
+ * rather than a call, and the server is still the one that decides.
+ *
+ * Refusing here is about where the player finds out. A name with a space in it
+ * is a 400 they have to interpret after the form has already been submitted;
+ * this way the field they must fix is still in front of them, and it is the
+ * same shape of check the domain field already gets.
+ *
+ * Multi-byte input is refused with everything else outside the range - a name
+ * is written into bodies that are plain bytes, and the composer already drops
+ * what it cannot put on the wire.
+ *
+ * The length is measured against the wire's field, not the form's: the box
+ * holds AUTH_FIELD_MAX bytes and the account holds NET_USER_MAX, so a name
+ * between the two would type in cleanly and be refused by the server.
+ *
+ * @param username Candidate name from the form.
+ * @return true when tetrisd would accept the name.
+ */
+static bool	username_is_valid(const char *username)
+{
+	size_t	index;
+
+	if (username == NULL || username[0] == '\0')
+		return (false);
+	index = 0;
+	while (username[index] != '\0')
+	{
+		if ((unsigned char)username[index] <= 0x20
+			|| (unsigned char)username[index] >= 0x7f)
+			return (false);
+		index++;
+	}
+	return (index < NET_USER_MAX);
 }
 
 static bool	domain_is_valid(const char *domain)

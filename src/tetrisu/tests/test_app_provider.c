@@ -30,6 +30,8 @@ static void	test_fixture_provider_contract(void)
 	assert(provider.load_profile != NULL && provider.load_catalogue != NULL);
 	assert(provider.load_leaderboard != NULL && provider.load_lobby != NULL);
 	assert(provider.load_room != NULL && provider.create_room != NULL);
+	assert(provider.refresh_room != NULL && provider.leave_room != NULL);
+	assert(provider.start_room != NULL);
 	assert(provider.login(provider.userdata, "", "password", "example.com",
 			&auth)
 		== APP_PROVIDER_INVALID);
@@ -57,6 +59,13 @@ static void	test_fixture_provider_contract(void)
 		assert(room.mode == APP_GAME_MODE_DOUBLE);
 		assert(room.player_count == 1);
 		assert(room.players[0].owner && room.players[0].ready);
+		assert(provider.refresh_room(provider.userdata, room.id, &room)
+			== APP_PROVIDER_OK);
+		assert(provider.start_room(provider.userdata, room.id, &room)
+			== APP_PROVIDER_OK);
+		assert(room.state == APP_ROOM_STATE_IN_GAME);
+		assert(provider.leave_room(provider.userdata, room.id)
+			== APP_PROVIDER_OK);
 		assert(provider.create_room(provider.userdata, APP_GAME_MODE_NONE,
 				&room) == APP_PROVIDER_INVALID);
 	}
@@ -115,7 +124,15 @@ static void	test_fixture_models_are_marked_and_populated(void)
 	assert(app_screen_view_load(&provider, APP_SCREEN_WAITING_ROOM, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.room.player_count == WAITING_ROOM_DOUBLE_PLAYERS);
-	assert(view.data.room.players[0].owner);
+	/*
+	 * The local player owns the room they are seated in. Asserting that slot 0
+	 * owned it locked in a room nobody present could start: Start is the
+	 * owner's to press, and a fixture has no other player to press it, so every
+	 * Battle Royale room answered ONLY THE ROOM OWNER CAN START forever.
+	 */
+	assert(view.data.room.local_slot >= 0
+		&& view.data.room.local_slot < view.data.room.player_count);
+	assert(view.data.room.players[view.data.room.local_slot].owner);
 	assert(app_screen_view_load(&provider, APP_SCREEN_MULTIPLAYER_MODE, &view)
 		== APP_PROVIDER_OK);
 	assert(view.data.profile.signed_in);

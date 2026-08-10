@@ -40,6 +40,9 @@
 ** what tetrisd sells is a fixed roster of four characters and seven themes */
 # define BODY_CATALOGUE_MAX	16
 # define BODY_ITEM_NAME_MAX	32
+# define BODY_ROOM_MEMBERS_MAX	99
+/* the longest chat line a room will carry, sender excluded */
+# define BODY_CHAT_TEXT_MAX	256
 /* what t_body_state.hold reads when the player is holding nothing */
 # define BODY_HOLD_EMPTY		(-1)
 
@@ -159,6 +162,28 @@ typedef struct s_body_room_row
 	char				owner[BODY_USER_MAX];
 }	t_body_room_row;
 
+/* one occupied waiting-room seat, kept in server slot order */
+typedef struct s_body_room_member
+{
+	int			slot;
+	uint64_t	player_id;
+	bool		owner;
+	bool		ready;
+	char		username[BODY_USER_MAX];
+}	t_body_room_member;
+
+/* detailed LIST /room/<name> snapshot used by the waiting room */
+typedef struct s_body_room
+{
+	char				name[BODY_NAME_MAX];
+	t_body_mode			mode;
+	t_body_room_status	status;
+	int				min_to_start;
+	int				slot_count;
+	size_t				member_count;
+	t_body_room_member	members[BODY_ROOM_MEMBERS_MAX];
+}	t_body_room;
+
 /* UC-20 ProfileView body, one key per line; owned lists are count-prefixed */
 typedef struct s_body_profile
 {
@@ -219,6 +244,38 @@ typedef struct s_body_catalogue
 	size_t					theme_count;
 }	t_body_catalogue;
 
+/*
+** One line of a room's feed (UC-09), in encode order:
+**   seq <n>
+**   at <ms>
+**   kind player|system
+**   sender <username>            (absent when kind is system)
+**   text <one line>
+**
+** Player chat and system narration are one type with two authors, not two
+** mechanisms: narration is a message the server wrote, so `system` is true
+** and there is no sender. That is what lets a client draw one ordered feed
+** instead of merging two.
+**
+** `text` runs to end of line and may contain spaces, so it is last and
+** nothing follows it. A newline or any other control character in it would
+** end the line early and re-decode as a different message, so the codec
+** rejects them outright rather than escaping - one message has exactly one
+** representation.
+**
+** `seq` is the room's own counter. The chat lane in tetrisd's outbox drops
+** its oldest message rather than closing a slow client, so a client that
+** cares can see the gap instead of silently believing it read everything.
+*/
+typedef struct s_body_chat
+{
+	uint64_t	seq;
+	uint64_t	at;
+	bool		system;
+	char		sender[BODY_USER_MAX];
+	char		text[BODY_CHAT_TEXT_MAX];
+}	t_body_chat;
+
 /* STATE.C */
 int	body_state_encode(const t_body_state *in, char *out, size_t cap);
 int	body_state_decode(const char *buf, size_t len, t_body_state *out);
@@ -226,6 +283,14 @@ int	body_state_decode(const char *buf, size_t len, t_body_state *out);
 /* ROOMS.C */
 int	body_rooms_encode(const t_body_room_row *rows, size_t count, char *out, size_t cap);
 int	body_rooms_decode(const char *buf, size_t len, t_body_room_row *rows, size_t cap, size_t *count);
+
+/* ROOM.C */
+int	body_room_encode(const t_body_room *in, char *out, size_t cap);
+int	body_room_decode(const char *buf, size_t len, t_body_room *out);
+
+/* CHAT.C */
+int	body_chat_encode(const t_body_chat *in, char *out, size_t cap);
+int	body_chat_decode(const char *buf, size_t len, t_body_chat *out);
 
 /* PROFILE.C */
 int	body_profile_encode(const t_body_profile *in, char *out, size_t cap);

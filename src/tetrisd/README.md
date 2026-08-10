@@ -28,6 +28,7 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 - Server-authoritative: the client sends inputs, never board state, and the subject of every input rides in the request path
 - A player holds at most one connection — a second `LOGIN` displaces the first; disconnecting forfeits the game in progress, so an abandoned game is still recorded
 - Inputs are rate limited per connection with a token bucket, answering `429` with `Retry-After`; passwords are salted and SHA-256 hashed here, so the plaintext never reaches the store
+- Room chat and system narration are one feed on their own outbox lane: best-effort, drop-oldest, and never a reason to close a connection
 - Detaches itself, holds a locked pidfile, and reports its boot over a readiness pipe
 
 Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue. Double and Battle Royale are designed but unbuilt, and with them the twelve abilities that need a Target.
@@ -96,6 +97,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `SIGNUP` | `/account` | Register a player; `201` with its id, `409` when the name is taken |
 | `LOGIN` | `/session` | Bind the connection to a player, displacing any older one |
 | `LIST` | `/rooms` | Every occupied room, in-game ones included |
+| `LIST` | `/room/<name>` | Detailed room state and ordered occupied seats; visible only to a player seated in that room |
 | `LIST` | `/store` | The character and theme catalogues, with the prices this server charges |
 | `LEADERBOARD` | `/leaderboard` | Top ten by recorded score, rank ascending; registering is what puts a player on it, so a fresh account ranks last with nought |
 | `PROFILE` | `/player/<pid>` | Wallet, score, rank, owned items and the equipped loadout; `403` for another player |
@@ -112,7 +114,9 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `PAUSE` | `/room/<name>/player/<pid>` | Body `PAUSE` or `RESUME`; **Single only** |
 | `RESTART` | `/room/<name>/player/<pid>` | No body — deal a fresh game, discarding the one in progress; **Single only** |
 | `ABILITY` | `/room/<name>/player/<pid>` | Body `level <1-4>`, optionally `column <0-9>` to aim Sol |
+| `CHAT` | `/room/<name>` | Body `text <line>`; broadcast to the room including the sender. `429` rate-limited, `404` not seated there, `403` `muted`, `400` `bad-text` |
 | `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick |
+| `CHAT` | `/room/<name>` | **Server-originated** — one line of the room's feed, pushed to every seat |
 
 A piece that touches down does not lock on the spot either. It keeps
 `LOCKDOWN_DELAY_MS` (500 ms), and every accepted `MOVE` or `ROTATE` buys that
@@ -137,7 +141,7 @@ Rooms are named by the lobby (`S-01`, `D-02`, `BR-03`), never by clients, which 
 
 Statuses in use: `200`, `201`, `400`, `401`, `403`, `404`, `409`, `413`, `429`, `500`, `501`.
 
-A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`, `insufficient-funds`, `inventory-full`, `not-owned`. A bare status would leave a player unable to tell a full room from one already playing, or "you cannot afford that" from "that ability has nothing here to act on".
+A refusal the domain has a reason for carries it — `reason full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`, `insufficient-funds`, `inventory-full`, `not-owned`, `muted`, `bad-text`. A bare status would leave a player unable to tell a full room from one already playing, or "you cannot afford that" from "that ability has nothing here to act on".
 
 ### Abilities
 
@@ -247,7 +251,25 @@ The rule that makes `data.ptr` safe replaced the registry rwlock: **no client is
 
 ### Outbox
 
-A bounded FIFO of responses plus a one-slot mailbox holding the latest `STATE`. Responses that overflow the FIFO close the client — it cannot keep up, and buffering more would let it exhaust the server. `STATE` snapshots overwrite instead, so a stalled client loses intermediate frames but never holds up the tick that produced them. That split has nothing to do with threading, which is why it outlived the writer thread, the condition variable and the mutex unchanged.
+Three lanes, because three kinds of message fail differently.
+
+A bounded FIFO of responses: a response belongs to a request the client is waiting on, so overflowing it closes the client — it cannot keep up, and buffering more would let it exhaust the server. A one-slot mailbox holding the latest `STATE`: a snapshot supersedes the one before it, so it overwrites and a stalled client loses intermediate frames but never holds up the tick that produced them. A small ring of `CHAT`: best-effort by specification (UC-09 E1), so it drops its oldest line and **never closes the client**.
+
+Chat cannot share the response FIFO. A Battle Royale room narrating its knockouts would fill it, and the next genuine response would kill a connection whose only fault was being slow — the opposite of what that FIFO's rule is for. `registry_enqueue_chat` is a separate call from `registry_enqueue` for the same reason: chat must not be able to reach the `shutdown` the response path takes on overflow.
+
+Draining order is responses, then chat, then `STATE`. A snapshot is regenerated on the following tick, so it is the one thing worth deferring. Three lanes means there is **no total order** between the three; chat is ordered within itself and against nothing else, which is why every line carries its own `seq`.
+
+That split has nothing to do with threading, which is why it outlived the writer thread, the condition variable and the mutex unchanged.
+
+### The room feed
+
+Player chat and system narration are one feed with two authors — the same body, the same lane, numbered by the same per-room counter — so a client draws one ordered list instead of merging two. `narrate.c` owns both: `room_chat_broadcast` stamps and delivers, `room_narrate` is the same call with the server as the author.
+
+Narration is emitted from `room.c` and nowhere else, because that is the only module holding both halves of a Room and it already receives every event — `room_seat`'s verdict, `room_release`'s `t_release_result` with its successor. Emitting from a handler would let the roster and the feed disagree, which is [the bug that already happened once](../../docs/bugs/room_runtime_outlived_its_room.md) in a different guise.
+
+Two orderings are load-bearing and asserted in `tests/test_chat.c`. A refused join narrates **nothing**. And a status reaches the client before the narration about it — not by arranging the calls, but because responses drain ahead of chat, so the guarantee survives someone rearranging them.
+
+The server keeps **no history**: a player who joins late has missed what was said. That is what makes closing a room a no-op for the feed, and it is why `tetrisu`'s own ring is the only backlog that exists.
 
 ### A Room is two objects
 
@@ -278,15 +300,17 @@ src/tetrisd/
 │   ├── reactor.c          The event loop, sweep, teardown
 │   ├── client.c           Spawn, adopt, kill, reap — the client lifetime rules
 │   ├── clientio.c         Socket reads, frame boundaries, sealed writes
-│   ├── outbox.c           Bounded response FIFO + one-slot STATE mailbox
+│   ├── outbox.c           Response FIFO, STATE mailbox, chat ring — three lanes
 │   ├── registry.c         Live connections, addressable by player id
 │   ├── handshake_pool.c   Bounded workers for the one blocking call
 │   ├── dispatch.c         Frame → route → status; body field helpers
 │   ├── request_target.c   Who may act on whose board, and the input budget
 │   ├── handlers_*.c       account (SIGNUP, LOGIN), lobby, input, game,
-│   │                      profile (PROFILE), store (LIST /store, BUY, EQUIP)
+│   │                      profile (PROFILE), store (LIST /store, BUY, EQUIP),
+│   │                      chat (CHAT)
 │   ├── ability_ctrl.c     The Gaiden catalogue, targeting, and what it costs
 │   ├── room.c             Both halves of a Room; ticking and STATE push
+│   ├── narrate.c          The room feed — broadcast, and the server's own lines
 │   ├── game.c             t_game — the aggregate libtetrisbrain does not own
 │   └── …                  config, logger, listener, buffer, clock, signals, dump
 ├── tests/                 harness.c drives a real server over a real session

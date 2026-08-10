@@ -33,7 +33,12 @@ install_linux() {
 
     if command -v apt-get >/dev/null 2>&1; then
         $SUDO apt-get update
-        $SUDO apt-get install -y build-essential pkg-config \
+        # binutils is named explicitly even though build-essential depends on
+        # it: naming it is what upgrades an assembler that is older than the
+        # installed GCC, and an already-satisfied build-essential upgrades
+        # nothing. GCC 15 emits `.base64` for non-ASCII string constants and
+        # only binutils 2.44 and newer can assemble it (see check_deps.sh).
+        $SUDO apt-get install -y build-essential binutils pkg-config \
             libssl-dev libreadline-dev libncurses-dev
         if apt-cache show valgrind >/dev/null 2>&1; then
             $SUDO apt-get install -y valgrind libc6-dbg || \

@@ -88,6 +88,12 @@ static void	test_unserved_screens_are_unavailable(void)
 	assert(provider.load_lobby(&session, &lobby) == APP_PROVIDER_UNAVAILABLE);
 	assert(provider.load_room(&session, "duel-42", &room)
 		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.refresh_room(&session, "duel-42", &room)
+		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.leave_room(&session, "duel-42")
+		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.start_room(&session, "duel-42", &room)
+		== APP_PROVIDER_UNAVAILABLE);
 	printf("PASS test_unserved_screens_are_unavailable\n");
 }
 
@@ -124,6 +130,8 @@ static void	test_lobby_create_room_unauthed_returns_unavailable(void)
 		== APP_PROVIDER_UNAVAILABLE);
 	assert(provider.load_room(&session, "D-99", &room)
 		== APP_PROVIDER_UNAVAILABLE);
+	assert(provider.refresh_room != NULL && provider.leave_room != NULL);
+	assert(provider.start_room != NULL);
 	assert(provider.create_room(&session, APP_GAME_MODE_NONE, &room)
 		== APP_PROVIDER_INVALID);
 	printf("PASS test_lobby_create_room_unauthed_returns_unavailable\n");

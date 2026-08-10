@@ -21,11 +21,13 @@ static void	test_leaving_removes_an_empty_room(void);
 static void	test_only_the_owner_starts_the_game(void);
 static void	test_start_needs_enough_players(void);
 static void	test_ownership_passes_to_a_successor(void);
+static void	test_room_snapshot_tracks_live_roster(void);
 static void	test_a_destroyed_room_does_not_take_its_successor_with_it(void);
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static int		simple(t_harness *hc, const char *method, const char *path, const char *body);
 static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap);
+static int		list_room(t_harness *hc, const char *path, t_body_room *room);
 
 int	main(void)
 {
@@ -36,6 +38,7 @@ int	main(void)
 	test_only_the_owner_starts_the_game();
 	test_start_needs_enough_players();
 	test_ownership_passes_to_a_successor();
+	test_room_snapshot_tracks_live_roster();
 	test_a_destroyed_room_does_not_take_its_successor_with_it();
 	return (0);
 }
@@ -188,6 +191,51 @@ static void	test_ownership_passes_to_a_successor(void)
 }
 
 /**
+ * The waiting-room client needs more than the lobby's player count: it needs
+ * the ordered seats, names, roles, and current room state. This case follows
+ * that projection across join and owner succession through the real protocol.
+ */
+static void	test_room_snapshot_tracks_live_roster(void)
+{
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	blake;
+	t_harness	casey;
+	t_body_room	snapshot;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(player(&fx, &amber, "amber") == 0);
+	assert(player(&fx, &blake, "blake") == 0);
+	assert(player(&fx, &casey, "casey") == 0);
+	assert(hc_join_new(&amber, "double", room, sizeof(room)) == 201);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.member_count == 1);
+	assert(snapshot.members[0].slot == 1);
+	assert(snapshot.members[0].owner && snapshot.members[0].ready);
+	assert(strcmp(snapshot.members[0].username, "amber") == 0);
+	assert(list_room(&casey, path, &snapshot) == 404);
+	assert(simple(&blake, "JOIN", path, NULL) == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.status == BODY_ROOM_READY);
+	assert(snapshot.member_count == 2);
+	assert(strcmp(snapshot.members[1].username, "blake") == 0);
+	assert(!snapshot.members[1].owner && snapshot.members[1].ready);
+	assert(simple(&amber, "LEAVE", path, NULL) == 200);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(snapshot.member_count == 1);
+	assert(strcmp(snapshot.members[0].username, "blake") == 0);
+	assert(snapshot.members[0].owner);
+	hc_close(&casey);
+	hc_close(&blake);
+	hc_close(&amber);
+	fx_stop(&fx);
+	printf("PASS test_room_snapshot_tracks_live_roster\n");
+}
+
+/**
  * @brief Connects, registers, and logs in one player.
  *
  * @param fx Running fixture.
@@ -290,4 +338,28 @@ static size_t	list_rooms(t_harness *hc, t_body_room_row *rows, size_t cap)
 		assert(body_rooms_decode((const char *)resp.body, resp.body_len, rows, cap, &count) == 0);
 	htttp_message_free(&resp);
 	return (count);
+}
+
+/**
+ * @brief Lists and decodes one detailed waiting-room snapshot.
+ *
+ * @param hc Connected client making the request.
+ * @param path Room path.
+ * @param room Receives a decoded 200 response.
+ * @return Response status, or -1 on transport/codec failure.
+ */
+static int	list_room(t_harness *hc, const char *path, t_body_room *room)
+{
+	t_htttp_message	response;
+	int				status;
+
+	if (hc_request(hc, "LIST", path, NULL, &response) != 0)
+		return (-1);
+	status = (int)response.status_code;
+	if (status == 200 && (response.body == NULL
+			|| body_room_decode((const char *)response.body, response.body_len,
+				room) != 0))
+		status = -1;
+	htttp_message_free(&response);
+	return (status);
 }

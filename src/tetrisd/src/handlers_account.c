@@ -31,6 +31,16 @@ int	signup_handler(const t_htttp_message *msg, void *context)
 	ctx = context;
 	if (read_credentials(ctx, username, password) != 0)
 		return (400);
+	/*
+	 * The store applies this rule itself, so asking first buys nothing but
+	 * the reason - and "bad-username" is the difference between a player
+	 * fixing their name and one retyping their password at a bare 400.
+	 */
+	if (!db_username_valid(username))
+	{
+		request_body_printf(ctx, "reason bad-username\n");
+		return (400);
+	}
 	if (salt_generate(salt, sizeof(salt)) != 0
 		|| password_hash(password, salt, hash, sizeof(hash)) != 0)
 		return (500);

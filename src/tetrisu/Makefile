@@ -111,6 +111,7 @@ DEP			:= $(OBJ:.o=.d)
 # main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
 # unit-test archive keeps only state and gameplay logic.
 LOGIC_SRC	:= $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/solo_mode.c \
+				   $(SRC_DIR)/multiplayer_match_mode.c \
 				   $(SRC_DIR)/render_%.c $(SRC_DIR)/audio.c, $(SRC))
 LOGIC_OBJ	:= $(LOGIC_SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 LOGIC_LIB	:= $(OBJ_DIR)/logic.a
@@ -255,6 +256,16 @@ $(TEST_BIN_DIR)/solo_authority_smoke: $(TESTS_DIR)/solo_authority_smoke.c $(LOGI
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# The room feed against a live tetrisd: narration the server wrote, chat a
+# player sent, and the fact that both reach the ring whether they arrive on
+# their own or across a reply. Same link line - net_chat.c is in the app
+# archive beside the rest of the network layer.
+$(TEST_BIN_DIR)/chat_smoke: $(TESTS_DIR)/chat_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
@@ -270,7 +281,8 @@ unit: $(UNIT_BINS)
 	@ $(TEST_RUNNER) unit $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
-			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke
+			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
+			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 

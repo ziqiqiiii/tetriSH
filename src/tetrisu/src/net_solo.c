@@ -40,6 +40,12 @@ static t_solo_ability_result	verdict_of(const char *reason);
  * rooms (S-01, D-02), so a client asks the collection for one and is told
  * which it got.
  *
+ * The two steps are one operation, so a failed START gives the seat back.
+ * Keeping it left the player in a room they were not playing in and could
+ * not see: the authority reports itself offline, so its close does nothing,
+ * and every later JOIN is answered 409 already-in-room - Solo silently
+ * playing the local rules for the rest of the session.
+ *
  * @param net Authenticated client.
  * @param out Receives the server's answer to whichever step refused.
  * @return 0 when a game is running, -1 otherwise.
@@ -61,9 +67,15 @@ int	net_solo_start(t_net_client *net, t_net_result *out)
 	net->state = NET_IN_ROOM;
 	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, net->room);
 	if (net_request(net, "START", path, NULL, &result) != 0)
+	{
+		net_solo_leave(net);
 		return (-1);
+	}
 	if (result.status != 200)
+	{
+		net_solo_leave(net);
 		return (refused(out, &result));
+	}
 	snprintf(net->play_path, sizeof(net->play_path), "%s%s/player/%llu",
 		TETRISU_ROUTE_ROOM, net->room,
 		(unsigned long long)net->player_id);
@@ -90,6 +102,7 @@ void	net_solo_leave(t_net_client *net)
 	net->room[0] = '\0';
 	net->play_path[0] = '\0';
 	net->has_state = false;
+	net_chat_reset(net);
 }
 
 /**

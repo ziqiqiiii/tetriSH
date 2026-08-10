@@ -3,6 +3,7 @@
 // Static Functions
 static void	free_msg(t_outbound_message *msg);
 static bool	take_next(t_outbox *ob, t_outbound_message *out);
+static bool	take_chat(t_outbox *ob, t_outbound_message *out);
 
 /**
  * @brief Prepares an empty outbox for one client.
@@ -74,12 +75,51 @@ int	outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len)
 }
 
 /**
+ * @brief Queues one line of the room's feed, dropping the oldest if full.
+ *
+ * Chat is best-effort by specification (UC-09 E1): it must never block the
+ * game loop and must never be the reason a connection is closed. So a full
+ * ring loses its oldest message and still accepts the new one - a client that
+ * has fallen this far behind wants the newest of the feed, and every message
+ * carries a `seq` so the gap is visible rather than silent.
+ *
+ * Ownership of the bytes transfers only on success, as everywhere else here.
+ *
+ * @param ob Outbox to push into.
+ * @param bytes Serialised CHAT push; freed by the outbox once accepted.
+ * @param len Length of bytes.
+ * @return 0 when queued, -1 only when the outbox is closed.
+ */
+int	outbox_push_chat(t_outbox *ob, unsigned char *bytes, size_t len)
+{
+	size_t	slot;
+
+	if (ob == NULL || bytes == NULL)
+		return (-1);
+	if (ob->closed)
+		return (-1);
+	if (ob->chat_count == TETRISD_CHAT_CAPACITY)
+	{
+		free_msg(&ob->chat[ob->chat_head]);
+		ob->chat_head = (ob->chat_head + 1) % TETRISD_CHAT_CAPACITY;
+		ob->chat_count--;
+		ob->chat_dropped++;
+	}
+	slot = (ob->chat_head + ob->chat_count) % TETRISD_CHAT_CAPACITY;
+	ob->chat[slot].bytes = bytes;
+	ob->chat[slot].len = len;
+	ob->chat_count++;
+	return (0);
+}
+
+/**
  * @brief Takes the next message to send, or reports that there is none.
  *
- * Queued responses go out before the STATE mailbox: a request_reply is part of
- * a request the client is waiting on, while a snapshot is only ever the latest
- * truth. An empty outbox and a closed one are the same answer. The caller owns
- * the returned bytes.
+ * Queued responses go out first: a response is part of a request the client
+ * is waiting on. Chat comes next, then the STATE mailbox - a snapshot is only
+ * ever the latest truth and is regenerated on the following tick anyway, so
+ * it is the one thing worth deferring. An empty outbox and a closed one are
+ * the same answer. The caller owns the returned bytes.
  *
  * @param ob Outbox to take from.
  * @param out Receives the message.
@@ -109,7 +149,7 @@ bool	outbox_idle(t_outbox *ob)
 
 	if (ob == NULL)
 		return (true);
-	idle = ob->count == 0 && !ob->state_pending;
+	idle = ob->count == 0 && ob->chat_count == 0 && !ob->state_pending;
 	return (idle);
 }
 
@@ -136,6 +176,14 @@ void	outbox_close(t_outbox *ob)
 	}
 	ob->count = 0;
 	ob->head = 0;
+	i = 0;
+	while (i < ob->chat_count)
+	{
+		free_msg(&ob->chat[(ob->chat_head + i) % TETRISD_CHAT_CAPACITY]);
+		i++;
+	}
+	ob->chat_count = 0;
+	ob->chat_head = 0;
 	free_msg(&ob->state);
 	ob->state_pending = false;
 }
@@ -182,6 +230,8 @@ static bool	take_next(t_outbox *ob, t_outbound_message *out)
 		ob->count--;
 		return (true);
 	}
+	if (take_chat(ob, out))
+		return (true);
 	if (ob->state_pending)
 	{
 		*out = ob->state;
@@ -191,4 +241,23 @@ static bool	take_next(t_outbox *ob, t_outbound_message *out)
 		return (true);
 	}
 	return (false);
+}
+
+/**
+ * @brief Moves the oldest queued chat line out of the outbox.
+ *
+ * @param ob Outbox to take from.
+ * @param out Receives the message.
+ * @return true when a message was taken, false when the lane was empty.
+ */
+static bool	take_chat(t_outbox *ob, t_outbound_message *out)
+{
+	if (ob->chat_count == 0)
+		return (false);
+	*out = ob->chat[ob->chat_head];
+	ob->chat[ob->chat_head].bytes = NULL;
+	ob->chat[ob->chat_head].len = 0;
+	ob->chat_head = (ob->chat_head + 1) % TETRISD_CHAT_CAPACITY;
+	ob->chat_count--;
+	return (true);
 }

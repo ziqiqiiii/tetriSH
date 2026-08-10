@@ -19,6 +19,13 @@
 ** a client sends; a server answer is neither a command nor a board snapshot.
 */
 # define HTTTP_CONTENT_TYPE_STATUS			"application/tetris-status"
+/*
+** A pushed CHAT: one line of a room's feed, written by a player or by the
+** server itself. Like STATE it is server-originated and unsolicited, so it
+** is neither a command nor a response to one; unlike STATE it is not a board.
+** A client's own CHAT still goes up as tetris-command - it is a request.
+*/
+# define HTTTP_CONTENT_TYPE_CHAT			"application/tetris-chat"
 # define HTTTP_VALIDATE_AUTHENTICATED_REQUEST	0x01u
 
 typedef enum

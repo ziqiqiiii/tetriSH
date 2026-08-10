@@ -17,10 +17,11 @@ UNAME_S="${UNAME_S:-$(uname -s)}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
 
 probe="$(mktemp /tmp/tetrish-deps-check.XXXXXX)"
-trap 'rm -f "$probe"' EXIT HUP INT TERM
+probe_log="$probe.log"
+trap 'rm -f "$probe" "$probe_log"' EXIT HUP INT TERM
 
 missing=""
-for tool in gcc make ar pkg-config; do
+for tool in gcc as make ar pkg-config; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         missing="$missing $tool"
     fi
@@ -34,6 +35,31 @@ fi
 
 if [ -n "$missing" ]; then
     echo "Missing tools:$missing" >&2
+    exit 1
+fi
+
+# The assembler has to understand what the compiler emits, and on a
+# partially-upgraded box it does not: GCC 15 encodes non-ASCII string constants
+# with the `.base64` directive, which GNU as only learned in binutils 2.44. A
+# GCC that has outrun its binutils compiles most of the tree and then dies on
+# the one file that draws a box — notcurses' ncplane_perimeter_* inlines carry
+# the box-drawing characters — with "unknown pseudo-op: `.base64'". Probing the
+# pair here turns that into one sentence at the start of the build.
+if ! printf '%s\n' \
+        'const char *tetrish_box_probe(void);' \
+        'const char *tetrish_box_probe(void) { return "╔╗╚╝═║╭╮╰╯─│"; }' \
+        | gcc -x c - -c -o /dev/null 2>"$probe_log"; then
+    if grep -q 'base64' "$probe_log"; then
+        echo "The assembler cannot assemble what this GCC emits." >&2
+        echo "  gcc: $(gcc -dumpfullversion 2>/dev/null || echo unknown)" >&2
+        echo "  as:  $(command -v as) - $(as --version 2>/dev/null | head -1)" >&2
+        echo "GCC 15 writes non-ASCII string constants as '.base64', which needs" >&2
+        echo "binutils 2.44 or newer. Upgrade the assembler, e.g. on Debian/Kali:" >&2
+        echo "  sudo apt-get update && sudo apt-get install --only-upgrade binutils" >&2
+    else
+        echo "The C toolchain cannot compile a trivial file:" >&2
+        cat "$probe_log" >&2
+    fi
     exit 1
 fi
 

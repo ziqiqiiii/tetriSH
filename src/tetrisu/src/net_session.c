@@ -93,6 +93,13 @@ static int	credentials_request(t_net_client *net, const char *method,
  * seen it. Taking it from one place keeps the client from having two ideas of
  * who it is.
  *
+ * That same id is what decides NET_AUTHED, rather than the status code.
+ * SIGNUP answers 201 and creates an account, but it binds nothing: identity
+ * belongs to the connection (ADR-0001) and only LOGIN claims it, so a signup
+ * comes back with no Player-Id at all. Reading 201 as "signed in" left the
+ * client sure it was authenticated on a socket tetrisd still considered
+ * anonymous, and every route it then called answered 401.
+ *
  * @param net Client to bind.
  * @param username Name that was accepted.
  * @param result The server's answer.
@@ -103,6 +110,6 @@ static void	adopt_identity(t_net_client *net, const char *username,
 	if (result->status != 200 && result->status != 201)
 		return ;
 	snprintf(net->username, sizeof(net->username), "%s", username);
-	if (net->state < NET_AUTHED)
+	if (net->player_id != 0 && net->state < NET_AUTHED)
 		net->state = NET_AUTHED;
 }

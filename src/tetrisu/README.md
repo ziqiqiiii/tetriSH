@@ -157,6 +157,21 @@ waiting room with chat and a pre-match countdown — while the authoritative
   roster. It also has a status line and a chat column on the right. `C` opens
   the composer, and while it is open every printable key is text - so a message
   containing "s" cannot start the match.
+- That chat column is the server's when there is a server. `net_chat.c` holds
+  every pushed `CHAT` in a drop-oldest ring, and the panel draws the tail of
+  it. Posting sends and appends **nothing** locally: `tetrisd` echoes the
+  sender their own line along with everybody else's, so a client that also
+  appended it would draw the message twice, and the copy it drew first would
+  be the one without the server's ordering. The same column carries the
+  server's own narration - who joined, who left, who owns the room now - with
+  no author, because it is one feed with two writers rather than two lists to
+  merge. With no such provider - an offline room - the local append is the
+  feed, which is all an offline room can have.
+- A line that crosses a reply is still filed. `net_request` reads the socket
+  too, so a loop that only asked `net_pump` "did anything arrive?" would lose
+  most of the feed - the same trap `applied_seq` documents for snapshots. The
+  ring therefore counts every line ever received rather than the ones it still
+  holds, and a screen compares that against what it last drew.
 - A Double room auto-starts when both seats are filled and ready. Battle Royale
   supports capacities from 4 through 99, requires every occupied player to be
   ready, and waits for the room owner to press `S`. Both paths run the same
@@ -167,9 +182,10 @@ waiting room with chat and a pre-match countdown — while the authoritative
 - Lobby and waiting-room volume keys use the same floating music-volume card
   as Home and Solo; they do not replace room-list, readiness, countdown, or
   chat feedback.
-- The countdown is the only value in the client that advances without input, so
-  it is the only thing on its region plane: one small plane repaints per second
-  and nothing else on the screen is touched.
+- The countdown and the live room snapshot advance without input. The client
+  refreshes the authoritative roster and room state every 500 ms, and the
+  existing region signatures repaint only the seats or status that changed;
+  the countdown keeps its own small once-per-second plane.
 - The lobby, the create-room panel and the waiting room share one duel-hall
   backdrop and one set of region planes. Switching between them destroys the
   planes the previous screen owned, because leaving one behind would strand a
@@ -288,6 +304,21 @@ Leaderboard, Settings, and Settings → Marketplace are reachable. Without
 `TETRISU_UI_PREVIEW=1`, the preview action is not rendered or accepted; real
 server sign-in and Play Offline retain their existing behavior.
 
+Every screen below Home is several keystrokes deep, which makes checking one in
+a real terminal slow and an automated visual pass fragile. `TETRISU_START_SCREEN`
+boots straight into one — the real screen, loading its real model through the
+provider and leaving through its own Back route, not a preview of it:
+
+```bash
+TETRISU_UI_PREVIEW=1 TETRISU_START_SCREEN=lobby ./bin/tetrisu
+```
+
+It accepts `solo`, `marketplace`, `settings`, `leaderboard`, `multiplayer`,
+`lobby`, `create`, `room`, `double`, and `royale`; anything else is ignored and
+the app boots at Login as usual. `TETRISU_MATCH_PREVIEW=double|battle` is the
+older, narrower gate for the two match screens, and
+`TETRISU_MATCH_PREVIEW_SKIP_SELECTION=1` skips their character select.
+
 By default the network adapter stays disconnected, so `CHECK SERVER` reports
 offline and `LOGIN`/`SIGN UP` stay refused; `PLAY OFFLINE` and the preview gate
 above are the two ways into Home. A refused button says which case applies on
@@ -372,13 +403,16 @@ blank.
 it reports `SERVER ONLINE`, `SIGN UP` registers a player and `LOGIN` binds the
 connection. Single Player then plays Solo against `tetrisd` — every board
 mutation is server-authoritative and the renderer draws only `STATE` snapshots.
-Multiplayer's lobby, create-room, and join-by-id are driven by `LIST`/`JOIN`
-against the server.
+Multiplayer's lobby and create/join paths are driven by `LIST`/`JOIN`. Once
+seated, the waiting room polls the read-only `LIST /room/<name>` snapshot,
+sends `LEAVE` before navigating back, and sends `START` before launching a
+match. The snapshot carries the ordered roster, owner, readiness, capacity,
+mode, and room state; refresh never joins the room again.
 
 | Screen | Server reach today |
 |---|---|
-| Login / Sign Up, Settings, Marketplace, catalogues, Single Player, Leaderboard, Multiplayer lobby & create/join | Driven by `tetrisd` |
-| Waiting-room roster, Double / Battle Royale matches | `tetrisd` does not serve them yet — the screen shows its account-needed copy |
+| Login / Sign Up, Settings, Marketplace, catalogues, Single Player, Leaderboard, Multiplayer lobby, create/join, and waiting-room roster/start/leave | Driven by `tetrisd` |
+| Double / Battle Royale match presentation | Match screens remain scaffolded; room start and server game allocation are live |
 
 Settings and the Marketplace read `LIST /store` for the catalogue and its
 prices and `PROFILE` for the wallet, rank, inventory and loadout; `Enter` on a
@@ -583,6 +617,7 @@ Modules (each a `.c` under `src/`):
 | `multiplayer_screen.c` | Pure mode-picker and create-room state, actions, and card copy |
 | `lobby_screen.c` | Pure room-browser state: filter, cursor, join-by-id field, and join guards |
 | `waiting_room_screen.c` | Pure ready/start policy, chat transcript, and the pre-match countdown |
+| `net_chat.c` | The room feed: the drop-oldest ring pushed lines land in, and posting one |
 | `confirmation.c` | Pure safe-default Yes/No confirmation state and copy |
 | `render_confirmation.c` | Persistent confirmation plane and keyboard interaction loop |
 | `multiplayer_layout.c` | Reference-space geometry for all four multiplayer surfaces |
@@ -624,6 +659,7 @@ tetrisu/
 │   ├── multiplayer_screen.c   Pure mode-picker + create-room state → logic.a
 │   ├── lobby_screen.c         Pure room-browser state → logic.a
 │   ├── waiting_room_screen.c  Pure ready/chat/countdown policy → logic.a
+│   ├── net_chat.c             Room feed ring + CHAT send → logic.a
 │   ├── multiplayer_layout.c   Pure multiplayer bitmap geometry → logic.a
 │   ├── auth_form.c            Pure authentication form state → logic.a
 │   ├── render_background.c    notcurses init, background, input, teardown
@@ -697,16 +733,19 @@ screen: on a Sixel terminal a full-screen bitmap re-emitted over the region
 planes blanks them until the next keystroke, which is the fifth bug in
 `docs/adding-a-screen.md`.
 
-The unit suite covers the notcurses/SDL-free app and Solo game state. Three
+The unit suite covers the notcurses/SDL-free app and Solo game state. Six
 integration suites boot a throwaway `tetrisd` — one server bring-up, shared by
-all three as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
+all of them as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
 and drive a real socket against it:
 
 | Suite | Client | What it covers |
 |---|---|---|
 | `test_net_solo.sh` | `net_smoke` | The wire: `JOIN`/`START`, every gameplay action, `STATE` decoded into the Solo view model |
-| `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join |
+| `test_net_provider.sh` | `net_provider_smoke` | The provider vtable the UI calls: CHECK SERVER, SIGN UP, LOGIN, signing in *again*, profile, leaderboard, lobby, create/join, live roster refresh, owner-only start, leave, and room re-entry |
 | `test_solo_authority.sh` | `solo_authority_smoke` | The layer `solo_mode.c` calls: who owns the board, and the hold that stops `tetrisd`'s clock for the length of the client's 3-2-1 |
+| `test_net_chat.sh` | `chat_smoke` | The room feed: narration nobody asked for, a line echoed back to its sender, a line that crosses a reply still being filed, the server's refusals, and the provider seam the waiting room calls |
+| `test_net_store.sh` | `store_smoke` | The Marketplace's half of the account: the catalogue and its prices, a fresh account's starters, affordability, `BUY`/`EQUIP` outliving the screen, and artwork keyed by catalogue id |
+| `test_net_session.sh` | `session_smoke` | What a session leaves behind — a descriptor returned on every disconnect, `SIGNUP` claiming no identity of its own, and a refused solo start changing nothing. All three are regressions; none is visible without a real socket |
 
 The fixture walks its port upward from the suite's base rather than using a
 fixed one: a fixed port inside the kernel's ephemeral range collides with
