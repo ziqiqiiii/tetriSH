@@ -32,14 +32,14 @@ The sections below describe the target design; this table says what exists today
 |---|---|
 | `src/tetrish` | Implemented — REPL, builtins, `.tetrishrc`, system programs under `bin/` |
 | `src/tetrisu` | Partial — notcurses intro, menu, and audio; no gameplay or networking |
-| `src/tetrisd` | Implemented — Single mode end to end: accounts, lobby, rooms, live games, `STATE` push; integration tested |
+| `src/tetrisd` | Implemented — Single mode end to end: accounts, lobby, rooms, live games, `STATE` push; integration tested (Linux only — reactor is `epoll`, no macOS build) |
 | `src/tetrislogd` | Implemented — receives, validates, writes, rotates on `SIGHUP`; 35 tests across four suites, valgrind-clean |
 | `tetrisctl` | Partial — `start`/`status`/`stop`/`restart` by pidfile and signal; the control socket is a later step |
 | `lib/libtetrisbrain` | Implemented — nine modules, unit tested |
 | `lib/libtetrisroom` | Implemented — room/slot/lobby domain, unit tested |
 | `lib/libmacminidb` | Implemented — in-memory store, WAL, catalogues, unit tested |
 | `lib/libtetrissh` | Implemented — handshake and encrypted framing, unit tested |
-| `lib/libcoreipc` | Implemented — log records, ring buffer, `AF_UNIX`, mqueue, unit tested |
+| `lib/libcoreipc` | Implemented — log records, ring buffer, `AF_UNIX`, mqueue, unit tested (mqueue module is Linux only — Darwin has no POSIX `mqueue.h`) |
 | `lib/libhtttp` | Implemented — parser, serialiser, validation, dispatch, unit tested |
 | `lib/libstatusbody` | Implemented — state, rooms, profile, leaderboard codecs, unit tested |
 
@@ -49,7 +49,9 @@ The sections below describe the target design; this table says what exists today
 
 GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` additionally needs notcurses (required); SDL2 and SDL2_mixer are optional and enable its audio, which compiles out via `-DTETRISU_ENABLE_AUDIO=0`.
 
-Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported; where no notcurses package exists, it is built from source.
+Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported for dependency install; where no notcurses package exists, it is built from source.
+
+`make deps`/`make` run on macOS and build `tetrish`, the pure-logic libraries, and `tetrisu`. `tetrisd` does not: its reactor is built directly on `epoll_create1`/`epoll_ctl`/`epoll_wait` (`src/tetrisd/src/{server,client,clientio,reactor,handshake_pool}.c`), which Darwin has no equivalent for, and `lib/libcoreipc`'s mqueue module calls POSIX `mq_open`/`mq_send`/`mq_receive`, which Darwin never implemented. Both fail to compile on macOS. Run the server side — `tetrisd`, and anything that links `libcoreipc`'s mqueue module — on Linux or WSL; a client-only macOS checkout can still build `tetrisu` and connect to a `tetrisd` running elsewhere.
 
 The compiler and the assembler have to be upgraded together: GCC 15 writes non-ASCII string constants with the `.base64` directive, which GNU as only understands from binutils 2.44. A machine whose GCC has outrun its binutils compiles most of the tree and then fails on `src/tetrisu/src/render_multiplayer.c` — the one file that draws a box — with ``unknown pseudo-op: `.base64'``. `make check-deps` probes the pair and says so before the build starts; `make deps` upgrades binutils where the package manager can.
 
