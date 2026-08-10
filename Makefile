@@ -24,7 +24,9 @@
 #
 #   make play         set up everything and launch a client against a server
 #
-#   make docker-build build the image (installs every dependency itself)
+#   make docker-build build the full image (installs every dependency itself)
+#   make docker-build-server build the server-only image (no tetrisu, no
+#                     notcurses) - what a deployment and `play` run
 #   make docker-run   run the shell + daemons in a container, publishing 4242
 #   make docker-server run the daemons alone, detached, for a client on the host
 #   make docker-logs  follow the detached server's daemon logs
@@ -87,7 +89,16 @@ COMPONENT_MAKEFILES	:= $(wildcard src/tetrisd/Makefile \
 							  src/tetrislogd/Makefile \
 							  src/tetrisctl/Makefile \
 							  src/tetrisu/Makefile)
-DAEMON_DIRS			:= $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES)))
+
+# Components this build leaves out, even though their Makefile is present. The
+# server container image sets SKIP_COMPONENTS=src/tetrisu: nothing in the server
+# half needs notcurses, and building it from source is most of that image.
+# Tests follow the same list, since a component that was not built cannot be
+# tested.
+SKIP_COMPONENTS		?=
+
+DAEMON_DIRS			:= $(filter-out $(SKIP_COMPONENTS), \
+							  $(patsubst %/,%,$(dir $(COMPONENT_MAKEFILES))))
 TEST_DIRS			:= $(LIB_DIRS) $(filter src/tetrisu src/tetrisd \
 							  src/tetrislogd src/tetrisctl,$(DAEMON_DIRS))
 
@@ -207,6 +218,12 @@ DOCKER_TAG		:= dev
 DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
 DOCKER_NAME		:= tetrish
 DOCKER_SERVER	:= tetrish-server
+
+# Two images from one Dockerfile (see its header). The server one is the
+# deployable half and the only one `play` and `docker-server` want; the dev one
+# carries tetrisu and the test tooling as well.
+DOCKER_SRV_TAG	:= server
+DOCKER_SRV_REF	:= $(DOCKER_IMAGE):$(DOCKER_SRV_TAG)
 DOCKER_PORT		:= 4242
 
 # Named volume for the daemons' runtime state, mounted where .tetrishrc points
@@ -247,8 +264,15 @@ DOCKER_TERM		 = $(if $(TERM),-e TERM=$(TERM))
 
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
-	@ $(DOCKER) build -t $(DOCKER_REF) .
+	@ $(DOCKER) build --target dev -t $(DOCKER_REF) .
 	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_REF)$(CLR_RMV) built ✔️"
+
+# The server half alone: no notcurses, no SDL2, no valgrind, so this is both the
+# faster build and the one small enough to build on the box that will serve it.
+docker-build-server:
+	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_SRV_REF)$(CLR_RMV)..."
+	@ $(DOCKER) build --target server -t $(DOCKER_SRV_REF) .
+	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_SRV_REF)$(CLR_RMV) built ✔️"
 
 
 docker-run: docker-stop
@@ -260,16 +284,18 @@ docker-run: docker-stop
 # The server on its own, detached, for a client running on the host - the only
 # way to play on macOS, where tetrisd cannot be built at all (epoll, timerfd,
 # POSIX mqueue). certs/ is mounted rather than baked: the host's tetrisu has to
-# verify the server against the same CA, and the image's own certificates are
-# minted inside a filesystem the host cannot read. Read-only, because the host
-# is what mints them - `certs` is a prerequisite here for exactly that reason.
+# verify the server against the same CA, and certificates minted inside the
+# image would be in a filesystem the host cannot read. Read-only, because the
+# host is what mints them - `certs` is a prerequisite here for exactly that
+# reason. The image is the server target, so its CMD is already the entrypoint
+# script and there is nothing to override on the command line.
 docker-server: certs docker-stop
 	@ echo "\n$(CYAN)==> Starting$(CLR_RMV) $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) on port $(DOCKER_PORT)..."
 	@ $(DOCKER) run -d $(DOCKER_INIT) --name $(DOCKER_SERVER) \
 		$(DOCKER_ENV) -p $(DOCKER_PORT):$(DOCKER_PORT) \
 		-v $(CURDIR)/$(CERT_DIR):/tetrish/certs:ro \
 		-v $(DOCKER_STATE):/tetrish/tmp \
-		$(DOCKER_REF) bash scripts/docker_server.sh >/dev/null
+		$(DOCKER_SRV_REF) >/dev/null
 	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) started ✔️"
 
 docker-logs:
@@ -286,8 +312,8 @@ docker-stop:
 	@ $(DOCKER) rm -f $(DOCKER_NAME) $(DOCKER_SERVER) >/dev/null 2>&1 || true
 
 docker-clean:
-	@ $(DOCKER) image rm -f $(DOCKER_REF) >/dev/null 2>&1 || true
-	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF)$(CLR_RMV) ✔️"
+	@ $(DOCKER) image rm -f $(DOCKER_REF) $(DOCKER_SRV_REF) >/dev/null 2>&1 || true
+	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF) $(DOCKER_SRV_REF)$(CLR_RMV) ✔️"
 
 # Drops the players, wallets and leaderboard with the volume; the image stays.
 docker-reset: docker-stop
@@ -298,8 +324,11 @@ docker-reset: docker-stop
 # what is missing, starts the engine, brings the server up and launches tetrisu
 # against it. It is the only target that spans host and container, which is why
 # it is a script and not a recipe.
+#
+# The server image, not the dev one: the client half of `play` is native on both
+# platforms, so nothing it starts in a container ever draws a board.
 play:
-	@ DOCKER_REF=$(DOCKER_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
+	@ DOCKER_REF=$(DOCKER_SRV_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
 		bash ./scripts/play.sh
 
 ################################################################################
@@ -349,7 +378,8 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run certs stack test docker-build docker-run \
+			bin-link run certs stack test docker-build \
+			docker-build-server docker-run \
 			docker-server docker-logs docker-test docker-shell \
 			docker-stop docker-clean docker-reset play \
 			clean fclean reset re

@@ -125,9 +125,12 @@ make docker-run                       # shell + daemons, publishing 4242
 make docker-run DOCKER_PORT=5252      # any variable below overrides per run
 ```
 
+One `Dockerfile`, two targets. `tetrish:dev` is the whole environment above; `tetrish:server` is the deployable half alone — the daemons, the shell and `tetrisctl`, with no `tetrisu` and so no notcurses, no SDL2 and no valgrind. `make play` and every deployment run the server one, because `tetrisu` is never run from a container.
+
 | Target | Description |
 |---|---|
-| `make docker-build` | Build the image — installs every dependency, builds all components, mints certs |
+| `make docker-build` | Build `tetrish:dev` — installs every dependency, builds all components, mints certs |
+| `make docker-build-server` | Build `tetrish:server` — the server half only, less than half the size |
 | `make docker-run` | Run the shell with the daemons up, publishing `TETRISD_PORT` |
 | `make docker-server` | Run the daemons alone, detached, for a client on the host |
 | `make docker-logs` | Follow the detached server's daemon logs |
@@ -141,7 +144,7 @@ make docker-run DOCKER_PORT=5252      # any variable below overrides per run
 
 Both run targets mount the named volume `tetrish-state` at `/tetrish/tmp`, where `.tetrishrc` points `TETRISD_DATA_DIR` and the logger's sink. Without it the player store's append-only log lives in the container's writable layer, and every account, wallet and leaderboard row is lost the moment the container is replaced — which `--rm` does on every run.
 
-notcurses is built from source at the tag `src/tetrisu/Makefile` pins, read at build time so bumping it there rebuilds the image to match. No distro package works: Ubuntu's predates the `NCBLIT_4x2` blitter `tetrisu` uses, and Debian ships none.
+notcurses is built from source at the tag `src/tetrisu/Makefile` pins, read at build time so bumping it there rebuilds the image to match. No distro package works: Ubuntu's predates the `NCBLIT_4x2` blitter `tetrisu` uses, and Debian ships none. That build, and the ffmpeg headers behind it, are most of `tetrish:dev` — which is why the server target leaves `src/tetrisu` out of the build entirely (`SKIP_COMPONENTS`) and fits on a box small enough to also serve from.
 
 ### Playing on macOS
 
@@ -154,12 +157,15 @@ make play
 It installs a container engine if none is there (colima + the `docker` CLI via Homebrew — no GUI installer, no admin password), starts it, mints the certificates, builds the image, brings the server up detached, waits for the port to answer, builds `tetrisu` if needed, and launches it against `127.0.0.1`. Every step checks before it acts, so re-running is how you restart the client.
 
 ```bash
-bash scripts/play.sh --server-only     # server up, no client
-bash scripts/play.sh --client-only     # client against a server already up
-bash scripts/play.sh --port 5252       # some other port
-bash scripts/play.sh --rebuild         # rebuild the image first
-bash scripts/play.sh --stop            # take the server down
+bash scripts/play.sh --host 203.0.113.9  # a server someone else is running
+bash scripts/play.sh --server-only       # server up, no client
+bash scripts/play.sh --client-only       # client against a server already up
+bash scripts/play.sh --port 5252         # some other port
+bash scripts/play.sh --rebuild           # rebuild the image first
+bash scripts/play.sh --stop              # take the server down
 ```
+
+`--host` is the deployed case: the server half already exists elsewhere, so every step but the client is skipped and no container engine is needed on the laptop at all, on either OS. It defaults the CA to the tracked `deploy/vps-ca.crt` rather than this machine's `certs/ca.crt`, since the chain has to be verified against the *server's* CA — `--ca PATH` for any other. See [`docs/deployment.md`](docs/deployment.md) for the server side of that.
 
 `certs/` is bind-mounted into the container read-only rather than baked into the image, because the host's `tetrisu` has to verify the server against the same CA and the image's own certificates sit in a filesystem the host cannot read. The host mints them (`make certs`), the container uses them, and the client trusts them.
 

@@ -43,7 +43,7 @@ make check-deps   # verify dependencies without changing the system
 make clean / fclean / re
 make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
 make play         # set up everything and launch a client against a server
-make docker-*     # build/run/test/server/logs/shell/stop/clean/reset in a container
+make docker-*     # build/build-server/run/test/server/logs/shell/stop/clean/reset
 ```
 
 Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root
@@ -67,6 +67,17 @@ pid namespace. It starts them through `tetrisctl`, blocks on their logs, and
 traps `TERM` so `docker stop` becomes an ordered stop rather than a killed
 namespace. `certs/` is bind-mounted read-only, never baked in — the host's
 client has to verify the server against the same CA.
+
+The `Dockerfile` has two targets over a shared `base`: `server` (the daemons,
+the shell and `tetrisctl`) and `dev` (everything, `tetrisu` included). `server`
+is what `make play` and every deployment run, and it is the reason the root
+Makefile has `SKIP_COMPONENTS` — dropping `src/tetrisu` from the umbrella build
+takes the source build of notcurses and the ffmpeg headers behind it out of the
+image (1.42 GB → 652 MB), which is what lets it be built on the same 1 GB box
+that serves it. It bakes no certificates *because* the bind-mount would shadow
+them: a baked set would surface only when the mount was missing, booting
+`tetrisd` against a CA no client can verify instead of failing loudly.
+`scripts/play.sh --host` is the deployed client — see `docs/deployment.md`.
 
 Each library is also **self-contained** — it owns a Makefile that builds its
 archive in place and runs its own tests:
@@ -343,6 +354,7 @@ Custom HTTP-like protocol. Two methods are server-originated (pushed): `STATE`, 
 - `lib/*/README.md`, `src/*/README.md` — each component's own scope, API, and build; `libhtttp` carries the protocol grammar and method table
 - `.tetrishrc` — the shell start-up file; its keys are documented inline as comments
 - `docs/CONTEXT.md` — the shared glossary; domain terms only, no implementation. Check a term here before inventing one
+- `docs/deployment.md` — running the server half on a DigitalOcean Droplet, and why App Platform cannot serve it (its ingress demultiplexes on a hostname; `libtetrissh` sends no SNI)
 - `docs/adr/*.md` — architecture decision records, numbered sequentially. Read the relevant one before changing what it decided
 - `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs. `themes.md` is the source of truth for ability text; `use_cases.md` carries a second table of the same abilities as server-enforced effects, kept in step with it
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
