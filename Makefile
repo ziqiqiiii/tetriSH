@@ -109,12 +109,16 @@ daemons: libs | deps
 # to PATH, and tetrisctl resolves each daemon through PATH exactly as execvp
 # does, so a daemon missing from ./bin cannot be launched by name at all. Each
 # component's binary is named after its directory; unbuilt ones are skipped.
+# The daemons link theirs at the top of the component directory, tetrisu into
+# its own bin/ — look in both, or the client is unreachable by name.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
 	@ ln -sf $(CURDIR)/$(SHELL_DIR)/bin/* $(BIN)/ 2>/dev/null || true
 	@ for d in $(DAEMON_DIRS); do \
 		n=`basename $$d`; \
-		if [ -x $$d/$$n ]; then ln -sf $(CURDIR)/$$d/$$n $(BIN)/; fi; \
+		for p in $$d/$$n $$d/$(BIN)/$$n; do \
+			if [ -x $$p ]; then ln -sf $(CURDIR)/$$p $(BIN)/; break; fi; \
+		done; \
 	done
 
 # Idiomatic launch: the shell sources .tetrishrc, whose last line is
