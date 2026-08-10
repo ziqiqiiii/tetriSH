@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libsdl2-mixer-dev \
         ca-certificates \
         ncurses-term \
+        kitty-terminfo \
         locales \
         git \
         cmake \

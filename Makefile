@@ -238,6 +238,13 @@ DOCKER_ENV		 = -e TETRISD_PORT=$(DOCKER_PORT) -e TETRISU_PORT=$(DOCKER_PORT)
 # script's trap unchanged.
 DOCKER_INIT		 = --init
 
+# The host's TERM, forwarded when there is one. The image pins
+# TERM=xterm-256color, which has no bitmap graphics protocol, so an in-container
+# tetrisu could not draw a board no matter what terminal was actually attached;
+# kitty-terminfo is installed for the same reason. Not passed to docker-server,
+# which draws nothing.
+DOCKER_TERM		 = $(if $(TERM),-e TERM=$(TERM))
+
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
 	@ $(DOCKER) build -t $(DOCKER_REF) .
@@ -245,8 +252,9 @@ docker-build:
 
 
 docker-run: docker-stop
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_INIT) --name $(DOCKER_NAME) \
-		$(DOCKER_ENV) -p $(DOCKER_PORT):$(DOCKER_PORT) \
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) $(DOCKER_INIT) \
+		--name $(DOCKER_NAME) $(DOCKER_ENV) \
+		-p $(DOCKER_PORT):$(DOCKER_PORT) \
 		-v $(DOCKER_STATE):/tetrish/tmp $(DOCKER_REF)
 
 # The server on its own, detached, for a client running on the host - the only
@@ -271,7 +279,7 @@ docker-test:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
 
 docker-shell:
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) bash
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) $(DOCKER_REF) bash
 
 # Both names, because either can be holding the published port.
 docker-stop:
