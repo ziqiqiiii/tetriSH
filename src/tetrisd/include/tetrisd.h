@@ -45,7 +45,7 @@
 ** seals the answer and writes it. Beside it sits a bounded pool of handshake
 ** workers, because session_handshake_server is the one genuinely blocking
 ** thing tetrisd does; a worker owns only its own client until it hands the
-** established session back (docs/adr/0008, step 3).
+** established session back (step 3 of the event-driven migration).
 **
 ** Gravity is one timerfd in the same epoll set. On expiry the loop reads the
 ** monotonic clock once, advances every in-game room by that same elapsed, and
@@ -61,7 +61,7 @@
 ** replaces - lobby_mutex > room->mutex > registry rwlock > outbox mutex - was
 ** a rule a person had to hold in their head; this is a property of the
 ** program's shape, and the cheapest way to check an invariant is to make it
-** structural (docs/adr/0008, step 5).
+** structural (step 5 of the event-driven migration).
 **
 ** Two locks survive, and neither guards game state: the handshake pool's own
 ** mutex, which hands connections between the reactor and its workers, and
@@ -75,7 +75,7 @@
 ** client.
 **
 ** It detaches itself and publishes a locked pidfile; tetrisctl starts,
-** inspects and stops it through that file (docs/adr/0007). Both the fork and
+** inspects and stops it through that file. Both the fork and
 ** the claim live in main.c alone - server_start must stay the seam the tests
 ** drive in-process, and a start function that forked would take every suite
 ** with it.
@@ -133,6 +133,25 @@
 ** all of it, and because chat must never be able to crowd out a response.
 */
 # define TETRISD_CHAT_CAPACITY					16
+/*
+** Chat's own token bucket, in whole messages. It is deliberately generous:
+** its job is to keep a flood off the reactor, not to pace a conversation, and
+** a room's feed is already bounded by the drop-oldest ring above. Sized too
+** tightly it refuses the sixth line somebody sends in a second, which is
+** ordinary use rather than abuse.
+**
+** A constant rather than a config key because it bounds a person typing, which
+** does not vary between deployments the way an input budget does.
+*/
+# define TETRISD_CHAT_BURST						20
+# define TETRISD_CHAT_RATE_PER_SEC				5
+/*
+** Twice the field a message ends up in, so a line that is merely too long is
+** read whole and can be told apart from one carrying a control character. A
+** line longer even than this is refused as unsendable, which is honest: at
+** that point the server has not read enough of it to say why.
+*/
+# define TETRISD_CHAT_TEXT_RAW_MAX				(BODY_CHAT_TEXT_MAX * 2)
 # define TETRISD_LOG_RING_CAPACITY				1024
 # define TETRISD_LOG_DRAIN_MAX					64
 # define TETRISD_LOG_SHIPPER_WAIT_MS			20
@@ -479,7 +498,7 @@ typedef enum e_ability_verdict
 	ABILITY_INVALID
 }	t_ability_verdict;
 
-/* connection state machine - identity is owned by the connection (ADR-0001) */
+/* connection state machine - identity is owned by the connection */
 typedef enum e_client_state
 {
 	CLI_HANDSHAKE,
@@ -550,6 +569,15 @@ struct s_client
 	*/
 	int				tokens;
 	uint64_t		tokens_at_ms;
+	/*
+	** Chat's own bucket, and it is deliberately not the input one. Sharing a
+	** budget meant a line of chat cost a piece movement and a busy match could
+	** answer 429 to somebody typing, which is two unrelated floods policed by
+	** one number. A person types far slower than they press, so this one is
+	** sized in whole messages rather than from .tetrishrc.
+	*/
+	int				chat_tokens;
+	uint64_t		chat_tokens_at_ms;
 };
 
 /*
@@ -785,6 +813,7 @@ const char		*request_room_name(const t_request_context *ctx);
 t_player_id		request_player_id(const char *text, const char **end);
 int				request_body_token(t_request_context *ctx, char *out, size_t cap);
 bool			rate_limit_take_token(t_client *cli);
+bool			rate_limit_take_chat_token(t_client *cli);
 
 /* HANDLERS_INPUT.C */
 int				move_handler(const t_htttp_message *msg, void *context);

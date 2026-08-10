@@ -95,7 +95,7 @@ static int	credentials_request(t_net_client *net, const char *method,
  *
  * That same id is what decides NET_AUTHED, rather than the status code.
  * SIGNUP answers 201 and creates an account, but it binds nothing: identity
- * belongs to the connection (ADR-0001) and only LOGIN claims it, so a signup
+ * belongs to the connection and only LOGIN claims it, so a signup
  * comes back with no Player-Id at all. Reading 201 as "signed in" left the
  * client sure it was authenticated on a socket tetrisd still considered
  * anonymous, and every route it then called answered 401.

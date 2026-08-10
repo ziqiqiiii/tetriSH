@@ -111,8 +111,7 @@ static bool	read_chunk(t_client *cli)
 		want = TETRISD_RECV_BUFFER_MAX;
 	if (want <= cli->recv.len || buffer_reserve(&cli->recv, want) != 0)
 		return (client_kill(cli), false);
-	n = recv(cli->fd, cli->recv.data + cli->recv.len,
-			cli->recv.cap - cli->recv.len, 0);
+	n = recv(cli->fd, cli->recv.data + cli->recv.len, want - cli->recv.len, 0);
 	if (n > 0)
 	{
 		cli->recv.len += (size_t)n;

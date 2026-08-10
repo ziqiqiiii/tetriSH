@@ -3,7 +3,7 @@
 /*
 ** Reading back what db_record_game wrote.
 **
-** Every finished or forfeited game is already recorded (ADR-0002), so the
+** Every finished or forfeited game is already recorded, so the
 ** store has had a ranking since M1 - there was simply no way to ask for it,
 ** and tetrisu's Leaderboard screen answered "not served" against a live
 ** session while showing fixtures against a preview one. This is the route

@@ -1,5 +1,8 @@
 #include "tetrisd.h"
 
+// Static Functions
+static bool	take_token(int *tokens, uint64_t *at_ms, int cap, int rate);
+
 /*
 ** What every request that drives a game has to establish before it may touch
 ** one: that the connection is authenticated, that it is not hammering, that
@@ -162,26 +165,65 @@ int	request_body_token(t_request_context *ctx, char *out, size_t cap)
  */
 bool	rate_limit_take_token(t_client *cli)
 {
-	uint64_t	now;
-	int			cap;
+	return (take_token(&cli->tokens, &cli->tokens_at_ms,
+			cli->srv->cfg.input_burst * TETRISD_TOKEN_SCALE,
+			cli->srv->cfg.input_rate));
+}
 
-	cap = cli->srv->cfg.input_burst * TETRISD_TOKEN_SCALE;
+/**
+ * @brief Spends one token from this connection's chat budget.
+ *
+ * A separate bucket from the input one, and that separation is the point: the
+ * two police unrelated floods, so charging a line of chat against the budget a
+ * player needs to move a piece meant a busy match could answer 429 to somebody
+ * typing, and a talkative player could lose their own inputs. A person types
+ * far slower than they press, so this bucket is much smaller and refills much
+ * more slowly than the one beside it.
+ *
+ * @param cli Client spending a token.
+ * @return true when a token was available, false when the budget is empty.
+ */
+bool	rate_limit_take_chat_token(t_client *cli)
+{
+	return (take_token(&cli->chat_tokens, &cli->chat_tokens_at_ms,
+			TETRISD_CHAT_BURST * TETRISD_TOKEN_SCALE,
+			TETRISD_CHAT_RATE_PER_SEC));
+}
+
+/**
+ * @brief Refills one token bucket by however long it has been idle, then
+ *        spends a token from it.
+ *
+ * Shared by both buckets so there is one piece of refill arithmetic rather
+ * than two that could drift. A zero timestamp means the bucket has never been
+ * used, which starts it full - a connection's first request is never the one
+ * that is going too fast.
+ *
+ * @param tokens The bucket's level, in thousandths of a token.
+ * @param at_ms When the bucket was last refilled.
+ * @param cap The bucket's ceiling, in thousandths of a token.
+ * @param rate Refill rate in whole tokens per second.
+ * @return true when a token was available, false when the budget is empty.
+ */
+static bool	take_token(int *tokens, uint64_t *at_ms, int cap, int rate)
+{
+	uint64_t	now;
+
 	now = clock_now_ms();
-	if (cli->tokens_at_ms == 0)
+	if (*at_ms == 0)
 	{
-		cli->tokens = cap;
-		cli->tokens_at_ms = now;
+		*tokens = cap;
+		*at_ms = now;
 	}
-	if (now > cli->tokens_at_ms)
+	if (now > *at_ms)
 	{
-		cli->tokens += (int)((now - cli->tokens_at_ms)
-				* (uint64_t)cli->srv->cfg.input_rate);
-		cli->tokens_at_ms = now;
+		*tokens += (int)((now - *at_ms) * (uint64_t)rate);
+		*at_ms = now;
 	}
-	if (cli->tokens > cap)
-		cli->tokens = cap;
-	if (cli->tokens < TETRISD_TOKEN_SCALE)
+	if (*tokens > cap)
+		*tokens = cap;
+	if (*tokens < TETRISD_TOKEN_SCALE)
 		return (false);
-	cli->tokens -= TETRISD_TOKEN_SCALE;
+	*tokens -= TETRISD_TOKEN_SCALE;
 	return (true);
 }

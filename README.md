@@ -230,7 +230,7 @@ Steps 4 and 5 depend on components that are not finished yet — see [Status](#s
 
 ### tetrislogd
 
-`tetrislogd` is a separate process, not a thread inside `tetrisd`, so it survives game-server restarts. A single-threaded loop receives records on the socket from `.tetrishrc` and appends them to a log file it holds an exclusive `flock` on; it keeps no internal queue ([ADR-0005](docs/adr/0005-logger-keeps-no-internal-queue.md)). It counts Rejected and Degraded records — not Dropped, which is `tetrisd`'s ring counter — and handles `SIGTERM`/`SIGINT` (drain, report, exit), `SIGHUP` (reopen the log file for rotation) and `SIGUSR1` (report counters). See [`src/tetrislogd/README.md`](src/tetrislogd/README.md).
+`tetrislogd` is a separate process, not a thread inside `tetrisd`, so it survives game-server restarts. A single-threaded loop receives records on the socket from `.tetrishrc` and appends them to a log file it holds an exclusive `flock` on; it keeps no internal queue. It counts Rejected and Degraded records — not Dropped, which is `tetrisd`'s ring counter — and handles `SIGTERM`/`SIGINT` (drain, report, exit), `SIGHUP` (reopen the log file for rotation) and `SIGUSR1` (report counters). See [`src/tetrislogd/README.md`](src/tetrislogd/README.md).
 
 ### tetrisctl
 

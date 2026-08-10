@@ -72,13 +72,15 @@ static void	dump_clients(t_server *srv)
 		cli = srv->reg.slots[i];
 		if (cli != NULL)
 			logger_emit(&srv->log, COREIPC_LOG_INFO,
-				"state dump:   client fd %d %s player %llu %s room %s slot %d",
+				"state dump:   client fd %d %s player %llu %s room %s slot %d "
+				"chat-dropped %llu",
 				cli->fd, state_name(cli->state),
 				(unsigned long long)cli->player_id,
 				cli->username[0] != '\0' ? cli->username : "-",
 				cli->binding.room_name[0] != '\0'
 				? cli->binding.room_name : "-",
-				cli->binding.slot_index);
+				cli->binding.slot_index,
+				(unsigned long long)cli->outbox.chat_dropped);
 		i++;
 	}
 }

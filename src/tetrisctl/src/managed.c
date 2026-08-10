@@ -37,7 +37,7 @@ t_managed_state	managed_state(const t_managed *d, pid_t *pid)
  * launching process - it survives exactly as long as the boot does and exits
  * with the verdict. Waiting for it is therefore not a delay, it is the answer
  * to the question dspawn could never answer: was the program started, or did
- * it die with a reason nobody recorded (docs/adr/0007)?
+ * it die with a reason nobody recorded?
  *
  * The rc path is handed on as argv[1] so the daemon reads its settings out of
  * the same start-up file this roster came from, rather than re-resolving one

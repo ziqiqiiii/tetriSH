@@ -112,7 +112,7 @@ blocked reading. Writing one byte to it means "I am up"; closing it without
 writing means "I died". That single byte is the whole reason this library
 exists rather than reusing the shell's `daemon_spawn`, whose pipe is closed on
 success *and* on death, so its parent cannot tell them apart and always exits
-`EXIT_SUCCESS` ([ADR-0007](../../docs/adr/0007-daemons-detach-themselves.md)).
+`EXIT_SUCCESS`.
 
 The practical consequence is that `tetrisctl start` learns whether the boot it
 asked for happened, and a failed launch is testable in a script.

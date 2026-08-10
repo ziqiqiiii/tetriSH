@@ -21,9 +21,9 @@ The standalone logger daemon for tetriSH. Receives log records from `tetrisd` ov
 
 ## Features
 
-- One process, one thread, one loop — no internal queue, no shared state, no lock order ([ADR-0005](../../docs/adr/0005-logger-keeps-no-internal-queue.md))
+- One process, one thread, one loop — no internal queue, no shared state, no lock order
 - Survives `tetrisd` restarts; a producer that goes away simply stops sending
-- Detaches itself and holds a locked pidfile, so a second instance refuses to start rather than interleaving lines ([ADR-0007](../../docs/adr/0007-daemons-detach-themselves.md))
+- Detaches itself and holds a locked pidfile, so a second instance refuses to start rather than interleaving lines
 - Reports its own boot over a readiness pipe, so a launch that failed exits non-zero with the reason on the terminal
 - Keeps running with the sink unavailable — records go to stderr and are counted Degraded until an idle-tick retry gets the file back
 - `fdatasync` on the idle tick, never per record, so disk latency is not the ceiling on log throughput
@@ -159,7 +159,7 @@ poll(socket, self-pipe, idle_ms)
      └── timeout           sink_sync, then reclaim the sink if it needs it
 ```
 
-The kernel's socket receive buffer is the only queue in the design. A full buffer returns `EAGAIN` to `tetrisd`'s shipper, which still holds a copy of the record — backpressure that reaches the sender is strictly better than a drop that does not. The rejected alternative, a receiver thread draining into a ring, moves only *who loses*; see [ADR-0005](../../docs/adr/0005-logger-keeps-no-internal-queue.md).
+The kernel's socket receive buffer is the only queue in the design. A full buffer returns `EAGAIN` to `tetrisd`'s shipper, which still holds a copy of the record — backpressure that reaches the sender is strictly better than a drop that does not. The rejected alternative, a receiver thread draining into a ring, moves only *who loses*.
 
 One call to `logd_run_once` is exactly one poll iteration. That is the seam the tests drive: send a datagram or raise a signal, call it once, assert on the file — no thread, no fork.
 

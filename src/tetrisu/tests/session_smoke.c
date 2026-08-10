@@ -104,7 +104,7 @@ static int	check_reconnecting_leaks_no_descriptor(const t_net_config *cfg)
 /**
  * @brief SIGNUP creates an account; it does not sign anybody in.
  *
- * Identity belongs to the connection (ADR-0001) and only LOGIN claims it, so
+ * Identity belongs to the connection and only LOGIN claims it, so
  * a signup comes back with no Player-Id at all. Reading its 201 as "signed
  * in" left the client certain it was authenticated on a socket tetrisd
  * considered anonymous, and every route it then called answered 401.
