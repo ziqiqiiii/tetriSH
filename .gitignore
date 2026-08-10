@@ -92,5 +92,4 @@ compile_commands.json
 settings*
 
 .scratch/*
-docs/adr/*
 tmp/*
