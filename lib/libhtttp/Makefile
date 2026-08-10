@@ -41,7 +41,27 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER)
 	@ $(CC) $(FLAGS) $(INC) -c $< -o $@
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 
-$(NAME): FORCE $(OBJ)
+# The archive holds exactly the current objects: it is deleted before ar rather
+# than added to, because ar replaces and appends members, so a member whose
+# source is gone would otherwise stay in it.
+#
+# $(SRC_DIR) is a prerequisite because a *deleted* source is the one change
+# $(OBJ) cannot express - it leaves nothing newer behind to compare against, so
+# the archive looks up to date while still carrying the dropped member. A
+# directory's mtime changes exactly when an entry is added or removed, which is
+# the question being asked. Editing a file does not touch it; that is $(OBJ)'s
+# half.
+#
+# This replaced a FORCE prerequisite on the archive itself. FORCE got the
+# staleness right and everything else wrong: ar re-ran on every make, leaving the
+# archive permanently newer than everything that links it, so tetrisd and tetrisu
+# relinked every single time - including at every container start, where `make
+# run` recompiled before it could open a shell. Moving the force onto a
+# member-list stamp file was worse still: whether make re-stats a forced
+# prerequisite after its recipe runs differs between make 3.81 (macOS) and 4.3
+# (the container), and on 3.81 the archive was not rebuilt at all, which lost the
+# guarantee outright. Plain timestamps behave the same on both.
+$(NAME): $(OBJ) $(SRC_DIR)
 	@ $(RM) $@
 	@ $(AR) $(ARFLAGS) $@ $(OBJ)
 	@ echo "\n$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) created ✔️"
@@ -82,8 +102,6 @@ fclean: clean
 
 re: fclean all
 
-FORCE:
-
-.PHONY: all test memcheck clean fclean re FORCE
+.PHONY: all test memcheck clean fclean re
 
 .PRECIOUS: $(OBJ_DIR)/%.o
