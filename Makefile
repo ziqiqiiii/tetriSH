@@ -298,9 +298,15 @@ docker-reset: docker-stop
 # what is missing, starts the engine, brings the server up and launches tetrisu
 # against it. It is the only target that spans host and container, which is why
 # it is a script and not a recipe.
+#
+# HOST= plays on somebody else's server instead of starting one here, verifying
+# it against the committed demo CA:  make play HOST=10.27.229.33
+# PLAY_ARGS= passes anything else through: make play PLAY_ARGS=--rebuild
+PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
+
 play:
 	@ DOCKER_REF=$(DOCKER_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
-		bash ./scripts/play.sh
+		bash ./scripts/play.sh $(PLAY_HOST_ARG) $(PLAY_ARGS)
 
 ################################################################################
 #                                   CLEANUP                                    #

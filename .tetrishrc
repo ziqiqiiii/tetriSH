@@ -120,8 +120,16 @@ export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
 # certificate against it and refuses the session otherwise. `make certs` mints
 # a set where all three agree.
 #
+# The default below is the locally minted CA, which is the right answer for a
+# server on this machine and the wrong one for anybody else's. To play on a
+# server elsewhere, point this at the CA that signed *its* certificate:
+# certs/demo-ca.crt is the demo server's, committed for exactly that, and
+# `make play HOST=<addr>` selects it for you.
+#
 # With no server reachable, Solo falls back to the local rules and stays
-# playable; every other screen keeps its local preview fixtures.
+# playable; every other screen keeps its local preview fixtures. That fallback
+# is why a wrong CA here is worth care — it does not announce itself, it just
+# quietly stops being multiplayer.
 export TETRISU_HOST=127.0.0.1
 export TETRISU_PORT=4242
 export TETRISU_CA_PATH=certs/ca.crt

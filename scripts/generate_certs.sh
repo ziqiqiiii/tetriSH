@@ -9,19 +9,20 @@
 # clone needs three files before `make stack` can work — ca.crt, server.crt,
 # server.key — and this script mints them.
 #
-# These are DEVELOPMENT credentials: a self-signed CA, ~365-day leaf, and a
-# key with no passphrase. Only the two certificates are committed; the keys are
-# local, and none of it may be used for anything but local runs, the demo
-# server, and integration tests.
+# These are DEVELOPMENT credentials: a self-signed CA, ~365-day leaf, and a key
+# with no passphrase. Every file this script writes is git-ignored, and none of
+# it may be used for anything but local runs and integration tests.
+#
+# It never touches certs/demo-ca.crt, which is committed and belongs to the demo
+# server. That is a different CA with a different lifetime, and the reason it
+# lives under its own name: while the two shared certs/ca.crt, a plain `make
+# play` on any machine reissued the CA and locked every existing client out of
+# the demo server.
 #
 # Re-running is a no-op while the existing server certificate is still valid;
-# pass FORCE=1 to regenerate unconditionally.
-#
-# The CA is never replaced when it can be kept. ca.crt is committed, so every
-# client in the wild trusts exactly that CA, and minting a new one is not a
-# refresh - it is a revocation of everybody. So an existing CA is reused to sign
-# a new leaf, and a CA whose private key is absent is left untouched: that
-# checkout cannot sign for it and is a client, not a server.
+# pass FORCE=1 to regenerate unconditionally. An existing CA this directory can
+# sign with is reused rather than replaced, so reissuing an expired leaf does not
+# revoke the clients that already trust the CA above it.
 
 set -euo pipefail
 
@@ -69,38 +70,15 @@ fi
 mkdir -p "$OUT_DIR"
 SUBJ_BASE="/C=SG/ST=Singapore/L=Singapore/O=SUTD"
 
-# One question decides what happens to the CA: can this checkout sign for the
-# ca.crt it already has? Only a matching ca.key can, and a key that is merely
-# *present* is not enough - a stale local ca.key left over from an earlier CA
-# would otherwise send this down the mint path and overwrite the committed
-# certificate, which is the outcome the whole guard exists to prevent.
-if [ -f "$OUT_DIR/ca.crt" ] && [ -f "$OUT_DIR/ca.key" ] \
-	&& pair_matches "$OUT_DIR/ca.crt" "$OUT_DIR/ca.key"
-then
-	CA_MINE=1
-else
-	CA_MINE=0
-fi
-
-# An existing CA this checkout cannot sign for is somebody else's - the
-# committed one - so it is left exactly as it is rather than replaced. That
-# checkout is a client: it can verify the demo server and not be one. FORCE=1 is
-# the deliberate override, and it is destructive to every client in the wild.
-if [ "$FORCE" != "1" ] && [ -f "$OUT_DIR/ca.crt" ] && [ "$CA_MINE" -eq 0 ]
-then
-	echo "${GRN}CA ${RST}in ${BLU}${OUT_DIR}/ca.crt${RST} is not ours to reissue; leaving it alone ✔️"
-	echo "No matching ${BLU}ca.key${RST} here, so this checkout can verify that CA but not sign for it:"
-	echo "  play against the demo server with ${YEL}TETRISU_CA_PATH=$OUT_DIR/ca.crt${RST}"
-	echo "  to run a server here instead, mint a fresh CA with ${YEL}FORCE=1${RST} - that CA is"
-	echo "  trusted by nobody else, and replaces the committed one for every client"
-	exit 0
-fi
-
 echo "${YEL}Generating ${RST}dev CA and server certificate in ${BLU}${OUT_DIR}${RST}..."
 
-# Reuse the CA when this checkout owns it, so the committed ca.crt keeps its
-# meaning and only the leaf is reissued.
-if [ "$FORCE" != "1" ] && [ "$CA_MINE" -eq 1 ]
+# Reuse the CA whenever this directory can sign with it, so a leaf that merely
+# expired costs a leaf and not the CA - every client that already trusts it stays
+# able to connect. A key that is merely *present* is not enough: a stale ca.key
+# left over from an earlier CA cannot sign for this ca.crt, and reusing the pair
+# would mint a leaf no client could chain.
+if [ "$FORCE" != "1" ] && [ -f "$OUT_DIR/ca.crt" ] && [ -f "$OUT_DIR/ca.key" ] \
+	&& pair_matches "$OUT_DIR/ca.crt" "$OUT_DIR/ca.key"
 then
 	echo "${GRN}Reusing ${RST}the CA in ${BLU}${OUT_DIR}/ca.crt${RST}."
 else
