@@ -269,7 +269,7 @@ static int	open_reactor(t_server *srv)
  *
  * One timer for the whole server, not one per room: t_game already accumulates
  * against each player's own gravity interval, so a uniform coarse tick still
- * produces per-player speeds (docs/adr/0008).
+ * produces per-player speeds.
  *
  * @param srv Server being brought up; its epoll set must be open.
  * @return 0 on success, -1 on failure.

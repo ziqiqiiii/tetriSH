@@ -302,7 +302,7 @@ static void	test_a_deleted_log_file_is_reclaimed(void)
 ** unixsock_dgram_bind unlinks the path before binding, so a second launch that got
 ** as far as logd_start would silently steal the socket and leave the first
 ** logger deaf. Nothing inside logd_start prevents that any more - the guard
-** is the pidfile main.c claims first (docs/adr/0007), and this case pins the
+** is the pidfile main.c claims first, and this case pins the
 ** ordering that makes it a guard at all: the claim fails, so the bind that
 ** would have done the damage is never reached.
 **

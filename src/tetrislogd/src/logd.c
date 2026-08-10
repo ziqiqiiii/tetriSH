@@ -234,7 +234,7 @@ void	logd_report(t_logd *lg, const char *event)
  * The socket is bound last, and that is the part worth guarding: unixsock_dgram_bind
  * unlinks its path unconditionally, so binding it is the point of no return
  * for anyone else's socket. Nothing here excludes a second instance any more
- * - main.c's pidfile claim did that before this function ran (docs/adr/0007).
+ * - main.c's pidfile claim did that before this function ran.
  *
  * @param lg Daemon being started.
  * @param cfg Configuration supplying both paths.

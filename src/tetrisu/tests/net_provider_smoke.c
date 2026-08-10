@@ -277,7 +277,7 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
  *
  * Backing out of Home to the auth screen and pressing SIGN IN again is one of
  * the shortest paths through this client, and it was broken: identity belongs
- * to the socket (ADR-0001), so tetrisd answers a LOGIN on an authenticated
+ * to the socket, so tetrisd answers a LOGIN on an authenticated
  * connection with 409, and the screen showed a filled-in form that refused
  * every attempt until the player retyped the server address - which forced
  * the reconnect that was the actual repair.

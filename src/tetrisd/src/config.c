@@ -115,8 +115,15 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 		return (set_int(&cfg->input_burst, value, TETRISD_INPUT_LIMIT_MIN, TETRISD_INPUT_LIMIT_MAX));
 	if (strcmp(key, "INPUT_RATE") == 0)
 		return (set_int(&cfg->input_rate, value, TETRISD_INPUT_LIMIT_MIN, TETRISD_INPUT_LIMIT_MAX));
+	/*
+	 * The ceiling is TD_MAX_GAMES and not ROOM_MAX_SLOTS: the room domain
+	 * seats 99, but a room only runs TD_MAX_GAMES boards, so a larger number
+	 * here seated players the tick would never deal a game to - every input
+	 * they sent came back 409 with nothing to explain it, and room_is_over
+	 * could not see them at all.
+	 */
 	if (strcmp(key, "BR_SLOTS") == 0)
-		return (set_int(&cfg->br_slots, value, 2, ROOM_MAX_SLOTS));
+		return (set_int(&cfg->br_slots, value, 2, TD_MAX_GAMES));
 	if (strcmp(key, "HANDSHAKE_WORKERS") == 0)
 		return (set_int(&cfg->handshake_workers, value, 1, TETRISD_HANDSHAKE_WORKERS_MAX));
 	if (strcmp(key, "HANDSHAKE_TIMEOUT_MS") == 0)

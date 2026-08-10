@@ -28,7 +28,7 @@
 ** it, format it, and write it to the sink. It keeps no internal queue - the
 ** kernel's socket receive buffer is the only queue in the design, so a full
 ** buffer pushes back on the sender rather than dropping records this process
-** has already accepted (docs/adr/0005).
+** has already accepted.
 **
 ** A record has exactly three fates, and they are three different words:
 **   Dropped   tetrisd's ring was full; the record never left tetrisd.
@@ -40,7 +40,7 @@
 ** producer that goes away simply stops sending.
 **
 ** It detaches itself and publishes a locked pidfile, and tetrisctl starts,
-** inspects and stops it through that file (docs/adr/0007). Both the fork and
+** inspects and stops it through that file. Both the fork and
 ** the claim live in main.c and nowhere else: logd_start must stay the seam
 ** the tests drive in-process, and a start function that forked would take
 ** every suite with it.
@@ -109,7 +109,7 @@ typedef struct s_counters
 ** No lock is taken here. The sink used to carry the single-instance guard as
 ** well, which conflated two things: deleting tmp/ took away the sink and the
 ** guard in one stroke, and the reclaim path had to restore both. The guard is
-** the pidfile now (docs/adr/0007), so the sink is only about the sink.
+** the pidfile now, so the sink is only about the sink.
 **
 ** dev and ino are which file the descriptor actually holds, remembered so the
 ** daemon can notice the path now names a different one. An open descriptor

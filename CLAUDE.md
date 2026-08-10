@@ -13,7 +13,7 @@ Implementation status:
 | Component | Status |
 |---|---|
 | `src/tetrish` (shell) | implemented — REPL, builtins, `.tetrishrc`, `bin/` system programs |
-| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. Settings and the Marketplace are server-authoritative too (`tests/integration/test_net_store.sh`): the catalogue and its prices come from `LIST /store`, the wallet, rank, inventory and loadout from `PROFILE`, and buying and equipping are `BUY` and `EQUIP` — the client sends an item id and nothing else. Artwork is keyed by catalogue id in `catalogue_art.c`, because that is the only field both ends agree on. The waiting room's chat is real: `[C]` composes, `net_chat.c` holds the received feed in a drop-oldest ring, and the panel draws what the server sent rather than what was typed — the sender's own line comes back down the socket with everyone else's (`tests/integration/test_net_chat.sh`). The Double and Battle Royale match screens are real and playable on the Solo pipeline (`multiplayer_match.c`, `multiplayer_match_mode.c`, and a bitmap plus a compatibility renderer), with the rivals modelled in-process because `tetrisd` does not serve these modes yet (ADR-0009 steps 6-7). The local board is blitted as `MP_MATCH_BOARD_BANDS` horizontal strips so a moving piece only re-encodes the strips it touches — a terminal bitmap has no partial update, and re-encoding the whole board was the entire input latency. There is deliberately no pause in a match |
+| `src/tetrisu` (client) | partial — notcurses intro/menu/audio, Solo, Settings, Leaderboard, Marketplace, and the multiplayer mode/lobby/create-room/waiting-room screens. The session layer is implemented and covered end to end against a real `tetrisd` (`src/tetrisu/tests/integration/test_net_solo.sh`): connect, `SIGNUP`/`LOGIN`, `JOIN`/`START`, every gameplay action, and `STATE` decoded into the Solo view model. Solo runs through `solo_authority.c`, which is either the server or the local rules, and the sign-in screen hands it a live session when `TETRISU_NET` is set. `solo_authority.c` holds the server's clock paused for the length of the client's 3-2-1 (`src/tetrisu/tests/integration/test_solo_authority.sh`), and `net_client.c` mutes stdout/stderr across the handshake, because the frozen `common.c` prints the certificate report onto the screen notcurses owns. The Leaderboard screen reads the real ranking. Settings and the Marketplace are server-authoritative too (`src/tetrisu/tests/integration/test_net_store.sh`): the catalogue and its prices come from `LIST /store`, the wallet, rank, inventory and loadout from `PROFILE`, and buying and equipping are `BUY` and `EQUIP` — the client sends an item id and nothing else. Artwork is keyed by catalogue id in `catalogue_art.c`, because that is the only field both ends agree on. The waiting room's chat is real: `[C]` composes, `net_chat.c` holds the received feed in a drop-oldest ring, and the panel draws what the server sent rather than what was typed — the sender's own line comes back down the socket with everyone else's (`src/tetrisu/tests/integration/test_net_chat.sh`). The Double and Battle Royale match screens are real and playable on the Solo pipeline (`multiplayer_match.c`, `multiplayer_match_mode.c`, and a bitmap plus a compatibility renderer), with the rivals modelled in-process because `tetrisd` does not serve these modes yet (steps 6-7). The local board is blitted as `MP_MATCH_BOARD_BANDS` horizontal strips so a moving piece only re-encodes the strips it touches — a terminal bitmap has no partial update, and re-encoding the whole board was the entire input latency. There is deliberately no pause in a match |
 | `lib/libtetrisbrain` | implemented — all nine modules + tests |
 | `lib/libmacminidb` | implemented — in-memory store, WAL, catalogues + tests. A Player carries three running numbers that answer three different questions and must not be conflated: `leaderboard_score` is the best single game (what the board ranks on, moved only by being beaten), `lifetime_points` is every point ever scored (what the wallet's rate is charged against), `wallet_points` is what is left to spend |
 | `lib/libtetrissh` | implemented — handshake, session framing + tests |
@@ -22,7 +22,7 @@ Implementation status:
 | `lib/libhtttp` | implemented — parser, serialiser, validation, dispatch + tests |
 | `lib/libstatusbody` | implemented — body codecs for state, rooms, room, chat, profile, leaderboard, catalogue + tests (8 of 8 suites pass) |
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass) |
-| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (15 of 15 suites pass). A game that reaches game-over or is forfeited is recorded once through `award_game` in `room.c`, which credits the wallet at `TETRISD_POINTS_PER_WALLET_POINT` (100) game points each — as the difference between what the player's `lifetime_points` were worth before the game and after, so a game worth less than the rate carries its remainder rather than rounding to nothing. The same call ranks the player on their **best single game**, never on that total. Room chat and system narration are served here too, as one feed with two authors: `CHAT /room/<name>` posts a line, `narrate.c` writes the server's own (`joined the room`, `set as owner`, `left the room`, the successor after an owner leaves), and both are pushed as a server-originated `CHAT`. The feed rides a **third outbox lane** — a small drop-oldest ring that never closes a client — because a room narrating a Battle Royale's knockouts would otherwise fill the response FIFO and kill a slow connection. Narration is emitted only from `room.c`, the one module holding both halves of a Room, and no history is kept: a late joiner has missed what was said. ADR-0008 steps 1–5 are done — the migration this ADR describes is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt (ADR-0009), and with them the twelve abilities that need a Target |
+| `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the self-affecting half of the Gaiden ability catalogue + tests (16 of 16 suites pass). A game that reaches game-over or is forfeited is recorded once through `award_game` in `room.c`, which credits the wallet at `TETRISD_POINTS_PER_WALLET_POINT` (100) game points each — as the difference between what the player's `lifetime_points` were worth before the game and after, so a game worth less than the rate carries its remainder rather than rounding to nothing. The same call ranks the player on their **best single game**, never on that total. Room chat and system narration are served here too, as one feed with two authors: `CHAT /room/<name>` posts a line, `narrate.c` writes the server's own (`joined the room`, `set as owner`, `left the room`, the successor after an owner leaves), and both are pushed as a server-originated `CHAT`. The feed rides a **third outbox lane** — a small drop-oldest ring that never closes a client — because a room narrating a Battle Royale's knockouts would otherwise fill the response FIFO and kill a slow connection. Narration is emitted only from `room.c`, the one module holding both halves of a Room, and no history is kept: a late joiner has missed what was said. Steps 1–5 of the event-driven migration are done — the migration is complete; Double (step 6) and Battle Royale (step 7) are designed but unbuilt, and with them the twelve abilities that need a Target |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
 | `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
 
@@ -82,7 +82,7 @@ TCP (POSIX sockets)
 
 **Binaries:**
 
-- `tetrish` — interactive shell (REPL, builtins, `.tetrishrc`). Builds as `src/tetrish/macmini_shell`; its system programs land in `src/tetrish/bin/` and are symlinked into `./bin` by the root `bin-link` target. Its `dspawn`/`dcheck`/`dkill` are generic tools for daemonising arbitrary programs and are *not* the lifecycle manager for the game daemons (ADR-0007).
+- `tetrish` — interactive shell (REPL, builtins, `.tetrishrc`). Builds as `src/tetrish/macmini_shell`; its system programs land in `src/tetrish/bin/` and are symlinked into `./bin` by the root `bin-link` target. Its `dspawn`/`dcheck`/`dkill` are generic tools for daemonising arbitrary programs and are *not* the lifecycle manager for the game daemons.
 - `tetrisd` — concurrent game server; server-authoritative; manages rooms, game logic, clients
 - `tetrislogd` — separate logger process; receives log records over IPC; survives `tetrisd` restarts
 - `tetrisctl` — admin CLI; owns both daemons' lifecycle (`start`/`status`/`stop`/`restart`) through their locked pidfiles. A local-only control-plane IPC channel to `tetrisd` (not the public TCP port) is a later step
@@ -94,8 +94,8 @@ separate social-layer daemons.
 
 Both daemons perform their own double-fork at start-up and publish a locked
 pidfile; the fork lives in each one's `main.c` only, never behind
-`server_start`/`logd_start`, or the in-process test suites would begin forking
-(ADR-0007). They are launched by `tetrisctl start` from inside the shell (see
+`server_start`/`logd_start`, or the in-process test suites would begin forking.
+They are launched by `tetrisctl start` from inside the shell (see
 `.tetrishrc`), never from the root Makefile. `TETRISCTL_DAEMONS` in
 `.tetrishrc` is the only place launch order is written down — logger → game
 server — and teardown is that order reversed, because stopping the logger first
@@ -198,12 +198,12 @@ Beneath the two blocking calls sits a pure frame codec: `session_frame_seal` /
 `session_frame_open` (`frame.c`) do the AES-256-GCM work over caller-owned byte
 arrays, perform no I/O, and ignore `sess->fd`; `session_send` / `session_recv`
 are thin wrappers that add the socket and the 4-byte length prefix. That split
-is ADR-0008 step 1, and it is what lets the reactor own the socket.
+is what lets the reactor own the socket.
 
 The server's certificate and private key are loaded once into an opaque
 `t_tetrissh_credentials` (`session_credentials_load` / `session_credentials_free`),
 which `session_handshake_server` takes instead of two paths — so the handshake
-never touches the disk (ADR-0008 step 2). The object is immutable after loading
+never touches the disk (step 2 of the event-driven migration). The object is immutable after loading
 and safe to share across concurrent handshakes.
 
 ## libtetrisroom API (tetrisroom.h)
@@ -266,8 +266,8 @@ neither guards game state: the handshake pool's own mutex, and whatever
 `libmacminidb` holds internally. Wanting a third is a sign the work is on the
 wrong thread.
 
-See [ADR-0008](docs/adr/0008-tetrisd-is-event-driven.md): steps 1–5 are
-implemented. Steps 6 and 7 are Double mode and Battle Royale (ADR-0009).
+Steps 1–5 of the event-driven migration are
+implemented. Steps 6 and 7 are Double mode and Battle Royale.
 
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST` (`/rooms` and `/store`),
 `JOIN` (`/rooms` creates, `/room/<name>` joins), `LEAVE`, `START`, `MOVE`,
@@ -277,7 +277,7 @@ M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST` (`/rooms` and `/store`),
 `BUY`/`EQUIP` answer with the updated profile so a client never draws a wallet
 it has not been told. Catalogue ids are never renumbered — they live in
 players' owned lists — so they carry gaps and are never a position. A player holds at most one connection — a second `LOGIN` displaces the
-first (ADR-0004). Inputs are rate limited per connection, answering `429` with
+first. Inputs are rate limited per connection, answering `429` with
 `Retry-After`. `t_game` in `game.c` is the game aggregate `libtetrisbrain` does not
 own. Routes, bodies, and status mapping are in `src/tetrisd/README.md`.
 
@@ -308,9 +308,9 @@ site, `JOIN`; every other route refuses and leaves it.
 - No hard-coded paths anywhere; all paths come from `.tetrishrc` or are passed in by the caller.
 - The single-instance guard is the `flock` on each daemon's pidfile, and nothing else. It is claimed *after* the double-fork (the pid written must be the detached process's) and *before* anything a second instance could damage — for `tetrislogd` that means before `unixsock_dgram_bind`, which unlinks its socket path unconditionally.
 - A daemon keeps `stderr` on the terminal until its boot has succeeded, then moves it to its configured error file. Boot failures have to reach the person who typed the command; after boot, `stderr` is `tetrisd`'s last-resort copy of records the logger could not take and `tetrislogd`'s home for Degraded records.
-- `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue (ADR-0005) and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
-- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint has been retired rather than satisfied — ADR-0008 removed the shared state instead of ordering access to it — but it still binds every lock elsewhere in the project.
-- Cross-player effects (garbage, offensive abilities) are queued against a **Target** and applied at that player's next piece lock, never on arrival (ADR-0009). A player's own inputs still apply immediately. Injecting garbage under an active piece can produce a board `piece_is_valid` would reject, so the safe point is a game rule, not an optimisation. Battle Royale is one Room of 4–99 slots; garbage never crosses rooms.
+- `tetrisd` reaches `tetrislogd` through a non-blocking ring buffer on the *producer* side — log records are dropped (not blocked) when it is full, and that Dropped counter is what `tetrisctl dropped-logs` reports. `tetrislogd` itself keeps no queue and counts two different things: Rejected (malformed on arrival) and Degraded (valid, sink unavailable, written to stderr). The three words are not interchangeable — see `docs/CONTEXT.md`.
+- No mutex held across a blocking syscall. Lock acquisition order must be documented and strictly followed to prevent deadlocks. In `tetrisd` this constraint has been retired rather than satisfied — the event-driven migration removed the shared state instead of ordering access to it — but it still binds every lock elsewhere in the project.
+- Cross-player effects (garbage, offensive abilities) are queued against a **Target** and applied at that player's next piece lock, never on arrival. A player's own inputs still apply immediately. Injecting garbage under an active piece can produce a board `piece_is_valid` would reject, so the safe point is a game rule, not an optimisation. Battle Royale is one Room of 4–99 slots; garbage never crosses rooms.
 - Frame size cap: 64 KiB. HTTTP messages exceeding this → `413 Payload Too Large`.
 - All components compile clean under `-Wall -Wextra -Werror`; test binaries are expected to pass `valgrind --leak-check=full --error-exitcode=1`.
 
@@ -324,7 +324,6 @@ Custom HTTP-like protocol. Two methods are server-originated (pushed): `STATE`, 
 - `lib/*/README.md`, `src/*/README.md` — each component's own scope, API, and build; `libhtttp` carries the protocol grammar and method table
 - `.tetrishrc` — the shell start-up file; its keys are documented inline as comments
 - `docs/CONTEXT.md` — the shared glossary; domain terms only, no implementation. Check a term here before inventing one
-- `docs/adr/*.md` — architecture decision records, numbered sequentially. Read the relevant one before changing what it decided
 - `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs. `themes.md` is the source of truth for ability text; `use_cases.md` carries a second table of the same abilities as server-enforced effects, kept in step with it
 - `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
 - `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams

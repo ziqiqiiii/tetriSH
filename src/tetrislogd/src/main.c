@@ -8,7 +8,7 @@ static int	run(t_logd *lg);
  * @brief Entry point: detach, claim the pidfile, then loop until stopped.
  *
  * The fork lives here, never behind logd_start(), so the test suites can
- * boot the daemon in-process without forking (docs/adr/0007).
+ * boot the daemon in-process without forking.
  *
  * Boot owns the terminal: everything up to daemon_ready reports failure on
  * stderr and exits non-zero, so the operator who typed the command sees it.

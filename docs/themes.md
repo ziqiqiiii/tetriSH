@@ -38,8 +38,7 @@ A **Target** is the player an offensive ability lands on, as defined in
 unavailable there; Double implies the one other player; Battle Royale draws one
 per resolution from the room's seeded random source, among players still in the
 game. Every cross-player effect is queued against its Target and applied at that
-player's next piece lock — see
-[ADR-0009](adr/0009-cross-player-effects-resolve-at-piece-lock.md).
+player's next piece lock.
 
 `docs/use_cases.md` carries a second table of the same abilities, phrased as
 server-enforced effects. The two are kept in step; this one is the source of

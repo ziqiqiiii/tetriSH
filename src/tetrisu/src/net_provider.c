@@ -574,7 +574,7 @@ static void	character_portrait(const t_body_profile *profile,
 ** LEADERBOARD /leaderboard - the ranking tetrisd has been recording all
 ** along.
 **
-** Every finished or forfeited game is written to the store (ADR-0002), so
+** Every finished or forfeited game is written to the store, so
 ** the scores a player earns in Solo against a live server were already
 ** counted; this screen simply had no way to ask for them and answered "not
 ** served" while the preview build showed fixtures.
@@ -643,7 +643,7 @@ static t_app_room_state	map_body_status(t_body_room_status status)
 ** Credentials need a connection that is not signed in as anybody yet.
 **
 ** tetrisd answers a LOGIN on an already-authenticated connection with 409:
-** identity belongs to the socket (ADR-0001), so the only way to sign in as
+** identity belongs to the socket, so the only way to sign in as
 ** somebody else - or as the same player again after backing out to the auth
 ** screen - is on a socket that has not claimed a player. And a session lost
 ** while a game was running leaves the handle offline while the form still

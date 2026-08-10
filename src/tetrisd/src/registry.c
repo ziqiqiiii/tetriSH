@@ -78,9 +78,13 @@ void	registry_remove(t_registry *rg, t_client *cli)
  * @brief Hands a serialised message to one player's outbox.
  *
  * Addressing a player rather than a connection is the point: the caller knows
- * whose game it is describing and not which socket that player is on. A client
- * whose response queue overflows is shut down - it cannot keep up, and
- * buffering more would let it exhaust the server.
+ * whose game it is describing and not which socket that player is on.
+ *
+ * An overflowing response queue is not ended here. The reactor already ends
+ * an overflowed client at the two places that own that decision - drain_frames
+ * for traffic it just handled, and sweep for anything enqueued off the loop -
+ * and a shutdown() from here reached neither of them first, so it only ever
+ * duplicated a kill that was already coming.
  *
  * @param rg Registry to look in.
  * @param pid Player the message is addressed to.
@@ -93,7 +97,6 @@ int	registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
 		size_t len, bool is_state)
 {
 	t_client	*cli;
-	int			rc;
 
 	if (rg == NULL || bytes == NULL)
 		return (-1);
@@ -101,12 +104,8 @@ int	registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
 	if (cli == NULL)
 		return (-1);
 	if (is_state)
-		rc = outbox_push_state(&cli->outbox, bytes, len);
-	else
-		rc = outbox_push(&cli->outbox, bytes, len);
-	if (rc != 0 && cli->outbox.overflowed)
-		shutdown(cli->fd, SHUT_RDWR);
-	return (rc);
+		return (outbox_push_state(&cli->outbox, bytes, len));
+	return (outbox_push(&cli->outbox, bytes, len));
 }
 
 /**
@@ -114,8 +113,10 @@ int	registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes,
  *
  * Kept apart from registry_enqueue rather than added to it as a third mode,
  * because the two differ in the one thing that matters: a response that will
- * not fit closes the connection, and a chat line never does. Chat therefore
- * cannot reach the code above that calls shutdown, which is the whole point.
+ * not fit ends the connection, and a chat line never does. That difference is
+ * in the lanes themselves - outbox_push marks the outbox overflowed and the
+ * reactor ends it, while outbox_push_chat drops its oldest line and accepts
+ * the new one - so a chat line cannot reach the lane that ends a client.
  *
  * @param rg Registry to look in.
  * @param pid Player the message is addressed to.
@@ -178,12 +179,12 @@ void	registry_mark_state(t_registry *rg, t_client *cli, t_client_state state)
  * A player has at most one connection, so a fresh LOGIN takes the identity
  * back instead of being refused - a client that died without closing its
  * socket would otherwise lock its own account out until TCP gave up on it,
- * which can be hours (ADR-0004).
+ * which can be hours.
  *
  * Only the answer is given here. The reactor owns both connections, so it ends
  * the old one itself, synchronously, before the new one binds - which is why
  * the wait that used to be needed between two client threads is gone rather
- * than ported (docs/adr/0008).
+ * than ported.
  *
  * @param rg Registry to search.
  * @param pid Player being claimed.

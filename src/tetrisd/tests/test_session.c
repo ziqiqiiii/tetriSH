@@ -72,7 +72,7 @@ static void	test_boot_refuses_an_unusable_private_key(void)
 ** The certificate and key are read once, not once per connection, so removing
 ** both files out from under a running server changes nothing a client can
 ** observe. This is what makes the handshake safe to run on a bounded worker
-** pool: no connection is waiting on the disk (ADR-0008).
+** pool: no connection is waiting on the disk.
 */
 static void	test_handshakes_outlive_the_certificate_files(void)
 {

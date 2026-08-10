@@ -45,7 +45,7 @@ fall and is not allowed to touch.
 
 ## Why it was not caught
 
-`tests/integration/test_net_solo.sh` covers the wire and passes: `net_smoke`
+`src/tetrisu/tests/integration/test_net_solo.sh` covers the wire and passes: `net_smoke`
 calls `net_solo_start`, `net_solo_action` and `net_solo_apply` directly and
 never starts a countdown, because the countdown is not part of the protocol.
 `test_solo_game.c` covers the countdown and passes: it drives
@@ -71,7 +71,7 @@ Three changes, in one place each:
   clocks now agree about when the game starts. The pause overlay already yields
   to the countdown overlay when both are up, so the screen is unchanged.
 
-The regression test is `tests/integration/test_solo_authority.sh`, driving
+The regression test is `src/tetrisu/tests/integration/test_solo_authority.sh`, driving
 `solo_authority.c` against a real tetrisd. Reverting the presentation tick
 fails four of its six checks; reverting the hold fails the first.
 

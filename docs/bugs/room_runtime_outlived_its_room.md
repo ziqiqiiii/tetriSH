@@ -11,7 +11,7 @@
 
 Only the first has a lifecycle. `lobby_destroy_room` frees an index for reuse;
 nothing blanked the runtime attached to it, so a destroyed room left its games
-and — after [ADR-0008](../adr/0008-tetrisd-is-event-driven.md) step 4 — its
+and — after step 4 of the event-driven migration — its
 `ticking` flag behind for whoever got that index next.
 
 The sequence that bites:
@@ -39,7 +39,7 @@ timer expiry, so it needed a second `JOIN` to land inside it. Nothing in the
 suite did, and nothing would have reliably: at the shipped tick period this is
 a race a test loses far more often than it wins.
 
-It is not purely an ADR-0008 defect. Under the ticker threads the same runtime
+It is not purely a defect of the event-driven migration. Under the ticker threads the same runtime
 outlived the same room, and the same stale games were there to be found. What
 the threaded version had was `server_room_begin`'s `pthread_join` of the
 previous ticker, which narrowed the window without closing it. Step 4 deleted

@@ -8,7 +8,7 @@ address into the domain field fixed it — which is the tell, because that field
 does not authenticate anything. It triggers CHECK SERVER, and CHECK SERVER
 dials a new socket.
 
-Identity belongs to the connection ([ADR-0001](../adr/0001-identity-is-the-connection.md)),
+Identity belongs to the connection,
 so `login_handler` opens with:
 
 ```c

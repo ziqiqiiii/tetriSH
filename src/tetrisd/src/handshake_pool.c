@@ -14,7 +14,7 @@ static int		expire_one(t_client *cli, uint64_t now, int soonest);
  * The handshake is the one thing in tetrisd that genuinely blocks: six ordered
  * I/O steps around two RSA operations, waiting on a nonce from a peer that has
  * not authenticated itself yet. Putting it on the reactor would stutter every
- * running game, so it stays on threads that are allowed to wait (ADR-0008).
+ * running game, so it stays on threads that are allowed to wait.
  *
  * The queues are sized to the client limit because a client is registered
  * before it is submitted, so no more than that many can ever be in flight.

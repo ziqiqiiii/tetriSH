@@ -56,7 +56,7 @@ are the complete mapping.
   - [5.6 The `.tetrishrc` keys](#56-the-tetrishrc-keys)
 - [6. Decisions still open](#6-decisions-still-open)
 - [7. How to execute a rename safely](#7-how-to-execute-a-rename-safely)
-- [8. Sequencing against ADR-0008](#8-sequencing-against-adr-0008)
+- [8. Sequencing against the event-driven migration](#8-sequencing-against-the-event-driven-migration)
 
 ---
 
@@ -557,10 +557,10 @@ remove.
 argument against was that stage 2 touches four libraries that are green,
 valgrind-clean and finished, to improve names in code nobody is currently
 editing — so it could have been done lazily, one library at a time, whenever
-each was next opened for real work. It was done eagerly instead, for the same
-reason stage 1 goes before ADR-0008 (§8): a mechanical rename that lands while
-the code is quiet is a diff nobody has to review line by line, and a rename
-deferred into a library's next real change is one that tangles with it.
+each was next opened for real work. It was done eagerly instead, for the same reason stage 1 goes before the
+event-driven migration (§8): a mechanical rename that lands while the
+code is quiet is a diff nobody has to review line by line, and a
+rename deferred into a library's next real change is one that tangles with it.
 
 The one open question stage 2 raised and did not fully close is `daemon_`
 (§4.3) — accepted at two owners, revisit at three.
@@ -631,19 +631,20 @@ end and fix what is left.
 
 ---
 
-## 8. Sequencing against ADR-0008
+## 8. Sequencing against the event-driven migration
 
 **Do stage 1 before step 1 of the migration**, not after.
 
-The reason is that [ADR-0008](adr/0008-tetrisd-is-event-driven.md) rewrites
+The reason is that the event-driven migration rewrites
 much of `tetrisd`. Renaming first means every line of new reactor code is
 written in the final convention, and the rename diff — large, mechanical,
 boring — never tangles with the migration diff, which is small, subtle and
 needs real review. Renaming afterwards means writing new code in a convention
 you have already decided to abandon.
 
-The cost of going first is only the work spent renaming things that ADR-0008
-later deletes, and that is avoidable by simply not renaming them:
+The cost of going first is only the work spent renaming things that the
+event-driven migration later deletes, and that is avoidable by simply not
+renaming them:
 
 | Leave alone | Deleted by |
 |---|---|

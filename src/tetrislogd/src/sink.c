@@ -29,7 +29,7 @@ void	sink_blank(t_sink *sk)
  * second tetrislogd interleaving into the same file, which made the sink the
  * single-instance guard as well as the sink - so deleting tmp/ removed both
  * at once and the reclaim path had to restore both. The pidfile is the guard
- * now (docs/adr/0007), claimed in main.c before the daemon opens anything.
+ * now, claimed in main.c before the daemon opens anything.
  *
  * @param sk Sink to open.
  * @param path Log file path.

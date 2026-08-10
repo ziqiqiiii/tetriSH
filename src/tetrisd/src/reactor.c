@@ -16,7 +16,7 @@ static void	wind_down(t_server *srv);
  * the snapshots a tick produced, then free the clients this pass ended. That
  * last step is the ordering rule the whole design rests on - a batch may carry
  * several events for the same client, so nothing may be released until every
- * event in it has been looked at (docs/adr/0008).
+ * event in it has been looked at.
  *
  * The wait is unbounded unless a handshake is in flight, in which case it ends
  * at that handshake's deadline. Gravity does not need it bounded: the tick

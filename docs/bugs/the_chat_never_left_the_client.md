@@ -78,6 +78,6 @@ most of the feed during any burst of typing — precisely the mistake
 is the same family). `take_chat` is therefore called from both readers, and the
 ring counts every line ever received rather than the ones it still holds.
 
-`tests/integration/test_net_chat.sh` is the test that could have caught the
+`src/tetrisu/tests/integration/test_net_chat.sh` is the test that could have caught the
 original bug, and the check named "a line crossing a reply is kept" is the one
 that cannot pass without a real socket on the other end.

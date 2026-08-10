@@ -14,7 +14,7 @@ static int			list_room(t_request_context *ctx);
  *
  * libtetrissh authenticates the server and the bytes, not the client's
  * claimed identity, so Player-Id is compared against the player bound to this
- * connection at LOGIN - a forged header buys nothing (ADR-0001).
+ * connection at LOGIN - a forged header buys nothing.
  *
  * @param ctx Request context.
  * @return true when the connection is authenticated and the header matches.
