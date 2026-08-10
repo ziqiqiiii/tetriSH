@@ -294,17 +294,44 @@ docker-reset: docker-stop
 	@ $(DOCKER) volume rm -f $(DOCKER_STATE) >/dev/null 2>&1 || true
 	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_STATE)$(CLR_RMV) ✔️"
 
-# One command from a fresh clone to a playable client: scripts/play.sh installs
-# what is missing, starts the engine, brings the server up and launches tetrisu
-# against it. It is the only target that spans host and container, which is why
-# it is a script and not a recipe.
+# Build the client and play. This is the target for the machine that is only ever
+# a client, which on macOS is every machine: `make` cannot run here at all -
+# libcoreipc's mqueue module fails to compile on Darwin before the recursion ever
+# reaches tetrisu - so this recurses straight into src/tetrisu and touches
+# nothing else. It deliberately does not depend on bin-link, which builds the
+# shell and every daemon to populate ./bin and would fail for the same reason.
 #
-# HOST= plays on somebody else's server instead of starting one here, verifying
-# it against the committed demo CA:  make play HOST=10.27.229.33
-# PLAY_ARGS= passes anything else through: make play PLAY_ARGS=--rebuild
+# Deliberately no TETRISU_HOST. The server's address changes - a hotspot hands
+# out a new one - and a value baked in here would be a second place to remember
+# to edit. The sign-in screen's SERVER ID field is the one place it is typed, and
+# it wins over the environment anyway.
+#
+# TETRISU_CA_PATH is left alone too, because its default is already right:
+# certs/demo-ca.crt is committed, so a fresh clone verifies the demo server with
+# nothing configured. Only a server on this machine needs the override, and
+# `make play-local` passes it.
+#
+# TETRISU_NET is the one thing that must be set. Without it the client builds its
+# fixture provider instead of a session, and CHECK SERVER reports offline without
+# opening a socket - the same screen a wrong address gives, for a reason no
+# address can fix.
+play:
+	@ $(MAKE) $(MAKE_FLAGS) -C src/tetrisu
+	@ echo "\n$(CYAN)==> Launching $(BLUE)tetrisu$(CLR_RMV) - type the server's address in $(YELLOW)SERVER ID$(CLR_RMV)"
+	@ TETRISU_NET=1 ./src/tetrisu/bin/tetrisu
+
+# The other half: bring a server up on this machine and play against it.
+# scripts/play.sh installs what is missing, starts the container engine (macOS
+# has no native tetrisd), waits for the port and launches the client against it -
+# spanning host and container, which is why it is a script and not a recipe.
+#
+# HOST= plays on somebody else's server instead of starting one here, checking it
+# is reachable first and verifying it against the committed demo CA:
+#   make play-local HOST=10.27.229.33
+# PLAY_ARGS= passes anything else through: make play-local PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 
-play:
+play-local:
 	@ DOCKER_REF=$(DOCKER_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
 		bash ./scripts/play.sh $(PLAY_HOST_ARG) $(PLAY_ARGS)
 
@@ -357,5 +384,5 @@ re: fclean all
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
 			bin-link run certs stack test docker-build docker-run \
 			docker-server docker-logs docker-test docker-shell \
-			docker-stop docker-clean docker-reset play \
+			docker-stop docker-clean docker-reset play play-local \
 			clean fclean reset re

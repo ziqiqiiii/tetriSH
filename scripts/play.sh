@@ -306,19 +306,21 @@ ensure_client() {
     make bin-link >/dev/null 2>&1 || true
 }
 
-# notcurses queries the terminal for graphics support at start-up, and Solo is
-# drawn as pixel art: on a terminal with no bitmap protocol it does not fall
-# back, it refuses to start. Saying so here beats letting the client exit with
-# a notcurses error the moment a game is chosen.
+# notcurses is asked what the terminal can do at start-up and the board is drawn
+# to match. A terminal with no bitmap protocol is not a dead end: only
+# NCPIXEL_NONE loses bitmaps outright, and Solo composites a true-colour cell
+# board instead (render_compatibility_mode in render_solo.c), so Terminal.app
+# plays - it just plays in cells rather than pixel art. This used to claim the
+# game could not draw at all, which was wrong, and wrong in the direction that
+# talks somebody out of a client that would have worked.
 check_terminal() {
     case "${TERM:-}" in
         ""|dumb) die "no usable TERM; run this from a real terminal" ;;
     esac
     if [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ]; then
-        warn "Terminal.app has no bitmap graphics protocol, so Solo cannot draw."
-        warn "Install one that has and run this again from it:"
-        warn "    brew install --cask kitty      (or: ghostty)"
-        confirm "start the client here anyway?" || exit 1
+        warn "Terminal.app has no bitmap protocol, so the board draws in"
+        warn "compatibility mode - playable, but cells instead of pixel art."
+        warn "For the pixel board: brew install --cask kitty   (or: ghostty)"
     fi
 }
 
