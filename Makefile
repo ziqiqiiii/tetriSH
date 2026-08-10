@@ -193,6 +193,8 @@ DOCKER_TTY		 = $(shell { [ -t 3 ] && printf -- '-it' \
 					|| printf -- '-i'; } 3</dev/tty 2>/dev/null \
 					|| printf -- '-i')
 
+DOCKER_TERM		 = $(if $(TERM),-e TERM=$(TERM))
+
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
 	@ $(DOCKER) build -t $(DOCKER_REF) .
@@ -200,14 +202,14 @@ docker-build:
 
 
 docker-run: docker-stop
-	@ $(DOCKER) run --rm $(DOCKER_TTY) --name $(DOCKER_NAME) \
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) --name $(DOCKER_NAME) \
 		-p $(DOCKER_PORT):$(DOCKER_PORT) $(DOCKER_REF)
 
 docker-test:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
 
 docker-shell:
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) bash
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) $(DOCKER_REF) bash
 
 docker-stop:
 	@ $(DOCKER) rm -f $(DOCKER_NAME) >/dev/null 2>&1 || true
