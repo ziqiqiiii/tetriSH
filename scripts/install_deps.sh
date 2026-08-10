@@ -92,6 +92,25 @@ install_darwin() {
         exit 1
     fi
     brew install pkgconf openssl@3 readline ncurses
+
+    # The server half of the project does not exist on macOS - tetrisd needs
+    # epoll and timerfd, libcoreipc's mqueue module needs POSIX message queues,
+    # and Darwin has neither - so a container engine is not a convenience here,
+    # it is the only way to run a game server at all. Installed the way Valgrind
+    # is on Linux: attempted, never fatal, because everything that *can* build
+    # on macOS builds without it.
+    #
+    # colima and the docker CLI rather than the Docker Desktop cask: no GUI
+    # installer, no admin password, and `colima start` is scriptable. A machine
+    # that already has Docker Desktop is left alone.
+    if command -v docker >/dev/null 2>&1; then
+        echo "Container engine: docker is already installed."
+    elif [ -d /Applications/Docker.app ]; then
+        echo "Container engine: Docker Desktop is installed; start it once to add the CLI."
+    else
+        brew install colima docker || \
+            echo "Warning: colima/docker install failed; the client still builds, but a server needs one."
+    fi
 }
 
 case "$UNAME_S" in

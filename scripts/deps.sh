@@ -9,6 +9,7 @@
 #   UNAME_S            host OS (uname -s); forwarded to the check/install scripts
 #   AUTO_INSTALL_DEPS  1 to install on a failed probe, 0 to only report
 #   REQUIRE_VALGRIND   forwarded to the check
+#   REQUIRE_DOCKER     forwarded to the check
 #   GREEN / CLR_RMV    colour escapes (defined once in the Makefile); optional
 
 set -euo pipefail
@@ -16,6 +17,7 @@ set -euo pipefail
 UNAME_S="${UNAME_S:-$(uname -s)}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
+REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
 GREEN="${GREEN:-}"
 CLR_RMV="${CLR_RMV:-}"
 
@@ -23,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 run_check() {
     UNAME_S="$UNAME_S" REQUIRE_VALGRIND="$REQUIRE_VALGRIND" \
+        REQUIRE_DOCKER="$REQUIRE_DOCKER" \
         bash "$SCRIPT_DIR/check_deps.sh"
 }
 

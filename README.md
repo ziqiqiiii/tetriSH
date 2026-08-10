@@ -52,6 +52,8 @@ GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` ad
 
 Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported for dependency install; where no notcurses package exists, it is built from source.
 
+On macOS a container engine joins that list, and not as a convenience: it is the only way to run a server there at all, so `make deps` installs colima and the `docker` CLI when nothing is already present. A missing engine is a warning rather than an error, because everything that *can* build on macOS builds without one; `REQUIRE_DOCKER=1 make check-deps` makes it fatal. See [Playing on macOS](#playing-on-macos).
+
 `make deps`/`make` run on macOS and build `tetrish`, the pure-logic libraries, and `tetrisu`. `tetrisd` does not: its reactor is built directly on `epoll_create1`/`epoll_ctl`/`epoll_wait` (`src/tetrisd/src/{server,client,clientio,reactor,handshake_pool}.c`), which Darwin has no equivalent for, and `lib/libcoreipc`'s mqueue module calls POSIX `mq_open`/`mq_send`/`mq_receive`, which Darwin never implemented. Both fail to compile on macOS. Run the server side — `tetrisd`, and anything that links `libcoreipc`'s mqueue module — on Linux or WSL; a client-only macOS checkout can still build `tetrisu` and connect to a `tetrisd` running elsewhere.
 
 The compiler and the assembler have to be upgraded together: GCC 15 writes non-ASCII string constants with the `.base64` directive, which GNU as only understands from binutils 2.44. A machine whose GCC has outrun its binutils compiles most of the tree and then fails on `src/tetrisu/src/render_multiplayer.c` — the one file that draws a box — with ``unknown pseudo-op: `.base64'``. `make check-deps` probes the pair and says so before the build starts; `make deps` upgrades binutils where the package manager can.
@@ -127,14 +129,45 @@ make docker-run DOCKER_PORT=5252      # any variable below overrides per run
 |---|---|
 | `make docker-build` | Build the image — installs every dependency, builds all components, mints certs |
 | `make docker-run` | Run the shell with the daemons up, publishing `TETRISD_PORT` |
+| `make docker-server` | Run the daemons alone, detached, for a client on the host |
+| `make docker-logs` | Follow the detached server's daemon logs |
 | `make docker-test` | Run every component test suite inside a container |
 | `make docker-shell` | Open a `bash` prompt inside a container |
-| `make docker-stop` | Remove the running container, freeing its port and name |
+| `make docker-stop` | Remove the running containers, freeing the port and the names |
 | `make docker-clean` | Remove the image |
+| `make docker-reset` | Stop the containers and drop the state volume (players, wallets, leaderboard) |
 
-`docker-run` names its container and removes any predecessor first — the shell it starts never exits on its own, so a stale one would keep the port bound. `docker-test` and `docker-shell` publish no port and run alongside it. Override `DOCKER_TAG`, `DOCKER_NAME`, or `DOCKER_PORT` on any target.
+`docker-run` names its container and removes any predecessor first — the shell it starts never exits on its own, so a stale one would keep the port bound. `docker-test` and `docker-shell` publish no port and run alongside it. Override `DOCKER_TAG`, `DOCKER_NAME`, or `DOCKER_PORT` on any target; `DOCKER_PORT` travels into the container as `TETRISD_PORT`, so the published port and the listener never disagree.
+
+Both run targets mount the named volume `tetrish-state` at `/tetrish/tmp`, where `.tetrishrc` points `TETRISD_DATA_DIR` and the logger's sink. Without it the player store's append-only log lives in the container's writable layer, and every account, wallet and leaderboard row is lost the moment the container is replaced — which `--rm` does on every run.
 
 notcurses is built from source at the tag `src/tetrisu/Makefile` pins, read at build time so bumping it there rebuilds the image to match. No distro package works: Ubuntu's predates the `NCBLIT_4x2` blitter `tetrisu` uses, and Debian ships none.
+
+### Playing on macOS
+
+macOS cannot run the server at all, and this is not a packaging gap: `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`. Darwin implements none of the three, so no flag or shim reaches them. `tetrisu`, meanwhile, wants the host's own terminal: the board is drawn as Kitty-protocol bitmaps, which a container has no way to hand to a Mac. So the two halves run in different places, and one command walks the path between them:
+
+```bash
+make play
+```
+
+It installs a container engine if none is there (colima + the `docker` CLI via Homebrew — no GUI installer, no admin password), starts it, mints the certificates, builds the image, brings the server up detached, waits for the port to answer, builds `tetrisu` if needed, and launches it against `127.0.0.1`. Every step checks before it acts, so re-running is how you restart the client.
+
+```bash
+bash scripts/play.sh --server-only     # server up, no client
+bash scripts/play.sh --client-only     # client against a server already up
+bash scripts/play.sh --port 5252       # some other port
+bash scripts/play.sh --rebuild         # rebuild the image first
+bash scripts/play.sh --stop            # take the server down
+```
+
+`certs/` is bind-mounted into the container read-only rather than baked into the image, because the host's `tetrisu` has to verify the server against the same CA and the image's own certificates sit in a filesystem the host cannot read. The host mints them (`make certs`), the container uses them, and the client trusts them.
+
+Run it from **kitty or Ghostty**. Terminal.app has no bitmap graphics protocol at all, so Solo cannot draw and notcurses refuses to start rather than falling back; `scripts/play.sh` detects it and says so before launching. WezTerm and iTerm2 draw but never free replaced bitmaps, so `tetrisu` falls back to cell rendering there on purpose — see the renderer tiers in [`src/tetrisu/README.md`](src/tetrisu/README.md).
+
+On Linux `make play` skips the container entirely and runs the same five steps against `make stack`.
+
+Inside the container, `scripts/docker_server.sh` is what pid 1 runs. Both daemons double-fork and return, so `CMD tetrisd` would exit immediately and take the detached daemons down with the pid namespace; the script starts them through `tetrisctl`, blocks on their logs, and traps `TERM` so `docker stop` becomes an ordered `tetrisctl stop` rather than a killed namespace.
 
 ---
 
@@ -380,7 +413,9 @@ MacMini_tetriSH/
 │   ├── diagrams/                  Class, sequence, component, and solution diagrams
 │   └── bugs/                      Post-mortem notes on design defects
 ├── .claude/skills/                Code, Makefile, and README style guides
-├── scripts/                       Dependency check/install helpers
+├── scripts/                       Dependency, certificate, and launch helpers
+│   ├── play.sh                    One command from a fresh clone to a client
+│   └── docker_server.sh           Pid 1 in the server container
 ├── .tetrishrc                     Shell start-up file — launches the daemons
 ├── Dockerfile                     Containerised build of the whole stack
 ├── Makefile                       Umbrella; recurses into every component

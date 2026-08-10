@@ -22,18 +22,24 @@
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
 #
+#   make play         set up everything and launch a client against a server
+#
 #   make docker-build build the image (installs every dependency itself)
 #   make docker-run   run the shell + daemons in a container, publishing 4242
+#   make docker-server run the daemons alone, detached, for a client on the host
+#   make docker-logs  follow the detached server's daemon logs
 #   make docker-test  run every test suite inside a container
 #   make docker-shell open a bash prompt inside a container
-#   make docker-stop  stop the running container, freeing its port
+#   make docker-stop  stop the running containers, freeing the port
 #   make docker-clean remove the image
+#   make docker-reset stop the containers and drop the state volume
 
 MAKE_FLAGS	:= --no-print-directory -s
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS	:= 1
 REQUIRE_VALGRIND	:= 0
+REQUIRE_DOCKER		:= 0
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -163,6 +169,7 @@ test: all
 deps:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
 
@@ -176,12 +183,14 @@ install-deps:
 # script compiles/links a probe rather than trusting the package database.
 check-deps:
 	@ UNAME_S=$(UNAME_S) REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		bash ./scripts/check_deps.sh
 
 # Read-only summary of the dependency situation. Outsourced to scripts/.
 deps-info:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		bash ./scripts/deps_info.sh
 
 ################################################################################
@@ -197,11 +206,37 @@ DOCKER_IMAGE	:= tetrish
 DOCKER_TAG		:= dev
 DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
 DOCKER_NAME		:= tetrish
+DOCKER_SERVER	:= tetrish-server
 DOCKER_PORT		:= 4242
 
-DOCKER_TTY		 = $(shell { [ -t 3 ] && printf -- '-it' \
-					|| printf -- '-i'; } 3</dev/tty 2>/dev/null \
+# Named volume for the daemons' runtime state, mounted where .tetrishrc points
+# TETRISD_DATA_DIR and the logger's sink: tmp/. Without it the player store's
+# append-only log is inside the container's writable layer, so every player,
+# wallet and leaderboard row is lost the moment the container is replaced -
+# which `docker run --rm` does on every single run.
+DOCKER_STATE	:= tetrish-state
+
+# -it only when there is a terminal to attach. make's own stdin says nothing
+# about that, so the test opens /dev/tty on fd 3 - and stderr is dropped for the
+# whole probe rather than for the test alone, because it is the *redirection*
+# that fails where there is no controlling terminal, and that message escapes an
+# inner 2>/dev/null. It surfaced as "/bin/sh: /dev/tty: Device not configured"
+# on every docker target run from a script.
+DOCKER_TTY		 = $(shell exec 2>/dev/null; { [ -t 3 ] \
+					&& printf -- '-it' || printf -- '-i'; } 3</dev/tty \
 					|| printf -- '-i')
+
+# TETRISD_PORT travels with the published port. tetrisd lets the environment win
+# over .tetrishrc, and without this line `DOCKER_PORT=5252` published 5252 to a
+# server still listening on 4242 - a container that starts, reports itself up,
+# and answers nothing.
+DOCKER_ENV		 = -e TETRISD_PORT=$(DOCKER_PORT) -e TETRISU_PORT=$(DOCKER_PORT)
+
+# --init, because both daemons double-fork: the intermediate parent exits and
+# the detached daemon is reparented onto pid 1, which is a shell that never
+# waited for it and so cannot reap it. tini can, and forwards TERM to the
+# script's trap unchanged.
+DOCKER_INIT		 = --init
 
 docker-build:
 	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
@@ -210,8 +245,27 @@ docker-build:
 
 
 docker-run: docker-stop
-	@ $(DOCKER) run --rm $(DOCKER_TTY) --name $(DOCKER_NAME) \
-		-p $(DOCKER_PORT):$(DOCKER_PORT) $(DOCKER_REF)
+	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_INIT) --name $(DOCKER_NAME) \
+		$(DOCKER_ENV) -p $(DOCKER_PORT):$(DOCKER_PORT) \
+		-v $(DOCKER_STATE):/tetrish/tmp $(DOCKER_REF)
+
+# The server on its own, detached, for a client running on the host - the only
+# way to play on macOS, where tetrisd cannot be built at all (epoll, timerfd,
+# POSIX mqueue). certs/ is mounted rather than baked: the host's tetrisu has to
+# verify the server against the same CA, and the image's own certificates are
+# minted inside a filesystem the host cannot read. Read-only, because the host
+# is what mints them - `certs` is a prerequisite here for exactly that reason.
+docker-server: certs docker-stop
+	@ echo "\n$(CYAN)==> Starting$(CLR_RMV) $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) on port $(DOCKER_PORT)..."
+	@ $(DOCKER) run -d $(DOCKER_INIT) --name $(DOCKER_SERVER) \
+		$(DOCKER_ENV) -p $(DOCKER_PORT):$(DOCKER_PORT) \
+		-v $(CURDIR)/$(CERT_DIR):/tetrish/certs:ro \
+		-v $(DOCKER_STATE):/tetrish/tmp \
+		$(DOCKER_REF) bash scripts/docker_server.sh >/dev/null
+	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) started ✔️"
+
+docker-logs:
+	@ $(DOCKER) logs -f $(DOCKER_SERVER)
 
 docker-test:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
@@ -219,12 +273,26 @@ docker-test:
 docker-shell:
 	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) bash
 
+# Both names, because either can be holding the published port.
 docker-stop:
-	@ $(DOCKER) rm -f $(DOCKER_NAME) >/dev/null 2>&1 || true
+	@ $(DOCKER) rm -f $(DOCKER_NAME) $(DOCKER_SERVER) >/dev/null 2>&1 || true
 
 docker-clean:
 	@ $(DOCKER) image rm -f $(DOCKER_REF) >/dev/null 2>&1 || true
 	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF)$(CLR_RMV) ✔️"
+
+# Drops the players, wallets and leaderboard with the volume; the image stays.
+docker-reset: docker-stop
+	@ $(DOCKER) volume rm -f $(DOCKER_STATE) >/dev/null 2>&1 || true
+	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_STATE)$(CLR_RMV) ✔️"
+
+# One command from a fresh clone to a playable client: scripts/play.sh installs
+# what is missing, starts the engine, brings the server up and launches tetrisu
+# against it. It is the only target that spans host and container, which is why
+# it is a script and not a recipe.
+play:
+	@ DOCKER_REF=$(DOCKER_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
+		bash ./scripts/play.sh
 
 ################################################################################
 #                                   CLEANUP                                    #
@@ -274,5 +342,6 @@ re: fclean all
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
 			bin-link run certs stack test docker-build docker-run \
-			docker-test docker-shell docker-stop docker-clean \
+			docker-server docker-logs docker-test docker-shell \
+			docker-stop docker-clean docker-reset play \
 			clean fclean reset re
