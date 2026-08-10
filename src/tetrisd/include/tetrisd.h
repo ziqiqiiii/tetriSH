@@ -360,7 +360,9 @@ typedef struct s_game
 	** out-of-order snapshot, and a counter that only moved on interesting
 	** events would let two different boards share a number - which is
 	** exactly the case that check cannot catch. room.c bumps it once, at the
-	** one place a snapshot is taken.
+	** one place a snapshot is taken. The number on the wire is not this one,
+	** though: it is the owning connection's state_seq, because the client's
+	** staleness check numbers a stream that outlives any one game.
 	*/
 	uint64_t			seq;
 	int					accum_ms;
@@ -578,6 +580,16 @@ struct s_client
 	*/
 	int				chat_tokens;
 	uint64_t		chat_tokens_at_ms;
+	/*
+	** The number stamped on the last STATE frame this connection was sent.
+	** The client's staleness check is per connection, so the counter is per
+	** connection too: it survives the game and the room that produced the
+	** frames, both of which a finished match destroys. Numbering from the
+	** game instead reset the stream to zero on every new game, and a client
+	** that had not left since the last one dropped the whole of the next as
+	** replayed frames.
+	*/
+	uint64_t		state_seq;
 };
 
 /*

@@ -11,6 +11,7 @@ static void		advance_and_push(t_server_room *server_room, int elapsed_ms);
 static void		push_all(t_server_room *server_room, int n, const t_body_state *snaps, const t_player_id *pids);
 static void		push_state(t_server_room *server_room, const char *room_name, t_player_id pid, const t_body_state *snap);
 static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
+static void		number_snapshot(t_server_room *server_room, t_player_id pid, t_body_state *snap);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
@@ -791,6 +792,7 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 				server_room->games[slot].seq++;
 				game_snapshot(&server_room->games[slot], &snaps[n]);
 				pids[n] = server_room->games[slot].player_id;
+				number_snapshot(server_room, pids[n], &snaps[n]);
 				server_room->dirty[slot] = false;
 				n++;
 			}
@@ -798,6 +800,35 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 		slot++;
 	}
 	return (n);
+}
+
+/**
+ * @brief Numbers one outgoing snapshot on its connection's STATE stream.
+ *
+ * The staleness check this number feeds is per connection: a client drops
+ * any snapshot numbered below the last it saw on this stream. The game that
+ * produced the frame does not outlive a finished match, though - the room is
+ * destroyed with it and the next game sits in a fresh one - so numbering
+ * from the game reset the stream to zero on every new game, and a client
+ * that had never sent LEAVE in between dropped the whole of its next match
+ * as replayed frames. The counter therefore lives on the connection, beside
+ * the check that reads it.
+ *
+ * @param server_room Room the snapshot came from.
+ * @param pid Player the snapshot is addressed to.
+ * @param snap Snapshot to number; kept as the game numbered it when the
+ *        player's connection is already gone and the frame will not send.
+ */
+static void	number_snapshot(t_server_room *server_room, t_player_id pid,
+		t_body_state *snap)
+{
+	t_client	*cli;
+
+	cli = registry_find_other(&server_room->srv->reg, pid, NULL);
+	if (cli == NULL)
+		return ;
+	cli->state_seq++;
+	snap->seq = cli->state_seq;
 }
 
 /**

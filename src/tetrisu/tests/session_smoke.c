@@ -28,6 +28,8 @@ static int	check_a_refused_solo_start_leaves_the_session_intact(
 				const t_net_config *cfg, const char *name);
 static int	check_a_reply_timeout_closes_the_session(
 				const t_net_config *cfg, const char *name);
+static int	check_a_timed_out_solo_leave_stays_offline(
+				const t_net_config *cfg, const char *name);
 static pid_t	fixture_pid(void);
 static int	wait_until_stopped(pid_t pid);
 static int	open_descriptors(void);
@@ -66,6 +68,8 @@ int	main(void)
 		&failures);
 	report("a reply timeout closes the session",
 		check_a_reply_timeout_closes_the_session(&cfg, name), &failures);
+	report("a timed-out solo leave stays offline",
+		check_a_timed_out_solo_leave_stays_offline(&cfg, name), &failures);
 	return (failures != 0);
 }
 
@@ -259,6 +263,60 @@ static int	check_a_reply_timeout_closes_the_session(
 	if (!ok)
 		printf("  timeout diagnostic: rc=%d state=%d fd=%d status=%d\n",
 			rc, (int)net.state, net.fd, result.status);
+	net_disconnect(&net);
+	return (ok);
+}
+
+/**
+ * @brief A solo leave whose answer never comes must not fake a live session.
+ *
+ * net_solo_leave used to stamp NET_AUTHED unconditionally once its LEAVE
+ * returned - including the timeout path, where the request had already closed
+ * the connection. The client then believed it was signed in on a dead socket,
+ * and the next game opened online only to fail its first request. Offline is
+ * the honest state there: the server is told nothing more, and it reaps the
+ * seat itself when the FIN arrives.
+ *
+ * @param cfg Where the server is.
+ * @param name Existing account used to authenticate the connection.
+ * @return 1 when the leave leaves the client offline with no descriptor.
+ */
+static int	check_a_timed_out_solo_leave_stays_offline(
+			const t_net_config *cfg, const char *name)
+{
+	t_net_client	net;
+	pid_t			pid;
+	int				ok;
+
+	pid = fixture_pid();
+	if (pid <= 0)
+	{
+		printf("  leave diagnostic: fixture pid unavailable\n");
+		return (0);
+	}
+	memset(&net, 0, sizeof(net));
+	if (net_connect(&net, cfg) != 0)
+	{
+		printf("  leave diagnostic: connect failed\n");
+		return (0);
+	}
+	if (!sign_up_and_in(&net, name) || net_solo_start(&net, NULL) != 0)
+	{
+		printf("  leave diagnostic: no game to leave\n");
+		return (net_disconnect(&net), 0);
+	}
+	if (kill(pid, SIGSTOP) != 0 || !wait_until_stopped(pid))
+	{
+		(void)kill(pid, SIGCONT);
+		printf("  leave diagnostic: daemon did not stop\n");
+		return (net_disconnect(&net), 0);
+	}
+	net_solo_leave(&net);
+	(void)kill(pid, SIGCONT);
+	ok = net.state == NET_OFFLINE && net.fd == -1 && net.room[0] == '\0';
+	if (!ok)
+		printf("  leave diagnostic: state=%d fd=%d room=%s\n",
+			(int)net.state, net.fd, net.room);
 	net_disconnect(&net);
 	return (ok);
 }

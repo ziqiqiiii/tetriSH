@@ -88,6 +88,11 @@ int	net_solo_start(t_net_client *net, t_net_result *out)
 /**
  * @brief Gives up the room, ending the game the server is running.
  *
+ * The state is only wound back to signed-in when the session survived the
+ * request: a LEAVE that times out closes the connection on its way out, and
+ * stamping NET_AUTHED over that would leave the client claiming it is signed
+ * in on a socket that no longer exists.
+ *
  * @param net Client in a room.
  */
 void	net_solo_leave(t_net_client *net)
@@ -98,7 +103,8 @@ void	net_solo_leave(t_net_client *net)
 		return ;
 	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, net->room);
 	(void)net_request(net, "LEAVE", path, NULL, NULL);
-	net->state = NET_AUTHED;
+	if (net->state != NET_OFFLINE)
+		net->state = NET_AUTHED;
 	net->room[0] = '\0';
 	net->play_path[0] = '\0';
 	net->has_state = false;
