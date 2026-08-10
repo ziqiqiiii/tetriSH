@@ -42,12 +42,31 @@ make deps         # check/install dependencies for this OS
 make check-deps   # verify dependencies without changing the system
 make clean / fclean / re
 make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
+make play         # set up everything and launch a client against a server
+make docker-*     # build/run/test/server/logs/shell/stop/clean/reset in a container
 ```
 
 Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root
 dependencies are the toolchain, pkg-config, OpenSSL, readline, and ncurses;
 `tetrisu` additionally needs notcurses (required) and SDL2 + SDL2_mixer
 (optional — audio compiles out via `-DTETRISU_ENABLE_AUDIO=0`).
+
+**macOS cannot run the server**, and it is not a packaging gap: `tetrisd` is
+built directly on `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and
+`libcoreipc`'s mqueue module on POSIX `mq_open`/`mq_send`/`mq_receive` — Darwin
+has none of the three, so neither compiles there. `tetrisu` does build there and
+wants the host's own terminal, because the board is Kitty-protocol bitmaps a
+container cannot hand to a Mac. So the halves run in different places and
+`scripts/play.sh` (`make play`) walks the path between them: container engine,
+certificates, image, detached server, native client. Docker is therefore a macOS
+dependency — soft, like Valgrind on Linux, since everything that *can* build on
+macOS builds without it; `REQUIRE_DOCKER=1` enforces it. Inside the server
+container `scripts/docker_server.sh` is pid 1, because both daemons double-fork
+and return: `CMD tetrisd` exits within the second and takes them down with the
+pid namespace. It starts them through `tetrisctl`, blocks on their logs, and
+traps `TERM` so `docker stop` becomes an ordered stop rather than a killed
+namespace. `certs/` is bind-mounted read-only, never baked in — the host's
+client has to verify the server against the same CA.
 
 Each library is also **self-contained** — it owns a Makefile that builds its
 archive in place and runs its own tests:
