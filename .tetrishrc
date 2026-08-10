@@ -132,7 +132,7 @@ export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
 # quietly stops being multiplayer.
 export TETRISU_HOST=127.0.0.1
 export TETRISU_PORT=4242
-export TETRISU_CA_PATH=certs/ca.crt
+export TETRISU_CA_PATH=certs/demo-ca.crt
 
 ################################################################################
 #                                 daemons                                      #

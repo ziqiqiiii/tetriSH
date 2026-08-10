@@ -4,6 +4,7 @@ static void	test_login_focus_order(void);
 static void	test_sign_up_focus_order(void);
 static void	test_utf8_editing_and_masking(void);
 static void	test_server_check_state(void);
+static void	test_a_refused_certificate_does_not_read_as_unreachable(void);
 static void	test_refused_primary_explains_itself(void);
 static void	test_validation_and_submission(void);
 static void	test_a_username_the_server_would_refuse_is_caught_here(void);
@@ -16,6 +17,7 @@ int	main(void)
 	test_sign_up_focus_order();
 	test_utf8_editing_and_masking();
 	test_server_check_state();
+	test_a_refused_certificate_does_not_read_as_unreachable();
 	test_refused_primary_explains_itself();
 	test_validation_and_submission();
 	test_a_username_the_server_would_refuse_is_caught_here();
@@ -95,7 +97,7 @@ static void	test_server_check_state(void)
 		== AUTH_ACTION_CHECK_SERVER);
 	assert(form.server_state == AUTH_SERVER_CHECKING);
 	assert(form.feedback == AUTH_FEEDBACK_LOADING);
-	auth_form_finish_server_check(&form, false);
+	auth_form_finish_server_check(&form, false, NULL);
 	assert(form.server_state == AUTH_SERVER_OFFLINE);
 	assert(strstr(form.status, "OFFLINE") != NULL);
 	form.focus = AUTH_FOCUS_PRIMARY;
@@ -105,10 +107,45 @@ static void	test_server_check_state(void)
 	(void)auth_form_handle_key(&form, 'x');
 	assert(form.server_state == AUTH_SERVER_UNVERIFIED);
 	assert(auth_form_begin_server_check(&form));
-	auth_form_finish_server_check(&form, true);
+	auth_form_finish_server_check(&form, true, NULL);
 	assert(auth_form_online_enabled(&form));
 	assert(strstr(form.status, "READY") != NULL);
 	printf("PASS test_server_check_state\n");
+}
+
+/*
+ * Both failures used to read OFFLINE, and they are not the same problem. A
+ * server that answered and was not trusted means the address is right and the
+ * CA is wrong - the opposite conclusion to nothing listening, and the one that
+ * sends somebody debugging their network for an evening over a certificate.
+ * Whatever the session layer called it has to survive to the screen.
+ */
+static void	test_a_refused_certificate_does_not_read_as_unreachable(void)
+{
+	t_auth_form	form;
+
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	snprintf(form.domain, sizeof(form.domain), "10.27.229.33");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, false, "handshake refused");
+	assert(form.server_state == AUTH_SERVER_OFFLINE);
+	assert(strstr(form.status, "HANDSHAKE REFUSED") != NULL);
+	assert(!auth_form_online_enabled(&form));
+
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	snprintf(form.domain, sizeof(form.domain), "10.27.229.33");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, false, "no server");
+	assert(strstr(form.status, "NO SERVER") != NULL);
+	assert(strstr(form.status, "HANDSHAKE") == NULL);
+
+	/* nothing more specific to say still says something useful */
+	auth_form_init(&form, AUTH_FORM_LOGIN);
+	snprintf(form.domain, sizeof(form.domain), "10.27.229.33");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, false, NULL);
+	assert(strstr(form.status, "OFFLINE") != NULL);
+	printf("PASS test_a_refused_certificate_does_not_read_as_unreachable\n");
 }
 
 /*
@@ -130,7 +167,7 @@ static void	test_refused_primary_explains_itself(void)
 	form.focus = AUTH_FOCUS_DOMAIN;
 	snprintf(form.domain, sizeof(form.domain), "play.example.com");
 	assert(auth_form_begin_server_check(&form));
-	auth_form_finish_server_check(&form, false);
+	auth_form_finish_server_check(&form, false, NULL);
 	form.focus = AUTH_FOCUS_PRIMARY;
 	assert(auth_form_handle_key(&form, NCKEY_ENTER) == AUTH_ACTION_NONE);
 	assert(form.feedback == AUTH_FEEDBACK_ERROR);
@@ -153,7 +190,7 @@ static void	test_validation_and_submission(void)
 	snprintf(form.confirm, sizeof(form.confirm), "different");
 	snprintf(form.domain, sizeof(form.domain), "play.example.com");
 	assert(auth_form_begin_server_check(&form));
-	auth_form_finish_server_check(&form, true);
+	auth_form_finish_server_check(&form, true, NULL);
 	assert(!auth_form_validate(&form));
 	assert(form.feedback == AUTH_FEEDBACK_ERROR);
 	assert(strstr(form.status, "DO NOT MATCH") != NULL);
@@ -189,7 +226,7 @@ static void	test_a_username_the_server_would_refuse_is_caught_here(void)
 	snprintf(form.password, sizeof(form.password), "cute-pass");
 	snprintf(form.domain, sizeof(form.domain), "play.example.com");
 	assert(auth_form_begin_server_check(&form));
-	auth_form_finish_server_check(&form, true);
+	auth_form_finish_server_check(&form, true, NULL);
 	snprintf(form.username, sizeof(form.username), "amber lee");
 	assert(!auth_form_validate(&form));
 	assert(strstr(form.status, "WITHOUT SPACES") != NULL);

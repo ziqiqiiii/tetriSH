@@ -174,8 +174,18 @@ bool	auth_form_begin_server_check(t_auth_form *form)
 
 /**
  * @brief Completes the server availability check.
+ *
+ * `reason` is the session layer's own word for what went wrong, shown as given
+ * rather than folded into one message. The two it reports mean opposite things
+ * to whoever is standing at this screen: "no server" is nothing listening, and
+ * "handshake refused" is a server that answered and was not trusted - the
+ * address is right and the CA is wrong. Both used to read OFFLINE, which sent
+ * the search to the network every time and cost an evening on a certificate
+ * problem that was never a reachability problem. NULL keeps the generic text,
+ * for callers with nothing more specific (the local-fixture path).
  */
-void	auth_form_finish_server_check(t_auth_form *form, bool online)
+void	auth_form_finish_server_check(t_auth_form *form, bool online,
+		const char *reason)
 {
 	if (form == NULL || form->server_state != AUTH_SERVER_CHECKING)
 		return ;
@@ -183,13 +193,25 @@ void	auth_form_finish_server_check(t_auth_form *form, bool online)
 	{
 		form->server_state = AUTH_SERVER_ONLINE;
 		set_status(form, AUTH_FEEDBACK_SUCCESS, "SERVER ONLINE - READY");
+		return ;
 	}
-	else
+	form->server_state = AUTH_SERVER_OFFLINE;
+	if (reason != NULL && reason[0] != '\0')
 	{
-		form->server_state = AUTH_SERVER_OFFLINE;
-		set_status(form, AUTH_FEEDBACK_ERROR,
-			"OFFLINE - USE PLAY OFFLINE");
+		char	text[AUTH_STATUS_MAX];
+		size_t	i;
+
+		snprintf(text, sizeof(text), "%s - USE PLAY OFFLINE", reason);
+		i = 0;
+		while (text[i] != '\0')
+		{
+			text[i] = (char)toupper((unsigned char)text[i]);
+			i++;
+		}
+		set_status(form, AUTH_FEEDBACK_ERROR, text);
+		return ;
 	}
+	set_status(form, AUTH_FEEDBACK_ERROR, "OFFLINE - USE PLAY OFFLINE");
 }
 
 /**
