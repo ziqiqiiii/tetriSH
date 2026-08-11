@@ -91,8 +91,8 @@ All bodies are plaintext `key value` lines. Single public header,
 
 | Function | Description |
 |---|---|
-| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15 and cell type/color nibbles before writing |
-| `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
+| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15, opponent count and usernames, and cell type/color nibbles before writing |
+| `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars per board, and no trailing bytes |
 
 Fixed key order, exactly as encoded:
 
@@ -111,9 +111,14 @@ charge 7
 ability 2 1
 clear tetris
 clearing 2 350 18 19
+countdown 0
 board
 00000000000000000000
 ...                     (exactly 20 rows)
+opponents 1
+opp 2 7 1 clearing 4200 9 3 rival
+00000000000000000000
+...                     (exactly 20 rows, per opponent)
 ```
 
 | Key | Form |
@@ -124,7 +129,31 @@ board
 | `ability` | `<level> <0\|1>` — last activation; level `0` = none |
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
+| `countdown` | `<ms>` remaining before a dealt match begins; `0` when none is running |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
+| `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
+| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <username>` |
+
+`phase` reads `active`, `clearing`, `paused`, `topout`, or `countdown`.
+`countdown` is a dealt board being held still before a match starts — it is
+every player's clock stopped, which is what makes it a different thing from
+`paused`, one player's own.
+
+`countdown` and `opponents` are always written, carrying `0` when there is
+neither, the way `clearing` has always been written with a count of `0`. No
+line's presence depends on another line's value, so a decoder never looks
+ahead; a Single snapshot is the frame it always was plus those two zeroes.
+
+An opponent's board rides inside the recipient's snapshot rather than arriving
+as a snapshot of its own, because `tetrisd` holds one `STATE` mailbox slot per
+client and a second push would destroy the first — and carrying both in one
+message makes them the same instant by construction. `pending` is garbage
+queued against that opponent and not yet landed; it applies at their next piece
+lock, so it is visible before it is real.
+
+`username` is last on its line and may not contain a space: every field before
+it is positional, so one space shifts all of them. The encoder refuses such a
+name rather than writing a line its own decoder would misread.
 
 ### Rooms — `LIST /rooms` rows (`rooms.c`)
 

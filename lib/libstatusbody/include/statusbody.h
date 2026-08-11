@@ -41,17 +41,39 @@
 # define BODY_CATALOGUE_MAX	16
 # define BODY_ITEM_NAME_MAX	32
 # define BODY_ROOM_MEMBERS_MAX	99
+/*
+** How many other players' boards one STATE snapshot carries.
+**
+** One, because that is Double. It is a deliberate cap and not a placeholder:
+** an opponent costs a whole board inside t_body_state, and tetrisd collects
+** one t_body_state per slot on the stack for every tick, so the struct is
+** multiplied by TD_MAX_GAMES before it is ever encoded. Battle Royale's 98
+** cannot be carried this way at all - it needs the 1-bit-per-cell projection
+** the field order below leaves room for, and a tick that encodes per slot
+** rather than collecting first.
+*/
+# define BODY_OPPONENTS_MAX	1
 /* the longest chat line a room will carry, sender excluded */
 # define BODY_CHAT_TEXT_MAX	256
 /* what t_body_state.hold reads when the player is holding nothing */
 # define BODY_HOLD_EMPTY		(-1)
 
+/*
+** COUNTDOWN is last so the four that came before it keep their values.
+**
+** It is the room holding a dealt board still before a match begins: every
+** game is active and none of them is advancing. It is not PAUSED, which is one
+** player stopping their own clock and is refused outside Single for exactly
+** that reason - a countdown stops everybody's, which is the only way two
+** players can be made to start on the same tick.
+*/
 typedef enum e_body_phase
 {
 	BODY_PHASE_ACTIVE,
 	BODY_PHASE_CLEARING,
 	BODY_PHASE_PAUSED,
-	BODY_PHASE_TOP_OUT
+	BODY_PHASE_TOP_OUT,
+	BODY_PHASE_COUNTDOWN
 }	t_body_phase;
 
 typedef enum e_body_clear_label
@@ -104,9 +126,41 @@ typedef struct s_body_ability
 }	t_body_ability;
 
 /*
+** One other player's board, as the snapshot's recipient is shown it.
+**
+** It rides inside the recipient's own snapshot rather than arriving as a
+** snapshot of its own, because tetrisd's outbox holds exactly one STATE
+** mailbox slot per client and a second push would destroy the first. Carrying
+** both boards in one message also makes them the same instant by
+** construction: a client can never draw its own board from one tick beside
+** its opponent's from three ticks ago.
+**
+** `pending` is the garbage queued against this player and not yet landed - it
+** is applied at their next piece lock, so it is a warning the recipient can
+** see coming rather than a change to the board below it.
+**
+** The username is last on its line and may not contain a space, which is the
+** format's rule rather than a policy: every field before it is positional, so
+** one space inside a name shifts all of them. db_username_valid is where that
+** rule is enforced at the source.
+*/
+typedef struct s_body_opponent
+{
+	int			slot;
+	uint64_t	player_id;
+	bool		alive;
+	t_body_phase	phase;
+	uint64_t	score;
+	int			lines;
+	int			pending;
+	char		username[BODY_USER_MAX];
+	t_body_cell	cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
+}	t_body_opponent;
+
+/*
 ** application/tetris-state body, in encode order:
 **   seq <u64>
-**   phase <active|clearing|paused|topout>
+**   phase <active|clearing|paused|topout|countdown>
 **   piece <type> <rotation> <col> <row>
 **   next <t0> <t1> <t2>
 **   hold <type|-1> <0|1>
@@ -115,8 +169,13 @@ typedef struct s_body_ability
 **   ability <level> <0|1>
 **   clear <none|single|double|triple|tetris|tspin|tspin_mini|perfect>
 **   clearing <count> <elapsed_ms> [<rows>...]
+**   countdown <ms>
 **   board            (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
+**   opponents <n>
+**   opp <slot> <pid> <alive> <phase> <score> <lines> <pending> <username>
+**                    (then that opponent's 20 board lines; both repeated n
+**                     times)
 **
 ** `hold` is BODY_HOLD_EMPTY until the player has held something. Its second
 ** field says the hold has already been spent on the falling piece, which is
@@ -128,6 +187,13 @@ typedef struct s_body_ability
 ** count is 0 whenever no clear is running. The client draws the animation
 ** from that offset rather than timing one of its own, so it cannot still be
 ** flashing rows the server has taken away.
+**
+** `countdown` and `opponents` are always written, carrying 0 when there is no
+** countdown and no opponent. That is this codec's existing idiom - `clearing`
+** has always been present with a count of 0 - and it is what keeps the line
+** order fixed: no line's presence depends on another line's value, so a
+** decoder never has to look ahead to know what it is reading. Single sends
+** both as zeroes and is otherwise unchanged.
 */
 typedef struct s_body_state
 {
@@ -148,7 +214,10 @@ typedef struct s_body_state
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
+	int					countdown_ms;
 	t_body_clear_label	last_clear;
+	size_t				opponent_count;
+	t_body_opponent		opponents[BODY_OPPONENTS_MAX];
 }	t_body_state;
 
 /* one LIST /rooms line: <name> <mode> <players>/<slots> <status> <owner> */

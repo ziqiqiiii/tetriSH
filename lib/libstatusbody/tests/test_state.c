@@ -19,12 +19,14 @@ static const char	*g_head = \
 	"charge 7\n" \
 	"ability 2 1\n" \
 	"clear tetris\n" \
-	"clearing 2 350 18 19\n";
+	"clearing 2 350 18 19\n" \
+	"countdown 0\n";
 
 // Static Functions
 static void	make_state(t_body_state *st);
 static void	build_body(char *dst, const char *head, int zero_rows,
 				const char *tail);
+static void	fill_opponent(t_body_opponent *opponent);
 
 // a full, valid frame matching g_head with an all-empty board
 static void	make_state(t_body_state *st)
@@ -56,7 +58,7 @@ static void	make_state(t_body_state *st)
 	st->last_clear = BODY_CLEAR_TETRIS;
 }
 
-// head + "board\n" + zero_rows all-empty rows + an optional tail
+// head + "board\n" + zero_rows all-empty rows + "opponents 0\n" + a tail
 static void	build_body(char *dst, const char *head, int zero_rows,
 				const char *tail)
 {
@@ -70,8 +72,27 @@ static void	build_body(char *dst, const char *head, int zero_rows,
 		strcat(dst, "00000000000000000000\n");
 		i++;
 	}
+	strcat(dst, "opponents 0\n");
 	if (tail)
 		strcat(dst, tail);
+}
+
+// one opponent whose board is distinguishable from an empty one
+static void	fill_opponent(t_body_opponent *opponent)
+{
+	memset(opponent, 0, sizeof(*opponent));
+	opponent->slot = 2;
+	opponent->player_id = 7;
+	opponent->alive = true;
+	opponent->phase = BODY_PHASE_CLEARING;
+	opponent->score = 4200;
+	opponent->lines = 9;
+	opponent->pending = 3;
+	strcpy(opponent->username, "rival");
+	opponent->cells[19][0].type = 1;
+	opponent->cells[19][0].color = 4;
+	opponent->cells[18][9].type = 2;
+	opponent->cells[18][9].color = 11;
 }
 
 void	test_state_encode_contains_all_required_keys(void)
@@ -299,6 +320,153 @@ void	test_state_hold_round_trips_empty_and_held(void)
 	printf("PASS test_state_hold_round_trips_empty_and_held\n");
 }
 
+/*
+** A Single frame is the same frame it always was, plus the two zero-valued
+** lines that keep the line order fixed. This is the check that says the Solo
+** path did not quietly change shape when Double was added to the body.
+*/
+void	test_state_solo_frame_carries_zero_countdown_and_opponents(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0);
+	assert(strstr(out, "countdown 0\n") != NULL);
+	assert(strstr(out, "opponents 0\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.opponent_count == 0 && back.countdown_ms == 0);
+	assert(memcmp(&in, &back, sizeof(in)) == 0);
+	printf("PASS test_state_solo_frame_carries_zero_countdown_and_opponents\n");
+}
+
+/*
+** The countdown is a phase of its own rather than a paused game, because a
+** paused game is one player's clock stopped and a countdown is everybody's.
+*/
+void	test_state_countdown_phase_round_trips(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.phase = BODY_PHASE_COUNTDOWN;
+	in.countdown_ms = 2400;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0);
+	assert(strstr(out, "phase countdown\n") != NULL);
+	assert(strstr(out, "countdown 2400\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.phase == BODY_PHASE_COUNTDOWN && back.countdown_ms == 2400);
+	in.countdown_ms = -1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_countdown_phase_round_trips\n");
+}
+
+void	test_state_opponent_round_trips_whole(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.opponent_count = 1;
+	fill_opponent(&in.opponents[0]);
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0);
+	assert(strstr(out, "opponents 1\n") != NULL);
+	assert(strstr(out, "opp 2 7 1 clearing 4200 9 3 rival\n") != NULL);
+	memset(&back, 0, sizeof(back));
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(memcmp(&in, &back, sizeof(in)) == 0);
+	printf("PASS test_state_opponent_round_trips_whole\n");
+}
+
+/*
+** The two boards must stay distinct through a round trip. They are the same
+** block in the same encoding read back to back, so a decoder that reused one
+** cursor position for both would produce two copies of whichever it read
+** first - and the player would watch their own stack on the opponent's side.
+*/
+void	test_state_opponent_board_is_not_the_local_board(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.cells[0][0].type = 1;
+	in.cells[0][0].color = 2;
+	in.opponent_count = 1;
+	fill_opponent(&in.opponents[0]);
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(memcmp(back.cells, in.cells, sizeof(in.cells)) == 0);
+	assert(memcmp(back.opponents[0].cells, in.opponents[0].cells,
+			sizeof(in.opponents[0].cells)) == 0);
+	assert(memcmp(back.cells, back.opponents[0].cells,
+			sizeof(back.cells)) != 0);
+	printf("PASS test_state_opponent_board_is_not_the_local_board\n");
+}
+
+/*
+** The count bounds the read, so a body that claims an opponent it does not
+** carry has to run out of lines rather than leave the previous frame's
+** opponent in the array.
+*/
+void	test_state_decode_rejects_opponent_count_mismatch(void)
+{
+	t_body_state	st;
+	char			body[8192];
+
+	build_body(body, g_head, BODY_BOARD_ROWS, NULL);
+	strcpy(strstr(body, "opponents 0\n"), "opponents 1\n");
+	assert(body_state_decode(body, strlen(body), &st) == -1);
+	assert(errno == EBADMSG);
+	build_body(body, g_head, BODY_BOARD_ROWS, NULL);
+	strcpy(strstr(body, "opponents 0\n"), "opponents 9\n");
+	assert(body_state_decode(body, strlen(body), &st) == -1);
+	assert(errno == EBADMSG);
+	printf("PASS test_state_decode_rejects_opponent_count_mismatch\n");
+}
+
+/*
+** Every field on an opp line is positional and the name is last, so a space
+** inside the name shifts all of them. It is refused at the encoder rather
+** than written out and misread at the far end - the failure the leaderboard
+** decoder already suffered once.
+*/
+void	test_state_encode_rejects_unusable_opponent_username(void)
+{
+	t_body_state	in;
+	char			out[8192];
+
+	make_state(&in);
+	in.opponent_count = 1;
+	fill_opponent(&in.opponents[0]);
+	strcpy(in.opponents[0].username, "amber lee");
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	fill_opponent(&in.opponents[0]);
+	in.opponents[0].username[0] = '\0';
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	fill_opponent(&in.opponents[0]);
+	in.opponent_count = BODY_OPPONENTS_MAX + 1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_encode_rejects_unusable_opponent_username\n");
+}
+
 int	main(void)
 {
 	test_state_encode_contains_all_required_keys();
@@ -312,5 +480,11 @@ int	main(void)
 	test_state_decode_rejects_numeric_overflow();
 	test_state_large_seq_round_trips_exactly();
 	test_state_hold_round_trips_empty_and_held();
+	test_state_solo_frame_carries_zero_countdown_and_opponents();
+	test_state_countdown_phase_round_trips();
+	test_state_opponent_round_trips_whole();
+	test_state_opponent_board_is_not_the_local_board();
+	test_state_decode_rejects_opponent_count_mismatch();
+	test_state_encode_rejects_unusable_opponent_username();
 	return (0);
 }
