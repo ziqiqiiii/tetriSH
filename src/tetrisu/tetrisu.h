@@ -1663,6 +1663,13 @@ typedef struct s_app_data_provider
 	t_app_provider_result	(*start_room)(void *userdata, const char *room_id,
 				t_app_room_view_model *view);
 	/*
+	 * Declaring readiness, which is the server's fact and not the screen's.
+	 * A client that kept it locally had its own next refresh overrule it,
+	 * because the room it re-read had never been told.
+	 */
+	t_app_provider_result	(*ready_room)(void *userdata, const char *room_id,
+				bool ready, t_app_room_view_model *view);
+	/*
 	 * Posting to the room's feed. It answers with the room rather than with a
 	 * verdict for the same reason buy_item does: the sender's own line comes
 	 * back from the server with everybody else's, in the order the server

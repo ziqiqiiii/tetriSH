@@ -128,6 +128,44 @@ void	room_recompute_status(t_room *r)
 }
 
 /**
+ * @brief Sets whether one seated player has declared themselves ready.
+ *
+ * Readiness is a seat's own fact, not a consequence of the seat being taken:
+ * a room whose every occupant was ready by definition could never be told
+ * that one of them was not.
+ *
+ * Never touched once a room is in game or finished - a match does not care,
+ * and letting it change there would leave a finished room looking startable.
+ *
+ * @param r The room holding the seat.
+ * @param pid The player declaring.
+ * @param ready true to declare ready, false to withdraw it.
+ * @return 0 when the seat was found and set, -1 otherwise.
+ */
+int	room_set_ready(t_room *r, t_player_id pid, bool ready)
+{
+	int	i;
+
+	if (!r || r->status == ROOM_IN_GAME || r->status == ROOM_FINISHED)
+		return (-1);
+	i = 0;
+	while (i < r->slot_count)
+	{
+		if (r->slots[i].occupied
+			&& r->slots[i].membership.player_id == pid)
+		{
+			if (ready)
+				r->slots[i].status = SLOT_READY;
+			else
+				r->slots[i].status = SLOT_WAITING;
+			return (0);
+		}
+		i++;
+	}
+	return (-1);
+}
+
+/**
  * @brief Finds the seated membership for a player.
  *
  * @param r The room to search.

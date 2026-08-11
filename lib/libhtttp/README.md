@@ -140,6 +140,7 @@ client-initiated request/response. Auth means a non-empty `Player-Id` header.
 | `JOIN` | `/room/<id>` | ✓ | Create or join a room |
 | `LEAVE` | `/room/<id>` | ✓ | Leave a room |
 | `START` | `/room/<id>` | ✓ | Owner starts the game |
+| `READY` | `/room/<id>` | ✓ | Declare or withdraw readiness for a match |
 | `CHAT` | `/room/<id>` | ✓ | Broadcast a room message |
 | `MOVE` | `/room/<id>/player/<pid>` | ✓ | Translate the falling piece |
 | `ROTATE` | `/room/<id>/player/<pid>` | ✓ | Rotate the falling piece |

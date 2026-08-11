@@ -837,6 +837,9 @@ int				leave_handler(const t_htttp_message *msg, void *context);
 int				start_handler(const t_htttp_message *msg, void *context);
 bool			request_is_authorised(t_request_context *ctx);
 
+/* HANDLERS_READY.C */
+int				ready_handler(const t_htttp_message *msg, void *context);
+
 /* HANDLERS_CHAT.C */
 int				chat_handler(const t_htttp_message *msg, void *context);
 
@@ -902,6 +905,9 @@ void			server_room_unbind(t_client *cli);
 int				server_room_open(t_server *srv, t_client *cli, t_game_mode mode);
 t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli, int *slot);
 t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
+bool			server_room_set_ready(t_server_room *server_room, t_client *cli, bool ready);
+bool			server_room_all_ready(const t_server_room *server_room);
+bool			server_room_autostart(t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);

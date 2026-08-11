@@ -276,6 +276,55 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
 }
 
 /**
+ * @brief Records whether one seated player has declared themselves ready.
+ *
+ * Readiness is the room's to hold, not the client's. A client that kept it
+ * locally had it overwritten by its own next refresh - the server had never
+ * had an opinion, so it kept answering with the one it was born with.
+ *
+ * @param server_room Room holding the seat.
+ * @param cli Client declaring.
+ * @param ready true to declare ready, false to withdraw it.
+ * @return true when the declaration was recorded.
+ */
+bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
+			bool ready)
+{
+	if (server_room == NULL || cli == NULL)
+		return (false);
+	return (room_set_ready(server_room->room, cli->player_id, ready) == 0);
+}
+
+/**
+ * @brief Reports whether every seat in a full room has declared ready.
+ *
+ * What a Double room starts on. It is asked of the Room because both halves
+ * of the answer - how many seats are taken and what each of them has declared
+ * - are this file's.
+ *
+ * @param server_room Room to ask.
+ * @return true when the room is full and every occupant is ready.
+ */
+bool	server_room_all_ready(const t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (false);
+	if (server_room->room->number_of_players < server_room->room->min_to_start)
+		return (false);
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& server_room->room->slots[slot].status != SLOT_READY)
+			return (false);
+		slot++;
+	}
+	return (true);
+}
+
+/**
  * @brief Starts the game in a room, on its owner's request.
  *
  * Beginning a game used to mean creating a thread, which could fail and had to
@@ -305,6 +354,49 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
 	}
 	server_room->ticking = true;
 	return (verdict);
+}
+
+/**
+ * @brief Starts a room that has readied itself, on nobody's behalf.
+ *
+ * The room decides this one, so it cannot go through server_room_start: that
+ * asks whether the requester owns the room, and the player who completes a
+ * readiness is whoever declared last - as often the joiner as the owner. A
+ * Double room that refused to start because the wrong person finished getting
+ * ready would be enforcing a rule nobody wrote.
+ *
+ * The owner is still named to the domain, because a room's start is the
+ * owner's in every other mode and the verdict is the same one.
+ *
+ * @param server_room Room to start.
+ * @return true when the match is now running.
+ */
+bool	server_room_autostart(t_server_room *server_room)
+{
+	t_player_id	owner;
+	int			slot;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (false);
+	owner = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& membership_is_owner(&server_room->room->slots[slot].membership))
+			owner = server_room->room->slots[slot].membership.player_id;
+		slot++;
+	}
+	if (owner == 0 || room_start(server_room->room, owner) != START_ACCEPTED)
+		return (false);
+	deal_games(server_room);
+	if (!server_room_is_solo(server_room))
+	{
+		server_room->countdown_ms = TETRISD_MATCH_COUNTDOWN_MS;
+		server_room->countdown_second = -1;
+	}
+	server_room->ticking = true;
+	return (true);
 }
 
 /**

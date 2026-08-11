@@ -36,6 +36,8 @@ static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 				bool refresh_geometry, bool replace_background);
 static void	restore_after_notification(t_render_ctx *ctx,
 				const t_menu_selection *menu);
+static bool	toggle_ready(const t_app_data_provider *provider,
+				t_app_room_view_model *room, t_mp_session *session);
 static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
@@ -1878,6 +1880,46 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
  * a network session cannot navigate away from a room state the server still
  * owns.
  */
+/**
+ * @brief Declares this player ready, through the server when there is one.
+ *
+ * A provider that owns the room owns readiness too: the declaration goes up
+ * and the roster that comes back is what gets drawn. Toggling locally as well
+ * would put the screen a step ahead of every other player, and the next
+ * refresh would take it away again - which is exactly what withdrawing
+ * readiness used to look like.
+ *
+ * With no such provider - an offline room - the local toggle is the whole of
+ * it, which is what the waiting room has always done.
+ *
+ * @param provider Data provider, possibly serving no room.
+ * @param room Room model, replaced with the server's answer on success.
+ * @param session Multiplayer screen session, whose feedback line is set.
+ * @return true when the declaration stood.
+ */
+static bool	toggle_ready(const t_app_data_provider *provider,
+	t_app_room_view_model *room, t_mp_session *session)
+{
+	bool	wanted;
+
+	wanted = !waiting_room_local_ready(room);
+	if (provider == NULL || provider->ready_room == NULL)
+	{
+		if (!waiting_room_toggle_ready(room))
+			return (true);
+		(void)waiting_room_sync_state(room);
+		session->room_state.feedback = waiting_room_local_ready(room)
+			? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+		return (true);
+	}
+	if (provider->ready_room(provider->userdata, room->id, wanted, room)
+		!= APP_PROVIDER_OK)
+		return (false);
+	session->room_state.feedback = wanted
+		? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+	return (true);
+}
+
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_navigation *navigation,
 	t_mp_session *session, t_room_action action)
@@ -1889,12 +1931,8 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	if (action == ROOM_ACTION_TOGGLE_READY)
 	{
 		audio_play_menu_select(audio);
-		if (waiting_room_toggle_ready(room))
-		{
-			(void)waiting_room_sync_state(room);
-			session->room_state.feedback = waiting_room_local_ready(room)
-				? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
-		}
+		if (!toggle_ready(provider, room, session))
+			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
 		/* Un-readying mid-countdown stops it: the room is no longer eligible. */
 		if (session->room_state.counting_down && !waiting_room_can_start(room))
 			(void)waiting_room_cancel_countdown(&session->room_state);

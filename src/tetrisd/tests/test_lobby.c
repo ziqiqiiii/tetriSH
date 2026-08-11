@@ -214,15 +214,22 @@ static void	test_room_snapshot_tracks_live_roster(void)
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.member_count == 1);
 	assert(snapshot.members[0].slot == 1);
-	assert(snapshot.members[0].owner && snapshot.members[0].ready);
+	/* seated is not ready: taking a seat says nothing about declaring */
+	assert(snapshot.members[0].owner && !snapshot.members[0].ready);
 	assert(strcmp(snapshot.members[0].username, "amber") == 0);
+	assert(simple(&amber, "READY", path, "ready 1") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[0].ready);
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready);
 	assert(list_room(&casey, path, &snapshot) == 404);
 	assert(simple(&blake, "JOIN", path, NULL) == 200);
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.status == BODY_ROOM_READY);
 	assert(snapshot.member_count == 2);
 	assert(strcmp(snapshot.members[1].username, "blake") == 0);
-	assert(!snapshot.members[1].owner && snapshot.members[1].ready);
+	assert(!snapshot.members[1].owner && !snapshot.members[1].ready);
 	assert(simple(&amber, "LEAVE", path, NULL) == 200);
 	assert(list_room(&blake, path, &snapshot) == 200);
 	assert(snapshot.member_count == 1);

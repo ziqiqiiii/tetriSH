@@ -100,15 +100,18 @@ stateDiagram-v2
 
     state "SLOT (per slot)" as SLOT {
         [*] --> S_WAITING
-        state "WAITING (empty)" as S_WAITING
+        state "WAITING (empty, or seated and not ready)" as S_WAITING
         state "JOINING" as S_JOINING
-        state "READY (occupied)" as S_READY
+        state "READY (seated and declared)" as S_READY
         state "LEAVING" as S_LEAVING
 
         S_WAITING --> S_JOINING : room_seat begins
-        S_JOINING --> S_READY : slot_occupy succeeds
+        S_JOINING --> S_WAITING : slot_occupy succeeds (seated, not ready)
         S_JOINING --> S_WAITING : probe fails mid-join (no partial seat)
+        S_WAITING --> S_READY : room_set_ready(true)
+        S_READY --> S_WAITING : room_set_ready(false)
         S_READY --> S_LEAVING : room_release begins
+        S_WAITING --> S_LEAVING : room_release begins
         S_LEAVING --> S_WAITING : slot_clear
     }
 
@@ -125,6 +128,11 @@ stateDiagram-v2
 ## The Connection Probe Seam
 
 `room_seat`, `room_release`, and `room_select_successor` take a
+Readiness is a seat's own fact, moved only by `room_set_ready`. Occupying a
+seat leaves it `WAITING`, because a room whose every occupant was ready by
+definition could never be told that one of them was not — which is what left a
+player unable to withdraw a readiness they had never declared.
+
 `bool (*probe)(void *ctx, t_player_id pid)` callback plus an opaque `ctx`;
 `NULL` means "everyone is connected". It is the library's only I/O-adjacent
 seam.

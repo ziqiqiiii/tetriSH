@@ -15,7 +15,7 @@ void	test_slot_init_waiting_and_unoccupied(void)
 	printf("PASS test_slot_init_waiting_and_unoccupied\n");
 }
 
-void	test_slot_occupy_from_joining_sets_ready(void)
+void	test_slot_occupy_from_joining_seats_but_waits(void)
 {
 	t_slot			s;
 	t_membership	m;
@@ -26,9 +26,9 @@ void	test_slot_occupy_from_joining_sets_ready(void)
 	assert(slot_occupy(&s, m) == 0);
 	assert(s.occupied == true);
 	assert(s.membership.player_id == 17);
-	assert(s.status == SLOT_READY);
+	assert(s.status == SLOT_WAITING);
 	assert(s.index == 1);
-	printf("PASS test_slot_occupy_from_joining_sets_ready\n");
+	printf("PASS test_slot_occupy_from_joining_seats_but_waits\n");
 }
 
 void	test_slot_occupy_rejected_when_not_joining(void)
@@ -69,7 +69,7 @@ void	test_slot_clear_removes_occupant_and_sets_waiting(void)
 int	main(void)
 {
 	test_slot_init_waiting_and_unoccupied();
-	test_slot_occupy_from_joining_sets_ready();
+	test_slot_occupy_from_joining_seats_but_waits();
 	test_slot_occupy_rejected_when_not_joining();
 	test_slot_clear_removes_occupant_and_sets_waiting();
 	return (0);

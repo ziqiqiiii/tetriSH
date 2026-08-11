@@ -15,6 +15,8 @@
 #include <assert.h>
 
 // Static Functions
+static void	test_readiness_is_the_rooms_and_survives_a_refresh(void);
+static void	test_both_declaring_ready_starts_the_match(void);
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
 static void	test_each_snapshot_carries_the_other_board(void);
@@ -28,6 +30,7 @@ static int		simple(t_harness *hc, const char *method, const char *path,
 static int		seat_two(t_fixture *fx, t_harness *amber, t_harness *blake,
 					char *room, size_t cap);
 static int		start_match(t_harness *owner, const char *room);
+static int		list_room(t_harness *hc, const char *path, t_body_room *out);
 static void		play_path(const t_harness *hc, const char *room, char *out,
 					size_t cap);
 static int		wait_phase(t_harness *hc, t_body_state *out, t_body_phase phase,
@@ -41,6 +44,8 @@ static int		recorded(t_fixture *fx, t_player_id pid, bool won);
 
 int	main(void)
 {
+	test_readiness_is_the_rooms_and_survives_a_refresh();
+	test_both_declaring_ready_starts_the_match();
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
 	test_each_snapshot_carries_the_other_board();
@@ -48,6 +53,72 @@ int	main(void)
 	test_a_top_out_ends_the_match_for_both_players();
 	test_both_players_are_recorded_once_each();
 	return (0);
+}
+
+/*
+** The bug this route exists for: a seat used to become READY the moment it was
+** occupied, so readiness meant "somebody is sitting here" and the room had no
+** way to say the other thing. A player who withdrew it saw their own client
+** agree, and be overruled half a second later by the next refresh - because
+** the server had never had an opinion to change.
+*/
+static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
+{
+	t_body_room	snapshot;
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	blake;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready && !snapshot.members[1].ready);
+	assert(simple(&amber, "READY", path, "ready 1") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[0].ready);
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready);
+	assert(simple(&amber, "READY", path, "ready yes") == 400);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_readiness_is_the_rooms_and_survives_a_refresh\n");
+}
+
+/*
+** Both seats declaring is what starts a Double room, and the player who
+** declares last is as often the joiner as the owner - so the start cannot be
+** the owner's request. Nobody sends START here.
+*/
+static void	test_both_declaring_ready_starts_the_match(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&amber, "READY", path, "ready 1") == 200);
+	assert(hc_wait_state(&amber, &state, 300) != 0);
+	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	assert(wait_phase(&amber, &state, BODY_PHASE_COUNTDOWN,
+			HC_TIMEOUT_MS) == 0);
+	assert(wait_phase(&blake, &state, BODY_PHASE_COUNTDOWN,
+			HC_TIMEOUT_MS) == 0);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_both_declaring_ready_starts_the_match\n");
 }
 
 /*
@@ -340,6 +411,28 @@ static int	start_match(t_harness *owner, const char *room)
 
 	snprintf(path, sizeof(path), "/room/%s", room);
 	return (simple(owner, "START", path, NULL));
+}
+
+/**
+ * @brief Reads one room's authoritative snapshot.
+ *
+ * @param hc Connected client, seated in that room.
+ * @param path The /room/<name> path.
+ * @param out Receives the decoded snapshot.
+ * @return The status code the server answered.
+ */
+static int	list_room(t_harness *hc, const char *path, t_body_room *out)
+{
+	t_htttp_message	resp;
+	int				status;
+
+	if (hc_request(hc, "LIST", path, NULL, &resp) != 0)
+		return (-1);
+	status = (int)resp.status_code;
+	if (status == 200 && resp.body != NULL)
+		body_room_decode((const char *)resp.body, resp.body_len, out);
+	htttp_message_free(&resp);
+	return (status);
 }
 
 /**

@@ -33,7 +33,7 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 
 Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue.
 
-Double is partly served: a two-seat room is dealt, held still for `TETRISD_MATCH_COUNTDOWN_MS` before it begins, and ends when one player is left standing rather than when the last one stops — the survivor recorded `won`, the player who topped out `lost`, each exactly once. What is still missing is the second board on the wire, garbage between them, and the twelve abilities that need a Target. Battle Royale is designed but unbuilt. The plan for both is [`double-mode-plan.md`](double-mode-plan.md).
+Double is playable: both seats declare readiness with `READY`, the room starts itself once they all have, the boards are dealt and held for `TETRISD_MATCH_COUNTDOWN_MS`, every snapshot carries the other player's board beside its own, and the match ends when one player is left standing rather than when the last one stops — the survivor recorded `won`, the player who topped out `lost`, each exactly once. What is still missing is garbage between the boards and the twelve abilities that need a Target. Battle Royale is designed but unbuilt. The plan for both is [`double-mode-plan.md`](double-mode-plan.md).
 
 ---
 
@@ -108,6 +108,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
 | `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
 | `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
+| `READY` | `/room/<name>` | Body `ready <0\|1>` — declare or withdraw readiness; answers the room. A Double room starts itself once every seat has declared, so nobody sends `START` for one |
 | `START` | `/room/<name>` | Owner begins the game; `403` for a non-owner. Outside Single the boards are dealt and then held for `TETRISD_MATCH_COUNTDOWN_MS`, during which every input is refused `409` |
 | `MOVE` | `/room/<name>/player/<pid>` | Body `LEFT` or `RIGHT` |
 | `ROTATE` | `/room/<name>/player/<pid>` | Body `CW` or `CCW` |

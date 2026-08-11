@@ -156,6 +156,7 @@ t_join_verdict	room_can_accept(const t_room *r);
 int				room_seat(t_room *r, t_player_id pid, const char *username, bool (*probe)(void *ctx, t_player_id pid), void *probe_ctx);
 void			room_recompute_status(t_room *r);
 t_membership	*room_find_member(t_room *r, t_player_id pid);
+int				room_set_ready(t_room *r, t_player_id pid, bool ready);
 
 /* RELEASE.C */
 int				room_release(t_room *r, t_player_id pid, bool (*probe)(void *ctx, t_player_id pid), void *probe_ctx, t_release_result *out);

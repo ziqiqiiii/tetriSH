@@ -61,6 +61,9 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
 static t_app_provider_result	net_leave_room(void *userdata,
 				const char *room_id);
+static t_app_provider_result	net_ready_room(void *userdata,
+					const char *room_id, bool ready,
+					t_app_room_view_model *view);
 static t_app_provider_result	net_start_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
 static t_app_provider_result	net_send_chat(void *userdata,
@@ -96,6 +99,7 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->refresh_room = net_refresh_room;
 	provider->leave_room = net_leave_room;
 	provider->start_room = net_start_room;
+	provider->ready_room = net_ready_room;
 	provider->send_chat = net_send_chat;
 	provider->buy_item = net_buy_item;
 	provider->equip_item = net_equip_item;
@@ -936,6 +940,43 @@ static t_app_provider_result	net_leave_room(void *userdata,
  * @param view Receives the authoritative in-game room model.
  * @return Provider result.
  */
+/**
+ * @brief Declares this client ready, or withdraws it, and re-reads the room.
+ *
+ * The answer is the room as the server now sees it, so the roster the screen
+ * draws is the one every other player is being shown - which is the whole
+ * point of the declaration having left the client.
+ *
+ * @param userdata Network session.
+ * @param room_id Room the declaration is for.
+ * @param ready true to declare ready, false to withdraw it.
+ * @param view Receives the room as it stands afterwards.
+ * @return Provider result.
+ */
+static t_app_provider_result	net_ready_room(void *userdata,
+	const char *room_id, bool ready, t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+	char				path[NET_PATH_MAX];
+	char				body[32];
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
+	snprintf(body, sizeof(body), "ready %d\n", ready ? 1 : 0);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "READY", path, body, &result) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (result.status != 200)
+		return (APP_PROVIDER_INVALID);
+	return (net_refresh_room(userdata, room_id, view));
+}
+
 static t_app_provider_result	net_start_room(void *userdata,
 	const char *room_id, t_app_room_view_model *view)
 {
