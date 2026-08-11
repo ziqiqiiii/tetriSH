@@ -34,6 +34,7 @@ static void	calculate_solo_layout(t_render_ctx *ctx, t_solo_render *solo);
 static void	update_solo_compatibility_badge(t_render_ctx *ctx,
 	t_solo_render *solo);
 static bool	create_solo_planes(t_render_ctx *ctx, t_solo_render *solo);
+static bool	recover_solo_planes(t_render_ctx *ctx, t_solo_render *solo);
 static void	set_standard_backdrop(t_render_ctx *ctx);
 static bool	create_background_plane(t_render_ctx *ctx, t_solo_render *solo);
 static int	update_danger_background(t_render_ctx *ctx, t_solo_render *solo,
@@ -214,7 +215,7 @@ void	render_solo_draw(t_render_ctx *ctx, t_solo_render *solo,
 		}
 		return ;
 	}
-	if (!solo->assets_ready || !solo->planes_ready)
+	if (!recover_solo_planes(ctx, solo))
 	{
 		if (draw_status_message(ctx, solo, solo->asset_error))
 		{
@@ -501,6 +502,38 @@ static bool	create_solo_planes(t_render_ctx *ctx, t_solo_render *solo)
 		return (false);
 	}
 	solo->planes_ready = true;
+	return (true);
+}
+
+/**
+ * @brief Rebuilds the Solo surfaces after a frame the terminal refused.
+ *
+ * A refused blit is not necessarily a refusal of Solo. A resize landing between
+ * the geometry read and the transfer produces one, and dragging a window corner
+ * produces a burst of them - but the failure path destroys every plane and
+ * leaves planes_ready false, and nothing but another resize ever set it again.
+ * One transient refusal therefore ended the game's rendering for the rest of
+ * the session, and on a terminal that cannot scrub a bitmap the dead frame
+ * stayed on the screen looking like a crash.
+ *
+ * Retrying costs two plane creations and two blits, and only on a frame that
+ * has nothing to draw on anyway. A terminal that genuinely cannot take them
+ * still falls through to the status message, which is where a real refusal
+ * belongs.
+ *
+ * @param ctx Pointer to the active render context.
+ * @param solo Pointer to the Solo render state.
+ * @return true when there are planes to draw on.
+ */
+static bool	recover_solo_planes(t_render_ctx *ctx, t_solo_render *solo)
+{
+	if (solo->planes_ready)
+		return (solo->assets_ready);
+	if (!solo->assets_ready || !solo->layout_valid)
+		return (false);
+	if (!create_solo_planes(ctx, solo))
+		return (false);
+	solo->asset_error[0] = '\0';
 	return (true);
 }
 
