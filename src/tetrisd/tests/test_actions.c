@@ -280,11 +280,11 @@ static void	test_a_paid_ability_spends_exactly_its_cost(void)
 	board_set(&g.board, 0, BOARD_HEIGHT - 1, block);
 	def = ability_lookup(2, 1);
 	assert(def != NULL && ability_is_playable_solo(def));
-	assert(game_ability(&g, def, 0) == ABILITY_ACTIVATED);
+	assert(game_ability(&g, NULL, def, 0) == ABILITY_ACTIVATED);
 	assert(g.charge.charges == 0);
 	assert(board_get(&g.board, 0, BOARD_HEIGHT - 1).type == CELL_EMPTY);
 	assert(g.last_ability.level == 1 && g.last_ability.accepted);
-	assert(game_ability(&g, def, 0) == ABILITY_NO_CHARGE);
+	assert(game_ability(&g, NULL, def, 0) == ABILITY_NO_CHARGE);
 	assert(!g.last_ability.accepted);
 	printf("PASS test_a_paid_ability_spends_exactly_its_cost\n");
 }

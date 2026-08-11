@@ -1145,6 +1145,33 @@ int	server_room_target_of(t_server_room *server_room, int from_slot)
 }
 
 /**
+ * @brief The game one client's abilities land on.
+ *
+ * The seat-to-game step kept out of the handlers, which know a connection and
+ * a room and have no business knowing that a Room holds an array.
+ *
+ * @param server_room Room to resolve within.
+ * @param cli The connection acting.
+ * @return The Target's game, or NULL when there is no Target.
+ */
+t_game	*server_room_target_game(t_server_room *server_room,
+		const t_client *cli)
+{
+	int	from;
+	int	target;
+
+	if (server_room == NULL || cli == NULL)
+		return (NULL);
+	from = slot_of_player(server_room, cli->player_id);
+	if (from < 0)
+		return (NULL);
+	target = server_room_target_of(server_room, from);
+	if (target < 0)
+		return (NULL);
+	return (&server_room->games[target]);
+}
+
+/**
  * @brief Writes onto a snapshot the facts that belong to the room, not to the
  *        game it came from.
  *

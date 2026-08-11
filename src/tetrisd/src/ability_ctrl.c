@@ -60,6 +60,11 @@ static const t_ability_def	g_abilities[] = {
 // Static Functions
 static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
 								int argument);
+static t_ability_verdict	apply_targeted(t_game *g, t_game *target,
+								const t_ability_def *def);
+static t_game				*mirror_redirect(t_game *g, t_game *target);
+static bool					apply_vampire(t_game *g, t_game *target);
+static bool					apply_copy(t_game *g, const t_game *target);
 static bool					apply_fry(t_game *g);
 static bool					apply_mirurun(t_game *g);
 static bool					apply_cut(t_game *g);
@@ -112,8 +117,8 @@ bool	ability_is_playable_solo(const t_ability_def *def)
  * @param argument Ability-specific parameter; Sol's aiming column, else 0.
  * @return What the client should be told happened.
  */
-t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
-					int argument)
+t_ability_verdict	game_ability(t_game *g, t_game *target,
+					const t_ability_def *def, int argument)
 {
 	t_ability_verdict	verdict;
 
@@ -129,7 +134,10 @@ t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
 		remember(g, def->level, false);
 		return (ABILITY_NO_CHARGE);
 	}
-	verdict = apply_self(g, def, argument);
+	if (def->needs_target)
+		verdict = apply_targeted(g, target, def);
+	else
+		verdict = apply_self(g, def, argument);
 	if (verdict != ABILITY_ACTIVATED)
 	{
 		remember(g, def->level, false);
@@ -162,8 +170,8 @@ const char	*ability_verdict_reason(t_ability_verdict verdict)
 /**
  * @brief Applies whichever self-affecting transform this ability is.
  *
- * Only the four abilities a one-player room can serve reach here; the
- * targeted twelve are turned away before any charge is looked at.
+ * Only the four abilities a one-player room can serve reach here; anything
+ * needing somebody to aim at goes through apply_targeted.
  *
  * @param g Game being transformed.
  * @param def Ability being applied.
@@ -175,8 +183,6 @@ static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
 {
 	bool	ok;
 
-	if (def->needs_target)
-		return (ABILITY_NO_TARGET);
 	if (def->character_id == 1 && def->level == 1)
 		ok = apply_fry(g);
 	else if (def->character_id == 2 && def->level == 1)
@@ -195,6 +201,136 @@ static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
 	if (!ok)
 		return (ABILITY_BLOCKED);
 	return (ABILITY_ACTIVATED);
+}
+
+
+/**
+ * @brief Applies one ability that needed somebody to aim at.
+ *
+ * The eleven split in two, and the line between them is which board changes
+ * rather than which board is read:
+ *
+ *   - Mirror, Pals, Vampire and Copy land on the player who used them. They
+ *     are applied at once, exactly like the self-affecting four, because
+ *     there is no second board to be surprised - Vampire and Copy read the
+ *     Target, but a read cannot leave anybody's piece inside their stack.
+ *     They still need a Target to exist: there is nothing to steal, nothing
+ *     to copy, and no incoming garbage in a room of one, which is what
+ *     needs_target means here.
+ *
+ *   - Dark, Bomb, Inversion, Pentaris, Sirtet, Paralysis and Nue land on the
+ *     Target, so they are queued and applied at that player's next piece
+ *     lock. A board transform arriving under an active piece can leave it
+ *     inside the stack, and a status effect arriving mid-piece would spend
+ *     one of the pieces it is counted in before it began.
+ *
+ * Mirror is checked here rather than at the landing, and that is the whole of
+ * its ordering hazard: it steals *the next ability activated against* its
+ * holder, so the theft happens when the effect is aimed, not when it arrives.
+ * By the time a queued effect lands, three more could have been aimed.
+ *
+ * @param g Game activating the ability.
+ * @param target The other player's game, or NULL when there is none.
+ * @param def Ability being activated.
+ * @return ACTIVATED when it stood, NO_TARGET when nobody was there, BLOCKED
+ *         when the caster's own board would not take it.
+ */
+static t_ability_verdict	apply_targeted(t_game *g, t_game *target,
+								const t_ability_def *def)
+{
+	if (target == NULL || !target->active)
+		return (ABILITY_NO_TARGET);
+	if (def->character_id == 3 && def->level == 2)
+	{
+		effect_apply(&g->effects, EFFECT_MIRROR);
+		return (ABILITY_ACTIVATED);
+	}
+	if (def->character_id == 4 && def->level == 3)
+	{
+		effect_apply(&g->effects, EFFECT_PALS);
+		return (ABILITY_ACTIVATED);
+	}
+	if (def->character_id == 1 && def->level == 3)
+		return (apply_vampire(g, target) ? ABILITY_ACTIVATED : ABILITY_BLOCKED);
+	if (def->character_id == 3 && def->level == 4)
+		return (apply_copy(g, target) ? ABILITY_ACTIVATED : ABILITY_BLOCKED);
+	target = mirror_redirect(g, target);
+	if (def->character_id == 1 && def->level == 2)
+		game_queue_ability(target, PENDING_EFFECT, (int)EFFECT_DARK);
+	else if (def->character_id == 1 && def->level == 4)
+		game_queue_ability(target, PENDING_BOMB, 0);
+	else if (def->character_id == 2 && def->level == 2)
+		game_queue_ability(target, PENDING_EFFECT, (int)EFFECT_INVERSION);
+	else if (def->character_id == 2 && def->level == 3)
+		game_queue_garbage(target, TETRISD_PENTARIS_ROWS);
+	else if (def->character_id == 2 && def->level == 4)
+		game_queue_ability(target, PENDING_SIRTET, 0);
+	else if (def->character_id == 3 && def->level == 3)
+		game_queue_ability(target, PENDING_EFFECT, (int)EFFECT_PARALYSIS);
+	else if (def->character_id == 4 && def->level == 2)
+		game_queue_ability(target, PENDING_EFFECT, (int)EFFECT_NUE);
+	else
+		return (ABILITY_INVALID);
+	return (ABILITY_ACTIVATED);
+}
+
+/**
+ * @brief Sends an ability back at its sender when the Target holds a Mirror.
+ *
+ * Consumed on use, so one Mirror steals one ability. Reflecting is not the
+ * same as refusing: the sender still paid for it and it still happens, to
+ * them.
+ *
+ * @param g The player who aimed it.
+ * @param target The player it was aimed at.
+ * @return Whichever of the two the effect should now be queued against.
+ */
+static t_game	*mirror_redirect(t_game *g, t_game *target)
+{
+	if (!target->effects.mirror_armed)
+		return (target);
+	effect_clear(&target->effects, EFFECT_MIRROR);
+	return (g);
+}
+
+/**
+ * @brief Halloween L3 (Vampire): takes the Target's stored charge.
+ *
+ * charge_transfer moves it rather than copying it, so the Target is left with
+ * nothing and the total in the room is unchanged - which is what makes it a
+ * theft rather than a bonus.
+ *
+ * @param g Game receiving the charge.
+ * @param target Game losing it.
+ * @return true always; there is no board to refuse it.
+ */
+static bool	apply_vampire(t_game *g, t_game *target)
+{
+	charge_transfer(&target->charge, &g->charge);
+	return (true);
+}
+
+/**
+ * @brief Princess L4 (Copy): replaces the caster's field with the Target's.
+ *
+ * The only ability that changes the caster's board out of somebody else's, so
+ * it keeps the "try it on a copy and keep it only if the piece survives"
+ * discipline the self-affecting four use: a Target with a taller stack could
+ * otherwise arrive underneath the caster's falling piece.
+ *
+ * @param g Game whose board is replaced.
+ * @param target Game whose board is copied.
+ * @return true when the caster's piece survived the swap.
+ */
+static bool	apply_copy(t_game *g, const t_game *target)
+{
+	t_board	next;
+
+	board_copy(&next, &target->board);
+	if (!piece_is_valid(&next, &g->piece))
+		return (false);
+	board_copy(&g->board, &next);
+	return (true);
 }
 
 /**

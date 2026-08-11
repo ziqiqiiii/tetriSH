@@ -33,13 +33,28 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 
 Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue.
 
-Double is playable and competitive: both seats declare readiness with `READY`, the room starts itself once they all have, the boards are dealt and held for `TETRISD_MATCH_COUNTDOWN_MS`, every snapshot carries the other player's board beside its own, a clear on one board becomes garbage on the other, and the match ends when one player is left standing rather than when the last one stops — the survivor recorded `won`, the player who topped out `lost`, each exactly once. What is still missing is the twelve abilities that need a Target. Battle Royale is designed but unbuilt. The plan for both is [`double-mode-plan.md`](double-mode-plan.md).
+Double is complete: both seats declare readiness with `READY` and name the fighter they will play with, the room starts itself once they all have, the boards are dealt and held for `TETRISD_MATCH_COUNTDOWN_MS`, every snapshot carries the other player's board beside its own, a clear on one board becomes garbage on the other, every ability in the catalogue resolves — including the eleven that need a Target — and the match ends when one player is left standing rather than when the last one stops, the survivor recorded `won` and the player who topped out `lost`, each exactly once. Battle Royale is designed but unbuilt. The plan for both is [`double-mode-plan.md`](double-mode-plan.md).
 
 Garbage crosses at one place, `settle_garbage` in `room.c`, because it is the only module holding both halves of a Room: how many rows a clear is worth is `libtetrisbrain`'s (`garbage_lines_from_clear`, N−1) and who owes them to whom is the seating's. It runs after every game is advanced and before any snapshot is taken, so the frame that shows a clear is the frame that shows the `pending` count it caused. `server_room_target_of` answers *which* seat, and it is a function rather than an expression because Battle Royale's four targeting modes all reduce to that question.
 
 The character a match is played with is declared rather than inferred. `READY` carries an optional `character <id>`; `server_room_set_ready` stores it against the seat, `deal_games` copies it onto the game, and `ability_handler` resolves `(character, level)` against *that* — falling back to the account's equipped character when none was named, which is every Single game. Declaring rather than reading the account is what makes the choice per match: `EQUIP` is an account-wide change, and making one in order to play one game is the wrong scope, so a purchase or an equip made mid-match cannot change which four abilities a level selects from. Ownership is checked with `db_player_owns_character`, which answers a `t_db_bool` and is therefore tested against `DB_TRUE` — `DB_FALSE` is a successful read meaning "does not own it".
 
-**Rows land at the Target's next piece lock, never on arrival.** That is a game rule and not a scheduling convenience: injecting garbage raises the stack under whatever is falling and can produce a board `piece_is_valid` would reject, and there is no correct thing to do with a piece already in the air on a board that is no longer legal. The drain sits after the clear resolves — so a player never takes rows in the middle of watching their own go — and before `spawn_next`, so the rows are part of the board the next piece is validated against. A spawn that then fails is a top-out, which is the right outcome of being buried.
+**Rows land at the Target's next piece lock, never on arrival.** That is a game rule and not a scheduling convenience: injecting garbage raises the stack under whatever is falling and can produce a board `piece_is_valid` would reject, and there is no correct thing to do with a piece already in the air on a board that is no longer legal. The drain sits after the clear resolves — so a player never takes rows in the middle of watching their own go — and before `spawn_next`, so the rows are part of the board the next piece is validated against. A spawn that then fails is a top-out, which is the right outcome of being buried. Targeted abilities wait on the same lock and for a second reason of their own: a status effect counted in pieces that took hold mid-piece would be a piece short before it began.
+
+### Abilities that need a Target
+
+The catalogue's eleven targeted abilities divide on which board *changes*, not on which board is read:
+
+| Lands on | Abilities | When |
+|---|---|---|
+| The caster | Mirror, Pals, Vampire, Copy | At once, like the self-affecting four |
+| The Target | Dark, Bomb, Inversion, Pentaris, Sirtet, Paralysis, Nue | Queued, applied at the Target's next piece lock |
+
+Vampire and Copy *read* the Target but write the caster, and a read cannot leave anybody's piece inside their stack — so they need no deferral. They still need a Target to exist: there is nothing to steal, nothing to copy, and no incoming garbage in a room of one, which is what `needs_target` means for them and for Mirror and Pals. Copy keeps the "try it on a copy of the board and keep it only if the falling piece survives" discipline `apply_self` uses, because it is the one ability that replaces the caster's board out of somebody else's.
+
+**Mirror is checked when an ability is aimed, not when it lands.** It steals *the next ability activated against* its holder, and a queued effect can be several effects behind by the time it arrives — checking at the landing would steal the wrong one. Reflecting is not refusing: the sender still paid, and it still happens, to them.
+
+Bomb's scatter and garbage's hole column both walk from the game's own counters rather than from a random source. `libtetrisbrain` owns no RNG by contract, and a scatter that moves with how long a game has run is unpredictable to a player without being unreproducible to a test.
 
 ---
 

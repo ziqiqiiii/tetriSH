@@ -10,6 +10,8 @@ static void				finish_clear(t_game *g);
 static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
 static void				drain_garbage(t_game *g);
+static void				drain_abilities(t_game *g);
+static void				apply_bomb(t_game *g);
 
 /**
  * @brief Blanks a game slot back to "nobody is playing here".
@@ -472,8 +474,108 @@ static void	finish_clear(t_game *g)
 	g->clearing_count = 0;
 	g->clearing_ms = 0;
 	g->accum_ms = 0;
+	drain_abilities(g);
 	drain_garbage(g);
 	spawn_next(g);
+}
+
+/**
+ * @brief Applies the abilities that were aimed at this player.
+ *
+ * Before the garbage and before the next piece, for the same reason as each
+ * other: there is no active piece to invalidate here, and a board that Sirtet
+ * inverted should take its garbage on top of the inversion rather than have
+ * the inversion applied to rows that arrived afterwards.
+ *
+ * The queue is emptied whether or not each entry did anything. An effect that
+ * cannot be applied is spent, not held: the sender paid for it and its moment
+ * has passed.
+ *
+ * @param g Game whose queue is being emptied.
+ */
+static void	drain_abilities(t_game *g)
+{
+	int	index;
+
+	index = 0;
+	while (index < g->pending_count)
+	{
+		if (g->pending[index].kind == PENDING_EFFECT)
+			effect_apply(&g->effects,
+				(t_status_effect)g->pending[index].argument);
+		else if (g->pending[index].kind == PENDING_BOMB)
+			apply_bomb(g);
+		else if (g->pending[index].kind == PENDING_SIRTET)
+			board_invert(&g->board);
+		index++;
+	}
+	g->pending_count = 0;
+}
+
+/**
+ * @brief Halloween L4 (Bomb): destroys scattered cells on this board.
+ *
+ * "Randomly selected" without a random source: the cells walk from the game's
+ * own counters, the same trick garbage's hole column uses. libtetrisbrain owns
+ * no RNG on purpose, and a scatter that moves with how long the game has run
+ * is unpredictable to a player without being unreproducible to a test.
+ *
+ * @param g Game whose board is bombed.
+ */
+static void	apply_bomb(t_game *g)
+{
+	int			cols[TETRISD_BOMB_CELLS];
+	int			rows[TETRISD_BOMB_CELLS];
+	uint32_t	walk;
+	int			index;
+
+	walk = (uint32_t)g->seq + g->garbage_seq * 31u + 17u;
+	index = 0;
+	while (index < TETRISD_BOMB_CELLS)
+	{
+		walk = walk * 1664525u + 1013904223u;
+		cols[index] = (int)((walk >> 16) % (uint32_t)BOARD_WIDTH);
+		rows[index] = (int)((walk >> 8) % (uint32_t)BOARD_HEIGHT);
+		index++;
+	}
+	g->garbage_seq++;
+	board_clear_cells(&g->board, cols, rows, TETRISD_BOMB_CELLS);
+}
+
+/**
+ * @brief Queues one ability against this player, to land at their next lock.
+ *
+ * Only ability_ctrl.c calls this, and only for an effect that lands on
+ * somebody other than the player who used it. A full queue drops its oldest
+ * entry rather than refusing the newest: the newest is the one somebody just
+ * spent charge on, and a queue this deep means no piece has locked in a very
+ * long time.
+ *
+ * A game that is over takes nothing, for the same reason it takes no garbage.
+ *
+ * @param g Game the ability is aimed at.
+ * @param kind Which transform it is.
+ * @param argument The effect for PENDING_EFFECT, otherwise unused.
+ */
+void	game_queue_ability(t_game *g, t_pending_kind kind, int argument)
+{
+	int	index;
+
+	if (g == NULL || kind == PENDING_NONE || !g->active || g->topped_out)
+		return ;
+	if (g->pending_count >= TD_MAX_PENDING)
+	{
+		index = 1;
+		while (index < TD_MAX_PENDING)
+		{
+			g->pending[index - 1] = g->pending[index];
+			index++;
+		}
+		g->pending_count = TD_MAX_PENDING - 1;
+	}
+	g->pending[g->pending_count].kind = kind;
+	g->pending[g->pending_count].argument = argument;
+	g->pending_count++;
 }
 
 /**

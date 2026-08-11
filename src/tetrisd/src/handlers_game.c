@@ -128,6 +128,12 @@ int	ability_handler(const t_htttp_message *msg, void *context)
 	def = ability_lookup(character, ask[0]);
 	if (def == NULL)
 		return (400);
+	/*
+	 * Single is refused here rather than left to apply_targeted, because it is
+	 * a fact about the room and not about who happens to be alive in it: no
+	 * Single game ever has a Target, so the refusal is the same before the
+	 * match as during it.
+	 */
 	if (server_room_is_solo(server_room) && !ability_is_playable_solo(def))
 		return (request_refuse(ctx, "no-target"));
 	return (activate(ctx, server_room, def, ask[1]));
@@ -265,8 +271,8 @@ static int	activate(t_request_context *ctx, t_server_room *server_room,
 {
 	t_ability_verdict	verdict;
 
-	verdict = game_ability(server_room_game_of(server_room, ctx->cli), def,
-			column);
+	verdict = game_ability(server_room_game_of(server_room, ctx->cli),
+			server_room_target_game(server_room, ctx->cli), def, column);
 	server_room_mark_dirty(server_room, ctx->cli);
 	if (verdict != ABILITY_ACTIVATED)
 		return (request_refuse(ctx, ability_verdict_reason(verdict)));

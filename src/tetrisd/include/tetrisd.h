@@ -177,6 +177,27 @@
 # define TD_MAX_GAMES							16
 
 /*
+** Abilities that can be waiting on one player's lock at once. Four is the
+** whole of a rival's meter spent without a single piece landing, which is the
+** worst a Double match can do; past that the oldest is dropped rather than the
+** newest refused, because the newest is the one the sender just paid for.
+*/
+# define TD_MAX_PENDING							8
+
+/*
+** Rows Pentaris sends (docs/use_cases.md). It is written here rather than in
+** libtetrisbrain because it is a property of one character's level 3, not of
+** what a garbage row is.
+*/
+# define TETRISD_PENTARIS_ROWS					5
+
+/*
+** Cells Bomb destroys on the Target's field. Enough to matter and few enough
+** that the board is still the one the player was building.
+*/
+# define TETRISD_BOMB_CELLS						12
+
+/*
 ** Game points that buy one wallet point (docs/game-economics.md). It is the
 ** whole of the economy's exchange rate, and it is charged against a player's
 ** running total rather than each game on its own - see room.c's award_game.
@@ -349,6 +370,28 @@ typedef struct s_outbox
 ** One player's game: the aggregate libtetrisbrain deliberately does not own.
 ** The reactor is its only writer, which is now the whole of the rule.
 */
+/*
+** What one queued ability is, waiting on a Target's lock.
+**
+** `kind` names the transform rather than the ability, because several
+** abilities reduce to the same thing done to a board - and because the
+** ability that queued it belongs to the sender, whose character the receiver
+** has no business knowing.
+*/
+typedef enum e_pending_kind
+{
+	PENDING_NONE = 0,
+	PENDING_EFFECT,
+	PENDING_BOMB,
+	PENDING_SIRTET
+}	t_pending_kind;
+
+typedef struct s_pending_ability
+{
+	t_pending_kind	kind;
+	int				argument;
+}	t_pending_ability;
+
 typedef struct s_game
 {
 	t_board				board;
@@ -465,6 +508,23 @@ typedef struct s_game
 	** at deal time so an EQUIP made mid-match cannot change it.
 	*/
 	t_item_id			character_id;
+	/*
+	** Abilities aimed at this player, waiting for their next piece lock.
+	**
+	** They wait for the same reason garbage does, and the reason is stronger
+	** here: a board transform landing under an active piece can leave that
+	** piece inside the stack, and a status effect landing mid-piece would
+	** take hold of a piece already in the air - so the count of pieces it is
+	** meant to last would be short by one before it started. At the lock
+	** there is no piece, which is what makes the lock the safe point.
+	**
+	** Only effects that land on somebody *else* queue. An ability that lands
+	** on the player who used it - Mirror, Pals, Copy, Vampire - is applied at
+	** once, exactly like the self-affecting four, because there is no second
+	** board to be surprised.
+	*/
+	t_pending_ability	pending[TD_MAX_PENDING];
+	int					pending_count;
 }	t_game;
 
 /*
@@ -942,13 +1002,15 @@ bool			game_pause(t_game *g, bool paused);
 bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
 void			game_queue_garbage(t_game *g, int lines);
+void			game_queue_ability(t_game *g, t_pending_kind kind,
+					int argument);
 int				game_take_cleared(t_game *g);
 
 /* ABILITY_CTRL.C */
 const t_ability_def	*ability_lookup(t_item_id character_id, int level);
 bool			ability_is_playable_solo(const t_ability_def *def);
-t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
-					int argument);
+t_ability_verdict	game_ability(t_game *g, t_game *target,
+					const t_ability_def *def, int argument);
 const char		*ability_verdict_reason(t_ability_verdict verdict);
 
 /* ROOM.C */
@@ -968,6 +1030,8 @@ bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_acti
 bool			server_room_is_solo(const t_server_room *server_room);
 int				server_room_target_of(t_server_room *server_room,
 					int from_slot);
+t_game			*server_room_target_game(t_server_room *server_room,
+					const t_client *cli);
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
