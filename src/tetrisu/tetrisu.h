@@ -2444,6 +2444,13 @@ typedef struct s_mp_match_state
 	int				final_rank;
 	int				ko_count;
 	int				incoming_attackers;
+	/*
+	** Garbage rows queued against this player and not yet landed. They arrive
+	** at the next piece lock, so between being told and being buried there is
+	** a piece to place - which is the whole reason the count is shown. It is
+	** the server's number; nothing here counts rows of its own.
+	*/
+	int				incoming_garbage;
 	int				opponent_charge;
 	int				hovered_ability;
 	struct s_mp_opponent_snapshot

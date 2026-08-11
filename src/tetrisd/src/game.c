@@ -9,6 +9,7 @@ static bool				begin_clear(t_game *g);
 static void				finish_clear(t_game *g);
 static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
+static void				drain_garbage(t_game *g);
 
 /**
  * @brief Blanks a game slot back to "nobody is playing here".
@@ -347,6 +348,7 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 		out->charge = BODY_CHARGE_MAX;
 	out->last_ability = g->last_ability;
 	out->last_clear = g->last_clear;
+	out->pending = g->pending_garbage;
 	out->clearing_count = g->clearing_count;
 	out->clearing_ms = g->clearing_ms;
 	row = 0;
@@ -464,11 +466,92 @@ static void	finish_clear(t_game *g)
 		charge_on_clear(&g->charge, cleared);
 	}
 	g->last_clear = clear_label(cleared, perfect);
+	if (cleared > 0)
+		g->cleared_owed += cleared;
 	effect_on_piece_lock(&g->effects);
 	g->clearing_count = 0;
 	g->clearing_ms = 0;
 	g->accum_ms = 0;
+	drain_garbage(g);
 	spawn_next(g);
+}
+
+/**
+ * @brief Lands whatever garbage was owed, now that the board is nobody's.
+ *
+ * The two neighbours here are the whole reason this is a separate step. It
+ * runs after the clear resolves, so a player watching their own rows go never
+ * takes rows in the middle of it and never has their own clear cancelled by
+ * somebody else's gift; and it runs before spawn_next, so the rows are part of
+ * the board the next piece is validated against rather than something that
+ * appears underneath a piece already falling.
+ *
+ * The hole walks by one column per row, from a counter this game owns. A run
+ * of rows sharing one hole would be a wall rather than a handicap, and drawing
+ * the column would put a random number generator inside libtetrisbrain, which
+ * is pure by contract.
+ *
+ * @param g Game whose queue is being emptied.
+ */
+static void	drain_garbage(t_game *g)
+{
+	int	lines;
+
+	if (g->pending_garbage <= 0)
+		return ;
+	lines = g->pending_garbage;
+	if (lines > BOARD_HEIGHT)
+		lines = BOARD_HEIGHT;
+	g->pending_garbage = 0;
+	while (lines > 0)
+	{
+		board_inject_garbage(&g->board, 1,
+			(int)(g->garbage_seq % (uint32_t)BOARD_WIDTH));
+		g->garbage_seq++;
+		lines--;
+	}
+}
+
+/**
+ * @brief Queues garbage rows against this player, to land at their next lock.
+ *
+ * Only room.c calls this: how many rows a clear is worth is the brain's
+ * (garbage_lines_from_clear) and who owes them to whom is the room's, because
+ * a game does not know it has an opponent.
+ *
+ * A game that is over takes nothing. Burying a board nobody is playing would
+ * change a finished result.
+ *
+ * @param g Game the rows are owed to.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+void	game_queue_garbage(t_game *g, int lines)
+{
+	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
+		return ;
+	g->pending_garbage += lines;
+	if (g->pending_garbage > BOARD_HEIGHT)
+		g->pending_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Takes the lines this game has cleared and not yet been credited for.
+ *
+ * Reading clears the count, so a clear is charged to the Target exactly once
+ * however many ticks pass before anybody asks.
+ *
+ * @param g Game to take from.
+ * @return Lines cleared since the last call.
+ */
+int	game_take_cleared(t_game *g)
+{
+	int	cleared;
+
+	if (g == NULL)
+		return (0);
+	cleared = g->cleared_owed;
+	g->cleared_owed = 0;
+	return (cleared);
 }
 
 /**

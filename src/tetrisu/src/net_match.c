@@ -82,6 +82,12 @@ bool	net_match_apply(t_net_client *net, t_mp_match_state *state)
 		return (false);
 	snap = &net->state_snapshot;
 	net_state_apply(snap, &state->local_game);
+	/*
+	 * Rows owed to this player, straight from the server. It is a count and
+	 * not a board change - the rows land at the next lock - so there is
+	 * nothing here to reconcile against local_game, only something to say.
+	 */
+	state->incoming_garbage = snap->pending;
 	apply_countdown(state, snap);
 	apply_opponents(state, snap);
 	apply_result(state, snap);

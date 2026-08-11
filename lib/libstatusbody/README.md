@@ -112,6 +112,7 @@ ability 2 1
 clear tetris
 clearing 2 350 18 19
 countdown 0
+pending 0
 result none 0
 board
 00000000000000000000
@@ -131,6 +132,7 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
 | `countdown` | `<ms>` remaining before a dealt match begins; `0` when none is running |
+| `pending` | `<rows>` of garbage queued against **this** player and not yet landed; `0` in Single |
 | `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
@@ -141,11 +143,11 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 every player's clock stopped, which is what makes it a different thing from
 `paused`, one player's own.
 
-`countdown`, `result` and `opponents` are always written, carrying `0` or
-`none` when there is nothing to say, the way `clearing` has always been written
+`countdown`, `pending`, `result` and `opponents` are always written, carrying
+`0` or `none` when there is nothing to say, the way `clearing` has always been written
 with a count of `0`. No line's presence depends on another line's value, so a
 decoder never looks ahead; a Single snapshot is the frame it always was plus
-those three empty lines.
+those four empty lines.
 
 `result` is not a phase, because the winner's board is doing nothing a phase
 could describe — it is simply still active with a piece on it, exactly like a
@@ -156,9 +158,13 @@ rather than a bare loss.
 An opponent's board rides inside the recipient's snapshot rather than arriving
 as a snapshot of its own, because `tetrisd` holds one `STATE` mailbox slot per
 client and a second push would destroy the first — and carrying both in one
-message makes them the same instant by construction. `pending` is garbage
-queued against that opponent and not yet landed; it applies at their next piece
-lock, so it is visible before it is real.
+message makes them the same instant by construction.
+
+`pending` appears twice and means the same thing about two different players:
+the top-level line is garbage owed to the recipient, the `opp` field is garbage
+owed to that opponent. Both land at their subject's next piece lock rather than
+on arrival, so both are visible before they are real — which is the point of
+sending a count at all.
 
 `username` is last on its line and may not contain a space: every field before
 it is positional, so one space shifts all of them. The encoder refuses such a

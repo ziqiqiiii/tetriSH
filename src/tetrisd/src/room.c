@@ -19,6 +19,7 @@ static t_body_phase	game_phase(const t_game *game);
 static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
 static void		spread_dirty(t_server_room *server_room);
+static void		settle_garbage(t_server_room *server_room);
 static int		count_live_games(const t_server_room *server_room);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
@@ -966,6 +967,7 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 			server_room->dirty[slot] = true;
 		slot++;
 	}
+	settle_garbage(server_room);
 	spread_dirty(server_room);
 	n = 0;
 	slot = 0;
@@ -1023,6 +1025,82 @@ static void	spread_dirty(t_server_room *server_room)
 		}
 		slot++;
 	}
+}
+
+/**
+ * @brief Turns the lines each game cleared into garbage against its Target.
+ *
+ * This is the one place a clear on one board becomes rows on another, and it
+ * is in room.c because that is the only module holding both halves of a Room:
+ * how many rows a clear is worth belongs to libtetrisbrain
+ * (garbage_lines_from_clear, N-1) and who owes them to whom belongs to the
+ * room's seating, and neither knows the other.
+ *
+ * It runs after every game has been advanced and before any snapshot is taken,
+ * so the frame that shows a clear is the same frame that shows the pending
+ * count it caused. The rows themselves land later still - at the Target's next
+ * lock - which is what makes the count a warning rather than a surprise.
+ *
+ * Single takes the whole function out: a player with no Target is not owed a
+ * queue, and game_take_cleared is still called so nothing accumulates against
+ * a mode change that never comes.
+ *
+ * @param server_room Room whose clears are being charged.
+ */
+static void	settle_garbage(t_server_room *server_room)
+{
+	int	slot;
+	int	target;
+	int	cleared;
+
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		cleared = game_take_cleared(&server_room->games[slot]);
+		target = server_room_target_of(server_room, slot);
+		if (cleared > 0 && target >= 0)
+		{
+			game_queue_garbage(&server_room->games[target],
+				garbage_lines_from_clear(cleared));
+			server_room->dirty[target] = true;
+			server_room->dirty[slot] = true;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Names the player a slot's clears and abilities are aimed at.
+ *
+ * Double's answer is the whole of it today: the other occupied slot, if
+ * somebody is still playing in it. Single answers -1, which is the same answer
+ * as an opponent who has already topped out, and both mean "nothing crosses" -
+ * so no caller needs to know which of the two it got.
+ *
+ * Battle Royale is the reason this is a function rather than an expression.
+ * Its four targeting modes (docs/CONTEXT.md) all reduce to "which slot", and
+ * this is where they will land; nothing above it will have to change.
+ *
+ * @param server_room Room to resolve within.
+ * @param from_slot The 0-based slot acting.
+ * @return The 0-based Target slot, or -1 when there is none.
+ */
+int	server_room_target_of(t_server_room *server_room, int from_slot)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room == NULL
+		|| server_room_is_solo(server_room))
+		return (-1);
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (slot != from_slot && server_room->games[slot].player_id != 0
+			&& server_room->games[slot].active)
+			return (slot);
+		slot++;
+	}
+	return (-1);
 }
 
 /**
@@ -1122,7 +1200,7 @@ static void	project_opponent(t_server_room *server_room, int slot,
 	out->phase = game_phase(game);
 	out->score = game->score.total;
 	out->lines = game->lines;
-	out->pending = 0;
+	out->pending = game->pending_garbage;
 	out->piece.type = (int)game->piece.type;
 	out->piece.rotation = game->piece.rotation;
 	out->piece.col = game->piece.col;

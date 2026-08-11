@@ -274,9 +274,15 @@ static void	draw_double(struct ncplane *plane,
 	draw_board(plane, &layout->opponent_board,
 		&state->opponent_game, "OPPONENT BOARD");
 	set_fg(plane, MATCH_CREAM_R, MATCH_CREAM_G, MATCH_CREAM_B);
-	snprintf(line, sizeof(line), "%s  |  %" PRIu64 " PTS  |  POWER %d/10",
-		player, state->local_game.scoring.total,
-		state->local_game.crystal_charge);
+	if (state->incoming_garbage > 0)
+		snprintf(line, sizeof(line),
+			"%s  |  %" PRIu64 " PTS  |  POWER %d/10  |  +%d INCOMING",
+			player, state->local_game.scoring.total,
+			state->local_game.crystal_charge, state->incoming_garbage);
+	else
+		snprintf(line, sizeof(line), "%s  |  %" PRIu64 " PTS  |  POWER %d/10",
+			player, state->local_game.scoring.total,
+			state->local_game.crystal_charge);
 	put_centered(plane, 27, layout->local_board.x - 8,
 		layout->local_board.width + 16, line, false);
 	snprintf(line, sizeof(line), "%s  |  %" PRIu64 " PTS  |  POWER %d/10",

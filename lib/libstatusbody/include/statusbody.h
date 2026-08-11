@@ -198,6 +198,7 @@ typedef struct s_body_opponent
 **   clear <none|single|double|triple|tetris|tspin|tspin_mini|perfect>
 **   clearing <count> <elapsed_ms> [<rows>...]
 **   countdown <ms>
+**   pending <rows>
 **   result <none|won|lost> <rank>
 **   board          (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
@@ -249,6 +250,17 @@ typedef struct s_body_state
 	int					clearing_count;
 	int					clearing_ms;
 	int					countdown_ms;
+	/*
+	** Garbage queued against the recipient and not yet landed. It is the same
+	** number the opponents section carries for everyone else, said about the
+	** subject of the frame, because a player needs to see what is coming at
+	** them at least as much as what is coming at the other player.
+	**
+	** It is a count of rows and not a board change: garbage lands at the
+	** receiver's next piece lock, never on arrival, so between the two this is
+	** all there is to show. Single always sends 0.
+	*/
+	int					pending;
 	t_body_result		result;
 	int					rank;
 	t_body_clear_label	last_clear;

@@ -92,6 +92,7 @@ static uint64_t band_signature(const t_render_ctx *ctx, int slot, int first,
 static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
 				int band, t_mp_rect *out);
 static bool caption_stale(t_match_regions *pass);
+static int opponent_pending(const t_mp_match_state *state);
 static bool regions_caption(t_match_regions *pass, const t_mp_rect *board);
 static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
 				const t_piece *piece, int layer);
@@ -109,7 +110,8 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 				const t_mp_match_state *state);
 static void draw_double_caption(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *board,
-				const char *name, uint64_t points, int charge, bool local);
+				const char *name, uint64_t points, int charge, int pending,
+				bool local);
 static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect,
 				const t_mp_match_state *state, bool portrait);
@@ -561,10 +563,30 @@ static bool caption_stale(t_match_regions *pass)
 			sizeof(pass->state->local_game.scoring.total));
 	signature = hash_bytes(signature, &pass->state->local_game.crystal_charge,
 			sizeof(pass->state->local_game.crystal_charge));
+	signature = hash_bytes(signature, &pass->state->incoming_garbage,
+			sizeof(pass->state->incoming_garbage));
 	if (signature == pass->ctx->mp_match_caption_signature)
 		return (false);
 	pass->ctx->mp_match_caption_signature = signature;
 	return (true);
+}
+
+/**
+ * @brief Garbage queued against the opponent, as their caption reports it.
+ *
+ * Double reads it from the one opponent slot the snapshot fills. It is a
+ * different number from state->incoming_garbage and drawing one where the
+ * other belongs would warn the wrong player, which is the mistake this exists
+ * to make hard.
+ *
+ * @param state Match model to read.
+ * @return Rows owed to the opponent, or 0 when there is no opponent.
+ */
+static int opponent_pending(const t_mp_match_state *state)
+{
+	if (state == NULL || !state->opponents[0].present)
+		return (0);
+	return (state->opponents[0].garbage_pending);
 }
 
 /**
@@ -588,7 +610,8 @@ static bool regions_caption(t_match_regions *pass, const t_mp_rect *board)
 			draw_double_caption(pass->ctx, pass->pixels, pass->width,
 				pass->height, board, pass->state->profile.username,
 				pass->state->local_game.scoring.total,
-				pass->state->local_game.crystal_charge, true);
+				pass->state->local_game.crystal_charge,
+				pass->state->incoming_garbage, true);
 		}
 		return (create_region_plane(pass->ctx, pass->pixels, pass->width,
 				pass->height, &strip,
@@ -805,7 +828,7 @@ static bool regions_opponent_caption(t_match_regions *pass,
 		clear_rect(pass->pixels, pass->width, pass->height, &strip);
 		draw_double_caption(pass->ctx, pass->pixels, pass->width, pass->height,
 			board, state->opponent_name, state->opponent_game.scoring.total,
-			state->opponent_charge, false);
+			state->opponent_charge, opponent_pending(state), false);
 	}
 	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
 			pass->height, &strip, &pass->ctx->mp_match_opponent_plane));
@@ -1477,10 +1500,10 @@ static void compose_double(t_render_ctx *ctx, uint32_t *pixels,
 		&state->opponent_game, state->opponent_name, false);
 	draw_double_caption(ctx, pixels, width, height, &layout.local_board,
 		state->profile.username, state->local_game.scoring.total,
-		state->local_game.crystal_charge, true);
+		state->local_game.crystal_charge, state->incoming_garbage, true);
 	draw_double_caption(ctx, pixels, width, height, &layout.opponent_board,
 		state->opponent_name, state->opponent_game.scoring.total,
-		state->opponent_charge, false);
+		state->opponent_charge, opponent_pending(state), false);
 }
 
 static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
@@ -1550,17 +1573,28 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 
 static void draw_double_caption(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_rect *board, const char *name,
-	uint64_t points, int charge, bool local)
+	uint64_t points, int charge, int pending, bool local)
 {
 	t_mp_rect text;
 	char line[APP_ABILITY_TEXT_MAX];
+	char warning[32];
 
+	warning[0] = '\0';
+	/*
+	 * Garbage is announced when it is queued and lands at the next lock, so
+	 * this is the window in which saying so is worth anything: there is still
+	 * a piece to place before the rows arrive.
+	 */
+	if (pending > 0)
+		snprintf(warning, sizeof(warning), "   +%d INCOMING", pending);
 	if (local)
-		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d",
-			name != NULL && name[0] != '\0' ? name : "YOU", points, charge);
+		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d%s",
+			name != NULL && name[0] != '\0' ? name : "YOU", points, charge,
+			warning);
 	else
-		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d",
-			name != NULL && name[0] != '\0' ? name : "OPPONENT", points, charge);
+		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d%s",
+			name != NULL && name[0] != '\0' ? name : "OPPONENT", points, charge,
+			warning);
 	text = (t_mp_rect){board->x - 24, board->y + board->height + 20,
 		board->width + 48, 42};
 	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 17,

@@ -136,7 +136,7 @@ static int	validate_state(const t_body_state *in)
 		return (-1);
 	if (in->clearing_ms < 0 || in->last_ability.level < 0)
 		return (-1);
-	if (in->countdown_ms < 0 || in->rank < 0)
+	if (in->countdown_ms < 0 || in->rank < 0 || in->pending < 0)
 		return (-1);
 	if (in->result > BODY_RESULT_LOST)
 		return (-1);
@@ -352,6 +352,8 @@ static int	encode_timers(const t_body_state *in, char *out, size_t cap,
 	if (body_append(out, cap, off, "\n") != 0)
 		return (-1);
 	if (body_append(out, cap, off, "countdown %d\n", in->countdown_ms) != 0)
+		return (-1);
+	if (body_append(out, cap, off, "pending %d\n", in->pending) != 0)
 		return (-1);
 	return (body_append(out, cap, off, "result %s %d\n",
 			g_results[in->result], in->rank));
@@ -593,6 +595,10 @@ static int	decode_timers(t_body_cursor *c, t_body_state *out)
 	if (body_take_line(c, line, sizeof(line)) != 0
 		|| sscanf(line, "countdown %d%n", &out->countdown_ms, &n) != 1
 		|| line[n] != '\0' || out->countdown_ms < 0)
+		return (-1);
+	if (body_take_line(c, line, sizeof(line)) != 0
+		|| sscanf(line, "pending %d%n", &out->pending, &n) != 1
+		|| line[n] != '\0' || out->pending < 0)
 		return (-1);
 	return (decode_result(c, out));
 }

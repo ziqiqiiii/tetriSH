@@ -424,6 +424,40 @@ typedef struct s_game
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
+	/*
+	** Garbage rows owed to this player, and not yet on their board.
+	**
+	** They land at the next piece lock and never on arrival. That is a rule
+	** of the game rather than a scheduling convenience: injecting rows under
+	** an active piece raises the stack beneath it and can produce a board
+	** piece_is_valid would reject, so there is no correct thing to do with
+	** the piece already in the air. Waiting for the lock means the rows are
+	** always part of the board the *next* piece is validated against, and a
+	** spawn that then fails is a top-out, which is the right outcome of being
+	** buried.
+	**
+	** It is also the receiver's warning: the count is on the wire from the
+	** moment it is queued, so a player can see what is coming and clear
+	** underneath it.
+	*/
+	int					pending_garbage;
+	/*
+	** Which column the next garbage row leaves open. Derived from a counter
+	** rather than drawn, so the hole walks instead of stacking - the same
+	** fairness trick apply_fry uses, and for the same reason: no randomness
+	** enters libtetrisbrain, and a run of rows with the hole in one place
+	** would be a wall rather than a handicap.
+	*/
+	uint32_t			garbage_seq;
+	/*
+	** Lines this game has cleared that have not yet been charged to anybody.
+	**
+	** room.c takes it after each tick and turns it into garbage against the
+	** Target, because who the Target is depends on the room and a game does
+	** not know it is in one. It accumulates rather than being overwritten: a
+	** tick that ran two clear completions owes both.
+	*/
+	int					cleared_owed;
 }	t_game;
 
 /*
@@ -887,6 +921,8 @@ bool			game_hold(t_game *g);
 bool			game_pause(t_game *g, bool paused);
 bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
+void			game_queue_garbage(t_game *g, int lines);
+int				game_take_cleared(t_game *g);
 
 /* ABILITY_CTRL.C */
 const t_ability_def	*ability_lookup(t_item_id character_id, int level);
@@ -910,6 +946,8 @@ bool			server_room_all_ready(const t_server_room *server_room);
 bool			server_room_autostart(t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
+int				server_room_target_of(t_server_room *server_room,
+					int from_slot);
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);

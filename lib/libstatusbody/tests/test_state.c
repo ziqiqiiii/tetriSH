@@ -341,6 +341,7 @@ void	test_state_solo_frame_carries_zero_countdown_and_opponents(void)
 	n = body_state_encode(&in, out, sizeof(out));
 	assert(n > 0);
 	assert(strstr(out, "countdown 0\n") != NULL);
+	assert(strstr(out, "pending 0\n") != NULL);
 	assert(strstr(out, "opponents 0\n") != NULL);
 	assert(body_state_decode(out, (size_t)n, &back) == 0);
 	assert(back.opponent_count == 0 && back.countdown_ms == 0);
@@ -406,6 +407,36 @@ void	test_state_result_round_trips(void)
 	assert(body_state_encode(&in, out, sizeof(out)) == -1);
 	assert(errno == EINVAL);
 	printf("PASS test_state_result_round_trips\n");
+}
+
+/*
+** Garbage queued against the recipient, and against the other player, are two
+** different numbers on two different lines. They are asserted together
+** because conflating them is the mistake worth catching: a client that drew
+** the opponent's incoming rows as its own would warn the wrong player.
+*/
+void	test_state_pending_garbage_round_trips(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.pending = 4;
+	in.opponent_count = 1;
+	in.opponents[0].slot = 2;
+	in.opponents[0].alive = true;
+	in.opponents[0].pending = 2;
+	snprintf(in.opponents[0].username, sizeof(in.opponents[0].username),
+		"rival");
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "pending 4\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.pending == 4 && back.opponents[0].pending == 2);
+	in.pending = -1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1 && errno == EINVAL);
+	printf("PASS test_state_pending_garbage_round_trips\n");
 }
 
 void	test_state_opponent_round_trips_whole(void)
@@ -522,6 +553,7 @@ int	main(void)
 	test_state_solo_frame_carries_zero_countdown_and_opponents();
 	test_state_countdown_phase_round_trips();
 	test_state_result_round_trips();
+	test_state_pending_garbage_round_trips();
 	test_state_opponent_round_trips_whole();
 	test_state_opponent_board_is_not_the_local_board();
 	test_state_decode_rejects_opponent_count_mismatch();
