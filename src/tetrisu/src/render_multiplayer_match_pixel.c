@@ -405,9 +405,14 @@ static int repaint_changed_cells(t_match_regions *pass, int slot,
 /**
  * @brief Brings one board region up to date, by cell diff where it can.
  *
- * Both boards go through here. The falling piece is only ever the local
- * player's, so the opponent's cache holds landed blocks alone and survives
- * every tick of a game nobody is steering.
+ * Both boards go through here, and both draw their falling piece. The
+ * opponent's used to be left off, which was right while the opponent was a
+ * fixture nobody was steering: there was no piece worth showing and the cache
+ * survived every tick. Now the server sends it, and a board that only changed
+ * when something locked read as a rival sitting motionless and then jumping.
+ *
+ * It costs nothing to keep: the cell diff below is built from the same grid,
+ * so a moving piece repaints the cells it moved through rather than the board.
  */
 static bool board_region_sync(t_match_regions *pass, int slot,
 	const t_mp_rect *board, const t_solo_game *game)
@@ -417,7 +422,7 @@ static bool board_region_sync(t_match_regions *pass, int slot,
 	bool with_piece;
 
 	cache = &pass->ctx->mp_match_boards[slot];
-	with_piece = slot == 0;
+	with_piece = true;
 	if (pass->force)
 		return (true);
 	if (repaint_changed_cells(pass, slot, board, game, with_piece))
