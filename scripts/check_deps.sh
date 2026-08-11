@@ -8,8 +8,6 @@
 #   UNAME_S            host OS (uname -s); defaults to `uname -s` if unset
 #   REQUIRE_VALGRIND   1 to treat a missing Valgrind as a hard failure on Linux
 #                      (otherwise it is only a warning)
-#   REQUIRE_DOCKER     1 to treat a missing container engine as a hard failure
-#                      on macOS (otherwise it is only a warning)
 #
 # Exit code: 0 if all required dependencies are present and the probe links.
 
@@ -17,7 +15,6 @@ set -euo pipefail
 
 UNAME_S="${UNAME_S:-$(uname -s)}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
-REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
 
 probe="$(mktemp /tmp/tetrish-deps-check.XXXXXX)"
 probe_log="$probe.log"
@@ -34,19 +31,6 @@ if [ "$UNAME_S" = "Linux" ] \
         && [ "$REQUIRE_VALGRIND" = "1" ] \
         && ! command -v valgrind >/dev/null 2>&1; then
     missing="$missing valgrind"
-fi
-
-# A container engine is macOS's only way to run the server half at all: tetrisd
-# is built on epoll and timerfd and libcoreipc's mqueue module on POSIX message
-# queues, and Darwin has none of the three, so no compiler flag reaches it. It
-# is still not needed to *compile* what does build there - the shell, the pure
-# libraries and tetrisu - which is why a missing engine is a warning by default
-# and only REQUIRE_DOCKER=1 makes it fatal. Same treatment as Valgrind on Linux,
-# for the same reason: mandatory for a task, irrelevant to the build.
-if [ "$UNAME_S" = "Darwin" ] \
-        && [ "$REQUIRE_DOCKER" = "1" ] \
-        && ! command -v docker >/dev/null 2>&1; then
-    missing="$missing docker"
 fi
 
 if [ -n "$missing" ]; then
@@ -97,10 +81,9 @@ if [ "$UNAME_S" = "Linux" ] \
     echo "Warning: Valgrind is not installed. Build is OK, but PR/checkoff memory-safety runs need it."
 fi
 
-if [ "$UNAME_S" = "Darwin" ] \
-        && [ "$REQUIRE_DOCKER" != "1" ] \
-        && ! command -v docker >/dev/null 2>&1; then
-    echo "Warning: no docker on PATH. Build is OK, but tetrisd cannot be built"
-    echo "         or run on macOS at all - 'make play' serves it from a"
-    echo "         container instead. See the Docker section of README.md."
+if [ "$UNAME_S" = "Darwin" ]; then
+    echo "Note: tetrisd cannot be built or run on macOS - it needs epoll, timerfd,"
+    echo "      and POSIX mqueue, none of which Darwin has. 'make play' builds"
+    echo "      and runs tetrisu only; play against a server on another machine"
+    echo "      with 'bash scripts/play.sh --host ADDR'."
 fi

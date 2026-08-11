@@ -28,11 +28,7 @@ echo "Auto-install: $AUTO_INSTALL_DEPS"
 echo "Required: GCC, make, binutils, pkg-config, OpenSSL, Readline, ncurses"
 
 if [ "$UNAME_S" = "Darwin" ]; then
-    if command -v docker >/dev/null 2>&1; then
-        echo "Container engine: docker present (tetrisd is served from a container)"
-    else
-        echo "Container engine: MISSING - tetrisd cannot be built or run on macOS without one"
-    fi
+    echo "Server: tetrisd cannot be built or run on macOS (needs epoll, timerfd, POSIX mqueue)"
     echo "Valgrind: use Linux/WSL for the mandatory memory-safety run"
 elif [ "$REQUIRE_VALGRIND" = "1" ]; then
     echo "Valgrind: required by REQUIRE_VALGRIND=1"
