@@ -117,7 +117,7 @@ board
 00000000000000000000
 ...                     (exactly 20 rows)
 opponents 1
-opp 2 7 1 clearing 4200 9 3 rival
+opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 00000000000000000000
 ...                     (exactly 20 rows, per opponent)
 ```
@@ -134,7 +134,7 @@ opp 2 7 1 clearing 4200 9 3 rival
 | `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
-| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <username>` |
+| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <ptype> <protation> <pcol> <prow> <username>` |
 
 `phase` reads `active`, `clearing`, `paused`, `topout`, or `countdown`.
 `countdown` is a dealt board being held still before a match starts — it is

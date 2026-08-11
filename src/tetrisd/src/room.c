@@ -13,8 +13,12 @@ static void		push_state(t_server_room *server_room, const char *room_name, t_pla
 static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
 static void		number_snapshot(t_server_room *server_room, t_player_id pid, t_body_state *snap);
 static void		decorate_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
+static void		fill_opponents(t_server_room *server_room, int subject, t_body_state *snap);
+static void		project_opponent(t_server_room *server_room, int slot, t_body_opponent *out);
+static t_body_phase	game_phase(const t_game *game);
 static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
+static void		spread_dirty(t_server_room *server_room);
 static int		count_live_games(const t_server_room *server_room);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
@@ -862,14 +866,21 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 	int	slot;
 	int	n;
 
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].player_id != 0
+			&& game_gravity(&server_room->games[slot], elapsed_ms))
+			server_room->dirty[slot] = true;
+		slot++;
+	}
+	spread_dirty(server_room);
 	n = 0;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (server_room->games[slot].player_id != 0)
 		{
-			if (game_gravity(&server_room->games[slot], elapsed_ms))
-				server_room->dirty[slot] = true;
 			if (server_room->dirty[slot])
 			{
 				server_room->games[slot].seq++;
@@ -884,6 +895,42 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 		slot++;
 	}
 	return (n);
+}
+
+/**
+ * @brief Makes one player's move owe everybody in the room a snapshot.
+ *
+ * Every snapshot now carries every board in the room, so a frame is out of
+ * date the moment anybody moves - not only its own subject. Marking only the
+ * player who acted would leave the other watching a board that froze whenever
+ * they themselves stopped playing.
+ *
+ * This is the cost of carrying both boards in one message rather than two: a
+ * Double room pushes two frames where it used to push one. It is the right
+ * trade, because the alternative is a client drawing two boards from two
+ * different instants, and the STATE lane is a latest-wins mailbox - a client
+ * that cannot keep up drops frames rather than delaying anybody.
+ *
+ * Single is left alone: there is nobody else in the room to tell.
+ *
+ * @param server_room Room whose dirty flags are spread.
+ */
+static void	spread_dirty(t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room_is_solo(server_room))
+		return ;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->dirty[slot])
+		{
+			mark_all_dirty(server_room);
+			return ;
+		}
+		slot++;
+	}
 }
 
 /**
@@ -911,6 +958,120 @@ static void	decorate_snapshot(t_server_room *server_room, int slot,
 		snap->phase = BODY_PHASE_COUNTDOWN;
 	snap->result = server_room->result[slot];
 	snap->rank = server_room->rank[slot];
+	fill_opponents(server_room, slot, snap);
+}
+
+/**
+ * @brief Puts every other seat's board into one player's snapshot.
+ *
+ * The opponent rides inside the recipient's own snapshot because a client
+ * holds one STATE mailbox slot and a second push would free the first before
+ * it was written. It also makes the two boards the same instant by
+ * construction, which two messages could not promise: a client would
+ * otherwise be free to draw its own board from this tick beside its
+ * opponent's from three ticks ago.
+ *
+ * A seat with no game in it is skipped rather than sent empty. An opponent who
+ * has topped out is not skipped - they are still in the match until it ends,
+ * and their final board is what the winner is looking at.
+ *
+ * @param server_room Room being projected.
+ * @param subject The 0-based slot the snapshot belongs to.
+ * @param snap Snapshot receiving the opponents.
+ */
+static void	fill_opponents(t_server_room *server_room, int subject,
+		t_body_state *snap)
+{
+	int	slot;
+
+	snap->opponent_count = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (slot != subject && server_room->games[slot].player_id != 0
+			&& snap->opponent_count < BODY_OPPONENTS_MAX)
+		{
+			project_opponent(server_room, slot,
+				&snap->opponents[snap->opponent_count]);
+			snap->opponent_count++;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Projects one seat's game onto the compact opponent view.
+ *
+ * Only what the other player is entitled to see: the board, the piece on it,
+ * how they are doing and what is queued against them. Deliberately absent are
+ * the next queue, the hold slot and the charge meter - knowing which piece an
+ * opponent is about to be dealt is not watching their board, it is reading
+ * their hand.
+ *
+ * The name is taken from the seat rather than from the game, because a game
+ * knows a player id and nothing else about who is playing it.
+ *
+ * @param server_room Room holding the seat.
+ * @param slot The 0-based slot to project.
+ * @param out Receives the projection.
+ */
+static void	project_opponent(t_server_room *server_room, int slot,
+		t_body_opponent *out)
+{
+	const t_game	*game;
+	int				row;
+	int				col;
+
+	game = &server_room->games[slot];
+	memset(out, 0, sizeof(*out));
+	out->slot = server_room->room->slots[slot].index;
+	out->player_id = game->player_id;
+	out->alive = game->active;
+	out->phase = game_phase(game);
+	out->score = game->score.total;
+	out->lines = game->lines;
+	out->pending = 0;
+	out->piece.type = (int)game->piece.type;
+	out->piece.rotation = game->piece.rotation;
+	out->piece.col = game->piece.col;
+	out->piece.row = game->piece.row;
+	snprintf(out->username, sizeof(out->username), "%s",
+		server_room->room->slots[slot].membership.username);
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			out->cells[row][col].type
+				= (uint8_t)board_get(&game->board, col, row).type;
+			out->cells[row][col].color
+				= (uint8_t)(board_get(&game->board, col, row).color & 0x0F);
+			col++;
+		}
+		row++;
+	}
+}
+
+/**
+ * @brief Names the phase one game is in, for an onlooker.
+ *
+ * The same mapping game_snapshot makes for the game's own player, minus the
+ * countdown - that one belongs to the room and is written onto the snapshot
+ * as a whole, not per opponent.
+ *
+ * @param game Game to describe.
+ * @return The phase to put on the wire.
+ */
+static t_body_phase	game_phase(const t_game *game)
+{
+	if (game->topped_out)
+		return (BODY_PHASE_TOP_OUT);
+	if (game->paused)
+		return (BODY_PHASE_PAUSED);
+	if (game->clearing_count > 0)
+		return (BODY_PHASE_CLEARING);
+	return (BODY_PHASE_ACTIVE);
 }
 
 /**

@@ -219,6 +219,8 @@ static int	validate_opponents(const t_body_state *in)
 		opponent = &in->opponents[i];
 		if (opponent->slot < 0 || opponent->lines < 0 || opponent->pending < 0)
 			return (-1);
+		if (opponent->piece.type < 0 || opponent->piece.rotation < 0)
+			return (-1);
 		if (opponent->phase > BODY_PHASE_COUNTDOWN)
 			return (-1);
 		if (validate_username(opponent->username) != 0)
@@ -429,10 +431,12 @@ static int	encode_opponents(const t_body_state *in, char *out, size_t cap,
 	{
 		opponent = &in->opponents[i];
 		if (body_append(out, cap, off,
-				"opp %d %" PRIu64 " %d %s %" PRIu64 " %d %d %s\n",
+				"opp %d %" PRIu64 " %d %s %" PRIu64 " %d %d %d %d %d %d %s\n",
 				opponent->slot, opponent->player_id, opponent->alive,
 				g_phases[opponent->phase], opponent->score, opponent->lines,
-				opponent->pending, opponent->username) != 0)
+				opponent->pending, opponent->piece.type,
+				opponent->piece.rotation, opponent->piece.col,
+				opponent->piece.row, opponent->username) != 0)
 			return (-1);
 		if (encode_cells(opponent->cells, out, cap, off) != 0)
 			return (-1);
@@ -684,12 +688,16 @@ static int	decode_opponent(t_body_cursor *c, t_body_opponent *out)
 	int		n;
 
 	if (body_take_line(c, line, sizeof(line)) != 0
-		|| sscanf(line, "opp %d %" SCNu64 " %d %1023s %" SCNu64 " %d %d %31s%n",
+		|| sscanf(line,
+			"opp %d %" SCNu64 " %d %1023s %" SCNu64 " %d %d %d %d %d %d %31s%n",
 			&out->slot, &out->player_id, &alive, phase, &out->score,
-			&out->lines, &out->pending, out->username, &n) != 8
+			&out->lines, &out->pending, &out->piece.type, &out->piece.rotation,
+			&out->piece.col, &out->piece.row, out->username, &n) != 12
 		|| line[n] != '\0')
 		return (-1);
 	if (out->slot < 0 || out->lines < 0 || out->pending < 0)
+		return (-1);
+	if (out->piece.type < 0 || out->piece.rotation < 0)
 		return (-1);
 	if (alive != 0 && alive != 1)
 		return (-1);

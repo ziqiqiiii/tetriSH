@@ -17,6 +17,8 @@
 // Static Functions
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
+static void	test_each_snapshot_carries_the_other_board(void);
+static void	test_a_move_reaches_the_other_players_view(void);
 static void	test_a_top_out_ends_the_match_for_both_players(void);
 static void	test_both_players_are_recorded_once_each(void);
 
@@ -30,6 +32,8 @@ static void		play_path(const t_harness *hc, const char *room, char *out,
 					size_t cap);
 static int		wait_phase(t_harness *hc, t_body_state *out, t_body_phase phase,
 					int window_ms);
+static int		wait_opponent_col(t_harness *hc, t_body_state *out, int col,
+					int window_ms);
 static int		wait_result(t_harness *hc, t_body_state *out, int window_ms);
 static int		top_out(t_harness *hc, const char *path);
 static void		nap(int ms);
@@ -39,6 +43,8 @@ int	main(void)
 {
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
+	test_each_snapshot_carries_the_other_board();
+	test_a_move_reaches_the_other_players_view();
 	test_a_top_out_ends_the_match_for_both_players();
 	test_both_players_are_recorded_once_each();
 	return (0);
@@ -113,6 +119,73 @@ static void	test_the_hold_refuses_inputs(void)
 	hc_close(&blake);
 	fx_stop(&fx);
 	printf("PASS test_the_hold_refuses_inputs\n");
+}
+
+/*
+** Each player's snapshot carries the other's board. It rides inside the
+** recipient's own frame because a client holds one STATE mailbox slot and a
+** second push would free the first - and one message makes the two boards the
+** same instant, which two could not promise.
+*/
+static void	test_each_snapshot_carries_the_other_board(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	char			room[ROOM_NAME_MAX];
+	char			path[96];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	assert(start_match(&amber, room) == 200);
+	play_path(&blake, room, path, sizeof(path));
+	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
+			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
+	assert(state.opponent_count == 1);
+	assert(state.opponents[0].player_id == blake.player_id);
+	assert(strcmp(state.opponents[0].username, "blake") == 0);
+	assert(state.opponents[0].alive);
+	assert(wait_phase(&blake, &state, BODY_PHASE_ACTIVE,
+			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
+	assert(state.opponent_count == 1);
+	assert(state.opponents[0].player_id == amber.player_id);
+	assert(strcmp(state.opponents[0].username, "amber") == 0);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_each_snapshot_carries_the_other_board\n");
+}
+
+/*
+** A move by one player is a frame owed to both, because both frames now carry
+** both boards. Marking only the player who acted would leave the other
+** watching a board that froze whenever they stopped playing themselves.
+*/
+static void	test_a_move_reaches_the_other_players_view(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	char			room[ROOM_NAME_MAX];
+	char			path[96];
+	int				before;
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	assert(start_match(&amber, room) == 200);
+	play_path(&blake, room, path, sizeof(path));
+	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
+			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
+	before = state.opponents[0].piece.col;
+	assert(simple(&blake, "MOVE", path, "LEFT") == 200);
+	assert(wait_opponent_col(&amber, &state, before - 1, HC_TIMEOUT_MS) == 0);
+	assert(state.opponents[0].piece.col == before - 1);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_a_move_reaches_the_other_players_view\n");
 }
 
 /*
@@ -301,6 +374,35 @@ static int	wait_phase(t_harness *hc, t_body_state *out, t_body_phase phase,
 	while (hc_wait_state(hc, &snap, window_ms) == 0)
 	{
 		if (snap.phase == phase)
+		{
+			*out = snap;
+			return (0);
+		}
+	}
+	return (-1);
+}
+
+/**
+ * @brief Reads snapshots until the opponent's piece reaches a column.
+ *
+ * Waiting for "the next frame" would not do: the tick that carries the move
+ * is not necessarily the next one to arrive, and gravity produces frames of
+ * its own in between.
+ *
+ * @param hc Harness client to read.
+ * @param out Receives the matching snapshot.
+ * @param col The column the opponent's piece is expected to reach.
+ * @param window_ms How long to keep reading for.
+ * @return 0 when the opponent's piece got there, -1 when it did not.
+ */
+static int	wait_opponent_col(t_harness *hc, t_body_state *out, int col,
+			int window_ms)
+{
+	t_body_state	snap;
+
+	while (hc_wait_state(hc, &snap, window_ms) == 0)
+	{
+		if (snap.opponent_count == 1 && snap.opponents[0].piece.col == col)
 		{
 			*out = snap;
 			return (0);

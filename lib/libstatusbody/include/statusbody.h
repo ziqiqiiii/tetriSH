@@ -172,6 +172,15 @@ typedef struct s_body_opponent
 	uint64_t	score;
 	int			lines;
 	int			pending;
+	/*
+	** The falling piece, carried separately from the settled board for the
+	** same reason the recipient's own is: a board without it only changes
+	** when something locks, so an opponent would appear to sit motionless and
+	** then jump. Sending it as a piece rather than stamping it into the cells
+	** is what lets the client draw an opponent through the path it already
+	** draws a board with.
+	*/
+	t_body_piece	piece;
 	char		username[BODY_USER_MAX];
 	t_body_cell	cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
 }	t_body_opponent;
@@ -193,7 +202,8 @@ typedef struct s_body_opponent
 **   board          (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
 **   opponents <n>
-**   opp <slot> <pid> <alive> <phase> <score> <lines> <pending> <username>
+**   opp <slot> <pid> <alive> <phase> <score> <lines> <pending>
+**       <ptype> <protation> <pcol> <prow> <username>
 **                    (then that opponent's 20 board lines; both repeated n
 **                     times)
 **
