@@ -54,6 +54,15 @@ Vampire and Copy *read* the Target but write the caster, and a read cannot leave
 
 **Mirror is checked when an ability is aimed, not when it lands.** It steals *the next ability activated against* its holder, and a queued effect can be several effects behind by the time it arrives — checking at the landing would steal the wrong one. Reflecting is not refusing: the sender still paid, and it still happens, to them.
 
+Two of the eleven need something beyond a queue entry:
+
+- **Fry** is two halves. The rows go onto the sender's *own* floor and burn at their next lock — and are then sent to the Target, whole rather than through `garbage_lines_from_clear`'s N−1, because they are not a clear being converted but rows a player deliberately buried themselves under in order to hand over. They ride the ability lane, so Pals does not absorb them.
+- **Pals** turns the ordinary kind upside down: incoming garbage takes rows *off* the floor instead of putting them on. Ability garbage is excluded by the ability text, which is why `t_game` counts `pending_garbage` and `pending_ability_garbage` separately — one counter could not tell Pentaris from a tetris, so Pals would absorb both or neither.
+
+**Dark and Pals are the two effects `libtetrisbrain` refuses to time.** Its comment says the server decides when they end, so `t_game` carries `dark_pieces` and `pals_pieces` and `age_server_effects` runs them down on the holder's own locks. Without that, "for a limited time" is forever and one Dark ends the game. Dark's count is armed where it *lands* rather than where it was sent, so the lock that delivers it does not spend one of its pieces.
+
+**Dark is also the one ability a server cannot carry out.** Every other effect is a rule about what a player may *do*, enforced by refusing the input; Dark is a rule about what they may *see*. So it rides the wire as a count and `tetrisu` blanks the cells outside a window under the falling piece — applied to the drawn grid and not to the board, so the hidden rows still collide. The player is blinded, not helped.
+
 Bomb's scatter and garbage's hole column both walk from the game's own counters rather than from a random source. `libtetrisbrain` owns no RNG by contract, and a scatter that moves with how long a game has run is unpredictable to a player without being unreproducible to a test.
 
 ---

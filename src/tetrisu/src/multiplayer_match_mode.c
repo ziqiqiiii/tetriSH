@@ -20,6 +20,9 @@ static bool	apply_handling_actions(t_match_authority *authority,
 static void	select_power(t_match_authority *authority,
 				t_mp_match_state *state, t_audio_ctx *audio, uint32_t key);
 static void	play_match_events(t_audio_ctx *audio, uint32_t events);
+static bool	announce_effects(t_match_authority *authority,
+				const t_mp_match_state *state, t_render_ctx *ctx,
+				t_audio_ctx *audio);
 static bool	match_mouse_pixel_position(const t_render_ctx *ctx,
 				const ncinput *input, int *x, int *y);
 static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
@@ -165,6 +168,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 						&handling_config, elapsed_ms) || changed;
 			play_match_events(audio, solo_game_take_events(&state.local_game));
 			(void)solo_game_take_events(&state.opponent_game);
+			changed = announce_effects(&authority, &state, ctx, audio)
+				|| changed;
 			/*
 			 * A frame the opponent's presentation floor held back is due now,
 			 * and nothing else this turn is going to ask for a draw.
@@ -654,4 +659,41 @@ static void	play_match_events(t_audio_ctx *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_DOUBLE);
 	else if ((events & SOLO_EVENT_SINGLE) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_SINGLE);
+}
+
+/**
+ * @brief Puts up a card for any ability that has just landed on this player.
+ *
+ * The effects themselves are the server's and were always enforced; what was
+ * missing was any way to tell. Paralysis and a rotate key that had stopped
+ * responding looked identical from this side, and the player had no reason to
+ * suspect the first.
+ *
+ * A card and a sound rather than a screen shake: the board is a terminal
+ * bitmap with no partial update, so moving it means re-encoding both boards
+ * for every frame of the shake - which would cost exactly the input latency
+ * the banding work went to remove, at the moment the player can least afford
+ * it. The card is drawn on its own plane over the top and costs one region.
+ *
+ * @param authority Authority holding what was last reported.
+ * @param state Match model carrying the server's latest counts.
+ * @param ctx Render context to raise the card on.
+ * @param audio Audio context, for the sting that goes with it.
+ * @return true when a card went up and the frame should be presented.
+ */
+static bool	announce_effects(t_match_authority *authority,
+		const t_mp_match_state *state, t_render_ctx *ctx, t_audio_ctx *audio)
+{
+	char	title[UI_NOTIFICATION_TITLE_MAX + 1];
+	char	message[UI_NOTIFICATION_MESSAGE_MAX + 1];
+
+	if (!match_authority_is_online(authority))
+		return (false);
+	if (!solo_effects_take_arrival(&state->local_game.effects,
+			&authority->reported, title, sizeof(title), message,
+			sizeof(message)))
+		return (false);
+	render_notification_show_effect(ctx, title, message);
+	audio_play_sfx(audio, AUDIO_SFX_ABILITY_REJECTED);
+	return (true);
 }

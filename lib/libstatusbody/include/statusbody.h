@@ -199,6 +199,8 @@ typedef struct s_body_opponent
 **   clearing <count> <elapsed_ms> [<rows>...]
 **   countdown <ms>
 **   pending <rows>
+**   effects <paralysis> <inversion> <nue> <thwack> <fry> <dark> <pals>
+**           <mirror>
 **   result <none|won|lost> <rank>
 **   board          (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
@@ -261,6 +263,26 @@ typedef struct s_body_state
 	** all there is to show. Single always sends 0.
 	*/
 	int					pending;
+	/*
+	** The status effects riding on this player, as counts rather than flags:
+	** the piece-counted ones (Paralysis, Inversion, Nue, Thwack) say how many
+	** of this player's pieces are left under them, and the rest say 1 or 0.
+	**
+	** They are on the wire because an effect nobody can see is indis-
+	** tinguishable from a bug. Paralysis worked perfectly and looked exactly
+	** like a rotate key that had stopped responding, because the server
+	** refused the input and the client was never told why; Dark could not be
+	** drawn at all, since blacking out a field is something only the renderer
+	** can do.
+	*/
+	int					effect_paralysis;
+	int					effect_inversion;
+	int					effect_nue;
+	int					effect_thwack;
+	int					effect_fry;
+	int					effect_dark;
+	int					effect_pals;
+	int					effect_mirror;
 	t_body_result		result;
 	int					rank;
 	t_body_clear_label	last_clear;

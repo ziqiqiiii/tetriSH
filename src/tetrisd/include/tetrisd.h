@@ -198,6 +198,14 @@
 # define TETRISD_BOMB_CELLS						12
 
 /*
+** How many of the Target's pieces Dark and Pals last. Four matches Nue and
+** Thwack, the two piece-counted effects libtetrisbrain does time itself, so
+** "a limited time" means the same length whoever is counting it.
+*/
+# define TETRISD_DARK_PIECES						4
+# define TETRISD_PALS_PIECES						4
+
+/*
 ** Game points that buy one wallet point (docs/game-economics.md). It is the
 ** whole of the economy's exchange rate, and it is charged against a player's
 ** running total rather than each game on its own - see room.c's award_game.
@@ -484,6 +492,34 @@ typedef struct s_game
 	** underneath it.
 	*/
 	int					pending_garbage;
+	/*
+	** Garbage an ability sent, kept apart from the ordinary kind because Pals
+	** treats the two differently: "incoming ordinary garbage lowers the
+	** Player's stack instead of raising it; garbage created by abilities is
+	** excluded" (docs/use_cases.md). One counter could not tell them apart, so
+	** Pals would either absorb Pentaris - which the text forbids - or absorb
+	** nothing.
+	*/
+	int					pending_ability_garbage;
+	/*
+	** Rows Fry burned off this player's own floor and has not yet passed on.
+	** Fry is two halves and only the first was built: the rows go in, and at
+	** the next lock they clear *and are sent to the Target*. The burn is
+	** consumed by effect_on_piece_lock, so the count is taken before that runs
+	** and handed to room.c, which is the only module that knows who the Target
+	** is.
+	*/
+	int					fry_owed;
+	/*
+	** How many more of this player's pieces Dark and Pals last.
+	**
+	** libtetrisbrain deliberately leaves both open-ended - its comment says
+	** "Dark/Pals/Mirror stay on until effect_clear, the server decides when
+	** they end" - so this is the server deciding. Without it "for a limited
+	** time" would be forever, and a single Dark would end the game.
+	*/
+	int					dark_pieces;
+	int					pals_pieces;
 	/*
 	** Which column the next garbage row leaves open. Derived from a counter
 	** rather than drawn, so the hole walks instead of stacking - the same
@@ -1002,6 +1038,8 @@ bool			game_pause(t_game *g, bool paused);
 bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
 void			game_queue_garbage(t_game *g, int lines);
+void			game_queue_ability_garbage(t_game *g, int lines);
+int				game_take_fry(t_game *g);
 void			game_queue_ability(t_game *g, t_pending_kind kind,
 					int argument);
 int				game_take_cleared(t_game *g);

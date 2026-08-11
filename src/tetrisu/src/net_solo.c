@@ -29,6 +29,7 @@ static void	apply_cells(t_solo_game *game, const t_body_state *snap);
 static void	apply_counters(t_solo_game *game, const t_body_state *snap);
 static void	apply_phase(t_solo_game *game, const t_body_state *snap);
 static void	apply_clearing(t_solo_game *game, const t_body_state *snap);
+static void	apply_effects(t_solo_game *game, const t_body_state *snap);
 static void	apply_clear_label(t_solo_game *game, const t_body_state *snap,
 				uint64_t previous_score);
 static t_solo_ability_result	verdict_of(const char *reason);
@@ -315,7 +316,31 @@ void	net_state_apply(const t_body_state *snap, t_solo_game *game)
 	apply_counters(game, snap);
 	apply_clearing(game, snap);
 	apply_clear_label(game, snap, previous_score);
+	apply_effects(game, snap);
 	apply_phase(game, snap);
+}
+
+/**
+ * @brief Copies the server's effect counts onto the view model.
+ *
+ * Copied and not interpreted. Whether a rotation is allowed is the server's
+ * answer and always was; this is the client learning enough to say why it was
+ * refused, and enough for the renderer to black a field out - which is the one
+ * effect nothing but a renderer can carry out.
+ *
+ * @param game View model being filled.
+ * @param snap Snapshot to read.
+ */
+static void	apply_effects(t_solo_game *game, const t_body_state *snap)
+{
+	game->effects.paralysis = snap->effect_paralysis;
+	game->effects.inversion = snap->effect_inversion;
+	game->effects.nue = snap->effect_nue;
+	game->effects.thwack = snap->effect_thwack;
+	game->effects.fry = snap->effect_fry;
+	game->effects.dark = snap->effect_dark;
+	game->effects.pals = snap->effect_pals;
+	game->effects.mirror = snap->effect_mirror;
 }
 
 /**

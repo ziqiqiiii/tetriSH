@@ -35,10 +35,14 @@ static void	test_mirror_sends_the_next_ability_back(void);
 static void	test_pals_and_mirror_land_on_their_caster(void);
 static void	test_nobody_to_aim_at_is_refused(void);
 static void	test_a_full_queue_keeps_the_newest(void);
+static void	test_dark_blinds_for_four_pieces(void);
+static void	test_pals_turns_ordinary_garbage_into_a_gift(void);
+static void	test_fry_sends_its_burned_rows_on(void);
 
 static void	pair(t_game *sender, t_game *target);
 static void	arm(t_game *g);
 static const t_ability_def	*ability(t_item_id character, int level);
+static const t_ability_def	*ability_solo(t_item_id character, int level);
 static int	filled_cells(const t_game *g);
 
 int	main(void)
@@ -54,6 +58,9 @@ int	main(void)
 	test_pals_and_mirror_land_on_their_caster();
 	test_nobody_to_aim_at_is_refused();
 	test_a_full_queue_keeps_the_newest();
+	test_dark_blinds_for_four_pieces();
+	test_pals_turns_ordinary_garbage_into_a_gift();
+	test_fry_sends_its_burned_rows_on();
 	return (0);
 }
 
@@ -93,10 +100,12 @@ static void	test_pentaris_sends_five_rows(void)
 	pair(&sender, &target);
 	assert(game_ability(&sender, &target, ability(2, 3), 0)
 		== ABILITY_ACTIVATED);
-	assert(target.pending_garbage == TETRISD_PENTARIS_ROWS);
+	/* The ability lane, not the ordinary one: Pals must not absorb it. */
+	assert(target.pending_ability_garbage == TETRISD_PENTARIS_ROWS);
+	assert(target.pending_garbage == 0);
 	assert(filled_cells(&target) == 0);
 	assert(game_drop(&target, true));
-	assert(target.pending_garbage == 0);
+	assert(target.pending_ability_garbage == 0);
 	assert(filled_cells(&target)
 		>= TETRISD_PENTARIS_ROWS * (BOARD_WIDTH - 1));
 	printf("PASS test_pentaris_sends_five_rows\n");
@@ -410,4 +419,111 @@ static int	filled_cells(const t_game *g)
 		row++;
 	}
 	return (count);
+}
+
+/*
+** Dark has no counter in libtetrisbrain - the brain leaves it open-ended and
+** says the server decides when it ends. Without that decision "for a limited
+** time" is forever, and one Dark would end the game.
+**
+** The count is armed where it lands rather than where it was sent, so the
+** lock that delivers it does not spend one of its pieces.
+*/
+static void	test_dark_blinds_for_four_pieces(void)
+{
+	t_game	sender;
+	t_game	target;
+	int		pieces;
+
+	pair(&sender, &target);
+	assert(game_ability(&sender, &target, ability(1, 2), 0)
+		== ABILITY_ACTIVATED);
+	assert(target.dark_pieces == 0);
+	assert(game_drop(&target, true));
+	assert(target.dark_pieces == TETRISD_DARK_PIECES);
+	assert(target.effects.blackout);
+	pieces = 0;
+	while (pieces < TETRISD_DARK_PIECES)
+	{
+		assert(game_drop(&target, true));
+		pieces++;
+	}
+	assert(target.dark_pieces == 0);
+	assert(!target.effects.blackout);
+	printf("PASS test_dark_blinds_for_four_pieces\n");
+}
+
+/*
+** "Incoming ordinary garbage lowers the Player's stack instead of raising it;
+** garbage created by abilities is excluded." Both halves are the test: Pals
+** absorbing Pentaris would make Wolf-man's level 3 a hard counter to
+** Mirurun's, which the text refuses.
+*/
+static void	test_pals_turns_ordinary_garbage_into_a_gift(void)
+{
+	t_game	sender;
+	t_game	target;
+	int		before;
+
+	pair(&sender, &target);
+	arm(&target);
+	assert(game_ability(&target, &sender, ability(4, 3), 0)
+		== ABILITY_ACTIVATED);
+	assert(target.effects.pals);
+	before = filled_cells(&target);
+	game_queue_garbage(&target, 2);
+	assert(game_drop(&target, true));
+	/* Two rows off the floor, not two rows onto it. */
+	assert(filled_cells(&target) < before);
+	/* Pentaris still lands, Pals or no Pals. */
+	before = filled_cells(&target);
+	game_queue_ability_garbage(&target, TETRISD_PENTARIS_ROWS);
+	assert(game_drop(&target, true));
+	assert(filled_cells(&target) > before);
+	printf("PASS test_pals_turns_ordinary_garbage_into_a_gift\n");
+}
+
+/*
+** Fry is two halves and only the first was built: the rows went onto the
+** sender's own floor and burned at the next lock, and were then thrown away.
+** The text says they are sent to the Target.
+**
+** They go on whole rather than through garbage_lines_from_clear's N-1,
+** because they are not a clear being converted - they are three rows the
+** sender deliberately buried themselves under in order to hand over.
+*/
+static void	test_fry_sends_its_burned_rows_on(void)
+{
+	t_game	sender;
+	t_game	target;
+	int		burned;
+
+	pair(&sender, &target);
+	assert(game_ability(&sender, &target, ability_solo(1, 1), 0)
+		== ABILITY_ACTIVATED);
+	assert(effect_fry_rows(&sender.effects) > 0);
+	burned = effect_fry_rows(&sender.effects);
+	assert(game_drop(&sender, true));
+	assert(game_take_fry(&sender) == burned);
+	assert(game_take_fry(&sender) == 0);
+	printf("PASS test_fry_sends_its_burned_rows_on\n");
+}
+
+/**
+ * @brief Looks up an ability that does not need a Target.
+ *
+ * Fry is one: it is playable alone, with the send simply going nowhere, which
+ * is why every character has a level 1 a one-player room can serve.
+ *
+ * @param character The character offering it.
+ * @param level The ability level.
+ * @return The definition, never NULL.
+ */
+static const t_ability_def	*ability_solo(t_item_id character, int level)
+{
+	const t_ability_def	*def;
+
+	def = ability_lookup(character, level);
+	assert(def != NULL && !def->needs_target);
+	return (def);
 }

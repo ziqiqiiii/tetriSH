@@ -1093,16 +1093,34 @@ static void	settle_garbage(t_server_room *server_room)
 	int	slot;
 	int	target;
 	int	cleared;
+	int	fry;
 
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		cleared = game_take_cleared(&server_room->games[slot]);
+		fry = game_take_fry(&server_room->games[slot]);
 		target = server_room_target_of(server_room, slot);
-		if (cleared > 0 && target >= 0)
+		if (target < 0)
 		{
+			slot++;
+			continue ;
+		}
+		if (cleared > 0)
 			game_queue_garbage(&server_room->games[target],
 				garbage_lines_from_clear(cleared));
+		/*
+		 * Fry's rows go on whole rather than through
+		 * garbage_lines_from_clear's N-1: they are not a clear being
+		 * converted, they are three rows the sender put on their own floor
+		 * and burned in order to hand over. They ride the ability lane, so
+		 * Pals does not absorb them - the text excludes garbage an ability
+		 * made.
+		 */
+		if (fry > 0)
+			game_queue_ability_garbage(&server_room->games[target], fry);
+		if (cleared > 0 || fry > 0)
+		{
 			server_room->dirty[target] = true;
 			server_room->dirty[slot] = true;
 		}

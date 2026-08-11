@@ -96,6 +96,8 @@ static int opponent_pending(const t_mp_match_state *state);
 static bool regions_caption(t_match_regions *pass, const t_mp_rect *board);
 static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
 				const t_piece *piece, int layer);
+static void blackout_grid(const t_solo_game *game,
+				int grid[BOARD_HEIGHT][BOARD_WIDTH]);
 static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
 static void put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 				 t_color tint, unsigned alpha);
@@ -108,6 +110,8 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_match_pixel_layout *layout,
 				const t_mp_match_state *state);
+static void effect_line(const t_solo_effects *effects, char *out,
+				size_t size);
 static void draw_double_caption(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *board,
 				const char *name, uint64_t points, int charge, int pending,
@@ -316,6 +320,50 @@ static void board_cell_grid(const t_solo_game *game,
 	ghost = solo_game_ghost(game);
 	stamp_piece_cells(grid, &ghost, 2000);
 	stamp_piece_cells(grid, &game->active, 3000);
+	blackout_grid(game, grid);
+}
+
+/**
+ * @brief Halloween L2 (Dark): hides everything but a window under the piece.
+ *
+ * The only effect in the catalogue a server cannot carry out. Every other one
+ * is a rule about what a player may do, which tetrisd enforces by refusing the
+ * input; this one is a rule about what they may *see*, and only the thing
+ * drawing the board can enforce that.
+ *
+ * It is applied to the cell grid rather than to the board, so the hidden rows
+ * are still there and still collide - the player is blinded, not helped. The
+ * window travels with the falling piece and covers the rows just below it,
+ * which is what makes Dark survivable: you can place the piece in your hand
+ * and nothing else.
+ *
+ * @param game Game being drawn.
+ * @param grid Cell grid to blank outside the window.
+ */
+static void	blackout_grid(const t_solo_game *game,
+	int grid[BOARD_HEIGHT][BOARD_WIDTH])
+{
+	int	first;
+	int	last;
+	int	row;
+	int	col;
+
+	if (game->effects.dark <= 0)
+		return ;
+	first = game->active.row;
+	last = first + MP_MATCH_DARK_WINDOW_ROWS;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if ((row < first || row > last) && grid[row][col] < 3000)
+				grid[row][col] = 0;
+			col++;
+		}
+		row++;
+	}
 }
 
 static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
@@ -1255,6 +1303,13 @@ static uint64_t local_board_signature(const t_solo_game *game,
 	hash = hash_bytes(hash, &flash, sizeof(flash));
 	danger = danger_step(game);
 	hash = hash_bytes(hash, &danger, sizeof(danger));
+	/*
+	 * Dark changes what is drawn without changing the board, so a signature
+	 * that ignored it would keep showing a blacked-out field for as long as
+	 * the piece happened to sit still - and would keep showing it after the
+	 * effect had expired.
+	 */
+	hash = hash_bytes(hash, &game->effects, sizeof(game->effects));
 	if (include_score)
 		hash = hash_bytes(hash, &game->scoring, sizeof(game->scoring));
 	return (hash);
@@ -1292,6 +1347,9 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 	hash = hash_bytes(hash, &state->ko_count, sizeof(state->ko_count));
 	hash = hash_bytes(hash, &state->incoming_attackers,
 		sizeof(state->incoming_attackers));
+	/* The standing effect line lives in this region, so it dirties it. */
+	hash = hash_bytes(hash, &state->local_game.effects,
+		sizeof(state->local_game.effects));
 	return (hash_bytes(hash, &state->local_game.scoring.total,
 			sizeof(state->local_game.scoring.total)));
 }
@@ -1559,6 +1617,29 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 18,
 			g_gold, true);
 		draw_targeting(ctx, pixels, width, height, &layout->targeting, state);
+	}
+	/*
+	 * A standing line, because the card that announced the effect fades and
+	 * the effect does not: Paralysis outlives its own notification by two
+	 * pieces, and a player who looked away in between is back to guessing why
+	 * their piece will not turn.
+	 *
+	 * It goes *inside* layout->hud rather than beside the controls at the foot
+	 * of the screen. The controls are drawn here but live outside that
+	 * rectangle, which makes them part of the composition that is painted once
+	 * on a rebuild - a line put there would be right on the frame it appeared
+	 * and then frozen, because only the hud region is re-blitted when the hud
+	 * signature moves.
+	 */
+	effect_line(&state->local_game.effects, line, sizeof(line));
+	if (line[0] != '\0')
+	{
+		text = (t_mp_rect){margin, layout->hud.y
+			+ (state->mode == APP_GAME_MODE_DOUBLE ? 50 : 84),
+			width - margin * 2, 28};
+		if (text.y + text.height <= layout->hud.y + layout->hud.height)
+			mp_match_pixel_draw_text_box(ctx, pixels, width, height, line,
+				&text, 16, g_red, true);
 	}
 	text = layout->controls;
 	if (state->mode == APP_GAME_MODE_BATTLE_ROYALE)
@@ -2525,4 +2606,36 @@ static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 		* (255u - alpha) / 255u) / out_alpha;
 	*pixel = ncpixel(red, green, blue);
 	ncpixel_set_a(pixel, out_alpha);
+}
+
+/**
+ * @brief Names the effect currently riding on the player, or nothing.
+ *
+ * One at a time, worst first. Two effects at once is possible and rare, and a
+ * line long enough to hold both would be a line nobody reads mid-piece.
+ *
+ * @param effects The counts the server sent.
+ * @param out Destination buffer, emptied when nothing is active.
+ * @param size Capacity of out.
+ */
+static void effect_line(const t_solo_effects *effects, char *out, size_t size)
+{
+	out[0] = '\0';
+	if (effects->paralysis > 0)
+		snprintf(out, size, "NO ROTATION  -  %d PIECES", effects->paralysis);
+	else if (effects->inversion > 0)
+		snprintf(out, size, "CONTROLS INVERTED  -  %d PIECES",
+			effects->inversion);
+	else if (effects->nue > 0)
+		snprintf(out, size, "NO FAST DROP  -  %d PIECES", effects->nue);
+	else if (effects->dark > 0)
+		snprintf(out, size, "BLACKOUT  -  %d PIECES", effects->dark);
+	else if (effects->fry > 0)
+		snprintf(out, size, "%d ROWS BURN AT THE NEXT LOCK", effects->fry);
+	else if (effects->thwack > 0)
+		snprintf(out, size, "THWACK  -  %d PIECES", effects->thwack);
+	else if (effects->pals > 0)
+		snprintf(out, size, "PALS  -  GARBAGE LOWERS YOUR STACK");
+	else if (effects->mirror > 0)
+		snprintf(out, size, "MIRROR  -  THE NEXT ABILITY REBOUNDS");
 }

@@ -342,6 +342,7 @@ void	test_state_solo_frame_carries_zero_countdown_and_opponents(void)
 	assert(n > 0);
 	assert(strstr(out, "countdown 0\n") != NULL);
 	assert(strstr(out, "pending 0\n") != NULL);
+	assert(strstr(out, "effects 0 0 0 0 0 0 0 0\n") != NULL);
 	assert(strstr(out, "opponents 0\n") != NULL);
 	assert(body_state_decode(out, (size_t)n, &back) == 0);
 	assert(back.opponent_count == 0 && back.countdown_ms == 0);
@@ -437,6 +438,37 @@ void	test_state_pending_garbage_round_trips(void)
 	in.pending = -1;
 	assert(body_state_encode(&in, out, sizeof(out)) == -1 && errno == EINVAL);
 	printf("PASS test_state_pending_garbage_round_trips\n");
+}
+
+/*
+** The effect counts. They are on the wire because an effect nobody can see is
+** indistinguishable from a bug: Paralysis worked perfectly and looked exactly
+** like a rotate key that had stopped responding, and Dark could not be drawn
+** at all, since blacking out a field is something only a renderer can do.
+*/
+void	test_state_effects_round_trip(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.effect_paralysis = 3;
+	in.effect_inversion = 2;
+	in.effect_nue = 4;
+	in.effect_thwack = 1;
+	in.effect_fry = 3;
+	in.effect_dark = 4;
+	in.effect_pals = 1;
+	in.effect_mirror = 1;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "effects 3 2 4 1 3 4 1 1\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(memcmp(&in, &back, sizeof(in)) == 0);
+	in.effect_dark = -1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1 && errno == EINVAL);
+	printf("PASS test_state_effects_round_trip\n");
 }
 
 void	test_state_opponent_round_trips_whole(void)
@@ -554,6 +586,7 @@ int	main(void)
 	test_state_countdown_phase_round_trips();
 	test_state_result_round_trips();
 	test_state_pending_garbage_round_trips();
+	test_state_effects_round_trip();
 	test_state_opponent_round_trips_whole();
 	test_state_opponent_board_is_not_the_local_board();
 	test_state_decode_rejects_opponent_count_mismatch();

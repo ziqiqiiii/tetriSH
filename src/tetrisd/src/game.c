@@ -10,6 +10,8 @@ static void				finish_clear(t_game *g);
 static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
 static void				drain_garbage(t_game *g);
+static void				inject_rows(t_game *g, int lines);
+static void				age_server_effects(t_game *g);
 static void				drain_abilities(t_game *g);
 static void				apply_bomb(t_game *g);
 
@@ -350,7 +352,15 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 		out->charge = BODY_CHARGE_MAX;
 	out->last_ability = g->last_ability;
 	out->last_clear = g->last_clear;
-	out->pending = g->pending_garbage;
+	out->pending = g->pending_garbage + g->pending_ability_garbage;
+	out->effect_paralysis = g->effects.no_rotate_pieces;
+	out->effect_inversion = g->effects.inverted_pieces;
+	out->effect_nue = g->effects.no_fastdrop_pieces;
+	out->effect_thwack = g->effects.thwack_pieces;
+	out->effect_fry = g->effects.fry_rows;
+	out->effect_dark = g->dark_pieces;
+	out->effect_pals = g->pals_pieces;
+	out->effect_mirror = g->effects.mirror_armed;
 	out->clearing_count = g->clearing_count;
 	out->clearing_ms = g->clearing_ms;
 	row = 0;
@@ -458,6 +468,13 @@ static void	finish_clear(t_game *g)
 	cleared = board_clear_lines(&g->board);
 	if (cleared > 0 && effect_thwack_active(&g->effects))
 		cleared += board_cascade_clear(&g->board);
+	/*
+	 * Fry's second half. The rows it filled burn off this floor here - that
+	 * part always worked - and the count is taken before effect_on_piece_lock
+	 * consumes it, because they are owed to somebody. room.c passes them on;
+	 * a game does not know it has a Target.
+	 */
+	g->fry_owed += effect_fry_rows(&g->effects);
 	board_cut_bottom(&g->board, effect_fry_rows(&g->effects));
 	perfect = cleared > 0 && board_is_empty(&g->board);
 	score_apply_clear(&g->score, cleared, g->level, T_SPIN_NONE, perfect);
@@ -471,6 +488,7 @@ static void	finish_clear(t_game *g)
 	if (cleared > 0)
 		g->cleared_owed += cleared;
 	effect_on_piece_lock(&g->effects);
+	age_server_effects(g);
 	g->clearing_count = 0;
 	g->clearing_ms = 0;
 	g->accum_ms = 0;
@@ -501,8 +519,18 @@ static void	drain_abilities(t_game *g)
 	while (index < g->pending_count)
 	{
 		if (g->pending[index].kind == PENDING_EFFECT)
+		{
 			effect_apply(&g->effects,
 				(t_status_effect)g->pending[index].argument);
+			/*
+			 * Dark carries no counter of its own, so its length is set where
+			 * it lands rather than where it was sent - the ageing below runs
+			 * on the holder's locks, and arming it any earlier would spend a
+			 * piece of it on the lock that delivered it.
+			 */
+			if (g->pending[index].argument == (int)EFFECT_DARK)
+				g->dark_pieces = TETRISD_DARK_PIECES;
+		}
 		else if (g->pending[index].kind == PENDING_BOMB)
 			apply_bomb(g);
 		else if (g->pending[index].kind == PENDING_SIRTET)
@@ -597,20 +625,70 @@ void	game_queue_ability(t_game *g, t_pending_kind kind, int argument)
  */
 static void	drain_garbage(t_game *g)
 {
-	int	lines;
+	int	ordinary;
 
-	if (g->pending_garbage <= 0)
-		return ;
-	lines = g->pending_garbage;
+	ordinary = g->pending_garbage;
+	g->pending_garbage = 0;
+	/*
+	 * Pals turns the ordinary kind upside down: rows that would have raised
+	 * the stack take the same number off the floor instead. Ability garbage is
+	 * excluded by the ability text, which is the whole reason the two are
+	 * counted separately - Pentaris lands on a player holding Pals exactly as
+	 * it lands on one who is not.
+	 */
+	if (ordinary > 0 && g->effects.pals)
+	{
+		board_cut_bottom(&g->board, ordinary);
+		ordinary = 0;
+	}
+	inject_rows(g, ordinary);
+	inject_rows(g, g->pending_ability_garbage);
+	g->pending_ability_garbage = 0;
+}
+
+/**
+ * @brief Puts n garbage rows on the board, one at a time so the hole walks.
+ *
+ * @param g Game to raise.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+static void	inject_rows(t_game *g, int lines)
+{
 	if (lines > BOARD_HEIGHT)
 		lines = BOARD_HEIGHT;
-	g->pending_garbage = 0;
 	while (lines > 0)
 	{
 		board_inject_garbage(&g->board, 1,
 			(int)(g->garbage_seq % (uint32_t)BOARD_WIDTH));
 		g->garbage_seq++;
 		lines--;
+	}
+}
+
+/**
+ * @brief Ages the two effects libtetrisbrain leaves for the server to end.
+ *
+ * Dark and Pals have no counter of their own - the brain's comment says the
+ * server decides when they end - so this is where "for a limited time" is
+ * given a length. Counted in the holder's own pieces, like every other timed
+ * effect, so a player under Dark is blinded for four placements rather than
+ * for four seconds of however fast they happen to be going.
+ *
+ * @param g Game whose server-timed effects are aged by one lock.
+ */
+static void	age_server_effects(t_game *g)
+{
+	if (g->dark_pieces > 0)
+	{
+		g->dark_pieces--;
+		if (g->dark_pieces == 0)
+			effect_clear(&g->effects, EFFECT_DARK);
+	}
+	if (g->pals_pieces > 0)
+	{
+		g->pals_pieces--;
+		if (g->pals_pieces == 0)
+			effect_clear(&g->effects, EFFECT_PALS);
 	}
 }
 
@@ -634,6 +712,43 @@ void	game_queue_garbage(t_game *g, int lines)
 	g->pending_garbage += lines;
 	if (g->pending_garbage > BOARD_HEIGHT)
 		g->pending_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Queues garbage an ability sent, which Pals does not absorb.
+ *
+ * Counted apart from the ordinary kind for one reason and it is the ability
+ * text's: Pals turns incoming garbage into a gift, "garbage created by
+ * abilities is excluded". A single counter could not tell Pentaris from a
+ * tetris, so Pals would either eat both or neither.
+ *
+ * @param g Game the rows are owed to.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+void	game_queue_ability_garbage(t_game *g, int lines)
+{
+	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
+		return ;
+	g->pending_ability_garbage += lines;
+	if (g->pending_ability_garbage > BOARD_HEIGHT)
+		g->pending_ability_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Takes the Fry rows this player burned and has not passed on.
+ *
+ * @param g Game to take from.
+ * @return Rows burned since the last call.
+ */
+int	game_take_fry(t_game *g)
+{
+	int	rows;
+
+	if (g == NULL)
+		return (0);
+	rows = g->fry_owed;
+	g->fry_owed = 0;
+	return (rows);
 }
 
 /**

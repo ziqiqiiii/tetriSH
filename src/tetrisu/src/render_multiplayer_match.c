@@ -30,6 +30,8 @@ static bool	create_match_plane(t_render_ctx *ctx);
 static void	draw_selection(t_render_ctx *ctx, struct ncplane *plane,
 				const t_mp_match_state *state,
 				const t_mp_match_layout *layout);
+static void	effect_line(const t_solo_effects *effects, char *out,
+				size_t size);
 static void	draw_double(struct ncplane *plane,
 				const t_mp_match_state *state,
 				const t_mp_match_layout *layout);
@@ -291,6 +293,12 @@ static void	draw_double(struct ncplane *plane,
 	put_centered(plane, 27, layout->opponent_board.x - 14,
 		layout->opponent_board.width + 28, line, false);
 	draw_abilities(plane, &layout->abilities, state, false);
+	effect_line(&state->local_game.effects, line, sizeof(line));
+	if (line[0] != '\0')
+	{
+		set_fg(plane, MATCH_RED_R, MATCH_RED_G, MATCH_RED_B);
+		put_centered(plane, 29, 0, layout->cols, line, true);
+	}
 	set_fg(plane, MATCH_GOLD_R, MATCH_GOLD_G, MATCH_GOLD_B);
 	put_centered(plane, 31, 0, layout->cols, state->status, false);
 	set_fg(plane, MATCH_LAVENDER_R, MATCH_LAVENDER_G, MATCH_LAVENDER_B);
@@ -872,4 +880,37 @@ static t_cell	mini_sample(const t_board *board, int sample_x, int sample_y,
 static int	minimum(int first, int second)
 {
 	return (first < second ? first : second);
+}
+
+/**
+ * @brief Names every effect currently riding on the player, or nothing.
+ *
+ * The card that announces an arrival fades; this does not. An effect lasting
+ * three pieces outlives its own notification, so without a standing line a
+ * player who looked away would be back to guessing why their piece will not
+ * turn - which is the whole problem the wire field was added to solve.
+ *
+ * @param effects The counts the server sent.
+ * @param out Destination buffer, emptied when nothing is active.
+ * @param size Capacity of out.
+ */
+static void	effect_line(const t_solo_effects *effects, char *out, size_t size)
+{
+	out[0] = '\0';
+	if (effects->paralysis > 0)
+		snprintf(out, size, "NO ROTATION (%d)", effects->paralysis);
+	else if (effects->inversion > 0)
+		snprintf(out, size, "CONTROLS INVERTED (%d)", effects->inversion);
+	else if (effects->nue > 0)
+		snprintf(out, size, "NO FAST DROP (%d)", effects->nue);
+	else if (effects->dark > 0)
+		snprintf(out, size, "BLACKOUT (%d)", effects->dark);
+	else if (effects->fry > 0)
+		snprintf(out, size, "%d ROWS BURN AT THE NEXT LOCK", effects->fry);
+	else if (effects->thwack > 0)
+		snprintf(out, size, "THWACK (%d)", effects->thwack);
+	else if (effects->pals > 0)
+		snprintf(out, size, "PALS (%d)", effects->pals);
+	else if (effects->mirror > 0)
+		snprintf(out, size, "MIRROR READY");
 }

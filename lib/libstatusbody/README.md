@@ -113,6 +113,7 @@ clear tetris
 clearing 2 350 18 19
 countdown 0
 pending 0
+effects 0 0 0 0 0 0 0 0
 result none 0
 board
 00000000000000000000
@@ -133,6 +134,7 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
 | `countdown` | `<ms>` remaining before a dealt match begins; `0` when none is running |
 | `pending` | `<rows>` of garbage queued against **this** player and not yet landed; `0` in Single |
+| `effects` | `<paralysis> <inversion> <nue> <thwack> <fry> <dark> <pals> <mirror>` — the status effects riding on this player. The first four are how many of this player's pieces are left under them; the rest are `1` or `0` |
 | `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
@@ -143,11 +145,11 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 every player's clock stopped, which is what makes it a different thing from
 `paused`, one player's own.
 
-`countdown`, `pending`, `result` and `opponents` are always written, carrying
-`0` or `none` when there is nothing to say, the way `clearing` has always been written
+`countdown`, `pending`, `effects`, `result` and `opponents` are always
+written, carrying `0` or `none` when there is nothing to say, the way `clearing` has always been written
 with a count of `0`. No line's presence depends on another line's value, so a
 decoder never looks ahead; a Single snapshot is the frame it always was plus
-those four empty lines.
+those five empty lines.
 
 `result` is not a phase, because the winner's board is doing nothing a phase
 could describe — it is simply still active with a piece on it, exactly like a
@@ -165,6 +167,20 @@ the top-level line is garbage owed to the recipient, the `opp` field is garbage
 owed to that opponent. Both land at their subject's next piece lock rather than
 on arrival, so both are visible before they are real — which is the point of
 sending a count at all.
+
+`effects` exists because an effect nobody can see is indistinguishable from a
+bug. Every one of them is enforced by `tetrisd` and always was — but Paralysis
+looked exactly like a rotate key that had stopped responding, Inversion like
+the terminal had swapped the arrows, and Nue like a stuck spacebar, because the
+server refused the input and the client was never told why. Dark could not be
+carried out at all: blacking out a field is the one thing in the catalogue only
+a renderer can do.
+
+The client reads these as counts to display, never as rules to apply. It
+compares them against the ones it was last sent, and anything that went up is
+something that just landed — a comparison rather than an event, because a
+snapshot states what is true now and the `STATE` lane is a latest-wins mailbox
+that may drop one.
 
 `username` is last on its line and may not contain a space: every field before
 it is positional, so one space shifts all of them. The encoder refuses such a

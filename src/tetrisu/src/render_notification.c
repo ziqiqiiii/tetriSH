@@ -162,6 +162,31 @@ void	render_notification_queue_volume(t_render_ctx *ctx, int volume)
 /**
  * @brief Queues the fixed Marketplace guidance shown for a locked item.
  */
+/**
+ * @brief Shows one incoming-ability card, right now.
+ *
+ * Shown rather than queued: this is the only warning a player gets that
+ * something has been done to them, and it arrives while they are placing a
+ * piece. A card held back until the next stationary repaint would arrive after
+ * the effect it describes had already cost them something.
+ *
+ * @param ctx Render context.
+ * @param title What landed.
+ * @param message What it does.
+ */
+void	render_notification_show_effect(t_render_ctx *ctx, const char *title,
+		const char *message)
+{
+	uint64_t	now_ms;
+
+	if (ctx == NULL || ctx->nc == NULL)
+		return ;
+	now_ms = ui_notification_now_ms();
+	(void)ui_notification_show_effect(&ctx->notifications, title, message,
+		now_ms);
+	refresh_notifications(ctx, now_ms);
+}
+
 void	render_notification_queue_ownership(t_render_ctx *ctx)
 {
 	uint64_t	now_ms;

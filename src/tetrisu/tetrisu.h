@@ -258,6 +258,11 @@
 # define UI_NOTIFICATION_MESSAGE_MAX	31
 # define UI_NOTIFICATION_OWNERSHIP_TITLE	"ITEM NOT OWNED"
 # define UI_NOTIFICATION_OWNERSHIP_MESSAGE	"VISIT MARKETPLACE TO BUY"
+/*
+** An incoming ability holds longer than a volume bar. It is the only warning
+** the player gets, and it arrives while they are busy placing a piece.
+*/
+# define UI_NOTIFICATION_EFFECT_HOLD_MS	1600
 # define UI_NOTIFICATION_HOLD_MS	900
 # define UI_NOTIFICATION_FADE_MS	180
 # define UI_NOTIFICATION_FRAME_MS	33
@@ -1521,6 +1526,12 @@ typedef struct s_mp_rect
 */
 # define MP_MATCH_OPPONENT_PRESENT_MS 50
 /*
+** How many rows below the falling piece stay visible under Dark. Enough to
+** place the piece in your hand and nothing else, which is the ability's whole
+** shape: it takes away your plan, not your turn.
+*/
+# define MP_MATCH_DARK_WINDOW_ROWS 3
+/*
 ** Danger is quantised into this many steps between clear and full. The signal
 ** itself is Solo's solo_game_danger_dim(), so the two modes enter and leave
 ** danger on exactly the same rule; only the presentation differs, because the
@@ -1910,7 +1921,14 @@ typedef struct
 typedef enum e_ui_notification_kind
 {
 	UI_NOTIFICATION_VOLUME,
-	UI_NOTIFICATION_OWNERSHIP
+	UI_NOTIFICATION_OWNERSHIP,
+	/*
+	 * A rival's ability landing on this player. The card is the whole of the
+	 * feedback for the effects that cannot be seen on a board: a refused
+	 * rotation and a rotate key that has stopped working look identical, and
+	 * before this the player had no way to tell them apart.
+	 */
+	UI_NOTIFICATION_EFFECT
 }	t_ui_notification_kind;
 
 typedef struct s_ui_notification
@@ -2396,6 +2414,28 @@ typedef enum e_solo_popover_phase
 	SOLO_POPOVER_FADING_OUT
 }	t_solo_popover_phase;
 
+/*
+** What the server says is riding on a player, as the client is told it.
+**
+** A mirror of libtetrisbrain's t_effect_state rather than that struct itself,
+** because these are counts the client displays and never acts on: tetrisu
+** links the brain for its offline rules, but an online board's effects belong
+** to tetrisd and arrive in a snapshot like everything else about it.
+*/
+# define SOLO_EFFECT_COUNT	8
+
+typedef struct s_solo_effects
+{
+	int		paralysis;
+	int		inversion;
+	int		nue;
+	int		thwack;
+	int		fry;
+	int		dark;
+	int		pals;
+	int		mirror;
+}	t_solo_effects;
+
 typedef struct s_solo_game
 {
 	t_board			board;
@@ -2430,6 +2470,19 @@ typedef struct s_solo_game
 	int				danger_safe_elapsed_ms;
 	int				danger_fade_elapsed_ms;
 	uint32_t		pending_events;
+	/*
+	 * The status effects the server says are on this player, straight from
+	 * the snapshot. The four piece-counted ones carry how many pieces are
+	 * left under them; the rest carry 1 or 0.
+	 *
+	 * They are here because an effect nobody can see is indistinguishable
+	 * from a bug. Paralysis has always worked and has always looked exactly
+	 * like a rotate key that stopped responding: the server refused the
+	 * input, and the client had no way to say why. Nothing here enforces
+	 * them - the server does that, as it does everything - this is only what
+	 * the screen needs to tell the player what is happening to them.
+	 */
+	t_solo_effects	effects;
 	int				lock_resets;
 	int				last_kick_index;
 	bool			last_action_was_rotation;
@@ -2528,6 +2581,13 @@ typedef struct s_solo_authority
 */
 typedef struct s_match_authority
 {
+	/*
+	 * The effects last reported to the player, so a card is raised only when
+	 * a count goes up. A snapshot says what is true now rather than what just
+	 * happened, so the arrival has to be worked out by comparison - see
+	 * solo_effects.c.
+	 */
+	t_solo_effects	reported;
 	t_net_client	*net;
 	bool			online;
 	bool			lost;
@@ -2837,12 +2897,24 @@ t_app_provider_result	auth_form_submit(t_auth_form *form,
 bool			auth_form_mask_password(const char *password, char *masked,
 					size_t size);
 
+/* SOLO_EFFECTS.C - noticing that something has been done to you */
+bool			solo_effects_take_arrival(const t_solo_effects *now,
+					t_solo_effects *last, char *title, size_t title_cap,
+					char *message, size_t message_cap);
+
+/* SOLO_EFFECTS.C - noticing that something has been done to you */
+bool			solo_effects_take_arrival(const t_solo_effects *now,
+					t_solo_effects *last, char *title, size_t title_cap,
+					char *message, size_t message_cap);
+
 /* UI_NOTIFICATION.C */
 void			ui_notification_stack_init(t_ui_notification_stack *stack);
 bool			ui_notification_show(t_ui_notification_stack *stack,
 					const char *title, int percent, uint64_t now_ms);
 bool			ui_notification_show_ownership(
 					t_ui_notification_stack *stack, uint64_t now_ms);
+bool			ui_notification_show_effect(t_ui_notification_stack *stack,
+					const char *title, const char *message, uint64_t now_ms);
 bool			ui_notification_update(t_ui_notification_stack *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const t_ui_notification *notification,
@@ -2892,6 +2964,9 @@ void				render_notification_show_volume(t_render_ctx *ctx,
 void				render_notification_queue_volume(t_render_ctx *ctx,
 					int volume);
 void				render_notification_queue_ownership(t_render_ctx *ctx);
+void				render_notification_show_effect(t_render_ctx *ctx,
+						const char *title, const char *message);
+
 void				render_notification_tick(t_render_ctx *ctx);
 int					render_notification_next_wake_ms(
 					const t_render_ctx *ctx);

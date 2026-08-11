@@ -48,6 +48,8 @@ static int	decode_head(t_body_cursor *c, t_body_state *out);
 static int	decode_stats(t_body_cursor *c, t_body_state *out);
 static int	decode_flags(t_body_cursor *c, t_body_state *out);
 static int	decode_timers(t_body_cursor *c, t_body_state *out);
+static int	decode_effects(t_body_cursor *c, t_body_state *out);
+static int	validate_effects(const t_body_state *in);
 static int	decode_result(t_body_cursor *c, t_body_state *out);
 static int	decode_board(t_body_cursor *c, t_body_state *out);
 static int	decode_opponents(t_body_cursor *c, t_body_state *out);
@@ -137,6 +139,8 @@ static int	validate_state(const t_body_state *in)
 	if (in->clearing_ms < 0 || in->last_ability.level < 0)
 		return (-1);
 	if (in->countdown_ms < 0 || in->rank < 0 || in->pending < 0)
+		return (-1);
+	if (validate_effects(in) != 0)
 		return (-1);
 	if (in->result > BODY_RESULT_LOST)
 		return (-1);
@@ -354,6 +358,11 @@ static int	encode_timers(const t_body_state *in, char *out, size_t cap,
 	if (body_append(out, cap, off, "countdown %d\n", in->countdown_ms) != 0)
 		return (-1);
 	if (body_append(out, cap, off, "pending %d\n", in->pending) != 0)
+		return (-1);
+	if (body_append(out, cap, off, "effects %d %d %d %d %d %d %d %d\n",
+			in->effect_paralysis, in->effect_inversion, in->effect_nue,
+			in->effect_thwack, in->effect_fry, in->effect_dark,
+			in->effect_pals, in->effect_mirror) != 0)
 		return (-1);
 	return (body_append(out, cap, off, "result %s %d\n",
 			g_results[in->result], in->rank));
@@ -600,6 +609,8 @@ static int	decode_timers(t_body_cursor *c, t_body_state *out)
 		|| sscanf(line, "pending %d%n", &out->pending, &n) != 1
 		|| line[n] != '\0' || out->pending < 0)
 		return (-1);
+	if (decode_effects(c, out) != 0)
+		return (-1);
 	return (decode_result(c, out));
 }
 
@@ -782,4 +793,51 @@ static int	hex_nibble(char ch)
 	if (ch >= 'A' && ch <= 'F')
 		return (ch - 'A' + 10);
 	return (-1);
+}
+
+/**
+ * @brief Reads the effects line: eight counts in a fixed order.
+ *
+ * Positional and always present, like every other line here, so a decoder
+ * never has to look ahead. The four piece-counted effects carry how many of
+ * the player's pieces are left under them and the other four carry 1 or 0,
+ * which is why they share one line rather than being flags somewhere.
+ *
+ * @param c The body cursor.
+ * @param out The frame being filled.
+ * @return 0 on success, -1 on a malformed line or a negative count.
+ */
+static int	decode_effects(t_body_cursor *c, t_body_state *out)
+{
+	char	line[BODY_LINE_MAX];
+	int		n;
+
+	if (body_take_line(c, line, sizeof(line)) != 0
+		|| sscanf(line, "effects %d %d %d %d %d %d %d %d%n",
+			&out->effect_paralysis, &out->effect_inversion, &out->effect_nue,
+			&out->effect_thwack, &out->effect_fry, &out->effect_dark,
+			&out->effect_pals, &out->effect_mirror, &n) != 8
+		|| line[n] != '\0')
+		return (-1);
+	return (validate_effects(out));
+}
+
+/**
+ * @brief Refuses a negative effect count, in either direction.
+ *
+ * Shared by the encoder and the decoder so an unencodable frame and an
+ * unreadable one are the same frame.
+ *
+ * @param in The frame to check.
+ * @return 0 when every count is zero or positive, -1 otherwise.
+ */
+static int	validate_effects(const t_body_state *in)
+{
+	if (in->effect_paralysis < 0 || in->effect_inversion < 0
+		|| in->effect_nue < 0 || in->effect_thwack < 0)
+		return (-1);
+	if (in->effect_fry < 0 || in->effect_dark < 0
+		|| in->effect_pals < 0 || in->effect_mirror < 0)
+		return (-1);
+	return (0);
 }
