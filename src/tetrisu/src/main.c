@@ -1768,8 +1768,25 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	bool					polling;
 	bool					room_changed;
 
+	/*
+	 * A room that is not there is not a reason to close the game, and this is
+	 * the ordinary way to arrive at one: tetrisd destroys a room when its
+	 * match ends, so the room a player is returning *from* has already gone by
+	 * the time they get back to it. Answering that with -1 sent main.c
+	 * APP_NAV_QUIT, which is why pressing Enter or Escape on the results
+	 * screen closed the whole application.
+	 *
+	 * The lobby is where a player with no room belongs, so that is where they
+	 * go. Whether a finished room should instead be kept for a rematch is a
+	 * separate question, and a bigger one - until it is answered, going back a
+	 * screen is the honest thing to do rather than the last thing to do.
+	 */
 	if (!load_room_view(provider, session))
-		return (-1);
+	{
+		session->room_id[0] = '\0';
+		(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		return (0);
+	}
 	(void)waiting_room_sync_state(&session->room_view.data.room);
 	waiting_room_state_init(&session->room_state);
 	load_room_characters(provider, session);

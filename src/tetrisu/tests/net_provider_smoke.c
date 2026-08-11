@@ -32,6 +32,7 @@ static int	check_signing_in_again_works(t_app_data_provider *provider,
 				t_app_net_session *session, const char *name);
 static int	check_a_dead_session_redials(t_app_data_provider *provider,
 				t_app_net_session *session, const char *name);
+static int	check_a_vanished_room_is_invalid(t_app_data_provider *provider);
 static int	check_leaderboard_lists_the_account(t_app_data_provider *provider,
 				t_app_net_session *session, const char *name);
 static int	sign_in_raw(t_net_client *net, const char *name);
@@ -74,6 +75,8 @@ int	main(void)
 		check_signing_in_again_works(&provider, &session, name), &failures);
 	report("a lost session redials on the next sign-in",
 		check_a_dead_session_redials(&provider, &session, name), &failures);
+	report("a room that is gone reads as invalid",
+		check_a_vanished_room_is_invalid(&provider), &failures);
 	report("the leaderboard lists this account",
 		check_leaderboard_lists_the_account(&provider, &session, name),
 		&failures);
@@ -336,6 +339,7 @@ static int	check_a_dead_session_redials(t_app_data_provider *provider,
  * ascending, and the view model the screen reads is the one the fixture
  * provider used to fill.
  */
+static int	check_a_vanished_room_is_invalid(t_app_data_provider *provider);
 static int	check_leaderboard_lists_the_account(t_app_data_provider *provider,
 			t_app_net_session *session, const char *name)
 {
@@ -392,4 +396,23 @@ static void	report(const char *name, int ok, int *failures)
 	}
 	printf("FAIL: %s\n", name);
 	(*failures)++;
+}
+
+/*
+** Asking for a room that does not exist answers INVALID, not UNAVAILABLE.
+**
+** main.c leans on that difference. tetrisd destroys a room when its match
+** ends, so the room a player returns from has already gone by the time they
+** get back to it, and the waiting room reads INVALID as "you have no room,
+** go to the lobby". Reading it as a failure of the session is what used to
+** close the whole application when somebody pressed Enter on the results
+** screen.
+*/
+static int	check_a_vanished_room_is_invalid(t_app_data_provider *provider)
+{
+	t_app_screen_view_model	view;
+
+	memset(&view, 0, sizeof(view));
+	return (app_room_view_load(provider, "D-99", &view)
+		== APP_PROVIDER_INVALID);
 }
