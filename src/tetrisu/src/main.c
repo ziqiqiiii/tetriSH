@@ -111,6 +111,8 @@ static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
 static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 				uint32_t key);
 static void	enable_home_mouse(t_render_ctx *ctx);
+static t_net_client	*match_session(const t_app_data_provider *provider,
+						t_app_net_session *session);
 static void	apply_domain_to_config(t_net_config *cfg, const char *domain);
 
 /**
@@ -266,7 +268,8 @@ int	main(void)
 					? APP_GAME_MODE_DOUBLE : APP_GAME_MODE_BATTLE_ROYALE,
 					mp_session.room_id,
 					mp_session.room_view.screen == APP_SCREEN_WAITING_ROOM
-					? &mp_session.room_view.data.room : NULL) < 0)
+					? &mp_session.room_view.data.room : NULL,
+					match_session(&provider, &net_session)) < 0)
 			{
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 				continue ;
@@ -2272,6 +2275,31 @@ static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 /**
  * @brief Enables pointer movement and click reporting for the home menu.
  */
+/**
+ * @brief Hands a match the session it is to be played on, if there is one.
+ *
+ * A match needs more of a session than Solo does. Solo takes its own room on
+ * the way in, so being signed in is enough; a match is played in a room the
+ * waiting room already seated this client in, and the play path bound with
+ * that seat is what every pushed snapshot is matched against. Without it the
+ * client would connect, render, and silently discard every frame the server
+ * sent - so a session that has not got that far is not one to play on, and
+ * the fixture is the honest answer instead.
+ *
+ * @param provider The app's data provider; fixtures never carry a session.
+ * @param session The app's network session.
+ * @return The session to play against, or NULL to play the local fixture.
+ */
+static t_net_client	*match_session(const t_app_data_provider *provider,
+					t_app_net_session *session)
+{
+	if (provider->local_fixtures || !session->connected)
+		return (NULL);
+	if (session->net.state < NET_IN_ROOM || session->net.play_path[0] == '\0')
+		return (NULL);
+	return (&session->net);
+}
+
 static void	enable_home_mouse(t_render_ctx *ctx)
 {
 	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);

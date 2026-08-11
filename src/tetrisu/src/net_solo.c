@@ -240,12 +240,33 @@ void	net_solo_ability_feedback(const t_net_result *result,
  */
 bool	net_solo_apply(t_net_client *net, t_solo_game *game)
 {
-	const t_body_state	*snap;
-	uint64_t			previous_score;
-
 	if (net == NULL || game == NULL || !net->has_state)
 		return (false);
-	snap = &net->state_snapshot;
+	net_state_apply(&net->state_snapshot, game);
+	net->applied_seq = net->state_snapshot.seq;
+	return (true);
+}
+
+/**
+ * @brief Writes one decoded snapshot onto one view model.
+ *
+ * Split out of net_solo_apply so a match can use it for the board the player
+ * is steering. Both modes render the same t_solo_game and the server projects
+ * the same fields into it, so the mapping between them is one thing - and a
+ * second copy of it would be a second place for the two to drift.
+ *
+ * The snapshot is passed rather than the client, because a match reads one
+ * frame and applies parts of it to several view models.
+ *
+ * @param snap Snapshot to read.
+ * @param game View model to overwrite.
+ */
+void	net_state_apply(const t_body_state *snap, t_solo_game *game)
+{
+	uint64_t	previous_score;
+
+	if (snap == NULL || game == NULL)
+		return ;
 	previous_score = game->scoring.total;
 	apply_cells(game, snap);
 	game->active = piece_spawn((t_piece_type)snap->piece.type);
@@ -263,8 +284,6 @@ bool	net_solo_apply(t_net_client *net, t_solo_game *game)
 	apply_clearing(game, snap);
 	apply_clear_label(game, snap, previous_score);
 	apply_phase(game, snap);
-	net->applied_seq = snap->seq;
-	return (true);
 }
 
 /**

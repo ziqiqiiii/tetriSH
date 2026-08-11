@@ -800,6 +800,16 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 	if (body_room_decode(result.body, strlen(result.body), &snapshot) != 0
 		|| !map_room_snapshot(session, &snapshot, view))
 		return (APP_PROVIDER_INVALID);
+	/*
+	 * Binding the play path here rather than at START is what lets a player
+	 * who did not start the match receive it. The path is what every pushed
+	 * STATE is matched against, and it used to be written only by the call
+	 * that takes a room for Solo - so a joiner had none, and discarded every
+	 * frame the server sent them. It also makes the first snapshot the signal
+	 * that the match has begun, which beats waiting half a second for a poll
+	 * of the room to say so.
+	 */
+	(void)net_match_join(&session->net, room_id);
 	fill_chat(&session->net, view);
 	return (APP_PROVIDER_OK);
 }

@@ -2402,6 +2402,29 @@ typedef struct s_solo_authority
 	bool			countdown_hold;
 }	t_solo_authority;
 
+/*
+** Who owns the boards a match is played on - the same question
+** t_solo_authority answers for Solo, and split out for the same reason: a
+** loop that asked "am I online?" before each action would be one `if` away
+** from doing both.
+**
+** There is no countdown_hold here. Solo freezes the server's clock for its
+** own 3-2-1 by sending PAUSE, which a match cannot do and does not need to:
+** the countdown is the room's, it arrives in every snapshot, and the client
+** draws the number it is given.
+**
+** `local_slot` is which of the room's seats this client is sitting in, learnt
+** from the first snapshot rather than assumed, because the seat a player
+** holds can move under them when a room's owner leaves.
+*/
+typedef struct s_match_authority
+{
+	t_net_client	*net;
+	bool			online;
+	bool			lost;
+	int				local_slot;
+}	t_match_authority;
+
 typedef struct s_solo_render
 {
 	struct ncplane	*background_plane;
@@ -3074,7 +3097,7 @@ void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
 int				multiplayer_match_mode_run(t_render_ctx *ctx,
 					t_audio_ctx *audio, const t_app_data_provider *provider,
 					t_app_game_mode mode, const char *room_id,
-					const t_app_room_view_model *room);
+					const t_app_room_view_model *room, t_net_client *net);
 
 /* RENDER_MULTIPLAYER_FONT.C */
 bool			render_mp_pixel_show(t_render_ctx *ctx,
@@ -3248,7 +3271,30 @@ int				net_solo_ability(t_net_client *net, t_solo_ability ability,
 void			net_solo_ability_feedback(const t_net_result *result,
 					t_solo_ability ability, t_solo_game *game);
 bool			net_solo_apply(t_net_client *net, t_solo_game *game);
+void			net_state_apply(const t_body_state *snap, t_solo_game *game);
 bool			net_solo_pending(const t_net_client *net);
+
+/* NET_MATCH.C — Double played against tetrisd; both boards arrive together */
+int				net_match_join(t_net_client *net, const char *room);
+bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
+int				net_match_action(t_net_client *net, t_solo_action action,
+					t_net_result *out);
+int				net_match_ability(t_net_client *net, t_solo_ability ability,
+					t_net_result *out);
+
+/* MATCH_AUTHORITY.C — who owns the boards a match is played on */
+void			match_authority_open(t_match_authority *authority,
+					t_net_client *net, t_mp_match_state *state);
+bool			match_authority_is_online(const t_match_authority *authority);
+void			match_authority_close(t_match_authority *authority);
+int				match_authority_fd(const t_match_authority *authority);
+bool			match_authority_pending(const t_match_authority *authority);
+bool			match_authority_action(t_match_authority *authority,
+					t_mp_match_state *state, t_solo_action action);
+bool			match_authority_ability(t_match_authority *authority,
+					t_mp_match_state *state, t_solo_ability ability);
+bool			match_authority_update(t_match_authority *authority,
+					t_mp_match_state *state, int elapsed_ms);
 
 /* SOLO_AUTHORITY.C — the one place that knows who owns the board */
 void			solo_authority_open(t_solo_authority *authority,
