@@ -20,7 +20,8 @@ static const char	*g_head = \
 	"ability 2 1\n" \
 	"clear tetris\n" \
 	"clearing 2 350 18 19\n" \
-	"countdown 0\n";
+	"countdown 0\n" \
+	"result none 0\n";
 
 // Static Functions
 static void	make_state(t_body_state *st);
@@ -369,6 +370,40 @@ void	test_state_countdown_phase_round_trips(void)
 	printf("PASS test_state_countdown_phase_round_trips\n");
 }
 
+/*
+** The winner's board is indistinguishable from a board still being played -
+** active, with a piece on it - so the outcome cannot be read off the phase
+** and has to survive as a field of its own.
+*/
+void	test_state_result_round_trips(void)
+{
+	t_body_state	in;
+	t_body_state	back;
+	char			out[8192];
+	int				n;
+
+	make_state(&in);
+	in.result = BODY_RESULT_WON;
+	in.rank = 1;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "result won 1\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.result == BODY_RESULT_WON && back.rank == 1);
+	assert(back.phase == BODY_PHASE_ACTIVE);
+	make_state(&in);
+	in.result = BODY_RESULT_LOST;
+	in.rank = 7;
+	in.phase = BODY_PHASE_TOP_OUT;
+	n = body_state_encode(&in, out, sizeof(out));
+	assert(n > 0 && strstr(out, "result lost 7\n") != NULL);
+	assert(body_state_decode(out, (size_t)n, &back) == 0);
+	assert(back.result == BODY_RESULT_LOST && back.rank == 7);
+	in.rank = -1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_result_round_trips\n");
+}
+
 void	test_state_opponent_round_trips_whole(void)
 {
 	t_body_state	in;
@@ -482,6 +517,7 @@ int	main(void)
 	test_state_hold_round_trips_empty_and_held();
 	test_state_solo_frame_carries_zero_countdown_and_opponents();
 	test_state_countdown_phase_round_trips();
+	test_state_result_round_trips();
 	test_state_opponent_round_trips_whole();
 	test_state_opponent_board_is_not_the_local_board();
 	test_state_decode_rejects_opponent_count_mismatch();

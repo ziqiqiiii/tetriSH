@@ -9,6 +9,12 @@ static const char *const	g_phases[] = {
 								"countdown"
 							};
 
+static const char *const	g_results[] = {
+								"none",
+								"won",
+								"lost"
+							};
+
 static const char *const	g_clears[] = {
 								"none", 
 								"single", 
@@ -42,6 +48,7 @@ static int	decode_head(t_body_cursor *c, t_body_state *out);
 static int	decode_stats(t_body_cursor *c, t_body_state *out);
 static int	decode_flags(t_body_cursor *c, t_body_state *out);
 static int	decode_timers(t_body_cursor *c, t_body_state *out);
+static int	decode_result(t_body_cursor *c, t_body_state *out);
 static int	decode_board(t_body_cursor *c, t_body_state *out);
 static int	decode_opponents(t_body_cursor *c, t_body_state *out);
 static int	decode_opponent(t_body_cursor *c, t_body_opponent *out);
@@ -129,7 +136,9 @@ static int	validate_state(const t_body_state *in)
 		return (-1);
 	if (in->clearing_ms < 0 || in->last_ability.level < 0)
 		return (-1);
-	if (in->countdown_ms < 0)
+	if (in->countdown_ms < 0 || in->rank < 0)
+		return (-1);
+	if (in->result > BODY_RESULT_LOST)
 		return (-1);
 	if (in->piece.type < 0 || in->piece.rotation < 0)
 		return (-1);
@@ -340,7 +349,10 @@ static int	encode_timers(const t_body_state *in, char *out, size_t cap,
 	}
 	if (body_append(out, cap, off, "\n") != 0)
 		return (-1);
-	return (body_append(out, cap, off, "countdown %d\n", in->countdown_ms));
+	if (body_append(out, cap, off, "countdown %d\n", in->countdown_ms) != 0)
+		return (-1);
+	return (body_append(out, cap, off, "result %s %d\n",
+			g_results[in->result], in->rank));
 }
 
 /**
@@ -578,6 +590,30 @@ static int	decode_timers(t_body_cursor *c, t_body_state *out)
 		|| sscanf(line, "countdown %d%n", &out->countdown_ms, &n) != 1
 		|| line[n] != '\0' || out->countdown_ms < 0)
 		return (-1);
+	return (decode_result(c, out));
+}
+
+/**
+ * @brief Reads the result line: how the match ended, and at what placing.
+ *
+ * @param c The body cursor.
+ * @param out The frame being filled.
+ * @return 0 on success, -1 on an unknown result word or a negative rank.
+ */
+static int	decode_result(t_body_cursor *c, t_body_state *out)
+{
+	char	line[BODY_LINE_MAX];
+	char	word[BODY_LINE_MAX];
+	int		n;
+
+	if (body_take_line(c, line, sizeof(line)) != 0
+		|| sscanf(line, "result %1023s %d%n", word, &out->rank, &n) != 2
+		|| line[n] != '\0' || out->rank < 0)
+		return (-1);
+	n = body_word_index(word, g_results, 3);
+	if (n < 0)
+		return (-1);
+	out->result = (t_body_result)n;
 	return (0);
 }
 

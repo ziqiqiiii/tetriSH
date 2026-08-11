@@ -88,6 +88,25 @@ typedef enum e_body_clear_label
 	BODY_CLEAR_PERFECT
 }	t_body_clear_label;
 
+/*
+** How a match ended for the player being sent this snapshot.
+**
+** It is deliberately not a phase. A phase says what the board is doing, and
+** the winner's board is doing nothing unusual - it is simply still there,
+** active, with a piece on it. Nothing about the board distinguishes "still
+** playing" from "playing when everybody else stopped", so the outcome has to
+** be its own field or the winner is never told they won.
+**
+** Single sends NONE always: a solo game ends by topping out, and the top-out
+** phase already says so.
+*/
+typedef enum e_body_result
+{
+	BODY_RESULT_NONE,
+	BODY_RESULT_WON,
+	BODY_RESULT_LOST
+}	t_body_result;
+
 typedef enum e_body_mode
 {
 	BODY_MODE_SINGLE,
@@ -170,7 +189,8 @@ typedef struct s_body_opponent
 **   clear <none|single|double|triple|tetris|tspin|tspin_mini|perfect>
 **   clearing <count> <elapsed_ms> [<rows>...]
 **   countdown <ms>
-**   board            (then exactly 20 lines of 20 hex chars: 10 cells x
+**   result <none|won|lost> <rank>
+**   board          (then exactly 20 lines of 20 hex chars: 10 cells x
 **                     type nibble + color nibble)
 **   opponents <n>
 **   opp <slot> <pid> <alive> <phase> <score> <lines> <pending> <username>
@@ -188,12 +208,16 @@ typedef struct s_body_opponent
 ** from that offset rather than timing one of its own, so it cannot still be
 ** flashing rows the server has taken away.
 **
-** `countdown` and `opponents` are always written, carrying 0 when there is no
-** countdown and no opponent. That is this codec's existing idiom - `clearing`
-** has always been present with a count of 0 - and it is what keeps the line
-** order fixed: no line's presence depends on another line's value, so a
-** decoder never has to look ahead to know what it is reading. Single sends
-** both as zeroes and is otherwise unchanged.
+** `countdown`, `result` and `opponents` are always written, carrying 0 or
+** `none` when there is nothing to say. That is this codec's existing idiom -
+** `clearing` has always been present with a count of 0 - and it is what keeps
+** the line order fixed: no line's presence depends on another line's value, so
+** a decoder never has to look ahead to know what it is reading. Single sends
+** all three empty and is otherwise unchanged.
+**
+** `rank` rides with the result because Battle Royale's loss is a placing
+** rather than a bare defeat. It is 0 whenever the result is NONE, and 1 for a
+** win.
 */
 typedef struct s_body_state
 {
@@ -215,6 +239,8 @@ typedef struct s_body_state
 	int					clearing_count;
 	int					clearing_ms;
 	int					countdown_ms;
+	t_body_result		result;
+	int					rank;
 	t_body_clear_label	last_clear;
 	size_t				opponent_count;
 	t_body_opponent		opponents[BODY_OPPONENTS_MAX];

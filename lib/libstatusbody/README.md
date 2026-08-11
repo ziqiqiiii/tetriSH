@@ -112,6 +112,7 @@ ability 2 1
 clear tetris
 clearing 2 350 18 19
 countdown 0
+result none 0
 board
 00000000000000000000
 ...                     (exactly 20 rows)
@@ -130,6 +131,7 @@ opp 2 7 1 clearing 4200 9 3 rival
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
 | `countdown` | `<ms>` remaining before a dealt match begins; `0` when none is running |
+| `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
 | `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <username>` |
@@ -139,10 +141,17 @@ opp 2 7 1 clearing 4200 9 3 rival
 every player's clock stopped, which is what makes it a different thing from
 `paused`, one player's own.
 
-`countdown` and `opponents` are always written, carrying `0` when there is
-neither, the way `clearing` has always been written with a count of `0`. No
-line's presence depends on another line's value, so a decoder never looks
-ahead; a Single snapshot is the frame it always was plus those two zeroes.
+`countdown`, `result` and `opponents` are always written, carrying `0` or
+`none` when there is nothing to say, the way `clearing` has always been written
+with a count of `0`. No line's presence depends on another line's value, so a
+decoder never looks ahead; a Single snapshot is the frame it always was plus
+those three empty lines.
+
+`result` is not a phase, because the winner's board is doing nothing a phase
+could describe — it is simply still active with a piece on it, exactly like a
+board mid-game. Without a field of its own the winner would never be told they
+had won. `rank` rides alongside it because a Battle Royale defeat is a placing
+rather than a bare loss.
 
 An opponent's board rides inside the recipient's snapshot rather than arriving
 as a snapshot of its own, because `tetrisd` holds one `STATE` mailbox slot per
