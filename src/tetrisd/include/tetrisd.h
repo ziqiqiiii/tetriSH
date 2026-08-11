@@ -458,6 +458,13 @@ typedef struct s_game
 	** tick that ran two clear completions owes both.
 	*/
 	int					cleared_owed;
+	/*
+	** The character this game is being played with, or 0 when the player did
+	** not declare one and the account's equipped character stands. It decides
+	** which four abilities each level selects from, and it is copied in once
+	** at deal time so an EQUIP made mid-match cannot change it.
+	*/
+	t_item_id			character_id;
 }	t_game;
 
 /*
@@ -498,6 +505,19 @@ typedef struct s_server_room
 	*/
 	t_body_result	result[TD_MAX_GAMES];
 	int				rank[TD_MAX_GAMES];
+	/*
+	** The character each seat declared for this match, or 0 for "whatever the
+	** account has equipped". It is per seat and not per account because a
+	** character is picked for a match: EQUIP is an account-wide change, and
+	** making one to play one game is the wrong scope - it would also mean a
+	** purchase made mid-match could change which abilities a player's levels
+	** select from.
+	**
+	** Declared with READY and read once by deal_games, so it is fixed for the
+	** length of the match by construction. It shares a slot's lifetime, which
+	** is why room_blank clears it for the same reason it clears `ticking`.
+	*/
+	t_item_id		character[TD_MAX_GAMES];
 	t_server		*srv;
 	int				index;
 	/*
@@ -941,7 +961,7 @@ void			server_room_unbind(t_client *cli);
 int				server_room_open(t_server *srv, t_client *cli, t_game_mode mode);
 t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli, int *slot);
 t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
-bool			server_room_set_ready(t_server_room *server_room, t_client *cli, bool ready);
+bool			server_room_set_ready(t_server_room *server_room, t_client *cli, bool ready, t_item_id character);
 bool			server_room_all_ready(const t_server_room *server_room);
 bool			server_room_autostart(t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);

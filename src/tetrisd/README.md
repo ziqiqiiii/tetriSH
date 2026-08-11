@@ -37,6 +37,8 @@ Double is playable and competitive: both seats declare readiness with `READY`, t
 
 Garbage crosses at one place, `settle_garbage` in `room.c`, because it is the only module holding both halves of a Room: how many rows a clear is worth is `libtetrisbrain`'s (`garbage_lines_from_clear`, N−1) and who owes them to whom is the seating's. It runs after every game is advanced and before any snapshot is taken, so the frame that shows a clear is the frame that shows the `pending` count it caused. `server_room_target_of` answers *which* seat, and it is a function rather than an expression because Battle Royale's four targeting modes all reduce to that question.
 
+The character a match is played with is declared rather than inferred. `READY` carries an optional `character <id>`; `server_room_set_ready` stores it against the seat, `deal_games` copies it onto the game, and `ability_handler` resolves `(character, level)` against *that* — falling back to the account's equipped character when none was named, which is every Single game. Declaring rather than reading the account is what makes the choice per match: `EQUIP` is an account-wide change, and making one in order to play one game is the wrong scope, so a purchase or an equip made mid-match cannot change which four abilities a level selects from. Ownership is checked with `db_player_owns_character`, which answers a `t_db_bool` and is therefore tested against `DB_TRUE` — `DB_FALSE` is a successful read meaning "does not own it".
+
 **Rows land at the Target's next piece lock, never on arrival.** That is a game rule and not a scheduling convenience: injecting garbage raises the stack under whatever is falling and can produce a board `piece_is_valid` would reject, and there is no correct thing to do with a piece already in the air on a board that is no longer legal. The drain sits after the clear resolves — so a player never takes rows in the middle of watching their own go — and before `spawn_next`, so the rows are part of the board the next piece is validated against. A spawn that then fails is a top-out, which is the right outcome of being buried.
 
 ---
@@ -112,7 +114,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
 | `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
 | `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
-| `READY` | `/room/<name>` | Body `ready <0\|1>` — declare or withdraw readiness; answers the room. A Double room starts itself once every seat has declared, so nobody sends `START` for one |
+| `READY` | `/room/<name>` | Body `ready <0\|1>`, optionally `character <id>` — declare or withdraw readiness and name the fighter for this match; answers the room. `403` when the character is not owned. A Double room starts itself once every seat has declared, so nobody sends `START` for one |
 | `START` | `/room/<name>` | Owner begins the game; `403` for a non-owner. Outside Single the boards are dealt and then held for `TETRISD_MATCH_COUNTDOWN_MS`, during which every input is refused `409` |
 | `MOVE` | `/room/<name>/player/<pid>` | Body `LEFT` or `RIGHT` |
 | `ROTATE` | `/room/<name>/player/<pid>` | Body `CW` or `CCW` |

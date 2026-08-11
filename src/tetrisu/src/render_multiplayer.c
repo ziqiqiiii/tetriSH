@@ -558,9 +558,16 @@ static void	draw_waiting_room(struct ncplane *plane,
 		put_line(plane, row + 2, 2, cols - 4, line);
 	}
 	(void)draw_chat(plane, room, state, row + 3, cols, rows - 2);
+	if (state->character_name[0] != '\0')
+	{
+		set_colour(plane, MP_PINK_R, MP_PINK_G, MP_PINK_B);
+		snprintf(line, sizeof(line), "FIGHTER  <  %s  >",
+			state->character_name);
+		put_centered(plane, rows - 3, cols, line, false);
+	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 	put_centered(plane, rows - 2, cols,
-		"[UP/DN] LIST [R] READY [S] START [C] CHAT [L] LEAVE", false);
+		"[<>] FIGHTER [R] READY [S] START [C] CHAT [L] LEAVE", false);
 }
 
 /**

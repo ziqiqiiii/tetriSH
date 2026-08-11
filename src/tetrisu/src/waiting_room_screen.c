@@ -9,6 +9,8 @@ static bool	append_compose(t_waiting_room_state *state, uint32_t key);
 static bool	is_confirm_key(uint32_t key);
 static bool	valid_slot(const t_app_room_view_model *room, int index);
 static bool	valid_room_snapshot(const t_app_room_view_model *room);
+static void	append_fighter(const t_waiting_room_state *state, char *out,
+				size_t size);
 static void	move_roster(t_waiting_room_state *state,
 					const t_app_room_view_model *room, int delta);
 
@@ -509,7 +511,34 @@ const char	*waiting_room_status_text(const t_app_room_view_model *room,
 			waiting_room_ready_count(room), waiting_room_required_ready(room));
 	else
 		snprintf(out, size, "Ready to start");
+	append_fighter(state, out, size);
 	return (out);
+}
+
+/**
+ * @brief Appends the chosen fighter to a status line, when one is chosen.
+ *
+ * It lives on the status line rather than in a panel of its own because it is
+ * a thing about this player's next match, exactly like the readiness the line
+ * already reports - and because both renderers are handed this text, so saying
+ * it here says it in both without either learning what a roster is.
+ *
+ * @param state Waiting-room state holding the name, possibly NULL.
+ * @param out Status line to append to.
+ * @param size Capacity of out.
+ */
+static void	append_fighter(const t_waiting_room_state *state, char *out,
+	size_t size)
+{
+	size_t	used;
+
+	if (state == NULL || state->character_name[0] == '\0')
+		return ;
+	used = strlen(out);
+	if (used + 16 >= size)
+		return ;
+	snprintf(out + used, size - used, "  -  fighter %s",
+		state->character_name);
 }
 
 /**
@@ -637,6 +666,16 @@ static t_room_action	handle_room_key(t_waiting_room_state *state,
 		return (ROOM_ACTION_VOLUME_DOWN);
 	if (key == 'r' || key == 'R')
 		return (ROOM_ACTION_TOGGLE_READY);
+	/*
+	 * The fighter is chosen here because the match screen is too late: the
+	 * room deals the boards as soon as every seat has declared, so by the
+	 * time that screen opens the character it would ask about is already the
+	 * one the server is resolving abilities against.
+	 */
+	if (key == NCKEY_LEFT)
+		return (ROOM_ACTION_CHARACTER_PREV);
+	if (key == NCKEY_RIGHT)
+		return (ROOM_ACTION_CHARACTER_NEXT);
 	if (key == 's' || key == 'S')
 		return (ROOM_ACTION_START);
 	if (key == NCKEY_UP)

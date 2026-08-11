@@ -15,6 +15,8 @@
 
 // Static Functions
 static int	solo_only(t_request_context *ctx, t_server_room *server_room);
+static int	match_character(t_request_context *ctx,
+				t_server_room *server_room, t_item_id *out);
 static int	equipped_character(t_request_context *ctx, t_item_id *out);
 static int	ability_body(t_request_context *ctx, int *level, int *column);
 static int	parse_decimal(const char *text, int min, int max, int *out);
@@ -119,7 +121,7 @@ int	ability_handler(const t_htttp_message *msg, void *context)
 	ask[0] = request_input_target(ctx, &server_room);
 	if (ask[0] != 0)
 		return (ask[0]);
-	if (equipped_character(ctx, &character) != 0)
+	if (match_character(ctx, server_room, &character) != 0)
 		return (500);
 	if (ability_body(ctx, &ask[0], &ask[1]) != 0)
 		return (400);
@@ -143,6 +145,34 @@ static int	solo_only(t_request_context *ctx, t_server_room *server_room)
 	if (server_room_is_solo(server_room))
 		return (0);
 	return (request_refuse(ctx, "not-single"));
+}
+
+/**
+ * @brief Reads the character this game is being played with.
+ *
+ * A character declared with READY wins, because it was chosen for this match:
+ * it was copied onto the game at deal time, so an EQUIP or a purchase made
+ * while the match runs cannot change which four abilities a level selects
+ * from. A client that declared none falls back to the account's equipped
+ * character, which is every Single game and every client with no selector.
+ *
+ * @param ctx Request context naming the player.
+ * @param server_room Room holding the game.
+ * @param out Receives the character id to resolve against.
+ * @return 0 on success, -1 when the store has no such player.
+ */
+static int	match_character(t_request_context *ctx,
+		t_server_room *server_room, t_item_id *out)
+{
+	const t_game	*game;
+
+	game = server_room_game_of(server_room, ctx->cli);
+	if (game != NULL && game->character_id != 0)
+	{
+		*out = game->character_id;
+		return (0);
+	}
+	return (equipped_character(ctx, out));
 }
 
 /**

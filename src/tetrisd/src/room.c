@@ -20,6 +20,8 @@ static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
 static void		spread_dirty(t_server_room *server_room);
 static void		settle_garbage(t_server_room *server_room);
+static int		slot_of_player(const t_server_room *server_room,
+					t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
@@ -289,11 +291,48 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
  * @return true when the declaration was recorded.
  */
 bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
-			bool ready)
+			bool ready, t_item_id character)
 {
+	int	slot;
+
 	if (server_room == NULL || cli == NULL)
 		return (false);
-	return (room_set_ready(server_room->room, cli->player_id, ready) == 0);
+	if (room_set_ready(server_room->room, cli->player_id, ready) != 0)
+		return (false);
+	/*
+	 * The character rides with the declaration because that is the last
+	 * moment it can be chosen: deal_games reads it, and after that the match
+	 * is running. A body that omits it leaves whatever was declared before,
+	 * which is what makes re-declaring readiness not also a way to lose it.
+	 */
+	slot = slot_of_player(server_room, cli->player_id);
+	if (slot >= 0 && character != 0)
+		server_room->character[slot] = character;
+	return (true);
+}
+
+/**
+ * @brief Finds the 0-based slot a player is seated in.
+ *
+ * @param server_room Room to search.
+ * @param pid The player to find.
+ * @return The 0-based slot, or -1 when they are not seated here.
+ */
+static int	slot_of_player(const t_server_room *server_room, t_player_id pid)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (-1);
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& server_room->room->slots[slot].membership.player_id == pid)
+			return (slot);
+		slot++;
+	}
+	return (-1);
 }
 
 /**
@@ -717,6 +756,7 @@ static void	room_blank(t_server_room *server_room)
 		server_room->dirty[slot] = false;
 		server_room->result[slot] = BODY_RESULT_NONE;
 		server_room->rank[slot] = 0;
+		server_room->character[slot] = 0;
 		slot++;
 	}
 }
@@ -780,6 +820,7 @@ static int	deal_games(t_server_room *server_room)
 					+ slots[i].membership.player_id);
 			game_start(&server_room->games[i], slots[i].membership.player_id,
 				seed);
+			server_room->games[i].character_id = server_room->character[i];
 			server_room->dirty[i] = true;
 			started++;
 		}

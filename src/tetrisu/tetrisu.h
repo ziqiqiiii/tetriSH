@@ -1451,6 +1451,8 @@ typedef enum e_room_action
 {
 	ROOM_ACTION_NONE,
 	ROOM_ACTION_TOGGLE_READY,
+	ROOM_ACTION_CHARACTER_PREV,
+	ROOM_ACTION_CHARACTER_NEXT,
 	ROOM_ACTION_START,
 	ROOM_ACTION_SEND_CHAT,
 	ROOM_ACTION_LEAVE,
@@ -1468,6 +1470,21 @@ typedef enum e_room_action
 typedef struct s_waiting_room_state
 {
 	bool			chatting;
+	/*
+	 * Which owned character this player will take into the match, as an index
+	 * into the character catalogue. It is chosen here rather than in the
+	 * match screen because the match has already begun by the time that
+	 * screen opens - the room deals the boards the moment every seat has
+	 * declared - and it travels with READY rather than through EQUIP because
+	 * a character is picked for a match and equipping is account-wide.
+	 */
+	int				character_index;
+	/*
+	 * The chosen fighter's name, kept here rather than looked up at draw
+	 * time: the renderers are handed this state and the room, and the roster
+	 * it came from is neither.
+	 */
+	char			character_name[APP_TEXT_MAX];
 	bool			counting_down;
 	int				countdown;
 	int				roster_offset;
@@ -1695,9 +1712,15 @@ typedef struct s_app_data_provider
 	 * Declaring readiness, which is the server's fact and not the screen's.
 	 * A client that kept it locally had its own next refresh overrule it,
 	 * because the room it re-read had never been told.
+	 *
+	 * `character` is the fighter this player takes into the match, or 0 for
+	 * whatever the account has equipped. It rides with the declaration
+	 * because that is the last moment it can be chosen: the room deals the
+	 * boards as soon as every seat has declared.
 	 */
 	t_app_provider_result	(*ready_room)(void *userdata, const char *room_id,
-				bool ready, t_app_room_view_model *view);
+				bool ready, uint32_t character,
+				t_app_room_view_model *view);
 	/*
 	 * Posting to the room's feed. It answers with the room rather than with a
 	 * verdict for the same reason buy_item does: the sender's own line comes

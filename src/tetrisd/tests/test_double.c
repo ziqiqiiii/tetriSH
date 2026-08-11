@@ -23,8 +23,13 @@ static void	test_each_snapshot_carries_the_other_board(void);
 static void	test_a_move_reaches_the_other_players_view(void);
 static void	test_a_top_out_ends_the_match_for_both_players(void);
 static void	test_both_players_are_recorded_once_each(void);
+static void	test_an_unowned_fighter_is_refused(void);
+static void	test_a_declared_fighter_is_the_matchs(void);
+
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
+static t_item_id	starter_character(t_fixture *fx, t_player_id pid);
+static t_item_id	unowned_character(t_fixture *fx, t_player_id pid);
 static int		simple(t_harness *hc, const char *method, const char *path,
 					const char *body);
 static int		seat_two(t_fixture *fx, t_harness *amber, t_harness *blake,
@@ -52,6 +57,8 @@ int	main(void)
 	test_a_move_reaches_the_other_players_view();
 	test_a_top_out_ends_the_match_for_both_players();
 	test_both_players_are_recorded_once_each();
+	test_an_unowned_fighter_is_refused();
+	test_a_declared_fighter_is_the_matchs();
 	return (0);
 }
 
@@ -617,4 +624,145 @@ static int	recorded(t_fixture *fx, t_player_id pid, bool won)
 		ok = 0;
 	db_close(db);
 	return (ok);
+}
+
+/*
+** A character nobody bought buys nobody a roster. db_player_owns_character
+** answers a predicate, so it is DB_TRUE that means owned - testing it against
+** DB_OK would read every honest "no" as a database failure and let the
+** declaration through.
+**
+** The refusal also has to leave the seat alone: a Double room starts itself
+** once every seat has declared, so marking a seat ready on the way to
+** answering 403 would start a match the player never agreed to.
+*/
+static void	test_an_unowned_fighter_is_refused(void)
+{
+	t_body_room	snapshot;
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	blake;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+	char		body[64];
+	t_item_id	stranger;
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	stranger = unowned_character(&fx, amber.player_id);
+	assert(stranger != 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n",
+		(unsigned)stranger);
+	assert(simple(&amber, "READY", path, body) == 403);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.member_count == 2 && !snapshot.members[0].ready);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_an_unowned_fighter_is_refused\n");
+}
+
+/*
+** A character the player owns is accepted, declared readiness stands, and the
+** match starts on it. The point of carrying it here rather than reading the
+** account's equipped one is that it is fixed for the match: deal_games copies
+** it onto the game, so nothing done to the account afterwards can change
+** which four abilities a level selects from.
+*/
+static void	test_a_declared_fighter_is_the_matchs(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	char			body[64];
+	t_item_id		owned;
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	owned = starter_character(&fx, amber.player_id);
+	assert(owned != 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
+	assert(simple(&amber, "READY", path, body) == 200);
+	assert(simple(&blake, "READY", path, "ready 1\n") == 200);
+	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
+			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_a_declared_fighter_is_the_matchs\n");
+}
+
+/**
+ * @brief The character a fresh account already owns.
+ *
+ * Read from the catalogue rather than written down, because ids carry gaps -
+ * they live in players' owned lists and are never renumbered - so a literal
+ * here would be a guess about config/characters.cfg.
+ *
+ * @param fx Running fixture, whose store is reopened read-only.
+ * @param pid The player to ask about.
+ * @return An owned character id, or 0 when the player owns none.
+ */
+static t_item_id	starter_character(t_fixture *fx, t_player_id pid)
+{
+	t_character	roster[BODY_CATALOGUE_MAX];
+	t_db		*db;
+	t_item_id	found;
+	size_t		count;
+	size_t		i;
+
+	if (db_open(fx->cfg.data_dir, fx->cfg.config_dir, &db) != DB_OK)
+		return (0);
+	count = 0;
+	if (db_characters(db, roster, BODY_CATALOGUE_MAX, &count) != DB_OK)
+		count = 0;
+	found = 0;
+	i = 0;
+	while (i < count && found == 0)
+	{
+		if (db_player_owns_character(db, pid, roster[i].character_id)
+			== DB_TRUE)
+			found = roster[i].character_id;
+		i++;
+	}
+	db_close(db);
+	return (found);
+}
+
+/**
+ * @brief A character in the catalogue that this player does not own.
+ *
+ * @param fx Running fixture, whose store is reopened read-only.
+ * @param pid The player to ask about.
+ * @return An unowned character id, or 0 when the player owns them all.
+ */
+static t_item_id	unowned_character(t_fixture *fx, t_player_id pid)
+{
+	t_character	roster[BODY_CATALOGUE_MAX];
+	t_db		*db;
+	t_item_id	found;
+	size_t		count;
+	size_t		i;
+
+	if (db_open(fx->cfg.data_dir, fx->cfg.config_dir, &db) != DB_OK)
+		return (0);
+	count = 0;
+	if (db_characters(db, roster, BODY_CATALOGUE_MAX, &count) != DB_OK)
+		count = 0;
+	found = 0;
+	i = 0;
+	while (i < count && found == 0)
+	{
+		if (db_player_owns_character(db, pid, roster[i].character_id)
+			== DB_FALSE)
+			found = roster[i].character_id;
+		i++;
+	}
+	db_close(db);
+	return (found);
 }

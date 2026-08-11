@@ -62,7 +62,7 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 static t_app_provider_result	net_leave_room(void *userdata,
 				const char *room_id);
 static t_app_provider_result	net_ready_room(void *userdata,
-					const char *room_id, bool ready,
+					const char *room_id, bool ready, uint32_t character,
 					t_app_room_view_model *view);
 static t_app_provider_result	net_start_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
@@ -954,12 +954,13 @@ static t_app_provider_result	net_leave_room(void *userdata,
  * @return Provider result.
  */
 static t_app_provider_result	net_ready_room(void *userdata,
-	const char *room_id, bool ready, t_app_room_view_model *view)
+	const char *room_id, bool ready, uint32_t character,
+	t_app_room_view_model *view)
 {
 	t_app_net_session	*session;
 	t_net_result		result;
 	char				path[NET_PATH_MAX];
-	char				body[32];
+	char				body[64];
 
 	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
 		|| view == NULL)
@@ -968,7 +969,16 @@ static t_app_provider_result	net_ready_room(void *userdata,
 	if (session->net.state < NET_IN_ROOM)
 		return (APP_PROVIDER_UNAVAILABLE);
 	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
-	snprintf(body, sizeof(body), "ready %d\n", ready ? 1 : 0);
+	/*
+	 * A character of 0 is left off the body rather than sent as a zero. The
+	 * server reads an absent field as "whatever the account has equipped",
+	 * which is the honest thing for a client with nothing to offer to say.
+	 */
+	if (character != 0)
+		snprintf(body, sizeof(body), "ready %d\ncharacter %u\n",
+			ready ? 1 : 0, character);
+	else
+		snprintf(body, sizeof(body), "ready %d\n", ready ? 1 : 0);
 	memset(&result, 0, sizeof(result));
 	if (net_request(&session->net, "READY", path, body, &result) != 0)
 		return (APP_PROVIDER_UNAVAILABLE);

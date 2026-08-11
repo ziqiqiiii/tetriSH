@@ -29,6 +29,12 @@ typedef struct s_mp_session
 	bool					create_pending;
 	t_app_screen_view_model	room_view;
 	t_waiting_room_state	room_state;
+	/*
+	 * The character catalogue, held so the waiting room can offer a choice of
+	 * fighter. Only owned entries are offered - the roster is what the player
+	 * bought, and the Marketplace is where buying happens.
+	 */
+	t_app_catalogue_view_model	characters;
 }	t_mp_session;
 
 // Static Functions
@@ -38,6 +44,11 @@ static void	restore_after_notification(t_render_ctx *ctx,
 				const t_menu_selection *menu);
 static bool	toggle_ready(const t_app_data_provider *provider,
 				t_app_room_view_model *room, t_mp_session *session);
+static void	load_room_characters(const t_app_data_provider *provider,
+				t_mp_session *session);
+static void	cycle_character(t_mp_session *session, int delta);
+static uint32_t	chosen_character(const t_mp_session *session);
+static void	name_character(t_mp_session *session);
 static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
@@ -1761,6 +1772,7 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		return (-1);
 	(void)waiting_room_sync_state(&session->room_view.data.room);
 	waiting_room_state_init(&session->room_state);
+	load_room_characters(provider, session);
 	/*
 	 * Arriving from a finished match must not re-arm the countdown, for this
 	 * whole visit rather than only on entry. Reloading the room hands back a
@@ -1912,8 +1924,8 @@ static bool	toggle_ready(const t_app_data_provider *provider,
 			? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
 		return (true);
 	}
-	if (provider->ready_room(provider->userdata, room->id, wanted, room)
-		!= APP_PROVIDER_OK)
+	if (provider->ready_room(provider->userdata, room->id, wanted,
+			chosen_character(session), room) != APP_PROVIDER_OK)
 		return (false);
 	session->room_state.feedback = wanted
 		? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
@@ -1936,6 +1948,23 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		/* Un-readying mid-countdown stops it: the room is no longer eligible. */
 		if (session->room_state.counting_down && !waiting_room_can_start(room))
 			(void)waiting_room_cancel_countdown(&session->room_state);
+		return (true);
+	}
+	if (action == ROOM_ACTION_CHARACTER_PREV
+		|| action == ROOM_ACTION_CHARACTER_NEXT)
+	{
+		audio_play_menu_move(audio);
+		cycle_character(session,
+			action == ROOM_ACTION_CHARACTER_NEXT ? 1 : -1);
+		/*
+		 * A player who had already declared is re-declared, because the
+		 * declaration is what carries the choice - otherwise changing fighter
+		 * after pressing R would change nothing the server ever heard.
+		 */
+		if (waiting_room_local_ready(room) && provider != NULL
+			&& provider->ready_room != NULL)
+			(void)provider->ready_room(provider->userdata, room->id, true,
+				chosen_character(session), room);
 		return (true);
 	}
 	if (action == ROOM_ACTION_START)
@@ -2383,4 +2412,119 @@ static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	render_menu_move_bunny(ctx, menu);
 	render_notification_reflow(ctx);
 	return (0);
+}
+
+/**
+ * @brief Fetches the character catalogue the waiting room offers a choice from.
+ *
+ * A provider that serves no catalogue leaves the roster empty, and an empty
+ * roster is not a failure: it means the client has nothing to offer and sends
+ * no character, which the server reads as "whatever the account has equipped".
+ * That is exactly what a Single game does and what a client with no selector
+ * has always done.
+ *
+ * The index is started on the equipped character, so the default choice is the
+ * one the player already made in the Marketplace.
+ *
+ * @param provider Data provider, possibly serving no catalogue.
+ * @param session Multiplayer session whose roster is filled.
+ */
+static void	load_room_characters(const t_app_data_provider *provider,
+		t_mp_session *session)
+{
+	int	index;
+
+	memset(&session->characters, 0, sizeof(session->characters));
+	session->room_state.character_index = 0;
+	if (provider == NULL || provider->load_catalogue == NULL)
+		return ;
+	if (provider->load_catalogue(provider->userdata, APP_CATALOGUE_CHARACTERS,
+			&session->characters) != APP_PROVIDER_OK)
+	{
+		memset(&session->characters, 0, sizeof(session->characters));
+		return ;
+	}
+	index = 0;
+	while (index < session->characters.count)
+	{
+		if (session->characters.items[index].owned
+			&& session->characters.items[index].equipped)
+		{
+			session->room_state.character_index = index;
+			break ;
+		}
+		index++;
+	}
+	name_character(session);
+}
+
+/**
+ * @brief Moves the choice to the next owned character in either direction.
+ *
+ * Unowned entries are stepped over rather than refused, so the roster reads as
+ * the fighters this player has rather than as a catalogue with gaps in it. A
+ * player who owns exactly one lands back on it, which is the correct no-op.
+ *
+ * @param session Multiplayer session holding the roster and the index.
+ * @param delta +1 for the next fighter, -1 for the previous.
+ */
+static void	cycle_character(t_mp_session *session, int delta)
+{
+	int	count;
+	int	index;
+	int	tried;
+
+	count = session->characters.count;
+	if (count <= 0)
+		return ;
+	index = session->room_state.character_index;
+	tried = 0;
+	while (tried < count)
+	{
+		index = (index + delta + count) % count;
+		tried++;
+		if (session->characters.items[index].owned)
+		{
+			session->room_state.character_index = index;
+			break ;
+		}
+	}
+	name_character(session);
+}
+
+/**
+ * @brief The character id this player will take into the match.
+ *
+ * @param session Multiplayer session holding the roster and the index.
+ * @return The chosen item id, or 0 when there is no roster to choose from.
+ */
+static uint32_t	chosen_character(const t_mp_session *session)
+{
+	int	index;
+
+	index = session->room_state.character_index;
+	if (index < 0 || index >= session->characters.count)
+		return (0);
+	if (!session->characters.items[index].owned)
+		return (0);
+	return (session->characters.items[index].item_id);
+}
+
+/**
+ * @brief Copies the chosen fighter's name where the renderers can read it.
+ *
+ * @param session Multiplayer session whose roster and index are read.
+ */
+static void	name_character(t_mp_session *session)
+{
+	int	index;
+
+	session->room_state.character_name[0] = '\0';
+	index = session->room_state.character_index;
+	if (index < 0 || index >= session->characters.count
+		|| !session->characters.items[index].owned)
+		return ;
+	snprintf(session->room_state.character_name,
+		sizeof(session->room_state.character_name), "%s",
+		session->characters.items[index].name);
 }
