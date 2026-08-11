@@ -627,7 +627,24 @@ Each step leaves the tree building and every existing suite passing.
 | 5 | `tetrisu`: send-only inputs, soft-drop rate, opponent banding (D5, D8, F8, F9) | See below — this moved ahead of the garbage work on purpose |
 | 6 | `tetrisd`: garbage — `pending_garbage`, Target, drain at lock | The mode becomes competitive |
 | 7 | `READY` + character (D7), waiting-room select, server-side auto-start | Abilities resolve against the right character; the ready button becomes real |
-| 8 | `tetrisd`: the twelve targeted abilities | Needs 6 and 7 |
+| 8 | `tetrisd`: the targeted abilities | Needs 6 and 7 |
+
+**All eight steps are implemented.** Two corrections the work turned up:
+
+- There are **eleven** targeted abilities, not twelve. Counting `needs_target`
+  in `g_abilities` gives Dark, Vampire, Bomb, Inversion, Pentaris, Sirtet,
+  Mirror, Paralysis, Copy, Nue, Pals.
+- Four of those eleven — Mirror, Pals, Vampire and Copy — land on the player
+  who *used* them, so they are applied at once rather than queued. The
+  deferral rule is about which board changes, not which board is read: a read
+  cannot leave anybody's piece inside their stack. They still need a Target to
+  exist, which is what `needs_target` gates.
+
+Open question 3 (rematch) is now a known defect rather than a hypothetical:
+it closed the whole client. See
+[`docs/bugs/the_results_screen_closed_the_application.md`](../../docs/bugs/the_results_screen_closed_the_application.md).
+The client goes back to the lobby instead of quitting; keeping a finished room
+for a rematch is still undecided.
 
 Steps 1–4 are the mode; step 5 makes it playable at a distance; steps 6–8 are
 the game.
