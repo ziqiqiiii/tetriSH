@@ -471,6 +471,21 @@ bool	net_state_take(t_net_client *net, const t_htttp_message *msg)
 	net->state_snapshot = snap;
 	net->last_seq = snap.seq;
 	net->has_state = true;
+	/*
+	 * A snapshot addressed to this client's own play path is the server
+	 * saying it is running a game for this player, and that is the only
+	 * honest definition of "in game" this side has. START is not one: in a
+	 * match only the owner sends it, so the player who merely joined would
+	 * sit at IN_ROOM for the whole game and have every input refused here,
+	 * before it ever reached the socket - which a game loop reads as a lost
+	 * session rather than as a rule it broke.
+	 *
+	 * It belongs in this function rather than in either mode's apply, because
+	 * both readers of the socket land here and the fact is about the session,
+	 * not about whichever view model happens to consume the frame.
+	 */
+	if (net->state == NET_IN_ROOM)
+		net->state = NET_IN_GAME;
 	return (true);
 }
 

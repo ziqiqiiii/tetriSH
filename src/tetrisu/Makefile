@@ -266,6 +266,16 @@ $(TEST_BIN_DIR)/chat_smoke: $(TESTS_DIR)/chat_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# Two clients in one process, on two sockets. That is what lets one program
+# assert on both halves of the same instant - that the board one player steers
+# is the board the other is shown, in the same frame. Two processes could only
+# agree by talking to each other, which is the thing under test.
+$(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
@@ -282,7 +292,8 @@ unit: $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
-			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke
+			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
+			 $(TEST_BIN_DIR)/match_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
