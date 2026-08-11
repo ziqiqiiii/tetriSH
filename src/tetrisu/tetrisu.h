@@ -221,6 +221,24 @@
 # define SOLO_DEFAULT_DAS_MS	167
 # define SOLO_DEFAULT_ARR_MS	33
 # define SOLO_DEFAULT_SOFT_DROP_FACTOR	20
+/*
+** The floor under every repeat, and it is ARR on purpose: no key repeats
+** faster than any other, so a held soft drop travels the board at the speed a
+** held move travels it and there is one handling rule instead of two.
+**
+** The number is not a feel decision, it is the server's budget divided in
+** half. Online, every repeat is a request, and TETRISD_DEFAULT_INPUT_RATE is
+** 60 a second: two keys held at 1000/33 each is exactly 60, with the burst of
+** 120 to absorb the transient. Without the floor, soft drop is
+** gravity_interval_ms(level) / 20 - 50 ms at level 1, but 9 ms at level 7 and
+** 3 ms at level 10, which is 111 and 333 requests a second against that 60.
+** A player merely holding a key was being answered 429 from level 6 up.
+**
+** It is applied offline too, though nothing there is rate-limited. Handling
+** that changed depending on whether a server was listening would be a worse
+** thing to own than a soft drop capped at thirty rows a second.
+*/
+# define SOLO_MIN_REPEAT_MS	SOLO_DEFAULT_ARR_MS
 # define SOLO_HANDLING_ACTION_CAP	64
 
 /* AUDIO.C */
@@ -1475,6 +1493,17 @@ typedef struct s_mp_rect
 */
 # define MP_MATCH_BOARD_BANDS 5
 /*
+** The floor under how often the opponent's region is re-presented, in
+** milliseconds. 50 is 20 Hz, which is faster than a piece falls at any level
+** and slower than a player can input, so it costs the opponent's board nothing
+** a viewer can see and gives the local board back every frame in between.
+**
+** It is a presentation rate and not a data rate: every snapshot is still
+** applied the moment it lands, and the pending garbage, the score and the
+** verdict are read from the model rather than from what was last drawn.
+*/
+# define MP_MATCH_OPPONENT_PRESENT_MS 50
+/*
 ** Danger is quantised into this many steps between clear and full. The signal
 ** itself is Solo's solo_game_danger_dim(), so the two modes enter and leave
 ** danger on exactly the same rule; only the presentation differs, because the
@@ -2022,7 +2051,34 @@ typedef struct
 	 */
 	struct ncplane		*mp_match_local_bands[MP_MATCH_BOARD_BANDS];
 	uint64_t			mp_match_band_signatures[MP_MATCH_BOARD_BANDS];
+	/*
+	 * The opponent's board is banded on the same terms and for a sharper
+	 * reason. While it was a local fixture it changed only at gravity
+	 * intervals, so re-encoding it whole cost nothing anybody noticed; fed
+	 * from the wire it changes at the tick rate, with a piece moving across
+	 * it, and it would pay in full the cost the local banding was introduced
+	 * to avoid - on the same frame, out of the same budget, as the board the
+	 * player is actually steering.
+	 *
+	 * The caption strip below it keeps a plane of its own rather than joining
+	 * the last band: it is not made of cells, so no band signature describes
+	 * it, and folding it in would re-blit a fifth of the board every time a
+	 * score changed.
+	 */
+	struct ncplane		*mp_match_opponent_bands[MP_MATCH_BOARD_BANDS];
+	uint64_t			mp_match_opponent_band_signatures[MP_MATCH_BOARD_BANDS];
 	struct ncplane		*mp_match_opponent_plane;
+	/*
+	 * The earliest this client will re-present the opponent's region. The
+	 * opponent's board is information and the local one is control: presenting
+	 * theirs at MP_MATCH_OPPONENT_PRESENT_MS while ours goes out on every
+	 * input is a trade the player cannot feel, and it keeps the terminal's
+	 * bitmap budget on the piece in their hands. Nothing is skipped, only
+	 * deferred - the signature is left unstored, so the next frame past the
+	 * floor draws whatever the board has become by then.
+	 */
+	uint64_t			mp_match_opponent_due_ms;
+	bool				mp_match_opponent_deferred;
 	struct ncplane		*mp_match_left_plane;
 	struct ncplane		*mp_match_right_plane;
 	struct ncplane		*mp_match_loadout_plane;
@@ -3118,6 +3174,7 @@ void			render_multiplayer_match_destroy(t_render_ctx *ctx);
 bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 					const t_mp_match_state *state, bool rebuild_background);
 void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+int				render_multiplayer_match_deferred_ms(const t_render_ctx *ctx);
 
 /* MULTIPLAYER_MATCH_MODE.C */
 int				multiplayer_match_mode_run(t_render_ctx *ctx,
@@ -3289,6 +3346,7 @@ int				net_solo_start(t_net_client *net, t_net_result *out);
 void			net_solo_leave(t_net_client *net);
 int				net_solo_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
+int				net_solo_send_action(t_net_client *net, t_solo_action action);
 int				net_solo_pause(t_net_client *net, bool paused,
 					t_net_result *out);
 int				net_solo_restart(t_net_client *net, t_net_result *out);
@@ -3305,6 +3363,7 @@ int				net_match_join(t_net_client *net, const char *room);
 bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
 int				net_match_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
+int				net_match_send_action(t_net_client *net, t_solo_action action);
 int				net_match_ability(t_net_client *net, t_solo_ability ability,
 					t_net_result *out);
 

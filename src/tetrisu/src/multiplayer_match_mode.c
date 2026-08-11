@@ -166,6 +166,12 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 			play_match_events(audio, solo_game_take_events(&state.local_game));
 			(void)solo_game_take_events(&state.opponent_game);
 			/*
+			 * A frame the opponent's presentation floor held back is due now,
+			 * and nothing else this turn is going to ask for a draw.
+			 */
+			if (render_multiplayer_match_deferred_ms(ctx) == 0)
+				changed = true;
+			/*
 			 * Only the fixture ends a match on a local top-out. Online the
 			 * verdict is the server's and arrives in a snapshot, because a
 			 * player who tops out has not necessarily lost yet - somebody else
@@ -336,6 +342,9 @@ static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
 		}
 	}
 	candidate = render_notification_next_wake_ms(ctx);
+	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+		wake_ms = candidate;
+	candidate = render_multiplayer_match_deferred_ms(ctx);
 	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
 		wake_ms = candidate;
 	candidate = audio_next_wake_ms(audio);

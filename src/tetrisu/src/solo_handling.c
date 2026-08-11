@@ -254,8 +254,8 @@ static int	soft_drop_interval(const t_solo_handling_config *config,
 	if (factor < 1)
 		factor = 1;
 	interval_ms = gravity_ms / factor;
-	if (interval_ms < 1)
-		interval_ms = 1;
+	if (interval_ms < SOLO_MIN_REPEAT_MS)
+		interval_ms = SOLO_MIN_REPEAT_MS;
 	return (interval_ms);
 }
 

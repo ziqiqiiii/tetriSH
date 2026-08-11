@@ -106,6 +106,25 @@ int	net_match_action(t_net_client *net, t_solo_action action,
 }
 
 /**
+ * @brief Sends one player action without waiting to be told it stood.
+ *
+ * The match loop's path. A match is where the wait it drops is worst: two
+ * boards stop for it rather than one, and the one that stops is the one being
+ * steered while the other keeps arriving on its own clock.
+ *
+ * @param net Client with a match running.
+ * @param action The action the player asked for.
+ * @return 0 when the request went out or was dropped under a back-off, -1 on
+ *         a transport failure.
+ */
+int	net_match_send_action(t_net_client *net, t_solo_action action)
+{
+	if (net == NULL || net->state != NET_IN_GAME)
+		return (-1);
+	return (net_solo_send_action(net, action));
+}
+
+/**
  * @brief Spends charge on one Gaiden ability level.
  *
  * @param net Client with a match running.

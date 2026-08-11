@@ -141,6 +141,38 @@ int	net_solo_action(t_net_client *net, t_solo_action action,
 }
 
 /**
+ * @brief Sends one player action without waiting to be told it stood.
+ *
+ * This is the path the game loop uses, and net_solo_action is the path a
+ * caller uses when the verdict is the thing it wants - a test asserting that
+ * a second HOLD is refused, for instance. The request on the wire is the same
+ * either way.
+ *
+ * Waiting is what this drops, and the reason it can be dropped is the
+ * authority boundary: the board changes when the snapshot that follows says it
+ * did, so the response to a MOVE carries nothing the next snapshot does not.
+ * What waiting cost was a turn of the render loop per keypress - at 40 ms
+ * round trip a key repeating every 33 ms issues faster than replies come back,
+ * and both boards sit still for each one.
+ *
+ * @param net Client with a game running.
+ * @param action The action the player asked for.
+ * @return 0 when the request went out or was dropped under a back-off, -1 on
+ *         a transport failure or an action with no request behind it.
+ */
+int	net_solo_send_action(t_net_client *net, t_solo_action action)
+{
+	const char	*method;
+	const char	*body;
+
+	if (net == NULL || net->state != NET_IN_GAME)
+		return (-1);
+	if (!action_request(net, action, &method, &body))
+		return (-1);
+	return (net_send(net, method, net->play_path, body));
+}
+
+/**
  * @brief PAUSE or RESUME the server-side game.
  *
  * @param net Client with a game running.

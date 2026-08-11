@@ -130,13 +130,11 @@ bool	match_authority_pending(const t_match_authority *authority)
 bool	match_authority_action(t_match_authority *authority,
 		t_mp_match_state *state, t_solo_action action)
 {
-	t_net_result	result;
-
 	if (!authority->online)
 		return (solo_game_apply_action(&state->local_game, action));
 	if (state->local_game.countdown_active)
 		return (false);
-	if (net_match_action(authority->net, action, &result) != 0)
+	if (net_match_send_action(authority->net, action) != 0)
 	{
 		fall_offline(authority, state);
 		return (true);

@@ -9,6 +9,7 @@ static void	test_last_pressed_direction_wins(void);
 static void	test_releasing_inactive_direction_keeps_timer(void);
 static void	test_terminal_repeat_is_ignored(void);
 static void	test_soft_drop_uses_gravity_factor(void);
+static void	test_soft_drop_never_outruns_the_input_budget(void);
 
 /**
  * @brief Runs terminal-aware Solo handling tests.
@@ -25,6 +26,7 @@ int	main(void)
 	test_releasing_inactive_direction_keeps_timer();
 	test_terminal_repeat_is_ignored();
 	test_soft_drop_uses_gravity_factor();
+	test_soft_drop_never_outruns_the_input_budget();
 	return (0);
 }
 
@@ -210,4 +212,43 @@ static void	test_soft_drop_uses_gravity_factor(void)
 			NCTYPE_RELEASE, &action));
 	assert(solo_handling_next_wake_ms(&state, &config, 800) == -1);
 	printf("PASS test_soft_drop_uses_gravity_factor\n");
+}
+
+/**
+ * @brief Checks no repeat runs faster than the floor, at any level.
+ *
+ * The number this defends is the server's, not a feel preference: online every
+ * repeat is a request, and gravity / 20 reaches 3 ms by level 10 - 333 a
+ * second against an input budget of 60. A player merely holding a key was
+ * being answered 429 from level 6 up.
+ *
+ * The gravity intervals below are the real ones, from lib/libtetrisbrain's
+ * scoring.c, so this fails if either the curve or the floor moves under the
+ * other.
+ */
+static void	test_soft_drop_never_outruns_the_input_budget(void)
+{
+	t_solo_handling_config	config;
+	t_solo_handling_state	state;
+	t_solo_action			action;
+	int						level;
+
+	config = solo_handling_default_config();
+	level = 1;
+	while (level <= 15)
+	{
+		solo_handling_reset(&state);
+		assert(solo_handling_event(&state, &config, NCKEY_DOWN,
+				NCTYPE_PRESS, &action));
+		assert(solo_handling_next_wake_ms(&state, &config,
+				gravity_interval_ms(level)) >= SOLO_MIN_REPEAT_MS);
+		level++;
+	}
+	/* Below the floor the level is what stops mattering, not the drop. */
+	solo_handling_reset(&state);
+	assert(solo_handling_event(&state, &config, NCKEY_DOWN,
+			NCTYPE_PRESS, &action));
+	assert(solo_handling_next_wake_ms(&state, &config, 60)
+		== SOLO_MIN_REPEAT_MS);
+	printf("PASS test_soft_drop_never_outruns_the_input_budget\n");
 }

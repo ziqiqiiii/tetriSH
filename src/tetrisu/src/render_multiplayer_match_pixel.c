@@ -83,8 +83,12 @@ static int repaint_changed_cells(t_match_regions *pass, int slot,
 				bool with_piece);
 static bool board_region_sync(t_match_regions *pass, int slot,
 				const t_mp_rect *board, const t_solo_game *game);
-static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region);
-static uint64_t band_signature(const t_render_ctx *ctx, int first, int last);
+static bool blit_board_bands(t_match_regions *pass, const t_mp_rect *region,
+				int slot, struct ncplane **planes, uint64_t *signatures);
+static bool regions_opponent_caption(t_match_regions *pass,
+				const t_mp_rect *board);
+static uint64_t band_signature(const t_render_ctx *ctx, int slot, int first,
+				int last);
 static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
 				int band, t_mp_rect *out);
 static bool caption_stale(t_match_regions *pass);
@@ -467,11 +471,13 @@ static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
 /**
  * @brief Hashes the board rows a band covers, plus the band's own geometry.
  *
- * Only the local cache is hashed because only the local board is banded; the
- * rows outside any band's board area contribute nothing, so a band holding
- * only margin settles to a constant and stops being re-blitted.
+ * The cell cache is hashed rather than the game, so this reads whichever board
+ * the caller is banding; the rows outside any band's board area contribute
+ * nothing, so a band holding only margin settles to a constant and stops being
+ * re-blitted.
  */
-static uint64_t band_signature(const t_render_ctx *ctx, int first, int last)
+static uint64_t band_signature(const t_render_ctx *ctx, int slot, int first,
+	int last)
 {
 	uint64_t	hash;
 	int			row;
@@ -482,19 +488,28 @@ static uint64_t band_signature(const t_render_ctx *ctx, int first, int last)
 	row = max_int(0, first);
 	while (row < min_int(last, BOARD_HEIGHT))
 	{
-		hash = hash_bytes(hash, ctx->mp_match_boards[0].cells[row],
-				sizeof(ctx->mp_match_boards[0].cells[row]));
+		hash = hash_bytes(hash, ctx->mp_match_boards[slot].cells[row],
+				sizeof(ctx->mp_match_boards[slot].cells[row]));
 		row++;
 	}
 	return (hash);
 }
 
 /**
- * @brief Re-blits only the bands of the local board whose rows changed.
+ * @brief Re-blits only the bands of one board whose rows changed.
  *
- * A forced pass re-blits every band, because the canvas underneath it is new.
+ * Both boards come through here. A forced pass re-blits every band, because
+ * the canvas underneath it is new.
+ *
+ * @param pass The frame in progress.
+ * @param region The board's rectangle including its margin.
+ * @param slot Which board: 0 local, 1 opponent.
+ * @param planes The band planes to reuse, and their stored signatures.
+ * @param signatures What each band last held.
+ * @return true unless a plane could not be created.
  */
-static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region)
+static bool blit_board_bands(t_match_regions *pass, const t_mp_rect *region,
+	int slot, struct ncplane **planes, uint64_t *signatures)
 {
 	t_render_ctx	*ctx;
 	t_mp_rect		strip;
@@ -509,16 +524,17 @@ static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region)
 	while (band < MP_MATCH_BOARD_BANDS)
 	{
 		band_bounds(ctx, region, band, &strip);
-		signature = band_signature(ctx, (strip.y - region->y - 8) / tile_size,
+		signature = band_signature(ctx, slot,
+				(strip.y - region->y - 8) / tile_size,
 				(strip.y + strip.height - region->y - 8 + tile_size - 1)
 				/ tile_size);
 		if (strip.height > 0 && (pass->force
-				|| ctx->mp_match_band_signatures[band] != signature))
+				|| signatures[band] != signature))
 		{
 			if (!create_region_plane(ctx, pass->pixels, pass->width,
-					pass->height, &strip, &ctx->mp_match_local_bands[band]))
+					pass->height, &strip, &planes[band]))
 				return (false);
-			ctx->mp_match_band_signatures[band] = signature;
+			signatures[band] = signature;
 		}
 		band++;
 	}
@@ -677,7 +693,8 @@ static int regions_local(t_match_regions *pass)
 		board->height + 16};
 	if (!board_region_sync(pass, 0, board, &state->local_game))
 		return (-1);
-	if (!blit_local_bands(pass, &region))
+	if (!blit_board_bands(pass, &region, 0, pass->ctx->mp_match_local_bands,
+			pass->ctx->mp_match_band_signatures))
 		return (-1);
 	if (doubles && !regions_caption(pass, board))
 		return (-1);
@@ -685,12 +702,25 @@ static int regions_local(t_match_regions *pass)
 	return (1);
 }
 
+/**
+ * @brief Brings the opponent's board and caption up to date, at their own rate.
+ *
+ * Two things separate this from regions_local. The board is banded the same way
+ * but under its own signatures, and the caption strip beneath it keeps a plane
+ * of its own so a score changing does not re-blit board rows.
+ *
+ * The other is the presentation floor. A rebuild that is merely due is deferred
+ * to MP_MATCH_OPPONENT_PRESENT_MS rather than skipped: the stored signature is
+ * left alone, so the next frame past the floor draws whatever the board has
+ * become by then, and nothing arrives late except the picture of it. A forced
+ * pass ignores the floor, because the canvas underneath it is new and a region
+ * left undrawn on a fresh canvas is a hole.
+ */
 static int regions_opponent(t_match_regions *pass)
 {
 	const t_mp_match_state *state;
 	const t_mp_rect *board;
 	t_mp_rect region;
-	t_mp_rect strip;
 	uint64_t signature;
 
 	state = pass->state;
@@ -700,26 +730,85 @@ static int regions_opponent(t_match_regions *pass)
 	signature = game_signature(&state->opponent_game);
 	if (!pass->force && pass->ctx->mp_match_opponent_signature == signature)
 		return (0);
+	if (!pass->force
+		&& ui_notification_now_ms() < pass->ctx->mp_match_opponent_due_ms)
+	{
+		pass->ctx->mp_match_opponent_deferred = true;
+		return (0);
+	}
 	if (!regions_prepare(pass))
 		return (-1);
 	if (!board_region_sync(pass, 1, board, &state->opponent_game))
 		return (-1);
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	if (!blit_board_bands(pass, &region, 1,
+			pass->ctx->mp_match_opponent_bands,
+			pass->ctx->mp_match_opponent_band_signatures))
+		return (-1);
+	if (!regions_opponent_caption(pass, board))
+		return (-1);
+	pass->ctx->mp_match_opponent_signature = signature;
+	pass->ctx->mp_match_opponent_due_ms = ui_notification_now_ms()
+		+ MP_MATCH_OPPONENT_PRESENT_MS;
+	pass->ctx->mp_match_opponent_deferred = false;
+	return (1);
+}
+
+/**
+ * @brief How long until a held-back opponent frame may be drawn.
+ *
+ * The loop only renders when something changed, so a frame the floor deferred
+ * would sit undrawn until the next thing that did change - which during a lull
+ * is a gravity step away, and at the end of a match is forever. Reporting the
+ * wait puts it back on the loop's timetable: it sleeps until the floor lifts
+ * and draws then.
+ *
+ * @param ctx Render context to ask.
+ * @return Milliseconds until the deferred frame is due, 0 when it is due now,
+ *         or -1 when nothing is being held back.
+ */
+int	render_multiplayer_match_deferred_ms(const t_render_ctx *ctx)
+{
+	uint64_t	now;
+
+	if (ctx == NULL || !ctx->mp_match_opponent_deferred)
+		return (-1);
+	now = ui_notification_now_ms();
+	if (now >= ctx->mp_match_opponent_due_ms)
+		return (0);
+	return ((int)(ctx->mp_match_opponent_due_ms - now));
+}
+
+/**
+ * @brief Redraws the name-and-score strip under the opponent's board.
+ *
+ * A forced pass has already had it composed onto the canvas by compose_match
+ * and only needs the plane, which is why the drawing is conditional and the
+ * plane is not.
+ *
+ * @param pass The frame in progress.
+ * @param board The opponent's board rectangle.
+ * @return true unless the plane could not be created.
+ */
+static bool regions_opponent_caption(t_match_regions *pass,
+	const t_mp_rect *board)
+{
+	const t_mp_match_state	*state;
+	t_mp_rect				strip;
+
+	state = pass->state;
+	strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
+		board->width + 16, 66};
 	if (!pass->force)
 	{
-		strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
-			board->width + 16, 66};
 		clear_rect(pass->pixels, pass->width, pass->height, &strip);
 		draw_double_caption(pass->ctx, pass->pixels, pass->width, pass->height,
 			board, state->opponent_name, state->opponent_game.scoring.total,
 			state->opponent_charge, false);
 	}
-	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
-		board->height + 82};
-	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
-			pass->height, &region, &pass->ctx->mp_match_opponent_plane))
-		return (-1);
-	pass->ctx->mp_match_opponent_signature = signature;
-	return (1);
+	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &strip, &pass->ctx->mp_match_opponent_plane));
 }
 
 static int regions_battle(t_match_regions *pass)
@@ -1018,8 +1107,13 @@ static void destroy_region_planes(t_render_ctx *ctx)
 			ncplane_destroy(ctx->mp_match_local_bands[index]);
 		ctx->mp_match_local_bands[index] = NULL;
 		ctx->mp_match_band_signatures[index] = 0;
+		if (ctx->mp_match_opponent_bands[index] != NULL)
+			ncplane_destroy(ctx->mp_match_opponent_bands[index]);
+		ctx->mp_match_opponent_bands[index] = NULL;
+		ctx->mp_match_opponent_band_signatures[index] = 0;
 		index++;
 	}
+	ctx->mp_match_opponent_due_ms = 0;
 }
 
 static uint64_t match_signature(const t_mp_match_state *state,

@@ -21,8 +21,12 @@ static int	connect_within(int fd, const struct sockaddr *addr,
 				socklen_t len, int timeout_ms);
 static void	socket_deadline(int fd, int timeout_ms);
 static int	send_message(t_net_client *net, t_htttp_message *msg);
+static int	dispatch_request(t_net_client *net, const char *method,
+				const char *path, const char *body);
 static int	receive_message(t_net_client *net, t_htttp_message *out,
 				int timeout_ms);
+static void	note_throttle(t_net_client *net, const t_htttp_message *msg);
+static uint64_t	net_now_ms(void);
 static void	take_chat(t_net_client *net, const t_htttp_message *msg);
 static bool	addressed_to_this_room(const t_net_client *net, const char *path);
 static bool	addressed_to_this_game(const t_net_client *net, const char *path);
@@ -174,32 +178,13 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 		const char *body, t_net_result *out)
 {
 	t_htttp_message	msg;
-	char			pid[32];
 	int				rc;
 
 	if (out != NULL)
 		memset(out, 0, sizeof(*out));
 	if (net == NULL || net->state == NET_OFFLINE)
 		return (-1);
-	htttp_message_init(&msg);
-	rc = -1;
-	if (htttp_message_make_request(&msg, method, path) == HTTTP_OK)
-	{
-		if (net->player_id != 0)
-		{
-			snprintf(pid, sizeof(pid), "%llu",
-				(unsigned long long)net->player_id);
-			htttp_message_set_header(&msg, "Player-Id", pid);
-		}
-		if (body != NULL && body[0] != '\0')
-		{
-			htttp_message_set_header(&msg, "Content-Type",
-				HTTTP_CONTENT_TYPE_COMMAND);
-			htttp_message_set_body(&msg, body, strlen(body));
-		}
-		rc = send_message(net, &msg);
-	}
-	htttp_message_free(&msg);
+	rc = dispatch_request(net, method, path, body);
 	while (rc == 0)
 	{
 		if (receive_message(net, &msg, NET_REPLY_TIMEOUT_MS) != 0)
@@ -210,6 +195,7 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 		if (msg.type == HTTTP_MESSAGE_RESPONSE)
 		{
 			take_player_id(net, &msg);
+			note_throttle(net, &msg);
 			if (out != NULL)
 			{
 				out->status = (int)msg.status_code;
@@ -227,12 +213,59 @@ int	net_request(t_net_client *net, const char *method, const char *path,
 }
 
 /**
+ * @brief Sends one request and does not wait for the answer.
+ *
+ * The response is left for net_pump, which reads it with everything else the
+ * server pushed. Nothing here inspects it, because the callers of this path -
+ * the gameplay inputs - act on the snapshot rather than on the verdict.
+ *
+ * While the server is asking for a back-off the request is dropped instead of
+ * sent. That is the point of noticing a 429 at all: a client that keeps
+ * sending through one spends the same wire and gets the same refusal, and the
+ * board looks the same to the player either way.
+ *
+ * @param net Connected client.
+ * @param method HTTTP method.
+ * @param path Resource path.
+ * @param body Request body text, or NULL.
+ * @return 0 when the request went out or was deliberately dropped, -1 on a
+ *         transport failure.
+ */
+int	net_send(t_net_client *net, const char *method, const char *path,
+		const char *body)
+{
+	if (net == NULL || net->state == NET_OFFLINE)
+		return (-1);
+	if (net_throttled(net))
+		return (0);
+	return (dispatch_request(net, method, path, body));
+}
+
+/**
+ * @brief Reports whether the server has asked this client to slow down.
+ *
+ * @param net Client to ask.
+ * @return true while a Retry-After the server sent is still running.
+ */
+bool	net_throttled(const t_net_client *net)
+{
+	if (net == NULL || net->throttle_until_ms == 0)
+		return (false);
+	return (net_now_ms() < net->throttle_until_ms);
+}
+
+/**
  * @brief Drains whatever the server has already sent, without waiting.
  *
  * Called once per loop turn after poll says the socket is readable. Draining
  * rather than reading one message is what keeps a burst of snapshots from
  * taking one loop turn each; keeping only the latest is what stops a client
  * that fell behind from rendering its way back through history.
+ *
+ * This is also where the answers to net_send's requests land. All but one of
+ * them is dropped on the floor, which is what asking for no answer means; the
+ * one is a 429, because a back-off nobody reads is a back-off that never
+ * happens.
  *
  * @param net Connected client.
  * @return 1 when a new snapshot arrived, 0 when nothing did, -1 on a closed
@@ -251,6 +284,7 @@ int	net_pump(t_net_client *net)
 		if (net_state_take(net, &msg))
 			fresh = 1;
 		take_chat(net, &msg);
+		note_throttle(net, &msg);
 		htttp_message_free(&msg);
 	}
 	if (net->state == NET_OFFLINE)
@@ -403,6 +437,49 @@ static int	send_message(t_net_client *net, t_htttp_message *msg)
 		return (-1);
 	}
 	return (0);
+}
+
+/**
+ * @brief Builds one request with this client's identity on it and writes it.
+ *
+ * Both send paths share this, which is the whole difference between them: what
+ * goes out is byte-identical whether or not anybody intends to wait for the
+ * answer, so the choice to wait is the caller's alone and never the server's
+ * to notice.
+ *
+ * @param net Connected client.
+ * @param method HTTTP method.
+ * @param path Resource path.
+ * @param body Request body text, or NULL.
+ * @return 0 when the frame was written, -1 on a build or write failure.
+ */
+static int	dispatch_request(t_net_client *net, const char *method,
+		const char *path, const char *body)
+{
+	t_htttp_message	msg;
+	char			pid[32];
+	int				rc;
+
+	htttp_message_init(&msg);
+	rc = -1;
+	if (htttp_message_make_request(&msg, method, path) == HTTTP_OK)
+	{
+		if (net->player_id != 0)
+		{
+			snprintf(pid, sizeof(pid), "%llu",
+				(unsigned long long)net->player_id);
+			htttp_message_set_header(&msg, "Player-Id", pid);
+		}
+		if (body != NULL && body[0] != '\0')
+		{
+			htttp_message_set_header(&msg, "Content-Type",
+				HTTTP_CONTENT_TYPE_COMMAND);
+			htttp_message_set_body(&msg, body, strlen(body));
+		}
+		rc = send_message(net, &msg);
+	}
+	htttp_message_free(&msg);
+	return (rc);
 }
 
 /**
@@ -773,4 +850,51 @@ static void	console_unmute(int saved[2])
 	close(saved[1]);
 	saved[0] = -1;
 	saved[1] = -1;
+}
+
+/**
+ * @brief Records a back-off the server asked for.
+ *
+ * Retry-After is read rather than assumed, because it is the server's number:
+ * dispatch.c sends 1 today, and a client that had hard-coded that would be
+ * wrong the moment it changed. A malformed or absent value falls back to one
+ * second, which is the same answer as guessing but says so.
+ *
+ * @param net Client whose back-off is being set.
+ * @param msg The message just read; anything but a 429 response is ignored.
+ */
+static void	note_throttle(t_net_client *net, const t_htttp_message *msg)
+{
+	const char	*retry;
+	long		seconds;
+
+	if (msg->type != HTTTP_MESSAGE_RESPONSE || msg->status_code != 429u)
+		return ;
+	retry = htttp_message_get_header(msg, "Retry-After");
+	seconds = 1;
+	if (retry != NULL)
+		seconds = strtol(retry, NULL, 10);
+	if (seconds < 1)
+		seconds = 1;
+	if (seconds > 30)
+		seconds = 30;
+	net->throttle_until_ms = net_now_ms() + (uint64_t)seconds * 1000u;
+	net->throttled++;
+}
+
+/**
+ * @brief The monotonic millisecond clock the back-off is measured on.
+ *
+ * Monotonic and not wall-clock: a back-off is a duration, and a clock that can
+ * step backwards would leave one running until the system time caught up.
+ *
+ * @return Milliseconds since an unspecified fixed point.
+ */
+static uint64_t	net_now_ms(void)
+{
+	struct timespec	now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return (0);
+	return ((uint64_t)now.tv_sec * 1000u + (uint64_t)(now.tv_nsec / 1000000));
 }
