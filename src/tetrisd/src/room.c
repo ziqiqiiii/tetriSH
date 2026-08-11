@@ -12,6 +12,11 @@ static void		push_all(t_server_room *server_room, int n, const t_body_state *sna
 static void		push_state(t_server_room *server_room, const char *room_name, t_player_id pid, const t_body_state *snap);
 static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
 static void		number_snapshot(t_server_room *server_room, t_player_id pid, t_body_state *snap);
+static void		decorate_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
+static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
+static void		mark_all_dirty(t_server_room *server_room);
+static int		count_live_games(const t_server_room *server_room);
+static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
 static void		forfeit_slot(t_server_room *server_room, int slot, t_game *out);
@@ -289,6 +294,11 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
 	if (verdict != START_ACCEPTED)
 		return (verdict);
 	deal_games(server_room);
+	if (!server_room_is_solo(server_room))
+	{
+		server_room->countdown_ms = TETRISD_MATCH_COUNTDOWN_MS;
+		server_room->countdown_second = -1;
+	}
 	server_room->ticking = true;
 	return (verdict);
 }
@@ -315,6 +325,15 @@ bool	server_room_input(t_server_room *server_room, t_client *cli,
 
 	game = server_room_game_of(server_room, cli);
 	if (game == NULL || !game->active)
+		return (false);
+	/*
+	 * A board being held before the match starts is not one to play on. The
+	 * game is active and unpaused for those three seconds - that is what makes
+	 * the hold the room's rather than the game's - so the game itself would
+	 * accept these, and a player who kept dropping through their own countdown
+	 * would begin the match with a stack.
+	 */
+	if (server_room->countdown_ms > 0)
 		return (false);
 	if (action == INPUT_MOVE)
 		ok = game_move(game, argument);
@@ -592,11 +611,15 @@ static void	room_blank(t_server_room *server_room)
 
 	server_room->ticking = false;
 	server_room->chat_seq = 0;
+	server_room->countdown_ms = 0;
+	server_room->countdown_second = -1;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
+		server_room->result[slot] = BODY_RESULT_NONE;
+		server_room->rank[slot] = 0;
 		slot++;
 	}
 }
@@ -676,13 +699,73 @@ static int	deal_games(t_server_room *server_room)
  */
 static void	tick_room(t_server_room *server_room, int elapsed_ms)
 {
+	if (server_room->countdown_ms > 0)
+		elapsed_ms = spend_countdown(server_room, elapsed_ms);
 	advance_and_push(server_room, elapsed_ms);
 	if (!room_is_over(server_room))
 		return ;
+	settle_results(server_room);
 	advance_and_push(server_room, 0);
 	server_room->ticking = false;
 	record_and_reset(server_room);
 	room_close(server_room);
+}
+
+/**
+ * @brief Holds a dealt match still, and hands back whatever time is left over.
+ *
+ * The countdown is spent before gravity rather than instead of it, so the tick
+ * it runs out on still advances the game by its remainder - the match begins
+ * exactly three seconds after it was dealt rather than at the start of the
+ * next tick, which is the same reasoning game_gravity already applies to a
+ * clear that finishes partway through a late tick.
+ *
+ * A snapshot is owed only when the second on screen changes. Three seconds at
+ * the tick rate is a couple of hundred frames of a number the client can
+ * interpolate between four of, and the frames a match needs are the ones after
+ * it starts.
+ *
+ * @param server_room Room being held.
+ * @param elapsed_ms Milliseconds this tick is worth.
+ * @return Milliseconds left after the countdown took its share.
+ */
+static int	spend_countdown(t_server_room *server_room, int elapsed_ms)
+{
+	int	second;
+
+	if (elapsed_ms >= server_room->countdown_ms)
+	{
+		elapsed_ms -= server_room->countdown_ms;
+		server_room->countdown_ms = 0;
+		mark_all_dirty(server_room);
+		return (elapsed_ms);
+	}
+	server_room->countdown_ms -= elapsed_ms;
+	second = (server_room->countdown_ms + 999) / 1000;
+	if (second != server_room->countdown_second)
+	{
+		server_room->countdown_second = second;
+		mark_all_dirty(server_room);
+	}
+	return (0);
+}
+
+/**
+ * @brief Marks every live game in the room as owing a snapshot.
+ *
+ * @param server_room Room whose games are marked.
+ */
+static void	mark_all_dirty(t_server_room *server_room)
+{
+	int	slot;
+
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].player_id != 0)
+			server_room->dirty[slot] = true;
+		slot++;
+	}
 }
 
 /**
@@ -791,6 +874,7 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 			{
 				server_room->games[slot].seq++;
 				game_snapshot(&server_room->games[slot], &snaps[n]);
+				decorate_snapshot(server_room, slot, &snaps[n]);
 				pids[n] = server_room->games[slot].player_id;
 				number_snapshot(server_room, pids[n], &snaps[n]);
 				server_room->dirty[slot] = false;
@@ -800,6 +884,33 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 		slot++;
 	}
 	return (n);
+}
+
+/**
+ * @brief Writes onto a snapshot the facts that belong to the room, not to the
+ *        game it came from.
+ *
+ * game_snapshot projects one board and deliberately knows nothing about the
+ * room around it. Two things a player has to be told are the room's alone: the
+ * countdown, which is every game in the room being held still at once, and the
+ * result, which is a fact about who else is left rather than about this board.
+ *
+ * The countdown overrides the phase because during it the game is genuinely
+ * active and unpaused - it is simply not being advanced - so the game has no
+ * way to describe itself as held.
+ *
+ * @param server_room Room the snapshot came from.
+ * @param slot 0-based slot the snapshot belongs to.
+ * @param snap Snapshot to decorate.
+ */
+static void	decorate_snapshot(t_server_room *server_room, int slot,
+		t_body_state *snap)
+{
+	snap->countdown_ms = server_room->countdown_ms;
+	if (server_room->countdown_ms > 0)
+		snap->phase = BODY_PHASE_COUNTDOWN;
+	snap->result = server_room->result[slot];
+	snap->rank = server_room->rank[slot];
 }
 
 /**
@@ -839,20 +950,77 @@ static void	number_snapshot(t_server_room *server_room, t_player_id pid,
  */
 static bool	room_is_over(t_server_room *server_room)
 {
-	bool	over;
-	int		slot;
-
-	over = true;
 	if (server_room->room->number_of_players == 0)
 		return (true);
+	if (server_room_is_solo(server_room))
+		return (count_live_games(server_room) == 0);
+	return (count_live_games(server_room) < 2
+		|| server_room->room->number_of_players < 2);
+}
+
+/**
+ * @brief Counts the games in this room that are still being played.
+ *
+ * @param server_room Room to count.
+ * @return How many of its games are active.
+ */
+static int	count_live_games(const t_server_room *server_room)
+{
+	int	live;
+	int	slot;
+
+	live = 0;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (server_room->games[slot].active)
-			over = false;
+			live++;
 		slot++;
 	}
-	return (over);
+	return (live);
+}
+
+/**
+ * @brief Decides how the match ended for each player, once, before the last
+ *        snapshot goes out.
+ *
+ * Surviving is the whole of winning: a player is the winner because everybody
+ * else stopped, not because of anything their own board did. That is also why
+ * the verdict has to be written down here rather than read off the game when
+ * the snapshot is built - the winner's board is active with a piece on it,
+ * exactly like a board mid-match.
+ *
+ * Single has no verdict to give. Its game ends by topping out and the top-out
+ * phase already says so, so the result stays NONE and its snapshot is
+ * unchanged.
+ *
+ * @param server_room Room whose match has just ended.
+ */
+static void	settle_results(t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room_is_solo(server_room))
+		return ;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].player_id != 0)
+		{
+			if (server_room->games[slot].active)
+			{
+				server_room->result[slot] = BODY_RESULT_WON;
+				server_room->rank[slot] = 1;
+			}
+			else
+			{
+				server_room->result[slot] = BODY_RESULT_LOST;
+				server_room->rank[slot] = count_live_games(server_room) + 1;
+			}
+			server_room->dirty[slot] = true;
+		}
+		slot++;
+	}
 }
 
 /**
@@ -861,6 +1029,13 @@ static bool	room_is_over(t_server_room *server_room)
  * Finishing a game clears every slot (the room domain's rule), so the room
  * ends empty and is handed back to the lobby; players who want another game
  * join a fresh one.
+ *
+ * A game is a win if it was still being played when the match ended, which is
+ * the same question settle_results asked a moment earlier and the same answer.
+ * It is deliberately not "did not top out": in Single those two agree, because
+ * the only way a solo game ends is by topping out, but in a match the winner
+ * is the player whose board never stopped and there is nothing on that board
+ * to say so.
  *
  * @param server_room Room whose game has ended.
  */
@@ -887,7 +1062,7 @@ static void	record_and_reset(t_server_room *server_room)
 	while (n > 0)
 	{
 		n--;
-		award_game(server_room->srv, &played[n], !played[n].topped_out);
+		award_game(server_room->srv, &played[n], played[n].active);
 	}
 }
 

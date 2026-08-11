@@ -20,7 +20,7 @@ static void	test_hard_drop_locks_a_piece(void);
 static void	test_gravity_falls_without_input(void);
 static void	test_inputs_for_another_player_are_refused(void);
 static void	test_topping_out_ends_and_records_the_game(void);
-static void	test_a_disconnect_forfeits_but_the_room_plays_on(void);
+static void	test_a_disconnect_ends_the_match_and_the_survivor_wins(void);
 static void	test_a_finished_game_frees_the_player(void);
 static void	test_an_input_flood_is_rate_limited(void);
 
@@ -28,6 +28,7 @@ static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static int		simple(t_harness *hc, const char *method, const char *path, const char *body);
 static int		start_single(t_fixture *fx, t_harness *hc, char *play_path, size_t cap);
 static int		latest_state(t_harness *hc, t_body_state *out, int window_ms);
+static int		wait_result(t_harness *hc, t_body_state *out, int window_ms);
 static void		nap(int ms);
 static int64_t	login_score(t_fixture *fx, const char *name);
 
@@ -39,7 +40,7 @@ int	main(void)
 	test_gravity_falls_without_input();
 	test_inputs_for_another_player_are_refused();
 	test_topping_out_ends_and_records_the_game();
-	test_a_disconnect_forfeits_but_the_room_plays_on();
+	test_a_disconnect_ends_the_match_and_the_survivor_wins();
 	test_a_finished_game_frees_the_player();
 	test_an_input_flood_is_rate_limited();
 	return (0);
@@ -237,7 +238,19 @@ static void	test_topping_out_ends_and_records_the_game(void)
 	printf("PASS test_topping_out_ends_and_records_the_game\n");
 }
 
-static void	test_a_disconnect_forfeits_but_the_room_plays_on(void)
+/*
+** UC-11 5a: a Double match with one player left in it is over, and the player
+** left in it has won. This used to assert the opposite - that the room played
+** on - which was the honest description of a server that had no idea two games
+** in one room were being played against each other: it ticked the survivor's
+** board alone until they too were starved out, and then recorded two losses.
+**
+** The first frame is the countdown, because a dealt match is held still before
+** it begins. The last one carries a result, because nothing about the winner's
+** board says they won: it is active, with a piece on it, exactly like a board
+** in the middle of a match.
+*/
+static void	test_a_disconnect_ends_the_match_and_the_survivor_wins(void)
 {
 	t_body_state	state;
 	t_fixture	fx;
@@ -254,13 +267,16 @@ static void	test_a_disconnect_forfeits_but_the_room_plays_on(void)
 	assert(simple(&blake, "JOIN", path, NULL) == 200);
 	assert(simple(&amber, "START", path, NULL) == 200);
 	assert(hc_wait_state(&blake, &state, HC_TIMEOUT_MS) == 0);
+	assert(state.phase == BODY_PHASE_COUNTDOWN);
+	assert(state.countdown_ms > 0);
 	hc_close(&amber);
-	nap(200);
-	assert(hc_wait_state(&blake, &state, HC_TIMEOUT_MS) == 0);
-	assert(state.phase == BODY_PHASE_ACTIVE);
+	assert(wait_result(&blake, &state, HC_TIMEOUT_MS) == 0);
+	assert(state.result == BODY_RESULT_WON);
+	assert(state.rank == 1);
+	assert(state.phase != BODY_PHASE_TOP_OUT);
 	hc_close(&blake);
 	fx_stop(&fx);
-	printf("PASS test_a_disconnect_forfeits_but_the_room_plays_on\n");
+	printf("PASS test_a_disconnect_ends_the_match_and_the_survivor_wins\n");
 }
 
 static void	test_a_finished_game_frees_the_player(void)
@@ -390,6 +406,38 @@ static int	latest_state(t_harness *hc, t_body_state *out, int window_ms)
 	if (seen == 0)
 		return (-1);
 	return (0);
+}
+
+/**
+ * @brief Waits for the snapshot that carries a match result.
+ *
+ * A match ends on a tick, and the frames before that tick are ordinary play,
+ * so the interesting one is not simply the next one or the last one - it is
+ * the first that has a verdict on it.
+ *
+ * @param hc Harness client to read.
+ * @param out Receives the snapshot carrying the result.
+ * @param window_ms How long to keep reading for.
+ * @return 0 when a result arrived, -1 when none did.
+ */
+static int	wait_result(t_harness *hc, t_body_state *out, int window_ms)
+{
+	t_body_state	snap;
+
+	if (hc->has_state && hc->last_state.result != BODY_RESULT_NONE)
+	{
+		*out = hc->last_state;
+		return (0);
+	}
+	while (hc_wait_state(hc, &snap, window_ms) == 0)
+	{
+		if (snap.result != BODY_RESULT_NONE)
+		{
+			*out = snap;
+			return (0);
+		}
+	}
+	return (-1);
 }
 
 /**

@@ -31,7 +31,9 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 - Room chat and system narration are one feed on their own outbox lane: best-effort, drop-oldest, and never a reason to close a connection
 - Detaches itself, holds a locked pidfile, and reports its boot over a readiness pipe
 
-Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue. Double and Battle Royale are designed but unbuilt, and with them the twelve abilities that need a Target.
+Single mode is served end to end, including hold, pause/resume, restart and the self-affecting half of the Gaiden ability catalogue.
+
+Double is partly served: a two-seat room is dealt, held still for `TETRISD_MATCH_COUNTDOWN_MS` before it begins, and ends when one player is left standing rather than when the last one stops — the survivor recorded `won`, the player who topped out `lost`, each exactly once. What is still missing is the second board on the wire, garbage between them, and the twelve abilities that need a Target. Battle Royale is designed but unbuilt. The plan for both is [`double-mode-plan.md`](double-mode-plan.md).
 
 ---
 
@@ -106,7 +108,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `JOIN` | `/rooms` | Create a room in the body's `mode` and own it; `201` |
 | `JOIN` | `/room/<name>` | Take a slot in an existing room; `200` |
 | `LEAVE` | `/room/<name>` | Give up the slot, forfeiting a game in progress |
-| `START` | `/room/<name>` | Owner begins the game; `403` for a non-owner |
+| `START` | `/room/<name>` | Owner begins the game; `403` for a non-owner. Outside Single the boards are dealt and then held for `TETRISD_MATCH_COUNTDOWN_MS`, during which every input is refused `409` |
 | `MOVE` | `/room/<name>/player/<pid>` | Body `LEFT` or `RIGHT` |
 | `ROTATE` | `/room/<name>/player/<pid>` | Body `CW` or `CCW` |
 | `DROP` | `/room/<name>/player/<pid>` | Body `SOFT` or `HARD` |
@@ -115,7 +117,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `RESTART` | `/room/<name>/player/<pid>` | No body — deal a fresh game, discarding the one in progress; **Single only** |
 | `ABILITY` | `/room/<name>/player/<pid>` | Body `level <1-4>`, optionally `column <0-9>` to aim Sol |
 | `CHAT` | `/room/<name>` | Body `text <line>`; broadcast to the room including the sender. `429` rate-limited, `404` not seated there, `403` `muted`, `400` `bad-text` |
-| `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick |
+| `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick, carrying the room's countdown and, when the match ends, that player's result |
 | `CHAT` | `/room/<name>` | **Server-originated** — one line of the room's feed, pushed to every seat |
 
 A piece that touches down does not lock on the spot either. It keeps

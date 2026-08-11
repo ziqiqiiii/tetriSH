@@ -183,6 +183,22 @@
 */
 # define TETRISD_POINTS_PER_WALLET_POINT			100
 
+/*
+** How long a dealt match is held still before it begins.
+**
+** Two players have to start on the same tick, and neither client can arrange
+** that for itself: each reaches its match screen at a different moment, and
+** PAUSE - which is how Solo freezes the board for its own 3-2-1 - is refused
+** in a room with anybody else in it precisely because one player stopping
+** their own clock is an advantage. So the hold belongs to the room, and the
+** client draws its countdown from the number this produces rather than from a
+** timer of its own.
+**
+** Single does not take one: its client already runs a 3-2-1 of its own and
+** moving it would change a mode this step is not touching.
+*/
+# define TETRISD_MATCH_COUNTDOWN_MS				3000
+
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
 # define TETRISD_ROUTE_SESSION					"/session"
@@ -432,6 +448,22 @@ typedef struct s_server_room
 	t_game			games[TD_MAX_GAMES];
 	bool			dirty[TD_MAX_GAMES];
 	bool			ticking;
+	/*
+	** The hold before a match begins, and the second of it last sent. The
+	** countdown is pushed when the displayed second changes rather than on
+	** every tick: three seconds at the tick rate would be a couple of hundred
+	** frames of a number the client can interpolate between four of.
+	*/
+	int				countdown_ms;
+	int				countdown_second;
+	/*
+	** How the match ended, per slot, decided once when it ends and read by
+	** the final snapshot each player is sent. It cannot be derived from the
+	** game: the winner's board is active with a piece on it, which is what
+	** every board mid-match looks like.
+	*/
+	t_body_result	result[TD_MAX_GAMES];
+	int				rank[TD_MAX_GAMES];
 	t_server		*srv;
 	int				index;
 	/*
