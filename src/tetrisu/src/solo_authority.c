@@ -100,6 +100,24 @@ int	solo_authority_fd(const t_solo_authority *authority)
 }
 
 /**
+ * @brief Reports whether a snapshot has already arrived and is unread.
+ *
+ * A request and the snapshot it causes travel the same socket, so the reply to
+ * a move is often read with the next STATE already behind it - and net_request
+ * puts that snapshot aside rather than dropping it. The loop has to know, or it
+ * waits out a poll interval holding the very frame the player is waiting for.
+ *
+ * @param authority Authority to ask.
+ * @return true when the next update has a snapshot to apply.
+ */
+bool	solo_authority_pending(const t_solo_authority *authority)
+{
+	if (authority == NULL || !authority->online)
+		return (false);
+	return (net_solo_pending(authority->net));
+}
+
+/**
  * @brief Applies one player action through whoever owns the board.
  *
  * Online, the action is a request and the board changes when the snapshot

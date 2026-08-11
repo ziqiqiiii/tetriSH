@@ -798,7 +798,16 @@
 # define GHOST_OUTLINE_BLEND		96u
 # define GHOST_INTERIOR_BLEND	24u
 # define SOLO_MAX_CATCHUP_MS		1000
-# define SOLO_RENDER_INTERVAL_MS	33
+/*
+ * How long one presented frame holds the screen. It is a coalescing rate, not
+ * a target: nothing waits for it unless something else already drew inside it.
+ * 33 ms was set to keep bitmap frames from outrunning the terminal's parser,
+ * but a measured Solo frame costs about 3 ms end to end on the sixel tier and
+ * notcurses never blocked on the write - so the interval was spending up to
+ * 33 ms of input latency to buy headroom that was not needed, and holding the
+ * countdown and clear animations at 27 fps.
+ */
+# define SOLO_RENDER_INTERVAL_MS	16
 # define SOLO_INPUT_BATCH_MAX		64
 /* The dynamic top strip spans one HOLD box and the three-piece NEXT box. */
 # define SOLO_NEXT_X				16
@@ -3247,6 +3256,7 @@ void			solo_authority_open(t_solo_authority *authority,
 bool			solo_authority_is_online(const t_solo_authority *authority);
 void			solo_authority_close(t_solo_authority *authority);
 int				solo_authority_fd(const t_solo_authority *authority);
+bool			solo_authority_pending(const t_solo_authority *authority);
 bool			solo_authority_action(t_solo_authority *authority,
 					t_solo_game *game, t_solo_action action);
 bool			solo_authority_ability(t_solo_authority *authority,

@@ -134,6 +134,15 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 			if (render_wait_ms < wait_ms)
 				wait_ms = render_wait_ms;
 		}
+		/*
+		 * A snapshot already in hand is not something to sleep on. The reply to
+		 * a move and the snapshot it caused arrive together often enough that
+		 * the request read both, and the socket then has nothing left to make
+		 * the poll return - so the frame the player is waiting for sat here for
+		 * a whole poll interval before anything looked at it.
+		 */
+		if (solo_authority_pending(&authority))
+			wait_ms = 0;
 		if (input_backlog)
 		{
 			errno = 0;
