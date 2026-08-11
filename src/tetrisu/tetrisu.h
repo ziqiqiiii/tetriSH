@@ -2070,6 +2070,22 @@ typedef struct
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
+	/*
+	** Set whenever a notification's planes appear or go away, and cleared by
+	** the screen that repaints because of it.
+	**
+	** A notification card is a bitmap, and so is most of what it covers.
+	** Notcurses cannot overlap two sprixels, so it annihilates the cells of
+	** the one underneath - and the screens cache their panels by signature,
+	** so once the card expires nothing considers those panels out of date and
+	** they never come back. Changing the volume left a room with its
+	** background, its title and its footer and no panels at all.
+	**
+	** The flag is the screen's cue to rebuild rather than trust its cache. It
+	** lives here rather than in the notification stack because it is a fact
+	** about the terminal's contents, which is what every renderer shares.
+	*/
+	bool				notification_repaint;
 	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
@@ -2788,6 +2804,9 @@ int					render_notification_next_wake_ms(
 					const t_render_ctx *ctx);
 void				render_notification_reflow(t_render_ctx *ctx);
 void				render_notification_raise(t_render_ctx *ctx);
+bool				render_notification_repaint_pending(
+					const t_render_ctx *ctx);
+bool				render_notification_take_repaint(t_render_ctx *ctx);
 void				render_notification_destroy(t_render_ctx *ctx);
 t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
 					const char *term, t_tetrisu_renderer_mode forced);

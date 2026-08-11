@@ -34,6 +34,8 @@ typedef struct s_mp_session
 // Static Functions
 static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 				bool refresh_geometry, bool replace_background);
+static void	restore_after_notification(t_render_ctx *ctx,
+				const t_menu_selection *menu);
 static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
@@ -332,11 +334,13 @@ int	main(void)
 		{
 			audio_volume_up(&audio);
 			render_notification_show_volume(&ctx, audio.music_volume);
+			restore_after_notification(&ctx, &menu);
 		}
 		else if (key == '-' || key == '_')
 		{
 			audio_volume_down(&audio);
 			render_notification_show_volume(&ctx, audio.music_volume);
+			restore_after_notification(&ctx, &menu);
 		}
 		else if ((key == 'q' || key == 'Q')
 			&& confirmation_prompt_run(&ctx, &audio, CONFIRM_QUIT_APP))
@@ -1857,7 +1861,8 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (waiting_room_action_leaves_screen(action))
 			discard_queued_input(ctx);
 		if (navigation->current == APP_SCREEN_WAITING_ROOM
-			&& (room_changed || waiting_room_state_view_changed(&previous,
+			&& (room_changed || render_notification_repaint_pending(ctx)
+				|| waiting_room_state_view_changed(&previous,
 					&session->room_state))
 			&& !render_waiting_room_show(ctx, &session->room_view,
 				&session->room_state, false))
@@ -2308,6 +2313,25 @@ static void	enable_home_mouse(t_render_ctx *ctx)
 /**
  * @brief Rebuilds the home screen after resize or scaffold navigation.
  */
+/**
+ * @brief Redraws the home screen a notification card has just covered.
+ *
+ * The card is a bitmap and so is the menu under it. Notcurses wipes the
+ * sprixel underneath rather than overlapping it, and the home loop redraws
+ * only on a keypress that changes the selection - so a volume press left the
+ * menu erased until something else happened to repaint it.
+ *
+ * @param ctx Active render context.
+ * @param menu Current selection, redrawn where it was.
+ */
+static void	restore_after_notification(t_render_ctx *ctx,
+	const t_menu_selection *menu)
+{
+	if (!render_notification_take_repaint(ctx))
+		return ;
+	(void)reflow_home(ctx, menu, false, false);
+}
+
 static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	bool refresh_geometry, bool replace_background)
 {

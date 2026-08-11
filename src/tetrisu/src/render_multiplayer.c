@@ -145,6 +145,14 @@ static bool	show_screen(t_render_ctx *ctx, const t_app_screen_view_model *view,
 
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
 		return (false);
+	/*
+	 * A notification card is a bitmap over bitmaps, and notcurses wipes the
+	 * sprixel underneath rather than overlapping it. The panels it covered
+	 * are cached by signature, so nothing else would ever consider them
+	 * stale - the screen has to be told to rebuild instead of trusting it.
+	 */
+	if (render_notification_take_repaint(ctx))
+		rebuild_background = true;
 	render_menu_destroy(ctx);
 	if (!render_compatibility_mode(ctx)
 		&& render_mp_pixel_show(ctx, view, state, rebuild_background))

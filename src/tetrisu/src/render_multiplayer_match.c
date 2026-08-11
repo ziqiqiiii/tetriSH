@@ -81,6 +81,14 @@ bool	render_multiplayer_match_show(t_render_ctx *ctx,
 
 	if (ctx == NULL || ctx->std == NULL || state == NULL)
 		return (false);
+	/*
+	 * A notification card is a bitmap over bitmaps, and notcurses wipes the
+	 * sprixel underneath rather than overlapping it. The panels it covered
+	 * are cached by signature, so nothing else would ever consider them
+	 * stale - the screen has to be told to rebuild instead of trusting it.
+	 */
+	if (render_notification_take_repaint(ctx))
+		rebuild_background = true;
 	if (!render_compatibility_mode(ctx)
 		&& render_multiplayer_match_pixel_show(ctx, state, rebuild_background))
 		return (true);
