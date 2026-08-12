@@ -21,8 +21,9 @@
 #
 # Environment:
 #   TETRISU_TERMINAL   force a choice: kitty, wezterm, none, or a path
-#   AUTO_INSTALL_DEPS  1 to install a missing terminal, 0 to only report
+#   AUTO_INSTALL_DEPS  1 to install or repair the terminal, 0 to only report
 #   KITTY_MIN_VERSION  lowest kitty that can draw the board (default 0.20.0)
+#   KITTY_MAX_VERSION  highest kitty this machine can run (default: from glibc)
 
 set -euo pipefail
 
@@ -38,12 +39,29 @@ die()  { printf '%b\n' "${RED}terminal.sh:${RST} $*" >&2; exit 1; }
 UNAME_S="$(uname -s)"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 
-# The placement-id (p=) and quiet (q=) graphics keys and the kitty keyboard
-# protocol all arrive in kitty 0.20.0. Below that the client's escape sequences
-# are not merely unsupported but unparseable, so the window opens and fills with
-# "Malformed GraphicsCommand" instead of a board.
+# The window of kitty versions that can draw the board here, as [min, max].
+# Both ends produce the same symptom - a window with no board in it - so both
+# are checked before launching, and a kitty outside the window is reinstalled
+# rather than merely complained about.
+#
+# The floor is the protocol. The placement-id (p=) and quiet (q=) graphics keys
+# and the kitty keyboard protocol all arrive in 0.20.0; below that the client's
+# escape sequences are not merely unsupported but unparseable, so the window
+# fills with "Malformed GraphicsCommand" instead. Distro packages sit here:
+# Ubuntu 20.04 still ships 0.15.0, from 2019.
+#
+# The ceiling is this machine's C library, so it is computed rather than fixed.
+# kitty 0.48 bundles a libpython built against GLIBC_2.35, so on an older
+# release it unpacks cleanly and then refuses to start at all. 0.47.0 is the
+# last release that runs below that line.
 KITTY_MIN_VERSION="${KITTY_MIN_VERSION:-0.20.0}"
+KITTY_MODERN_GLIBC="2.35"
+KITTY_LEGACY_VERSION="0.47.0"
 KITTY_INSTALLER_URL="https://sw.kovidgoyal.net/kitty/installer.sh"
+# Where the upstream installer puts it, which is also where this script looks
+# first - a repaired kitty must win over the distro one that PATH may still
+# resolve to.
+KITTY_PREFIX="$HOME/.local/kitty.app"
 
 ################################################################################
 #                                  DETECTION                                   #
@@ -121,20 +139,42 @@ choose_terminal() {
     fi
 }
 
-# Where the chosen terminal actually is, or empty if it is not installed.
+# Every kitty this machine might have, most trustworthy first. There can be
+# more than one and they are routinely different versions: the upstream
+# installer writes into ~/.local and does not remove the distro package, and
+# whether PATH resolves to the good one depends on the user's profile. So the
+# candidates are ranked here rather than left to `command -v`, and the first
+# *usable* one wins - see kitty_find.
+#
 # macOS is the awkward one: kitty ships as a cask, so the binary lives inside
 # the bundle and is not put on PATH by the installer.
+kitty_candidates() {
+    printf '%s\n' "$KITTY_PREFIX/bin/kitty"
+    command -v kitty 2>/dev/null || true
+    printf '%s\n' /Applications/kitty.app/Contents/MacOS/kitty
+    printf '%s\n' "$HOME/Applications/kitty.app/Contents/MacOS/kitty"
+}
+
+# The best kitty installed, or empty. $1 selects which question is being asked:
+# "usable" is the one to launch, "any" is the one to diagnose or replace.
+kitty_find() {
+    local want="${1:-usable}" path
+    while read -r path; do
+        [ -n "$path" ] && [ -x "$path" ] || continue
+        [ "$want" = "any" ] && { printf '%s' "$path"; return 0; }
+        kitty_usable "$path" && { printf '%s' "$path"; return 0; }
+    done <<< "$(kitty_candidates)"
+    return 1
+}
+
+# Where the chosen terminal actually is, or empty if it is not installed.
 terminal_binary() {
     local choice="$1"
     case "$choice" in
         kitty)
-            if command -v kitty >/dev/null 2>&1; then
-                command -v kitty
-            elif [ -x /Applications/kitty.app/Contents/MacOS/kitty ]; then
-                printf '%s' /Applications/kitty.app/Contents/MacOS/kitty
-            elif [ -x "$HOME/Applications/kitty.app/Contents/MacOS/kitty" ]; then
-                printf '%s' "$HOME/Applications/kitty.app/Contents/MacOS/kitty"
-            fi
+            # An unusable kitty is still reported, because "installed but
+            # wrong" and "not installed" need different repairs.
+            kitty_find usable || kitty_find any || true
             ;;
         wezterm)
             command -v wezterm.exe 2>/dev/null || command -v wezterm 2>/dev/null
@@ -169,21 +209,63 @@ version_ge() {
     return 0
 }
 
+# "2.31" on this machine's libc, or empty where there is no glibc to ask -
+# macOS and musl both land there, and both mean "no ceiling" rather than
+# "unknown, so refuse".
+glibc_version() {
+    local out
+    out="$({ getconf GNU_LIBC_VERSION 2>/dev/null || true; } | awk '{ print $2 }')"
+    [ -n "$out" ] || out="$({ ldd --version 2>/dev/null || true; } \
+        | awk 'NR == 1 { print $NF }')"
+    case "$out" in
+        [0-9]*) printf '%s' "$out" ;;
+    esac
+}
+
+# The newest kitty this machine can actually start, or empty for no ceiling.
+kitty_max_version() {
+    local glibc
+    if [ -n "${KITTY_MAX_VERSION:-}" ]; then
+        printf '%s' "$KITTY_MAX_VERSION"
+        return 0
+    fi
+    glibc="$(glibc_version)"
+    [ -n "$glibc" ] || return 0
+    version_ge "$glibc" "$KITTY_MODERN_GLIBC" || printf '%s' "$KITTY_LEGACY_VERSION"
+}
+
+# Asked once, because it shells out and every candidate would ask it again.
+KITTY_MAX_VERSION="$(kitty_max_version)"
+
+# The version to install when repairing: the ceiling if there is one, and
+# whatever upstream calls current otherwise.
+kitty_target_version() {
+    printf '%s' "${KITTY_MAX_VERSION:-latest}"
+}
+
 # "kitty 0.47.0 created by Kovid Goyal" -> "0.47.0". Empty when the binary
 # cannot run at all, which is its own failure and reported separately.
 kitty_version() {
     "$1" --version 2>/dev/null | awk 'NR == 1 { print $2; exit }'
 }
 
-# A kitty on PATH is not the same as a kitty that can draw. Two ways it fails,
-# and they need different advice: a distro package too old to parse the protocol
-# (Ubuntu 20.04 still ships 0.15.0, from 2019), or a binary too new for the
-# system it was unpacked onto — kitty 0.48+ bundles a libpython needing
-# GLIBC_2.35, so on an older release it installs cleanly and then refuses to
-# start. Installing is left to the user for the same reason WezTerm is: the fix
-# is an upstream tarball outside the package manager, which is not something to
-# do silently behind `make play`.
+# A kitty on PATH is not the same as a kitty that can draw. Quiet on purpose:
+# this runs against every candidate in turn, so the diagnosis belongs to
+# kitty_explain, which is called once against the one that was settled on.
 kitty_usable() {
+    local path="$1" have
+    have="$(kitty_version "$path")" || have=""
+
+    [ -n "$have" ] || return 1
+    version_ge "$have" "$KITTY_MIN_VERSION" || return 1
+    [ -z "$KITTY_MAX_VERSION" ] || version_ge "$KITTY_MAX_VERSION" "$have" || return 1
+    return 0
+}
+
+# Why the kitty at $1 cannot draw. Three answers, and they are not the same
+# repair - too old is a distro package, too new is a libc mismatch, and one
+# that will not run at all has already printed its own reason.
+kitty_explain() {
     local path="$1" have why
     have="$(kitty_version "$path")" || have=""
 
@@ -194,28 +276,25 @@ kitty_usable() {
         why="$({ "$path" --version 2>&1 || true; } | head -1)"
         warn "${BOLD}$path${RST} is installed but will not start:"
         [ -n "$why" ] && warn "    $why"
-        warn "A kitty built for a newer glibc does this; install one that matches"
-        warn "this system with ${BOLD}installer=version-<X.Y.Z>${RST} below."
-        kitty_install_hint
-        return 1
-    fi
-
-    if ! version_ge "$have" "$KITTY_MIN_VERSION"; then
+        warn "A kitty built for a newer glibc does this."
+    elif ! version_ge "$have" "$KITTY_MIN_VERSION"; then
         warn "kitty ${BOLD}$have${RST} at $path is too old to draw the board"
         warn "(need ${BOLD}$KITTY_MIN_VERSION${RST} or newer). It cannot parse the graphics"
         warn "protocol the client speaks, so the window fills with"
         warn "${BOLD}Malformed GraphicsCommand${RST} errors and no board appears."
-        kitty_install_hint
-        return 1
+    else
+        warn "kitty ${BOLD}$have${RST} at $path is newer than this system can run"
+        warn "(glibc ${BOLD}$(glibc_version)${RST} needs kitty ${BOLD}$KITTY_MAX_VERSION${RST} or older)."
+        warn "It unpacks cleanly and then refuses to start, so no window opens."
     fi
-    return 0
 }
 
 kitty_install_hint() {
-    warn "Install a current kitty for this user only:"
-    warn "    ${BOLD}curl -fsSL $KITTY_INSTALLER_URL | sh /dev/stdin launch=n${RST}"
+    warn "Install a kitty this machine can run, for this user only:"
+    warn "    ${BOLD}curl -fsSL $KITTY_INSTALLER_URL | sh /dev/stdin launch=n \\"
+    warn "        installer=version-$(kitty_target_version)${RST}"
     warn "then put ${BOLD}~/.local/bin${RST} on PATH ahead of /usr/bin:"
-    warn "    ${BOLD}ln -sf ~/.local/kitty.app/bin/kitty ~/.local/bin/kitty${RST}"
+    warn "    ${BOLD}ln -sf $KITTY_PREFIX/bin/kitty ~/.local/bin/kitty${RST}"
 }
 
 # Only kitty is version-gated. WezTerm has spoken the graphics protocol for as
@@ -265,6 +344,38 @@ install_kitty_darwin() {
     brew install --cask kitty
 }
 
+# The repair path, and the only one that can choose a *version*. A package
+# manager offers exactly one kitty and it is as likely to be four years old as
+# current; upstream's installer takes the number, which is what makes a
+# glibc ceiling actionable rather than just a diagnosis.
+#
+# Installed per-user under ~/.local, so it needs no privilege and cannot
+# conflict with the distro package it is there to overrule - kitty_candidates
+# looks here first precisely so PATH does not get a vote.
+install_kitty_upstream() {
+    local want
+    want="$(kitty_target_version)"
+    command -v curl >/dev/null 2>&1 \
+        || { warn "curl is needed to install kitty $want."; return 1; }
+
+    say "installing kitty $want under $KITTY_PREFIX..." >&2
+    if [ "$want" = "latest" ]; then
+        curl -fsSL "$KITTY_INSTALLER_URL" | sh /dev/stdin launch=n >&2 \
+            || return 1
+    else
+        curl -fsSL "$KITTY_INSTALLER_URL" \
+            | sh /dev/stdin launch=n "installer=version-$want" >&2 || return 1
+    fi
+
+    # A convenience, not the mechanism: this script launches kitty by absolute
+    # path, so the game does not need PATH to agree. The symlink is for the
+    # user's own shell, and only when nothing else already claims the name.
+    if [ -x "$KITTY_PREFIX/bin/kitty" ] && [ ! -e "$HOME/.local/bin/kitty" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$KITTY_PREFIX/bin/kitty" "$HOME/.local/bin/kitty"
+    fi
+}
+
 # WezTerm is only ever chosen on WSL, and there it is a *Windows* application:
 # installing it means driving winget across the WSL boundary, which prompts on
 # the Windows side and puts software outside the environment `make` was invoked
@@ -278,31 +389,79 @@ instruct_wezterm() {
     return 1
 }
 
+# Bring kitty to a version that can draw, from wherever it is now. Three
+# starting points and they do not cost the same, so they are not attempted in
+# the same order:
+#
+#   nothing installed   the package manager first - it is the cheapest, needs
+#                       no network beyond its own mirrors, and on a current
+#                       distro it is simply right
+#   wrong version       straight to upstream. The package manager offers one
+#                       kitty and it has already been established that it is
+#                       not the one needed, so asking it again spends a sudo
+#                       prompt to reinstall the same file
+#   right version       nothing
+#
+# Either way the result is re-verified rather than assumed, because "installed"
+# and "can draw the board" are the two different things this whole file exists
+# to keep apart.
+repair_kitty() {
+    local path
+    path="$(kitty_find any || true)"
+
+    if [ -z "$path" ]; then
+        say "installing kitty..." >&2
+        if [ "$UNAME_S" = "Darwin" ]; then
+            install_kitty_darwin >&2 || true
+        else
+            install_kitty_linux >&2 || true
+        fi
+        kitty_find usable && return 0
+        path="$(kitty_find any || true)"
+    fi
+
+    [ -n "$path" ] && kitty_explain "$path"
+
+    # macOS keeps its cask: brew's kitty is current, there is no glibc ceiling
+    # to dodge, and the upstream tarball would leave a second kitty.app behind
+    # the one Homebrew still thinks it owns.
+    if [ "$UNAME_S" = "Darwin" ]; then
+        say "upgrading kitty..." >&2
+        brew upgrade --cask kitty >&2 || true
+    else
+        install_kitty_upstream || true
+    fi
+    kitty_find usable
+}
+
 ensure_terminal() {
     local choice="$1" path
     path="$(terminal_binary "$choice")"
-    if [ -n "$path" ]; then
-        # Already present, so installing again cannot help: a package manager
-        # that shipped this kitty has no newer one to offer. Refuse with the
-        # advice rather than spending a sudo prompt to reinstall the same file.
-        verify_terminal "$choice" "$path" || return 1
+    if [ -n "$path" ] && verify_terminal "$choice" "$path"; then
         printf '%s' "$path"
         return 0
     fi
 
     if [ "$AUTO_INSTALL_DEPS" != "1" ]; then
-        warn "$choice is not installed and automatic installation is disabled."
+        if [ -n "$path" ]; then
+            [ "$choice" = "kitty" ] && kitty_explain "$path"
+            warn "$choice cannot draw the board and repair is disabled."
+            [ "$choice" = "kitty" ] && kitty_install_hint
+        else
+            warn "$choice is not installed and automatic installation is disabled."
+        fi
         return 1
     fi
 
     case "$choice" in
         kitty)
-            say "installing kitty..." >&2
-            if [ "$UNAME_S" = "Darwin" ]; then
-                install_kitty_darwin >&2
-            else
-                install_kitty_linux >&2
+            if ! path="$(repair_kitty)"; then
+                warn "kitty is still not able to draw the board."
+                kitty_install_hint
+                return 1
             fi
+            printf '%s' "$path"
+            return 0
             ;;
         wezterm)
             instruct_wezterm
@@ -313,11 +472,6 @@ ensure_terminal() {
             return 1
             ;;
     esac
-
-    path="$(terminal_binary "$choice")"
-    [ -n "$path" ] || { warn "$choice still not found after installing."; return 1; }
-    verify_terminal "$choice" "$path" || return 1
-    printf '%s' "$path"
 }
 
 ################################################################################
