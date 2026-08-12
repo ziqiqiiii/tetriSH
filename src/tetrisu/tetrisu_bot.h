@@ -160,6 +160,14 @@ typedef struct s_bot
 */
 # define BOT_FARM_MAX			4
 # define BOT_PATH_MAX			4096
+
+/*
+** The server coordinates a bot is handed on its command line, and the room
+** for them. BOT_HOST_MAX matches the session config's own host field; the
+** argv budget is the seven fixed arguments, six for the server, and NULL.
+*/
+# define BOT_HOST_MAX			256
+# define BOT_ARGV_MAX			16
 # define BOT_BINARY_NAME		"tetrisu-bot"
 # define BOT_LOG_NAME			"tetrisu-bot.log"
 # define BOT_LOG_DEFAULT		"tmp/" BOT_LOG_NAME
@@ -190,6 +198,8 @@ typedef struct s_bot_farm
 /* BOT_PROC.C — spawning, holding and letting go of bots */
 void			bot_farm_init(t_bot_farm *farm);
 void			bot_farm_remember_self(const char *argv0);
+void			bot_farm_remember_server(const char *host, int port,
+					const char *ca_path);
 int				bot_farm_binary(char *out, size_t cap);
 int				bot_farm_add(t_bot_farm *farm, const char *room,
 					t_bot_level level);

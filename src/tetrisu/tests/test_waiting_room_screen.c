@@ -15,6 +15,7 @@ static void	test_launch_action_matches_the_mode(void);
 static void	test_bot_keys_and_seat_marks(void);
 static void	test_the_legend_fits_the_narrowest_panel(void);
 static void	test_a_short_room_says_how_short_and_what_to_do(void);
+static void	test_the_newest_arrival_is_on_the_first_line(void);
 static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
@@ -35,7 +36,54 @@ int	main(void)
 	test_bot_keys_and_seat_marks();
 	test_the_legend_fits_the_narrowest_panel();
 	test_a_short_room_says_how_short_and_what_to_do();
+	test_the_newest_arrival_is_on_the_first_line();
 	return (0);
+}
+
+/*
+** A Battle Royale shows eight lines of ninety-nine, so a player who joins -
+** or a bot that is added - used to land out of sight at the bottom and the
+** room looked like nothing had happened. The roster reads newest first now.
+**
+** What is pinned here is that the reversal covers the occupied block and
+** stops there: the empty seats keep their order, "the first player_count
+** lines are taken" stays true, and every occupancy test in the renderers is
+** still reading the same thing it was.
+*/
+static void	test_the_newest_arrival_is_on_the_first_line(void)
+{
+	t_app_room_view_model	room;
+	char					line[APP_TEXT_MAX * 2];
+	int						position;
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 0);
+	/* player3 arrived last and is on line 1; the owner has sunk to line 4. */
+	assert(waiting_room_seat_index(&room, 0) == 3);
+	assert(waiting_room_seat_index(&room, 3) == 0);
+	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"player3") != NULL);
+	assert(strstr(waiting_room_slot_label(&room, 3, line, sizeof(line)),
+			"(owner)") != NULL);
+	/* The line number is the line, not the seat: it still counts 1, 2, 3... */
+	assert(strncmp(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"1. ", 3) == 0);
+	/* Empty seats are untouched, and are still the ones past player_count. */
+	position = room.player_count;
+	while (position < waiting_room_slot_count(&room))
+	{
+		assert(waiting_room_seat_index(&room, position) == position);
+		assert(strstr(waiting_room_slot_label(&room, position, line,
+					sizeof(line)), "(empty)") != NULL);
+		position++;
+	}
+	/* One player is its own newest, and an empty room has no lines at all. */
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 0);
+	assert(waiting_room_seat_index(&room, 0) == 0);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 0, 0);
+	assert(waiting_room_seat_index(&room, 0) == 0);
+	assert(waiting_room_seat_index(NULL, 0) == -1);
+	assert(waiting_room_seat_index(&room, -1) == -1);
+	printf("PASS test_the_newest_arrival_is_on_the_first_line\n");
 }
 
 /*
@@ -55,6 +103,8 @@ static void	test_bot_keys_and_seat_marks(void)
 	t_app_room_view_model	room;
 	t_waiting_room_state	state;
 	char					line[APP_TEXT_MAX * 2];
+	int						line_of_seat_2;
+	int						owner_line;
 
 	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
 	waiting_room_state_init(&state);
@@ -62,22 +112,34 @@ static void	test_bot_keys_and_seat_marks(void)
 	assert(waiting_room_handle_key(&state, &room, 'B') == ROOM_ACTION_ADD_BOT);
 	assert(waiting_room_handle_key(&state, &room, 'k') == ROOM_ACTION_KICK_BOT);
 	assert(waiting_room_handle_key(&state, &room, 'K') == ROOM_ACTION_KICK_BOT);
+	/*
+	** The mark is asked for by line, not by seat, so the fixture names the
+	** seat it wants marked and then asks which line that seat is on. Writing
+	** the answer in as a constant would make this a test of the ordering
+	** rather than of the mark.
+	*/
+	line_of_seat_2 = 0;
+	while (waiting_room_seat_index(&room, line_of_seat_2) != 2)
+		line_of_seat_2++;
 	/* A person is never marked, whatever their seat. */
-	assert(!waiting_room_seat_is_bot(&room, 1));
-	assert(strstr(waiting_room_slot_label(&room, 1, line, sizeof(line)),
-			"(bot)") == NULL);
-	snprintf(room.players[1].username, sizeof(room.players[1].username),
+	assert(!waiting_room_seat_is_bot(&room, line_of_seat_2));
+	assert(strstr(waiting_room_slot_label(&room, line_of_seat_2, line,
+				sizeof(line)), "(bot)") == NULL);
+	snprintf(room.players[2].username, sizeof(room.players[2].username),
 		"BOT_02");
-	assert(waiting_room_seat_is_bot(&room, 1));
-	assert(strstr(waiting_room_slot_label(&room, 1, line, sizeof(line)),
-			"(bot)") != NULL);
+	assert(waiting_room_seat_is_bot(&room, line_of_seat_2));
+	assert(strstr(waiting_room_slot_label(&room, line_of_seat_2, line,
+				sizeof(line)), "(bot)") != NULL);
 	/* An owner is an owner first: the two tags never both appear. */
+	owner_line = 0;
+	while (waiting_room_seat_index(&room, owner_line) != 0)
+		owner_line++;
 	snprintf(room.players[0].username, sizeof(room.players[0].username),
 		"BOT_01");
-	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
-			"(owner)") != NULL);
-	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
-			"(bot)") == NULL);
+	assert(strstr(waiting_room_slot_label(&room, owner_line, line,
+				sizeof(line)), "(owner)") != NULL);
+	assert(strstr(waiting_room_slot_label(&room, owner_line, line,
+				sizeof(line)), "(bot)") == NULL);
 	assert(!waiting_room_seat_is_bot(&room, 99));
 	assert(!waiting_room_seat_is_bot(NULL, 0));
 	printf("PASS test_bot_keys_and_seat_marks\n");
@@ -495,7 +557,14 @@ static void	test_slot_labels_and_badges(void)
 	assert(strcmp(waiting_room_badge_text(&room, 0), "ready") == 0);
 	assert(waiting_room_badge_text(&room, 1)[0] == '\0');
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 1);
-	assert(strcmp(waiting_room_badge_text(&room, 1), "not ready") == 0);
+	/*
+	** Two seats, and only the owner is ready. The badge follows the line
+	** rather than the seat, so the newest arrival's "not ready" is the one on
+	** the first line - reading it off players[position] would have printed the
+	** owner's badge against the other player's name.
+	*/
+	assert(strcmp(waiting_room_badge_text(&room, 0), "not ready") == 0);
+	assert(strcmp(waiting_room_badge_text(&room, 1), "ready") == 0);
 	assert(waiting_room_badge_text(NULL, 0)[0] == '\0');
 	assert(waiting_room_toggle_ready(&room));
 	assert(!waiting_room_local_ready(&room));

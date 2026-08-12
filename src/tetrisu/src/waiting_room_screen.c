@@ -580,22 +580,88 @@ static void	append_fighter(const t_waiting_room_state *state, char *out,
  * @return out, holding "N. (empty)" for a seat nobody occupies.
  */
 const char	*waiting_room_slot_label(const t_app_room_view_model *room,
-	int index, char *out, size_t size)
+	int position, char *out, size_t size)
 {
+	int	seat;
+
 	if (out == NULL || size == 0)
 		return ("");
 	out[0] = '\0';
-	if (room == NULL || index < 0 || index >= waiting_room_slot_count(room))
+	if (room == NULL || position < 0
+		|| position >= waiting_room_slot_count(room))
 		return (out);
-	if (index >= room->player_count)
+	if (position >= room->player_count)
 	{
-		snprintf(out, size, "%d. (empty)", index + 1);
+		snprintf(out, size, "%d. (empty)", position + 1);
 		return (out);
 	}
-	snprintf(out, size, "%d. %s%s", index + 1, room->players[index].username,
-		room->players[index].owner ? " (owner)"
-		: waiting_room_seat_is_bot(room, index) ? " (bot)" : "");
+	seat = waiting_room_seat_index(room, position);
+	snprintf(out, size, "%d. %s%s", position + 1, room->players[seat].username,
+		room->players[seat].owner ? " (owner)"
+		: waiting_room_seat_is_bot(room, position) ? " (bot)" : "");
 	return (out);
+}
+
+/**
+ * @brief Which seat of the model the roster's Nth line is showing.
+ *
+ * The one place the roster's order is written down, so that the label, the
+ * badge, the bot mark and the highlight cannot disagree about which player a
+ * line belongs to.
+ *
+ * Occupied seats read newest first. A Battle Royale shows eight lines of
+ * ninety-nine, so somebody who joins - or a bot that is added - lands out of
+ * sight at the bottom and the room looks like it did nothing. Reversing puts
+ * the arrival on the first line, where the person who caused it is looking.
+ *
+ * Only the occupied block is reversed, never the empty seats after it, so
+ * "the first player_count positions are taken" stays true and every occupancy
+ * test in the renderers is unaffected.
+ *
+ * Newest is taken to be the highest occupied seat, which is what the server's
+ * ordering gives: members arrive in slot order and a joiner takes the lowest
+ * free seat. After somebody leaves mid-room their seat is reused, so a player
+ * who fills a gap appears where the gap was rather than at the top. The
+ * snapshot carries no arrival time to do better with, and the case this is
+ * for - a room filling up - is exactly the case it gets right.
+ *
+ * @param room Room snapshot to read.
+ * @param position Line of the roster, from the top.
+ * @return The index into room->players, or -1 when there is no such line.
+ */
+int	waiting_room_seat_index(const t_app_room_view_model *room, int position)
+{
+	int	occupied;
+
+	if (room == NULL || position < 0)
+		return (-1);
+	occupied = room->player_count;
+	if (occupied > APP_ROOM_MAX_PLAYERS)
+		occupied = APP_ROOM_MAX_PLAYERS;
+	if (position >= occupied)
+		return (position);
+	return (occupied - 1 - position);
+}
+
+/**
+ * @brief Whether the seat on this roster line has declared itself ready.
+ *
+ * The renderers colour the badge before they print it, and reaching into
+ * players[] to ask would be reaching past the ordering this file owns.
+ *
+ * @param room Room snapshot to read.
+ * @param position Line of the roster, from the top.
+ * @return true when that seat is occupied and ready.
+ */
+bool	waiting_room_seat_ready(const t_app_room_view_model *room, int position)
+{
+	int	seat;
+
+	seat = waiting_room_seat_index(room, position);
+	if (room == NULL || seat < 0 || position >= room->player_count
+		|| seat >= APP_ROOM_MAX_PLAYERS)
+		return (false);
+	return (room->players[seat].ready);
 }
 
 /**
@@ -636,14 +702,19 @@ const char	*waiting_room_legend(int cols)
  * a player who joined somebody else's room sees the bots in it as bots.
  *
  * @param room Room snapshot to read.
- * @param index Seat index.
+ * @param position Line of the roster, from the top.
  * @return true when the seat is occupied by a bot account.
  */
-bool	waiting_room_seat_is_bot(const t_app_room_view_model *room, int index)
+bool	waiting_room_seat_is_bot(const t_app_room_view_model *room,
+		int position)
 {
-	if (room == NULL || index < 0 || index >= room->player_count)
+	int	seat;
+
+	seat = waiting_room_seat_index(room, position);
+	if (room == NULL || seat < 0 || position >= room->player_count
+		|| seat >= APP_ROOM_MAX_PLAYERS)
 		return (false);
-	return (strncmp(room->players[index].username, BOT_ACCOUNT_PREFIX,
+	return (strncmp(room->players[seat].username, BOT_ACCOUNT_PREFIX,
 			sizeof(BOT_ACCOUNT_PREFIX) - 1) == 0);
 }
 
@@ -655,12 +726,12 @@ bool	waiting_room_seat_is_bot(const t_app_room_view_model *room, int index)
  * @return A static, bounded caption; "" for a seat nobody occupies.
  */
 const char	*waiting_room_badge_text(const t_app_room_view_model *room,
-	int index)
+	int position)
 {
-	if (room == NULL || index < 0 || index >= room->player_count
-		|| index >= APP_ROOM_MAX_PLAYERS)
+	if (room == NULL || position < 0 || position >= room->player_count
+		|| position >= APP_ROOM_MAX_PLAYERS)
 		return ("");
-	if (room->players[index].ready)
+	if (waiting_room_seat_ready(room, position))
 		return ("ready");
 	return ("not ready");
 }

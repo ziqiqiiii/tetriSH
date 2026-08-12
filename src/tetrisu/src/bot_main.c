@@ -46,7 +46,7 @@ typedef struct s_bot_run
 
 // Static Functions
 static int	parse_args(int argc, char **argv, t_bot_run *run,
-				t_bot_level *level);
+				t_bot_level *level, t_net_config *cfg);
 static int	claim_account(t_net_client *net);
 static int	join_and_ready(t_bot_run *run);
 static int	declare_fighter(t_bot_run *run, const char *path);
@@ -76,11 +76,19 @@ int	main(int argc, char **argv)
 	memset(&run, 0, sizeof(run));
 	run.deadman = -1;
 	level = BOT_NORMAL;
-	if (parse_args(argc, argv, &run, &level) != 0)
-		return (fprintf(stderr, "usage: %s --room NAME [--level easy|normal|"
-				"ultra] [--deadman FD]\n", argv[0]), 1);
-	bot_init(&run.brain, level, (uint32_t)getpid());
+	/*
+	** Loaded before the arguments are read, not after: the environment is the
+	** default and the command line is the override. The parent knows which
+	** server it is actually talking to and this process cannot - a typed
+	** SERVER ID lives in the client's memory and was never in anybody's
+	** environment - so what it passes has to win.
+	*/
 	net_config_load(&cfg);
+	if (parse_args(argc, argv, &run, &level, &cfg) != 0)
+		return (fprintf(stderr, "usage: %s --room NAME [--level easy|normal|"
+				"ultra] [--deadman FD] [--host H] [--port P] [--ca PATH]\n",
+				argv[0]), 1);
+	bot_init(&run.brain, level, (uint32_t)getpid());
 	if (net_connect(&run.net, &cfg) != 0)
 		return (fprintf(stderr, "bot: no tetrisd at %s:%d\n", cfg.host,
 				cfg.port), 1);
@@ -102,10 +110,11 @@ int	main(int argc, char **argv)
  * @param argv Arguments.
  * @param run Receives the room and the deadman descriptor.
  * @param level Receives the difficulty.
+ * @param cfg Receives whichever server coordinates were passed.
  * @return 0 when a room was named, -1 otherwise.
  */
 static int	parse_args(int argc, char **argv, t_bot_run *run,
-			t_bot_level *level)
+			t_bot_level *level, t_net_config *cfg)
 {
 	int	index;
 
@@ -118,6 +127,13 @@ static int	parse_args(int argc, char **argv, t_bot_run *run,
 			bot_level_parse(argv[index + 1], level);
 		else if (strcmp(argv[index], "--deadman") == 0)
 			run->deadman = atoi(argv[index + 1]);
+		else if (strcmp(argv[index], "--host") == 0)
+			snprintf(cfg->host, sizeof(cfg->host), "%s", argv[index + 1]);
+		else if (strcmp(argv[index], "--port") == 0)
+			cfg->port = atoi(argv[index + 1]);
+		else if (strcmp(argv[index], "--ca") == 0)
+			snprintf(cfg->ca_path, sizeof(cfg->ca_path), "%s",
+				argv[index + 1]);
 		index += 2;
 	}
 	if (run->room[0] == '\0')

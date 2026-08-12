@@ -3394,12 +3394,16 @@ const char		*waiting_room_status_text(const t_app_room_view_model *room,
 int				waiting_room_players_needed(
 					const t_app_room_view_model *room);
 const char		*waiting_room_legend(int cols);
+int				waiting_room_seat_index(const t_app_room_view_model *room,
+					int position);
+bool			waiting_room_seat_ready(const t_app_room_view_model *room,
+					int position);
 bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
-					int index);
+					int position);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,
-					int index, char *out, size_t size);
+					int position, char *out, size_t size);
 const char		*waiting_room_badge_text(const t_app_room_view_model *room,
-					int index);
+					int position);
 const char		*waiting_room_feedback_text(const t_waiting_room_state *state,
 					char *out, size_t size);
 bool			waiting_room_is_under_way(

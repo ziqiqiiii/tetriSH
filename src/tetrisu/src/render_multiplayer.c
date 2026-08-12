@@ -534,7 +534,7 @@ static void	draw_waiting_room(struct ncplane *plane,
 		put_line(plane, row, 3, 30, line);
 		if (slot < room->player_count)
 		{
-			if (room->players[slot].ready)
+			if (waiting_room_seat_ready(room, slot))
 				set_colour(plane, MP_GREEN_R, MP_GREEN_G, MP_GREEN_B);
 			else
 				set_colour(plane, MP_AMBER_R, MP_AMBER_G, MP_AMBER_B);

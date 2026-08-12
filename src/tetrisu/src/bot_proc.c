@@ -42,6 +42,7 @@ static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
 				int deadman);
 static void	child_exec(const char *binary, const char *room,
 				t_bot_level level, int deadman);
+static int	server_args(char **args, char *port_text);
 static void	child_stdio(void);
 static int	reap(pid_t pid, int deadman);
 
@@ -52,6 +53,21 @@ static int	reap(pid_t pid, int deadman);
 ** running program to remember.
 */
 static char	g_invoked_as[BOT_PATH_MAX];
+
+/*
+** The server this client actually reached, which is not the same question as
+** what its environment says.
+**
+** A player types the address into SERVER ID on the sign-in screen, and that
+** value lives in the client's own t_net_config and nowhere else. A forked
+** child inherits the environment, so it inherited the *default* - 127.0.0.1 -
+** and looked for a server on the player's own laptop. Four bots would spawn,
+** four would fail to connect, and the room stayed empty while the screen said
+** BOT ADDED.
+*/
+static char	g_server_host[BOT_HOST_MAX];
+static char	g_server_ca[BOT_PATH_MAX];
+static int	g_server_port;
 
 /**
  * @brief Start an empty farm.
@@ -79,6 +95,28 @@ void	bot_farm_remember_self(const char *argv0)
 	if (argv0 == NULL)
 		return ;
 	snprintf(g_invoked_as, sizeof(g_invoked_as), "%s", argv0);
+}
+
+/**
+ * @brief Remembers which server this client reached, for the bots to be told.
+ *
+ * Called from net_connect rather than from the screens, so that it cannot be
+ * forgotten: every path that opens a session goes through there, including
+ * the reconnect the provider does, and a bot spawned after a reconnect to a
+ * different address would otherwise be sent to the old one.
+ *
+ * @param host The host the session was opened to.
+ * @param port Its port.
+ * @param ca_path The certificate authority it was verified against.
+ */
+void	bot_farm_remember_server(const char *host, int port,
+		const char *ca_path)
+{
+	if (host != NULL)
+		snprintf(g_server_host, sizeof(g_server_host), "%s", host);
+	if (ca_path != NULL)
+		snprintf(g_server_ca, sizeof(g_server_ca), "%s", ca_path);
+	g_server_port = port;
 }
 
 /**
@@ -370,12 +408,56 @@ static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
 static void	child_exec(const char *binary, const char *room,
 			t_bot_level level, int deadman)
 {
+	char	*args[BOT_ARGV_MAX];
 	char	fd_text[16];
+	char	port_text[16];
+	int		count;
 
 	child_stdio();
 	snprintf(fd_text, sizeof(fd_text), "%d", deadman);
-	execl(binary, binary, "--room", room, "--level", bot_level_word(level),
-		"--deadman", fd_text, (char *)NULL);
+	snprintf(port_text, sizeof(port_text), "%d", g_server_port);
+	count = 0;
+	args[count++] = (char *)binary;
+	args[count++] = (char *)"--room";
+	args[count++] = (char *)room;
+	args[count++] = (char *)"--level";
+	args[count++] = (char *)bot_level_word(level);
+	args[count++] = (char *)"--deadman";
+	args[count++] = fd_text;
+	count += server_args(args + count, port_text);
+	args[count] = NULL;
+	execv(binary, args);
+}
+
+/**
+ * @brief Appends the server coordinates, when this client has any to give.
+ *
+ * Absent only before the first connection, which is before any room exists to
+ * add a bot to - so in practice the child is always told, and the omission is
+ * a shape the code allows rather than one it reaches.
+ *
+ * @param args Where to write, which must have room for four.
+ * @param port_text The port, already rendered.
+ * @return How many arguments were written.
+ */
+static int	server_args(char **args, char *port_text)
+{
+	int	count;
+
+	count = 0;
+	if (g_server_host[0] != '\0')
+	{
+		args[count++] = (char *)"--host";
+		args[count++] = g_server_host;
+		args[count++] = (char *)"--port";
+		args[count++] = port_text;
+	}
+	if (g_server_ca[0] != '\0')
+	{
+		args[count++] = (char *)"--ca";
+		args[count++] = g_server_ca;
+	}
+	return (count);
 }
 
 /**
