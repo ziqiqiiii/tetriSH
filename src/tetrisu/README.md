@@ -733,7 +733,7 @@ screen: on a Sixel terminal a full-screen bitmap re-emitted over the region
 planes blanks them until the next keystroke, which is the fifth bug in
 `docs/adding-a-screen.md`.
 
-The unit suite covers the notcurses/SDL-free app and Solo game state. Six
+The unit suite covers the notcurses/SDL-free app and Solo game state. Seven
 integration suites boot a throwaway `tetrisd` — one server bring-up, shared by
 all of them as [`tests/integration/lib/tetrisd_fixture.sh`](tests/integration/lib/tetrisd_fixture.sh) —
 and drive a real socket against it:
@@ -746,11 +746,63 @@ and drive a real socket against it:
 | `test_net_chat.sh` | `chat_smoke` | The room feed: narration nobody asked for, a line echoed back to its sender, a line that crosses a reply still being filed, the server's refusals, and the provider seam the waiting room calls |
 | `test_net_store.sh` | `store_smoke` | The Marketplace's half of the account: the catalogue and its prices, a fresh account's starters, affordability, `BUY`/`EQUIP` outliving the screen, and artwork keyed by catalogue id |
 | `test_net_session.sh` | `session_smoke` | What a session leaves behind — a descriptor returned on every disconnect, `SIGNUP` claiming no identity of its own, and a refused solo start changing nothing. All three are regressions; none is visible without a real socket |
+| `test_net_double.sh` | `match_smoke` | Two clients in one Double match: both boards dealt and held, each snapshot carrying the other, a move crossing, the joiner playing without having started, every ability level reaching the server, one that was **paid for** landing, a top-out deciding it for both, and the room surviving to play again |
+
+The paid activation is the only accepted one anywhere that crosses a socket,
+and it is there because charge cannot be granted: it is earned by clearing
+lines, and no test can deal itself the pieces to clear one. So that check
+plays for it. Every snapshot carries the whole board and the falling piece,
+and `libtetrisbrain` is linked into the client too, so the bot tries every
+placement of the piece it was actually given and takes the one scoring best on
+lines, height, holes and bumpiness — four lines, two charges, one level-1
+activation, inside about twenty pieces. Nothing was opened in the server to
+make it reachable, which is the point: the bag is the bag `tetrisd` dealt
+itself, and a test-only way to top up a meter would only have asserted that
+the top-up worked.
 
 The fixture walks its port upward from the suite's base rather than using a
 fixed one: a fixed port inside the kernel's ephemeral range collides with
 whatever else the machine is doing, and the suite fails for a reason that has
 nothing to do with `tetrisu`.
+
+### Load
+
+`tests/stress_client.c` is the eighth client and the only one that asserts
+nothing about what the server said. It puts a fleet of players on one
+`tetrisd` and reports what they cost it:
+
+```bash
+make stress                                          # 20 players, Double, 20 s
+make stress STRESS_ARGS="--players 50 --seconds 30"
+make stress STRESS_ARGS="--mode single --players 60"
+make stress HOST=10.27.229.33                        # a server already running
+```
+
+[`scripts/stress.sh`](../../scripts/stress.sh) brings up the same throwaway
+server the suites use — its own port, certificates and data directory, all
+removed afterwards — raises `TETRISD_MAX_CLIENTS` and the handshake pool, and
+runs the fleet against it. It lives under `scripts/` and not beside the suites
+because the runner's wildcard would otherwise pick it up, and a minute of load
+does not belong in `make test`.
+
+One process per worker: tetrisu's network layer blocks on its socket by design,
+so concurrency has to come from outside it. Double seats two bots per process
+and is the shape a real load has; single seats one, and is the only way to get
+N genuinely simultaneous handshakes. Each worker sends its account home down a
+shared pipe in one write — under `PIPE_BUF`, so the kernel keeps the workers
+from interleaving — and the parent merges them into round-trip percentiles, a
+frame rate, and the counts of what was accepted, throttled and refused.
+
+Refusals are not faults and are counted apart from errors: a board that has
+topped out refuses every input until it is dealt again, and an ability with no
+charge behind it is refused by design. The first refusal's `reason` word is
+printed beside the count, which is what tells an idle fleet from a failing one.
+
+Two things a run has to be read with. `RESTART` is only accepted mid-game, so a
+bot that has topped out takes a new room instead — the same fallback
+`solo_authority.c` makes behind the `R` the Solo screen offers. And the lobby
+holds `LOBBY_MAX_ROOMS` (64) rooms, so Double tops out at 128 players and
+single at 64, whatever `TETRISD_MAX_CLIENTS` is set to.
 
 Run the strict component build without allowing dependency installation with:
 

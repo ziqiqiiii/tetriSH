@@ -276,6 +276,18 @@ $(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# The load generator. Not a test and deliberately not in `integration`: it
+# reports what the server cost rather than whether it was right, and a fleet
+# of fifty is far too slow and far too machine-dependent to sit in `make test`.
+# ../../scripts/stress.sh starts a server and drives this against it.
+$(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.h $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+stress: $(TEST_BIN_DIR)/stress_client
+
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
@@ -317,6 +329,6 @@ re: fclean all
 
 .PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
 			check-dependencies check-tetrisu-deps test unit integration \
-			clean fclean re
+			stress clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o
