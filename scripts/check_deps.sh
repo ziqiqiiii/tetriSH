@@ -8,6 +8,8 @@
 #   UNAME_S            host OS (uname -s); defaults to `uname -s` if unset
 #   REQUIRE_VALGRIND   1 to treat a missing Valgrind as a hard failure on Linux
 #                      (otherwise it is only a warning)
+#   REQUIRE_DOCKER     1 to treat a missing container engine as a hard failure
+#                      (otherwise it is only a warning)
 #
 # Exit code: 0 if all required dependencies are present and the probe links.
 
@@ -15,6 +17,19 @@ set -euo pipefail
 
 UNAME_S="${UNAME_S:-$(uname -s)}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
+REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Asked of container.sh rather than probed here, so "is there an engine" has one
+# owner and one answer. It reports reachability, not just presence: an installed
+# docker whose daemon is down, or whose socket the user is not in the group for,
+# is not an engine this project can use, and finding that out at `make deps`
+# beats finding it out from `make play` ten minutes into an image build.
+engine_available() {
+    [ -f "$SCRIPT_DIR/container.sh" ] || return 0
+    bash "$SCRIPT_DIR/container.sh" check >/dev/null 2>&1
+}
 
 probe="$(mktemp /tmp/tetrish-deps-check.XXXXXX)"
 probe_log="$probe.log"
@@ -31,6 +46,16 @@ if [ "$UNAME_S" = "Linux" ] \
         && [ "$REQUIRE_VALGRIND" = "1" ] \
         && ! command -v valgrind >/dev/null 2>&1; then
     missing="$missing valgrind"
+fi
+
+# The client runs in a container on every platform now - that is what makes one
+# Linux image serve a Linux, macOS and WSL client alike - so the engine is no
+# longer a macOS-only concern. It is still not needed to *compile* anything,
+# which is why a missing engine is a warning by default and only
+# REQUIRE_DOCKER=1 makes it fatal: same treatment as Valgrind on Linux, for the
+# same reason - mandatory for a task, irrelevant to the build.
+if [ "$REQUIRE_DOCKER" = "1" ] && ! engine_available; then
+    missing="$missing docker"
 fi
 
 if [ -n "$missing" ]; then
@@ -81,9 +106,15 @@ if [ "$UNAME_S" = "Linux" ] \
     echo "Warning: Valgrind is not installed. Build is OK, but PR/checkoff memory-safety runs need it."
 fi
 
+if [ "$REQUIRE_DOCKER" != "1" ] && ! engine_available; then
+    echo "Warning: no usable container engine. Build is OK, but 'make play' runs"
+    echo "         the client in one. 'bash scripts/container.sh check' says"
+    echo "         whether it is missing or merely unreachable."
+fi
+
 if [ "$UNAME_S" = "Darwin" ]; then
     echo "Note: tetrisd cannot be built or run on macOS - it needs epoll, timerfd,"
-    echo "      and POSIX mqueue, none of which Darwin has. 'make play' builds"
-    echo "      and runs tetrisu only; play against a server on another machine"
-    echo "      with 'bash scripts/play.sh --host ADDR'."
+    echo "      and POSIX mqueue, none of which Darwin has. 'make play' runs the"
+    echo "      client against a server on another machine; type its address into"
+    echo "      SERVER ID, or check it first with 'make play HOST=ADDR'."
 fi

@@ -1,6 +1,6 @@
 # tetriSH
 
-> A terminal-based Battle Royale Tetris system written in C. Combining a custom Unix shell, concurrent daemon processes, authenticated encrypted networking, and a bespoke application-layer protocol (HTTTP).
+A terminal-based Battle Royale Tetris system written in C. Combining a custom Unix shell, concurrent daemon processes, authenticated encrypted networking, and a bespoke application-layer protocol (HTTTP).
 
 Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of Technology and Design.
 
@@ -11,6 +11,7 @@ Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of 
 - [Status](#status)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
+- [Play](#play)
 - [Run](#run)
 - [Binaries](#binaries)
 - [Libraries](#libraries)
@@ -47,15 +48,14 @@ The sections below describe the target design; this table says what exists today
 
 ## Prerequisites
 
-GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` additionally needs notcurses 3.0.5+ (required); SDL2 and SDL2_mixer are optional and enable its audio, which compiles out via `-DTETRISU_ENABLE_AUDIO=0`.
-
-Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported for dependency install; where no notcurses package exists, it is built from source.
-
-**A plain `make` does not complete on macOS.** It recurses into every `lib/lib*/` in turn, and `lib/libcoreipc` stops it: `include/coreipc.h` includes `<mqueue.h>`, which Darwin does not ship, so the build fails at the first object with ``fatal error: 'mqueue.h' file not found`` — before it ever reaches `tetrisu`. `tetrisd` is unbuildable there for the same family of reasons: its reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd` (`src/tetrisd/src/{server,client,clientio,reactor,handshake_pool}.c`), which Darwin has no equivalent for.
-
-So on macOS, build the one component that does compile rather than the tree: `make play` (build `tetrisu` and launch it) or `make -C src/tetrisu` on its own. Run the server side — `tetrisd`, and anything linking `libcoreipc`'s mqueue module — on Linux or WSL; a client-only macOS checkout connects to a `tetrisd` running elsewhere.
-
-The compiler and the assembler have to be upgraded together: GCC 15 writes non-ASCII string constants with the `.base64` directive, which GNU as only understands from binutils 2.44. A machine whose GCC has outrun its binutils compiles most of the tree and then fails on `src/tetrisu/src/render_multiplayer.c` — the one file that draws a box — with ``unknown pseudo-op: `.base64'``. `make check-deps` probes the pair and says so before the build starts; `make deps` upgrades binutils where the package manager can.
+| Dependency | Needed for | Missing means |
+|---|---|---|
+| GCC 15 + binutils 2.44+, `make`, `pkg-config` | everything | error — GCC 15 emits `.base64`, which an older GNU as rejects |
+| OpenSSL, Readline, ncurses | shell, daemons | error |
+| notcurses 3.0.5+ | `tetrisu` | error — built from source where unpackaged |
+| SDL2, SDL2_mixer | `tetrisu` audio | compiles out via `-DTETRISU_ENABLE_AUDIO=0` |
+| Container engine — Docker on Linux, colima + the `docker` CLI on macOS | [`make play-image`](#play) | warning; `make deps` adds you to the `docker` group, `REQUIRE_DOCKER=1` makes it fatal |
+| Valgrind | memory-safety runs | warning; `REQUIRE_VALGRIND=1` makes it fatal |
 
 ```bash
 make deps                # check and install anything missing
@@ -64,7 +64,9 @@ make deps-info           # show detected OS/WSL and dependency policy
 make -C src/tetrisu deps # tetrisu render/audio deps only
 ```
 
-Installation may request sudo. Set `AUTO_INSTALL_DEPS=0` to keep it check-only, as in CI. Valgrind is needed only for memory-safety runs, and is unreliable on current macOS — run those on Linux or WSL; `REQUIRE_VALGRIND=1 make check-deps` enforces its presence.
+Install covers Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools), and may request sudo; `AUTO_INSTALL_DEPS=0` keeps it check-only, as in CI.
+
+**macOS cannot build the tree** — `lib/libcoreipc` includes `<mqueue.h>` and `tetrisd`'s reactor is `epoll` plus `timerfd`, none of which Darwin ships. Run [`make play-image`](#play) there, and the server and valgrind on Linux or WSL.
 
 ---
 
@@ -114,32 +116,51 @@ Networked binaries additionally link OpenSSL (`-lssl -lcrypto`); `libmacminidb` 
 
 ---
 
-### Playing on macOS
+## Play
 
-macOS cannot run the server at all, and this is not a packaging gap: `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`. Darwin implements none of the three, so no flag or shim reaches them.
-
-A Mac playing on somebody else's server needs only the client:
+One command from a fresh clone to a running client:
 
 ```bash
-make play
+make play          # client built on this host
+make play-image    # client built in a container instead
 ```
 
-That recurses into `src/tetrisu` (installing notcurses if it is missing), then launches the client with `TETRISU_NET=1`. **A plain `make` does not work on macOS** — the recursion reaches `lib/libcoreipc` and stops at `mqueue.h` long before `tetrisu` — which is why this target skips straight to the one component that builds.
+Either installs what is missing, compiles it, opens a kitty window and starts the game in it; every step checks before it acts, so re-running is how you restart. They differ only in **where the client is built**:
 
-The server's address is typed into **SERVER ID** on the sign-in screen, not configured here: it changes whenever the network does, and the field wins over the environment anyway. The certificate needs no configuring either — `certs/demo-ca.crt` is committed, so a fresh clone verifies the demo server with nothing set.
+| | `make play` | `make play-image` |
+|---|---|---|
+| Toolchain, notcurses, SDL2 | installed on this host | carried by the image |
+| Host needs a compiler | yes | no |
+| Container engine needed | no | yes |
+| Works on macOS | no — `make` stops at `mqueue.h` | yes |
 
-`TETRISU_NET=1` is the one thing that matters. Without it the client builds its fixture provider instead of a session, and CHECK SERVER reports offline **without opening a socket** — indistinguishable from a wrong address, and unfixable by correcting one.
+The container never draws: `tetrisu`'s board is Kitty-graphics-protocol escape sequences, bytes on the pty `docker run -t` allocates, so the host's terminal renders them and one Linux image serves Linux, macOS and WSL alike.
+
+| Environment | Terminal | Installed by `make play` |
+|---|---|---|
+| Linux desktop | kitty | Yes — apt, dnf, pacman, zypper, apk |
+| macOS | kitty | Yes — `brew install --cask kitty` |
+| WSL with WSLg | kitty | Yes, as a native WSLg window |
+| WSL without WSLg | WezTerm on Windows | No — prints the `winget` command to run |
+| SSH into a Linux VM | whichever terminal you connected from | No — that machine has no display |
+
+No packaging removes that last row: with no display there is no window to open, so the client runs in the terminal you are already in and only its protocol support matters. **kitty**, **Ghostty** and **WezTerm** speak it; Windows Terminal gets the cell board. `TETRISU_RENDERER=cell` pins that path anywhere — renderer tiers in [`src/tetrisu/README.md`](src/tetrisu/README.md).
 
 ```bash
-make play-local HOST=10.27.229.33      # client against a server elsewhere, checked first
-bash scripts/play.sh --client-only     # client against a server already up
-bash scripts/play.sh --port 5252       # some other port
-bash scripts/play.sh --stop            # take the server down (Linux)
+make play HOST=tetrish.dev             # against a server elsewhere, checked first
+make play-image REBUILD=1              # rebuild the client image first
+bash scripts/play.sh --client-only     # against a server already up
+bash scripts/play.sh --container       # what make play-image runs
+bash scripts/play.sh --stop            # take the local server down (Linux)
 ```
 
-There is no local server target for macOS: `make play-local` with no `HOST=` fails there outright. On Linux it runs the server natively via `make stack` and skips straight to the client.
+The server's address is typed into **SERVER ID** on the sign-in screen, which wins over the environment; the certificate needs no configuring, `certs/demo-ca.crt` being committed and bind-mounted into the container read-only rather than baked in.
 
-Prefer **kitty or Ghostty**, which get the pixel board. Terminal.app has no bitmap protocol, but that is a downgrade rather than a wall: only `NCPIXEL_NONE` loses bitmaps outright, and Solo composites a true-colour cell board instead, so it plays there in compatibility mode. WezTerm and iTerm2 draw bitmaps but never free replaced ones, so `tetrisu` holds them at a stationary tier on purpose — see the renderer tiers in [`src/tetrisu/README.md`](src/tetrisu/README.md), and `TETRISU_RENDERER=cell` pins the compatibility path anywhere.
+**Only one CA is trusted per run**, picked from the host `play.sh` launched against — the scratch `certs/ca.crt` for a local server, `certs/demo-ca.crt` for one named with `HOST=`. A *different* SERVER ID than that host fails with `certificate signature failure`: reachable server, other CA. Name it up front; concatenating both CAs is not a workaround, since `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate with `PEM_read_X509` and ignores the rest.
+
+macOS runs the client and never the server, so the server steps are skipped there.
+
+One concern per script: [`scripts/container.sh`](scripts/container.sh) the engine, image and run; [`scripts/terminal.sh`](scripts/terminal.sh) which terminal draws and whether one can be opened; [`scripts/play.sh`](scripts/play.sh) the order.
 
 ---
 
@@ -386,8 +407,11 @@ MacMini_tetriSH/
 │   └── bugs/                      Post-mortem notes on design defects
 ├── .claude/skills/                Code, Makefile, and README style guides
 ├── scripts/                       Dependency, certificate, and launch helpers
-│   └── play.sh                    One command from a fresh clone to a client
+│   ├── play.sh                    One command from a fresh clone to a client
+│   ├── container.sh               Engine, client image, and how the client runs
+│   └── terminal.sh                Which terminal draws, and whether one can open
 ├── .tetrishrc                     Shell start-up file — launches the daemons
+├── Dockerfile                     Client image — builds tetrisu, never draws
 ├── Makefile                       Umbrella; recurses into every component
 └── README.md
 ```

@@ -7,9 +7,8 @@
 #                                    CONFIG                                    #
 ################################################################################
 
-# tetriSH umbrella Makefile. Recurses into the self-contained libraries and the
-# vendored shell, then provides a shell-driven `run` entry point. Daemons are
-# launched by tetrisctl from inside the shell (see .tetrishrc), not from here.
+# tetriSH umbrella Makefile: recurses into the libraries and the vendored shell.
+# Daemons are launched by tetrisctl from inside the shell (.tetrishrc), not here.
 #
 #   make / make all   install missing dependencies, then build everything
 #   make deps         check/install dependencies for this OS
@@ -22,13 +21,15 @@
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
 #
-#   make play         set up everything and launch a client against a server
+#   make play         install + compile on this host, then play in kitty
+#   make play-image   the same, built in a container instead of on this host
 
 MAKE_FLAGS	:= --no-print-directory -s
 RM			:= rm -rf
 
 AUTO_INSTALL_DEPS	:= 1
 REQUIRE_VALGRIND	:= 0
+REQUIRE_DOCKER		:= 0
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -43,13 +44,12 @@ CYAN		:= \033[1;36m
 
 UNAME_S		:= $(shell uname -s)
 
-# Source-built dependencies usually install pkg-config metadata under
-# /usr/local; keep that visible before falling back to distro/Homebrew paths.
+# Source-built dependencies land their pkg-config metadata under /usr/local;
+# keep it visible before the distro/Homebrew paths.
 export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
 
-# Homebrew keeps these libraries keg-only on some macOS releases. Export their
-# pkg-config metadata so this Makefile and every recursive component build use
-# the same headers and libraries on both Intel and Apple Silicon Macs.
+# Homebrew keeps these keg-only on some macOS releases; exporting their
+# metadata keeps every recursive build on the same headers and libraries.
 ifeq ($(UNAME_S), Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
@@ -66,9 +66,8 @@ SHELL_BIN	:= $(SHELL_DIR)/macmini_shell
 BIN			:= bin
 CERT_DIR	:= certs
 
-# Build only the components that exist yet — the project is in early dev, so
-# the daemon directories are filled in over time. Match Makefiles rather than
-# directories so ignored build artefacts cannot be mistaken for components.
+# Build only the components that exist yet. Match Makefiles rather than
+# directories, so ignored build artefacts are not mistaken for components.
 LIB_MAKEFILES		:= $(wildcard lib/lib*/Makefile)
 LIB_DIRS			:= $(patsubst %/,%,$(dir $(LIB_MAKEFILES)))
 
@@ -100,13 +99,10 @@ daemons: libs | deps
 		$(MAKE) $(MAKE_FLAGS) -C $$d DEPS_READY=1 || exit 1; \
 	done
 
-# Collect every built binary into a single ./bin. The shell prepends $PWD/bin
-# to PATH, and tetrisctl resolves each daemon through PATH exactly as execvp
-# does, so a daemon missing from ./bin cannot be launched by name at all. Each
-# component's binary is named after its directory; unbuilt ones are skipped.
-# Both layouts are searched, because the daemons build their binary beside
-# their Makefile and tetrisu builds its own into bin/ - looking only for the
-# first is what left ./bin/tetrisu missing after a successful build.
+# Collect every built binary into one ./bin: the shell prepends it to PATH and
+# tetrisctl resolves daemons through PATH, so one missing here cannot be
+# launched by name at all. Each binary is named after its directory, and both
+# layouts are searched - daemons build beside their Makefile, tetrisu into bin/.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
 	@ ln -sf $(CURDIR)/$(SHELL_DIR)/bin/* $(BIN)/ 2>/dev/null || true
@@ -117,25 +113,21 @@ bin-link: shell daemons
 		done; \
 	done
 
-# Idiomatic launch: the shell sources .tetrishrc, whose last line is
-# `tetrisctl start` - so the daemons come up before the first prompt.
-#
-# certs is a prerequisite for the same reason it is one of `stack`: that
-# `tetrisctl start` boots tetrisd, and tetrisd treats missing certificates as
-# a fatal boot error. certs/ is git-ignored, so on a fresh clone this is the
-# difference between a shell with a game server behind it and one without.
+# The shell sources .tetrishrc, whose last line is `tetrisctl start` - so the
+# daemons come up before the first prompt. certs is a prerequisite because that
+# boots tetrisd, which treats missing certificates as fatal, and certs/ is
+# git-ignored: on a fresh clone it decides whether there is a server at all.
 run: all bin-link certs
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
-# Development credentials for the secure session. tetrisd refuses to boot
-# without them, so `run` and `stack` depend on this; the directory is
-# git-ignored and the script is a no-op while the certificate is still valid.
+# Development credentials for the secure session, which tetrisd refuses to boot
+# without. The script is a no-op while the certificate is still valid.
 certs:
 	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
 
-# Headless stack for integration tests (no interactive shell). tetrisctl reads
-# the roster and its order from .tetrishrc, and each daemon detaches itself, so
-# this returns only once they are actually up - and non-zero if one is not.
+# Headless stack for integration tests. tetrisctl reads the roster and its order
+# from .tetrishrc; each daemon detaches, so this returns only once they are up -
+# and non-zero if one is not.
 stack: all bin-link certs
 	@ PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
 		$(BIN)/tetrisctl start
@@ -152,75 +144,187 @@ test: all
 #                                DEPENDENCIES                                  #
 ################################################################################
 
-# `make` installs only when the compile/link probe fails. Set
-# AUTO_INSTALL_DEPS=0 in CI or managed environments to make this check-only.
-# Outsourced to scripts/; it delegates to check_deps.sh / install_deps.sh.
+# Installs only when the compile/link probe fails; AUTO_INSTALL_DEPS=0 makes it
+# check-only (CI). Outsourced to scripts/check_deps.sh + install_deps.sh.
 deps:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
 
-# Root deps are shared by multiple components: compiler toolchain, pkg-config,
-# OpenSSL, Readline, and ncurses. Install is outsourced to scripts/; component
-# render/audio packages belong in that component's own Makefile.
+# Root deps are the ones several components share: toolchain, pkg-config,
+# OpenSSL, readline, ncurses. A component's own packages belong in its Makefile.
 install-deps:
 	@ bash ./scripts/install_deps.sh
 
-# Verify dependencies without changing the system. Outsourced to scripts/; the
-# script compiles/links a probe rather than trusting the package database.
+# Verify without changing the system: the script compiles and links a probe
+# rather than trusting the package database.
 check-deps:
 	@ UNAME_S=$(UNAME_S) REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		bash ./scripts/check_deps.sh
 
-# Read-only summary of the dependency situation. Outsourced to scripts/.
+# Read-only summary of the dependency situation.
 deps-info:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
 		bash ./scripts/deps_info.sh
 
 ################################################################################
 #                                    PLAY                                      #
 ################################################################################
 
-# Build the client and play. This is the target for the machine that is only ever
-# a client, which on macOS is every machine: `make` cannot run here at all -
-# libcoreipc's mqueue module fails to compile on Darwin before the recursion ever
-# reaches tetrisu - so this recurses straight into src/tetrisu and touches
-# nothing else. It deliberately does not depend on bin-link, which builds the
-# shell and every daemon to populate ./bin and would fail for the same reason.
+# Two routes from a fresh clone to a playable client, differing only in where it
+# is built. Both install what is missing, compile, and open kitty on the game;
+# play.sh checks before every step, so re-running either restarts the client.
 #
-# Deliberately no TETRISU_HOST. The server's address changes - a hotspot hands
-# out a new one - and a value baked in here would be a second place to remember
-# to edit. The sign-in screen's SERVER ID field is the one place it is typed, and
-# it wins over the environment anyway.
+#   play        built on this host
+#   play-image  built in a container carrying the toolchain and notcurses, so
+#               this host installs none of it
 #
-# TETRISU_CA_PATH is left alone too, because its default is already right:
-# certs/demo-ca.crt is committed, so a fresh clone verifies the demo server with
-# nothing configured. Only a server on this machine needs the override, and
-# `make play-local` passes it.
+# The container never draws: the board is Kitty-graphics escape sequences, bytes
+# on the pty the host terminal renders either way. That is what lets one Linux
+# image serve macOS, where `make` cannot run at all - libcoreipc's mqueue module
+# does not compile on Darwin, and the recursion stops long before tetrisu.
 #
-# TETRISU_NET is the one thing that must be set. Without it the client builds its
-# fixture provider instead of a session, and CHECK SERVER reports offline without
-# opening a socket - the same screen a wrong address gives, for a reason no
-# address can fix.
-play:
-	@ $(MAKE) $(MAKE_FLAGS) -C src/tetrisu
-	@ echo "\n$(CYAN)==> Launching $(BLUE)tetrisu$(CLR_RMV) - type the server's address in $(YELLOW)SERVER ID$(CLR_RMV)"
-	@ TETRISU_NET=1 ./src/tetrisu/bin/tetrisu
+# Deliberately no TETRISU_HOST: the address changes, and a value baked in here
+# would be a second place to remember to edit. The sign-in screen's SERVER ID
+# field is where it is typed and wins over the environment anyway; HOST= only---
 
-# The other half: bring a server up on this machine and play against it.
-# scripts/play.sh installs what is missing, waits for the port and launches the
-# client against it.
+---
+
+## Play
+
+One command from a fresh clone to a running client:
+
+```bash
+make play          # built on this host
+make play-image    # built in a container instead
+```
+
+Both install what is missing, compile it, open a kitty window, and start the game in it. They differ only in **where the client is built**:
+
+| | `make play` | `make play-image` |
+|---|---|---|
+| Toolchain, notcurses, SDL2 | installed on this host | carried by the image |
+| Host needs a compiler | yes | no |
+| Works on macOS | no — `make` stops at `mqueue.h` | yes |
+| Container engine needed | no | yes |
+
+Every step checks before it acts, so re-running either is how you restart the client. The cheap checks come first on purpose — a missing toolchain, no terminal, or an engine needing a re-login all refuse the run, and none is worth discovering partway through a build.
+
+The container never draws. `tetrisu`'s board is Kitty-graphics-protocol escape sequences, and those are bytes on the pty `docker run -t` allocates — so the container needs no display of its own, the host's terminal renders them either way, and one Linux image serves a Linux, macOS, and WSL client alike. That is what makes `make play-image` the target for a Mac, which cannot compile the tree at all.
+
+| Environment | Terminal | Installed by `make play` |
+|---|---|---|
+| Linux desktop | kitty | Yes — apt, dnf, pacman, zypper, apk |
+| macOS | kitty | Yes — `brew install --cask kitty` |
+| WSL with WSLg | kitty | Yes, as a native WSLg window |
+| WSL without WSLg | WezTerm on Windows | No — prints the `winget` command to run |
+| SSH into a Linux VM | whichever terminal you connected from | No — nothing on that machine has a display |
+---
+
+---
+
+## Play
+
+One command from a fresh clone to a running client:
+
+```bash
+make play          # built on this host
+make play-image    # built in a container instead
+```
+
+Both install what is missing, compile it, open a kitty window, and start the game in it. They differ only in **where the client is built**:
+
+| | `make play` | `make play-image` |
+|---|---|---|
+| Toolchain, notcurses, SDL2 | installed on this host | carried by the image |
+| Host needs a compiler | yes | no |
+| Works on macOS | no — `make` stops at `mqueue.h` | yes |
+| Container engine needed | no | yes |
+
+Every step checks before it acts, so re-running either is how you restart the client. The cheap checks come first on purpose — a missing toolchain, no terminal, or an engine needing a re-login all refuse the run, and none is worth discovering partway through a build.
+
+The container never draws. `tetrisu`'s board is Kitty-graphics-protocol escape sequences, and those are bytes on the pty `docker run -t` allocates — so the container needs no display of its own, the host's terminal renders them either way, and one Linux image serves a Linux, macOS, and WSL client alike. That is what makes `make play-image` the target for a Mac, which cannot compile the tree at all.
+
+| Environment | Terminal | Installed by `make play` |
+|---|---|---|
+| Linux desktop | kitty | Yes — apt, dnf, pacman, zypper, apk |
+| macOS | kitty | Yes — `brew install --cask kitty` |
+| WSL with WSLg | kitty | Yes, as a native WSLg window |
+| WSL without WSLg | WezTerm on Windows | No — prints the `winget` command to run |
+| SSH into a Linux VM | whichever terminal you connected from | No — nothing on that machine has a display |
+
+That last row is the one constraint no packaging removes: a machine with no display has no window to open, so `make play` runs the client in the terminal you are already in and the far end has to understand the protocol itself. **kitty**, **Ghostty**, and **WezTerm** do. Windows Terminal does not, and gets the cell board — connect from WezTerm instead to keep the pixel art across the hop.
+
+```bash
+make play HOST=tetrish.dev             # against a server elsewhere, checked first
+make play-image REBUILD=1              # rebuild the client image first
+bash scripts/play.sh --client-only     # against a server already up
+bash scripts/play.sh --container       # what make play-image runs
+bash scripts/play.sh --stop            # take the local server down (Linux)
+```
+
+The server's address is typed into **SERVER ID** on the sign-in screen rather than configured here: it changes whenever the network does, and the field wins over the environment. The certificate needs no configuring — `certs/demo-ca.crt` is committed, so a fresh clone verifies the demo server with nothing set, and it is bind-mounted into the container read-only rather than baked into the image.
+
+**The CA is chosen at launch, and only one can be trusted per run.** A local server is signed by this machine's scratch `certs/ca.crt`; a server elsewhere is signed by `certs/demo-ca.crt`. `play.sh` picks from the host it was given, so typing a *different* SERVER ID than the one it launched against fails verification with `certificate signature failure` — the server is reachable, it is simply signed by the other CA. Name the server up front instead:
+
+```bash
+make play HOST=tetrish.dev
+```
+
+A single file holding both CAs does not work around this: `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate with `PEM_read_X509`, so a second in the same file is ignored.
+
+**macOS runs the client and never the server**, and needs `make play-image` to do it. `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`; Darwin implements none of the three, so no flag or shim reaches them and a plain `make` stops at `mqueue.h` long before `tetrisu`. Building in the container sidesteps that entirely, and the server steps are skipped there.
+
+Three scripts own this, one concern each: [`scripts/container.sh`](scripts/container.sh) the engine, image, and how the client is run; [`scripts/terminal.sh`](scripts/terminal.sh) which terminal draws and whether one can be opened at all; [`scripts/play.sh`](scripts/play.sh) the order they happen in. `TETRISU_RENDERER=cell` pins the compatibility path anywhere, and the renderer tiers are in [`src/tetrisu/README.md`](src/tetrisu/README.md).
+
+---
+That last row is the one constraint no packaging removes: a machine with no display has no window to open, so `make play` runs the client in the terminal you are already in and the far end has to understand the protocol itself. **kitty**, **Ghostty**, and **WezTerm** do. Windows Terminal does not, and gets the cell board — connect from WezTerm instead to keep the pixel art across the hop.
+
+```bash
+make play HOST=tetrish.dev             # against a server elsewhere, checked first
+make play-image REBUILD=1              # rebuild the client image first
+bash scripts/play.sh --client-only     # against a server already up
+bash scripts/play.sh --container       # what make play-image runs
+bash scripts/play.sh --stop            # take the local server down (Linux)
+```
+
+The server's address is typed into **SERVER ID** on the sign-in screen rather than configured here: it changes whenever the network does, and the field wins over the environment. The certificate needs no configuring — `certs/demo-ca.crt` is committed, so a fresh clone verifies the demo server with nothing set, and it is bind-mounted into the container read-only rather than baked into the image.
+
+**The CA is chosen at launch, and only one can be trusted per run.** A local server is signed by this machine's scratch `certs/ca.crt`; a server elsewhere is signed by `certs/demo-ca.crt`. `play.sh` picks from the host it was given, so typing a *different* SERVER ID than the one it launched against fails verification with `certificate signature failure` — the server is reachable, it is simply signed by the other CA. Name the server up front instead:
+
+```bash
+make play HOST=tetrish.dev
+```
+
+A single file holding both CAs does not work around this: `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate with `PEM_read_X509`, so a second in the same file is ignored.
+
+**macOS runs the client and never the server**, and needs `make play-image` to do it. `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`; Darwin implements none of the three, so no flag or shim reaches them and a plain `make` stops at `mqueue.h` long before `tetrisu`. Building in the container sidesteps that entirely, and the server steps are skipped there.
+
+Three scripts own this, one concern each: [`scripts/container.sh`](scripts/container.sh) the engine, image, and how the client is run; [`scripts/terminal.sh`](scripts/terminal.sh) which terminal draws and whether one can be opened at all; [`scripts/play.sh`](scripts/play.sh) the order they happen in. `TETRISU_RENDERER=cell` pins the compatibility path anywhere, and the renderer tiers are in [`src/tetrisu/README.md`](src/tetrisu/README.md).
+
+---
+# names a server to check is reachable first.
 #
-# HOST= plays on somebody else's server instead of starting one here, checking it
-# is reachable first and verifying it against the committed demo CA:
-#   make play-local HOST=10.27.229.33
-# PLAY_ARGS= passes anything else through: make play-local PLAY_ARGS=--rebuild
+# HOST= plays on somebody else's server:  make play HOST=tetrish.dev
+# PLAY_ARGS= passes anything else through: make play-image PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 
-play-local:
-	@ bash ./scripts/play.sh $(PLAY_HOST_ARG) $(PLAY_ARGS)
+play:
+	@ bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
+
+PLAY_REBUILD_ARG	 = $(if $(REBUILD),--rebuild)
+
+play-image:
+	@ bash ./scripts/play.sh --container $(PLAY_HOST_ARG) $(PLAY_REBUILD_ARG) $(PLAY_ARGS)
+
+# Kept as the name the docs and muscle memory reach for. `play` starts a local
+# server on Linux and skips it on macOS, so there is no separate local path now.
+play-local: play
 
 ################################################################################
 #                                   CLEANUP                                    #
@@ -239,16 +343,13 @@ fclean:
 	@ $(RM) $(BIN)
 	@ echo "$(RED)Deleted $(BLUE)component binaries$(CLR_RMV) ✔️"
 
-# Like fclean but also wipes daemon runtime state: stops whatever is still
-# running, delegates to the shell's own `reset` (drops its tmp/ and archive/),
-# and clears the repo-level bin/tmp.
+# fclean plus daemon runtime state: stops what is running, delegates to the
+# shell's own `reset` (its tmp/ and archive/), then clears bin/ and tmp/.
 #
-# The daemons are stopped first, and stopping them is what this target owes
-# them: tetrisctl blocks until each has finished tearing down, so the wipe
-# cannot delete tmp/ out from under a logger that is still writing into it.
-# Reversing these lines is the self-inflicted wound tetrislogd's sink reclaim
-# was written to survive - reclaim stays, because a log file can still be
-# rotated or removed by hand, but it stops being a patch for this.
+# Stopping comes first because tetrisctl blocks until each daemon has torn down,
+# so the wipe cannot delete tmp/ out from under a logger still writing into it.
+# Reversing these lines is the wound tetrislogd's sink reclaim was written to
+# survive - reclaim stays for hand-rotated logs, but is not a patch for this.
 reset:
 	@ if [ -x $(BIN)/tetrisctl ]; then \
 		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
@@ -269,5 +370,5 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run certs stack test play play-local \
+			bin-link run certs stack test play play-local play-image \
 			clean fclean reset re

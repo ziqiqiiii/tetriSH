@@ -42,7 +42,8 @@ make deps         # check/install dependencies for this OS
 make check-deps   # verify dependencies without changing the system
 make clean / fclean / re
 make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
-make play         # set up everything and launch a client against a server
+make play         # install + compile on this host, then play in kitty
+make play-image   # the same, built in a container instead (REBUILD=1 forces)
 ```
 
 Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root
@@ -50,16 +51,61 @@ dependencies are the toolchain, pkg-config, OpenSSL, readline, and ncurses;
 `tetrisu` additionally needs notcurses (required) and SDL2 + SDL2_mixer
 (optional — audio compiles out via `-DTETRISU_ENABLE_AUDIO=0`).
 
+A container engine is a root dependency too, because `make play` runs the
+client in one — Docker on Linux (and membership of the `docker` group, which
+`make deps` adds), colima plus the `docker` CLI on macOS. It is needed to play
+and never to compile, so it is warned about rather than enforced, the same
+treatment Valgrind gets; `REQUIRE_DOCKER=1` makes it fatal. It gets its own
+step in `scripts/deps.sh` rather than riding `install_deps.sh`, because a
+warning-level dependency never reaches the install path: the required-deps
+check passes without an engine, so nothing would ever install one.
+
+`WANT_ENGINE=0` turns that step off, and `make play` sets it: the native path
+builds and runs the client here, so pulling in a container runtime — and the
+group membership that makes one usable — would be installing Docker as a side
+effect of a build that never opens a container. `play.sh` also passes
+`DEPS_READY=1` into `make -C src/tetrisu` for the same reason, because that
+Makefile's `check-dependencies` otherwise recurses back into the root `deps`
+with the caller's flags stripped.
+
 **macOS cannot run the server**, and it is not a packaging gap: `tetrisd` is
 built directly on `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and
 `libcoreipc`'s mqueue module on POSIX `mq_open`/`mq_send`/`mq_receive` — Darwin
-has none of the three, so neither compiles there. `tetrisu` does build there and
-wants the host's own terminal, because the board is Kitty-protocol bitmaps a
-container cannot hand to a Mac. So a macOS checkout builds and runs `tetrisu`
-only (`make play`) and connects to a `tetrisd` running elsewhere —
-`scripts/play.sh --host ADDR` (`make play-local HOST=...`) checks that server is
-reachable and verifies it against the committed demo CA before launching the
-client. There is no local server path on macOS.
+has none of the three, so neither compiles there. A macOS checkout therefore
+runs the client only and connects to a `tetrisd` running elsewhere; `make play`
+drops the server steps there rather than refusing.
+
+The **client** is built on the host by `make play` and in a container by `make
+play-image`; both end in a kitty window, and they differ only in where the
+compiler lives. The container is what makes one Linux image serve macOS too,
+and is the only path that works there: the board is Kitty-graphics-protocol
+escape sequences,
+which are bytes on the pty `docker run -t` allocates, so the container needs no
+display and the *host's* terminal draws them. Nothing hands a container's
+framebuffer to a Mac, because there is no framebuffer — an earlier version of
+this file claimed the opposite and it was wrong. What a container cannot supply
+is the **window**: a machine with no display (a Linux VM over SSH) has none to
+open, so the client runs in the terminal already attached and only that
+terminal's protocol support matters. kitty, Ghostty and WezTerm speak it;
+Windows Terminal does not and gets the cell renderer.
+
+The client trusts **exactly one CA per run**, and `scripts/play.sh` picks it
+from the host it was launched against: the local scratch `certs/ca.crt` for a
+server started here, the committed `certs/demo-ca.crt` for one named with
+`--host`. Typing a different address into SERVER ID than the one it launched
+against therefore fails with `certificate signature failure` — reachable
+server, wrong CA — so a remote server is named up front (`make play
+HOST=...`). Concatenating both CAs into one file is not a fix: `load_cert_file`
+in the frozen `common.c` reads a single certificate with `PEM_read_X509` and
+ignores the rest.
+
+Three scripts own this, one concern each — `scripts/container.sh` the engine,
+image and run; `scripts/terminal.sh` which terminal draws and whether one can
+be opened; `scripts/play.sh` the order. The image is deps-only plus a build of
+`tetrisu`; `certs/` and `src/tetrisu/assets/` are bind-mounted read-only rather
+than baked in, credentials because they are credentials and the artwork because
+it is 183 MB already on disk. `bash scripts/play.sh --native` is the escape
+hatch back to a host build.
 
 Each library is also **self-contained** — it owns a Makefile that builds its
 archive in place and runs its own tests:

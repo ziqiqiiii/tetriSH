@@ -7,12 +7,16 @@
 #   UNAME_S            host OS (uname -s); defaults to `uname -s` if unset
 #   AUTO_INSTALL_DEPS  1 if `make` auto-installs missing deps (reported verbatim)
 #   REQUIRE_VALGRIND   1 if a missing Valgrind is a hard failure on Linux
+#   REQUIRE_DOCKER     1 if a missing container engine is a hard failure
 
 set -euo pipefail
 
 UNAME_S="${UNAME_S:-$(uname -s)}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
+REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "OS: $UNAME_S"
 
@@ -26,6 +30,18 @@ fi
 
 echo "Auto-install: $AUTO_INSTALL_DEPS"
 echo "Required: GCC, make, binutils, pkg-config, OpenSSL, Readline, ncurses"
+
+# Reported in container.sh's own words rather than re-probed here, so the two
+# never disagree about what counts as a usable engine.
+if [ -f "$SCRIPT_DIR/container.sh" ]; then
+    engine="$(bash "$SCRIPT_DIR/container.sh" check 2>/dev/null || true)"
+    echo "Container engine: ${engine#container engine: }"
+    if [ "$REQUIRE_DOCKER" = "1" ]; then
+        echo "                  required by REQUIRE_DOCKER=1"
+    else
+        echo "                  optional for build, runs the client for 'make play'"
+    fi
+fi
 
 if [ "$UNAME_S" = "Darwin" ]; then
     echo "Server: tetrisd cannot be built or run on macOS (needs epoll, timerfd, POSIX mqueue)"
