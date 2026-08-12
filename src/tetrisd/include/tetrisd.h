@@ -1154,6 +1154,7 @@ bool			server_room_begin_selection(t_server_room *server_room);
 bool			server_room_all_locked(const t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
+bool			server_room_starts_on_ready(const t_server_room *server_room);
 int				server_room_target_of(t_server_room *server_room,
 					int from_slot);
 t_game			*server_room_target_game(t_server_room *server_room,

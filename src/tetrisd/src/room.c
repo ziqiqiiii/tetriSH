@@ -41,6 +41,7 @@ static void		award_game(t_server *srv, const t_game *game, bool won);
 static void		narrate_departure(t_server_room *server_room, const char *who, const char *name, const t_release_result *res);
 static void		rehome_successor(t_server_room *server_room, t_client *leaver, const t_release_result *res);
 static int		slot_holding(const t_server_room *server_room, t_player_id pid);
+static void		settle_selection(t_server_room *server_room);
 static int		game_holding(const t_server_room *server_room, t_player_id pid);
 
 /*
@@ -821,6 +822,32 @@ bool	server_room_is_solo(const t_server_room *server_room)
 }
 
 /**
+ * @brief Reports whether readiness alone is enough to commit this room.
+ *
+ * Double, and only Double. Two players readying is the whole of a Double room's
+ * agreement - there is nobody else to wait for, and the player who declares
+ * last is as often the joiner as the owner, so requiring the owner to then
+ * press start would be a second confirmation of a decision already unanimous.
+ *
+ * A Battle Royale is the opposite case. It starts below capacity by design, so
+ * "everybody who is here is ready" is true of four people in a forty-seat room
+ * and says nothing about whether the match should begin - it is the owner's
+ * call, which is what docs/use_cases.md has always specified and what the
+ * client's waiting room has always drawn. Readiness there is a signal to the
+ * owner rather than a trigger.
+ *
+ * Single has no readiness to speak of and reaches its game through START.
+ *
+ * @param server_room Room to ask.
+ * @return true when the last readiness should commit the room by itself.
+ */
+bool	server_room_starts_on_ready(const t_server_room *server_room)
+{
+	return (server_room != NULL && server_room->room != NULL
+		&& server_room->room->mode == MODE_DOUBLE);
+}
+
+/**
  * @brief Removes a client from its room, forfeiting any game in progress.
  *
  * Leaving, topping out, and losing the connection are the same event:
@@ -859,18 +886,8 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 		rehome_successor(server_room, cli, &res);
 		narrate_departure(server_room, cli->username, name, &res);
-		/*
-		 * Leaving during the select window closes it. The room can no longer
-		 * deal the match it was setting up, and whoever is left would sit on
-		 * a roster screen waiting out a clock with nothing behind it.
-		 */
 		if (server_room->room->status == ROOM_SELECTING)
-		{
-			room_abort_selection(server_room->room);
-			server_room->select_ms = 0;
-			server_room->select_second = -1;
-			server_room->ticking = false;
-		}
+			settle_selection(server_room);
 	}
 	if (finished.player_id != 0)
 		award_game(srv, &finished, false);
@@ -2055,6 +2072,48 @@ static void	rehome_successor(t_server_room *server_room, t_client *leaver,
 	server_room->dirty[to] = server_room->dirty[from];
 	game_reset(&server_room->games[from]);
 	server_room->dirty[from] = false;
+}
+
+/**
+ * @brief Decides what a departure does to an open character-select window.
+ *
+ * The window used to close unconditionally, which is right for Double and
+ * hands a Battle Royale one player a cancel button: thirty people join, the
+ * owner starts, and one disconnect two seconds into the roster ends it for
+ * everybody. The rule is the one the room already uses everywhere else - is it
+ * still startable?
+ *
+ * Below min_to_start the window closes, because the room can no longer deal
+ * the match it was setting up and whoever is left would sit on a roster screen
+ * waiting out a clock with nothing behind it. Losing one of two players is
+ * exactly that case, so Double's behaviour falls out of this rather than being
+ * a special case beside it.
+ *
+ * Above it the window keeps running on its own clock - and may now be over,
+ * which is why this asks. The player who left took their declared fighter with
+ * them (server_room_forfeit closed their record), so a room waiting on that one
+ * seat is waiting for nobody, and without this check it would sit out the full
+ * TETRISD_MATCH_SELECT_MS before dealing a match everybody had already chosen
+ * for.
+ *
+ * Nothing here is the owner's: a window is the room's once it is open, so a
+ * departure that also changes the owner changes nothing about this.
+ *
+ * @param server_room Room whose window is being reconsidered.
+ */
+static void	settle_selection(t_server_room *server_room)
+{
+	if (server_room->room->number_of_players
+		< server_room->room->min_to_start)
+	{
+		room_abort_selection(server_room->room);
+		server_room->select_ms = 0;
+		server_room->select_second = -1;
+		server_room->ticking = false;
+		return ;
+	}
+	if (server_room_all_locked(server_room))
+		(void)server_room_autostart(server_room);
 }
 
 /**
