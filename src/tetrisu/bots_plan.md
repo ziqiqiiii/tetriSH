@@ -183,9 +183,11 @@ hole in it.
 Bots play real games, so `award_game` runs on them: they would earn wallet
 points and rank. Within an evening the board is bots.
 
-A reserved username prefix, refused by `SIGNUP` and filtered by `db_leaderboard`
-and `db_rank`. The prefix is a `libmacminidb` rule and not a `tetrisd` one,
-because the store is what ranks.
+A reserved username prefix, refused by `SIGNUP`, and — the part that matters —
+never inserted into the skip list at all. The prefix is a `libmacminidb` rule
+and not a `tetrisd` one, because the store is what ranks. See
+[the store's work](#liblibmacminidb) for why exclusion happens at the write
+and not at the two reads.
 
 Note honestly: the pool's password has to be known to the client binary, so
 anyone holding it can log in as a pool bot and occupy seats. On a LAN, for a
@@ -196,6 +198,43 @@ were ever exposed.
 
 Enough to reach a Battle Royale's minimum from one person, and one for a
 Double. Adding is an owner action for the same reason starting is.
+
+### D7 — a bot child must not be able to write on the terminal
+
+A forked child inherits its parent's stdout and stderr, and the parent's
+terminal is the one notcurses is drawing the board on. A bot that prints
+anything prints it *onto the game*.
+
+It will print. `lib/libtetrissh/src/common.c` is the frozen course-provided
+helper and it reports the certificate on every handshake — `net_client.c`
+already mutes stdout and stderr across the handshake for exactly this reason,
+and the note is in `CLAUDE.md`. A bot performs that same handshake, and muting
+inside the child is too late for anything the loader or the runtime says first.
+
+So `bot_proc.c` redirects the child's stdout and stderr *before* `exec`, and
+the redirect is not optional error handling — it is what makes the feature
+usable at all:
+
+```c
+/* between fork and exec, in the child */
+fd = open(bot_log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+if (fd < 0)
+    fd = open("/dev/null", O_WRONLY);
+dup2(fd, STDOUT_FILENO);
+dup2(fd, STDERR_FILENO);
+```
+
+A file rather than `/dev/null` because a bot that fails to join is otherwise
+silent in the one way that matters, and the client cannot report the failure
+for it — the parent only learns the child exited, never why. `/dev/null` is
+the fallback when the log cannot be opened, never the first choice.
+
+The same seam answers the second half of spawning a child: **where the bot
+binary is.** No hard-coded paths anywhere is a project rule, so `bot_proc.c`
+resolves it from the directory of the running `tetrisu` (`/proc/self/exe`, or
+`argv[0]` as a fallback), overridable by `TETRISU_BOT_BIN` for a build tree
+whose layout differs from an installed one. A path that cannot be resolved is
+the same refusal as an empty pool: say so, add nobody.
 
 ---
 
@@ -245,10 +284,28 @@ like any double. All of the work, none of the damage.
 - Reserved prefix in `db_username_valid`'s neighbourhood — a separate
   `db_username_is_reserved`, because the charset rule and the policy rule are
   different questions and `db_username_valid` is documented as the format's.
-- `db_signup` refuses a reserved name.
-- `db_leaderboard` and `db_rank` skip reserved accounts. This is the one that
-  matters: a filter in the encoder would leave `db_rank` telling a person they
-  are 14th out of a board that shows 9 rows.
+- `db_signup` refuses a reserved name typed by a person, and skips the
+  `skiplist_insert` at `db_signup.c:54` for one it creates itself.
+- `recovery.c:115` skips it too, so a replayed log does not put back what
+  sign-up kept out.
+- `db_record.c:53` guards `skiplist_update`, which removes a node and reinserts
+  it — on a player who was never in the list, the remove is a no-op and the
+  reinsert would quietly seat a bot on the board at its first game.
+
+**A reserved account is excluded at the write, not at the reads.** The obvious
+alternative is to filter `db_leaderboard` and `db_rank`, and it is worse for
+two reasons.
+
+It is two places that have to agree forever. `skiplist_rank` counts nodes as it
+walks (`skiplist_read.c:25`), so a filter there means "count everything except
+these" while `skiplist_topn`'s means "emit everything except these" — the same
+rule, written twice, in two shapes. The failure when they drift is `db_rank`
+telling a person they are 14th on a board whose 10 rows they can count.
+
+And it is a cost on every read to describe a thing that must never be read.
+Three guards at the three write sites leave both readers exactly as they are:
+whatever is in the list is rankable, which is the invariant the skip list was
+already assumed to have.
 
 ### `src/tetrisd`
 
@@ -273,8 +330,12 @@ for the shipped bot.
 
 ### `src/tetrisu/src/bot_proc.c` (new)
 
-Spawn, track and reap the children. Owns the deadman pipe (D3) and the child
-table. Kills every child on leaving a room and on exit.
+Spawn, track and reap the children. Owns the deadman pipe (D3), the stdio
+redirect and the binary lookup (D7), and the child table. Kills every child on
+leaving a room and on exit.
+
+It is the only module that forks, and the only one that knows a bot is a
+process rather than a seat.
 
 ### `src/tetrisu/src/bot_main.c` (new)
 
@@ -285,6 +346,13 @@ parent's pipe closes.
 The `--room NAME` behaviour lives here and nowhere else, which is what makes a
 bot join *your* room rather than opening one of its own the way `stress_client`
 does.
+
+This is a **second binary**, and `src/tetrisu/Makefile` builds exactly one
+(`NAME := tetrisu`, one `NAME_PATH`) — so the Makefile grows a second link
+target beside it. The bot links `libtetrissh`, `libhtttp`, `libstatusbody`,
+`libtetrisbrain` and the client's own `net_*` objects, and links **no
+notcurses and no SDL**: it has no screen, which is the whole reason D7's
+redirect is the only terminal concern it raises.
 
 ### Waiting room
 
@@ -340,9 +408,13 @@ point of D1.
 | ″ | ″ | The plan is re-derived after a rotation, not carried across it |
 | `test_bot_proc.c` | `tetrisu` unit | Children are reaped on room exit; the table never leaks a pid |
 | ″ | ″ | Closing the parent's pipe end exits the child |
+| ″ | ″ | A child's stdout and stderr are the log, not the inherited terminal |
+| ″ | ″ | An unresolvable binary path refuses rather than forking |
 | `test_bot_pool.c` | `tetrisd` | A claimed account is not claimed twice; disconnect releases it |
 | ″ | ″ | An empty pool refuses rather than displacing a logged-in bot |
 | `test_leaderboard.c` | `libmacminidb` | A reserved account never appears in a page or a rank |
+| ″ | ″ | A reserved account that has *played a game* still appears in neither — the `skiplist_update` guard |
+| ″ | ″ | Recovery does not replay a reserved account onto the board |
 | ″ | ″ | `db_signup` refuses a reserved name |
 | `test_bots.sh` | `tetrisu` integration | One human client + 3 bots reach a dealt Battle Royale and a bot survives 30 s |
 
@@ -356,10 +428,10 @@ The integration test is the one that would have caught every bug in this plan.
 |---|---|---|
 | 0 | `bot_brain.c` — lift, tier, unit-test | — |
 | 1 | `match_smoke.c` calls it instead of its own copy | 0 |
-| 2 | Reserved prefix + leaderboard exclusion | — |
+| 2 | Reserved prefix + the three skip-list write guards | — |
 | 3 | Account pool: config, boot creation, claim/release | 2 |
-| 4 | `bot_main.c` — a bot that joins a named room from the command line | 0, 3 |
-| 5 | `bot_proc.c` — spawn, deadman pipe, reap | 4 |
+| 4 | `bot_main.c` + its Makefile target — a bot that joins a named room from the command line | 0, 3 |
+| 5 | `bot_proc.c` — binary lookup, stdio redirect, spawn, deadman pipe, reap | 4 |
 | 6 | `B` / `K` in the waiting room, seat list marks | 5 |
 | 7 | `test_bots.sh` end to end | 6 |
 | 8 | `ultra`: 2-ply, hold, live `TARGET` | 0, 7 |
@@ -367,6 +439,12 @@ The integration test is the one that would have caught every bug in this plan.
 Steps 0–2 are independent and could land in any order. Step 8 is deliberately
 last: it is the only step whose value is judged by playing rather than by a
 test, and everything before it is worth having without it.
+
+Step 5 is the one to budget for. Every other step is code of a kind this tree
+already has a lot of; step 5 is the only place a `tetrisu` forks, and the two
+ways it goes wrong — a child printing over the board, a binary that cannot be
+found from a build tree — both look like the feature is broken rather than
+like a spawn is misconfigured.
 
 ---
 
