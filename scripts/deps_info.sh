@@ -8,6 +8,7 @@
 #   AUTO_INSTALL_DEPS  1 if `make` auto-installs missing deps (reported verbatim)
 #   REQUIRE_VALGRIND   1 if a missing Valgrind is a hard failure on Linux
 #   REQUIRE_DOCKER     1 if a missing container engine is a hard failure
+#   REQUIRE_KITTY      1 if a terminal that cannot draw the board is a hard failure
 
 set -euo pipefail
 
@@ -15,6 +16,7 @@ UNAME_S="${UNAME_S:-$(uname -s)}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
 REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
+REQUIRE_KITTY="${REQUIRE_KITTY:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -40,6 +42,19 @@ if [ -f "$SCRIPT_DIR/container.sh" ]; then
         echo "                  required by REQUIRE_DOCKER=1"
     else
         echo "                  optional for build, runs the client for 'make play'"
+    fi
+fi
+
+# Likewise terminal.sh's own words, which carry the version verdict and not just
+# a path - the whole point being that an installed kitty is not necessarily one
+# that can draw.
+if [ -f "$SCRIPT_DIR/terminal.sh" ]; then
+    terminal="$(bash "$SCRIPT_DIR/terminal.sh" check 2>/dev/null || true)"
+    echo "Terminal: ${terminal#terminal: }"
+    if [ "$REQUIRE_KITTY" = "1" ]; then
+        echo "          required by REQUIRE_KITTY=1"
+    else
+        echo "          optional for build, draws the board for 'make play'"
     fi
 fi
 

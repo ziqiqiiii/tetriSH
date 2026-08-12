@@ -296,7 +296,13 @@ ensure_deps() {
     # engine is a root dependency now: without this a native run would install
     # a container runtime, and ask for the docker group, on its way to a client
     # that never opens a container.
+    #
+    # WANT_TERMINAL is answered for the opposite reason: the terminal step would
+    # do the right thing, but ensure_terminal runs a few lines below with the
+    # messaging this script's own failure paths need, so letting `make deps`
+    # check first only means checking twice and explaining it twice.
     WANT_ENGINE=$([ "$NATIVE" = "1" ] && echo 0 || echo 1) \
+    WANT_TERMINAL=0 \
     make deps AUTO_INSTALL_DEPS="$AUTO_INSTALL_DEPS" \
         || die "dependencies are missing; see the output above"
 }

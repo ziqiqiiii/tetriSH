@@ -540,6 +540,14 @@ case "$action" in
         elif [ -n "$path" ]; then
             if ! verify_terminal "$choice" "$path"; then
                 echo "terminal: $choice ($path, cannot draw the board)"
+                # kitty_usable is deliberately silent - it runs against every
+                # candidate - so the one that was settled on is explained here.
+                # Without this the check reports a verdict and no reason, and
+                # check_deps.sh sends the reader to this very command for one.
+                if [ "$choice" = "kitty" ]; then
+                    kitty_explain "$path"
+                    kitty_install_hint
+                fi
                 exit 1
             fi
             echo "terminal: $choice ($path)"

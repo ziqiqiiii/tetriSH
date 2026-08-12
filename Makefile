@@ -30,6 +30,7 @@ RM			:= rm -rf
 AUTO_INSTALL_DEPS	:= 1
 REQUIRE_VALGRIND	:= 0
 REQUIRE_DOCKER		:= 0
+REQUIRE_KITTY		:= 0
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -160,7 +161,7 @@ stress:
 deps:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
 
@@ -173,14 +174,14 @@ install-deps:
 # rather than trusting the package database.
 check-deps:
 	@ UNAME_S=$(UNAME_S) REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		bash ./scripts/check_deps.sh
 
 # Read-only summary of the dependency situation.
 deps-info:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		bash ./scripts/deps_info.sh
 
 ################################################################################

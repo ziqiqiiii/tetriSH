@@ -10,6 +10,7 @@
 #   AUTO_INSTALL_DEPS  1 to install on a failed probe, 0 to only report
 #   REQUIRE_VALGRIND   forwarded to the check
 #   REQUIRE_DOCKER     forwarded to the check
+#   REQUIRE_KITTY      forwarded to the check
 #   GREEN / CLR_RMV    colour escapes (defined once in the Makefile); optional
 
 set -euo pipefail
@@ -18,6 +19,7 @@ UNAME_S="${UNAME_S:-$(uname -s)}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 REQUIRE_VALGRIND="${REQUIRE_VALGRIND:-0}"
 REQUIRE_DOCKER="${REQUIRE_DOCKER:-0}"
+REQUIRE_KITTY="${REQUIRE_KITTY:-0}"
 GREEN="${GREEN:-}"
 CLR_RMV="${CLR_RMV:-}"
 
@@ -25,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 run_check() {
     UNAME_S="$UNAME_S" REQUIRE_VALGRIND="$REQUIRE_VALGRIND" \
-        REQUIRE_DOCKER="$REQUIRE_DOCKER" \
+        REQUIRE_DOCKER="$REQUIRE_DOCKER" REQUIRE_KITTY="$REQUIRE_KITTY" \
         bash "$SCRIPT_DIR/check_deps.sh"
 }
 
@@ -55,12 +57,33 @@ run_engine() {
     AUTO_INSTALL_DEPS=1 bash "$SCRIPT_DIR/container.sh" install || true
 }
 
+# The terminal is the engine's twin and gets its own step for the same reason:
+# it draws the board and compiles nothing, so run_check passes without one and
+# nothing on the install path would ever produce one.
+#
+# What a presence probe would miss is that this is a *version* question. kitty
+# is routinely already installed and still unable to draw - too old to parse the
+# graphics protocol (Ubuntu 20.04 packages a 2019 build) or too new for the
+# machine's glibc to start - so the step asks terminal.sh, which knows the range
+# and repairs a kitty outside it rather than only reporting one.
+#
+# WANT_TERMINAL=0 turns the step off. `make play` sets it: play.sh runs the same
+# check itself moments later, with the messaging its own failure paths need.
+run_terminal() {
+    [ "${WANT_TERMINAL:-1}" = "1" ] || return 0
+    bash "$SCRIPT_DIR/terminal.sh" check >/dev/null 2>&1 && return 0
+    [ "$AUTO_INSTALL_DEPS" = "1" ] || return 0
+    AUTO_INSTALL_DEPS=1 bash "$SCRIPT_DIR/terminal.sh" install || true
+}
+
 if run_check >/dev/null 2>&1; then
     run_engine
+    run_terminal
     printf '%b\n' "${GREEN}Dependencies ready${CLR_RMV} ($UNAME_S)."
 elif [ "$AUTO_INSTALL_DEPS" = "1" ]; then
     run_install
     run_engine
+    run_terminal
     run_check
 else
     # Re-run the check unsilenced so the specific missing dependency is shown.
