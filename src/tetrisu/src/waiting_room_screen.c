@@ -316,8 +316,6 @@ bool	waiting_room_toggle_ready(t_app_room_view_model *room)
  */
 t_room_feedback	waiting_room_start_blocker(const t_app_room_view_model *room)
 {
-	int	required_players;
-
 	if (room == NULL)
 		return (ROOM_FEEDBACK_NEED_PLAYERS);
 	if (!valid_room_snapshot(room))
@@ -327,15 +325,37 @@ t_room_feedback	waiting_room_start_blocker(const t_app_room_view_model *room)
 		return (ROOM_FEEDBACK_UNAVAILABLE);
 	if (!waiting_room_local_is_owner(room))
 		return (ROOM_FEEDBACK_NOT_OWNER);
-	if (room->mode == APP_GAME_MODE_DOUBLE)
-		required_players = WAITING_ROOM_DOUBLE_PLAYERS;
-	else
-		required_players = WAITING_ROOM_ROYALE_MIN_PLAYERS;
-	if (room->player_count < required_players)
+	if (waiting_room_players_needed(room) > 0)
 		return (ROOM_FEEDBACK_NEED_PLAYERS);
 	if (waiting_room_ready_count(room) < waiting_room_required_ready(room))
 		return (ROOM_FEEDBACK_NEED_READY);
 	return (ROOM_FEEDBACK_NONE);
+}
+
+/**
+ * @brief How many more players this room needs before it can be started.
+ *
+ * The number rather than the fact, because "not enough players" is a poor
+ * thing to tell somebody who cannot see how many are missing - and in a Battle
+ * Royale, where the minimum is four and a player with two laptops has two, it
+ * is the number that says whether bots can close the gap.
+ *
+ * @param room Room snapshot to test.
+ * @return How many more are needed, 0 when the room already has enough.
+ */
+int	waiting_room_players_needed(const t_app_room_view_model *room)
+{
+	int	required_players;
+
+	if (room == NULL)
+		return (0);
+	if (room->mode == APP_GAME_MODE_DOUBLE)
+		required_players = WAITING_ROOM_DOUBLE_PLAYERS;
+	else
+		required_players = WAITING_ROOM_ROYALE_MIN_PLAYERS;
+	if (room->player_count >= required_players)
+		return (0);
+	return (required_players - room->player_count);
 }
 
 /**
@@ -669,7 +689,8 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
 	else if (state->feedback == ROOM_FEEDBACK_NOT_READY)
 		snprintf(out, size, "YOU ARE NO LONGER READY");
 	else if (state->feedback == ROOM_FEEDBACK_NEED_PLAYERS)
-		snprintf(out, size, "NOT ENOUGH PLAYERS YET");
+		snprintf(out, size, "NEED %d MORE PLAYER%s", state->feedback_value,
+			state->feedback_value == 1 ? "" : "S");
 	else if (state->feedback == ROOM_FEEDBACK_NEED_READY)
 		snprintf(out, size, "WAITING FOR MORE PLAYERS TO READY UP");
 	else if (state->feedback == ROOM_FEEDBACK_NOT_OWNER)
@@ -688,6 +709,9 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
 		snprintf(out, size, "CHAT IS FULL");
 	else if (state->feedback == ROOM_FEEDBACK_VOLUME)
 		snprintf(out, size, "MUSIC VOLUME %d%%", state->feedback_value);
+	else if (state->feedback == ROOM_FEEDBACK_NEED_PLAYERS_BOT)
+		snprintf(out, size, "NEED %d MORE - PRESS B TO ADD A BOT",
+			state->feedback_value);
 	else
 		bot_feedback_text(state->feedback, out, size);
 	return (out);

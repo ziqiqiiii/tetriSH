@@ -55,6 +55,8 @@ static bool	toggle_ready(const t_app_data_provider *provider,
 static void	add_bot(t_mp_session *session);
 static void	kick_bot(t_mp_session *session);
 static t_bot_level	default_bot_level(void);
+static t_room_feedback	start_blocker_for(t_mp_session *session,
+					const t_app_room_view_model *room);
 static void	load_room_characters(const t_app_data_provider *provider,
 				t_mp_session *session);
 static void	cycle_character(t_mp_session *session, int delta);
@@ -2135,6 +2137,37 @@ static t_bot_level	default_bot_level(void)
 	return (level);
 }
 
+/**
+ * @brief Why this room will not start, and what the player can do about it.
+ *
+ * A Battle Royale needs four and a player with two laptops has two, so "not
+ * enough players" on its own is a dead end - the room cannot be started and
+ * the screen has not said that anything can be done. When the shortfall is
+ * one a bot could fill, the message carries the way out with it.
+ *
+ * Only when pressing B would actually work: start_blocker has already turned
+ * a non-owner away with ROOM_FEEDBACK_NOT_OWNER, and the farm is checked here
+ * so a player who has already added four is told the plain fact rather than
+ * pointed at a key that will refuse them.
+ *
+ * @param session The multiplayer session, whose farm and feedback value are read.
+ * @param room Room snapshot to test.
+ * @return The blocker to show, or ROOM_FEEDBACK_NONE when the start may go on.
+ */
+static t_room_feedback	start_blocker_for(t_mp_session *session,
+	const t_app_room_view_model *room)
+{
+	t_room_feedback	blocker;
+
+	blocker = waiting_room_start_blocker(room);
+	if (blocker != ROOM_FEEDBACK_NEED_PLAYERS)
+		return (blocker);
+	session->room_state.feedback_value = waiting_room_players_needed(room);
+	if (session->bots.count < BOT_FARM_MAX)
+		return (ROOM_FEEDBACK_NEED_PLAYERS_BOT);
+	return (blocker);
+}
+
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_navigation *navigation,
 	t_mp_session *session, t_room_action action)
@@ -2175,7 +2208,7 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		audio_play_menu_select(audio);
 		if (session->room_state.counting_down)
 			return (true);
-		blocker = waiting_room_start_blocker(room);
+		blocker = start_blocker_for(session, room);
 		if (blocker != ROOM_FEEDBACK_NONE)
 			session->room_state.feedback = blocker;
 		else if (waiting_room_counts_down_here(provider))

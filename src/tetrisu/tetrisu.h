@@ -1495,6 +1495,12 @@ typedef enum e_room_feedback
 	 * with nothing to kick, and is deliberately not silence: a key that
 	 * sometimes does nothing and never says so reads as a key that is broken.
 	 */
+	/*
+	 * "not enough players" said two ways. The plain one is a fact; the _BOT
+	 * one is a fact and a way out of it, and is only chosen when pressing B
+	 * would actually help - the owner, with room in the farm for another.
+	 */
+	ROOM_FEEDBACK_NEED_PLAYERS_BOT,
 	ROOM_FEEDBACK_BOT_ADDED,
 	ROOM_FEEDBACK_BOT_KICKED,
 	ROOM_FEEDBACK_BOT_LIMIT,
@@ -3378,6 +3384,8 @@ const char		*waiting_room_status_text(const t_app_room_view_model *room,
 # define WAITING_ROOM_LEGEND_SHORT \
 	"[<>]FIGHT [R]EADY [S]TART [B]OT [K]ICK [C]HAT [L]EAVE"
 
+int				waiting_room_players_needed(
+					const t_app_room_view_model *room);
 const char		*waiting_room_legend(int cols);
 bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
 					int index);

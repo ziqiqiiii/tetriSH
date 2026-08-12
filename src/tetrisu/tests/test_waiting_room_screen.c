@@ -14,6 +14,7 @@ static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
 static void	test_bot_keys_and_seat_marks(void);
 static void	test_the_legend_fits_the_narrowest_panel(void);
+static void	test_a_short_room_says_how_short_and_what_to_do(void);
 static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
@@ -33,6 +34,7 @@ int	main(void)
 	test_launch_action_matches_the_mode();
 	test_bot_keys_and_seat_marks();
 	test_the_legend_fits_the_narrowest_panel();
+	test_a_short_room_says_how_short_and_what_to_do();
 	return (0);
 }
 
@@ -116,6 +118,46 @@ static void	test_the_legend_fits_the_narrowest_panel(void)
 		index++;
 	}
 	printf("PASS test_the_legend_fits_the_narrowest_panel\n");
+}
+
+/*
+** "not enough players" on its own is a dead end in a Battle Royale: the
+** minimum is four, a player with two laptops has two, and the screen has not
+** said that anything can be done about it. The shortfall is a number here so
+** that the message can carry the way out with it.
+*/
+static void	test_a_short_room_says_how_short_and_what_to_do(void)
+{
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
+	char					line[APP_TEXT_MAX * 2];
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 1);
+	assert(waiting_room_players_needed(&room)
+		== WAITING_ROOM_ROYALE_MIN_PLAYERS - 1);
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_NEED_PLAYERS);
+	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 1);
+	assert(waiting_room_players_needed(&room) == 1);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	assert(waiting_room_players_needed(&room) == 0);
+	assert(waiting_room_players_needed(NULL) == 0);
+	/* Both messages name the number, and only one of them names the key. */
+	waiting_room_state_init(&state);
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS;
+	state.feedback_value = 3;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "3") != NULL && strstr(line, "PLAYERS") != NULL);
+	assert(strstr(line, "B") == NULL);
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS_BOT;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "3") != NULL && strstr(line, "PRESS B") != NULL);
+	assert(strlen(line) <= (size_t)MP_COMPAT_MIN_COLS - 4);
+	/* One missing player is not "1 MORE PLAYERS". */
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS;
+	state.feedback_value = 1;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "PLAYERS") == NULL && strstr(line, "PLAYER") != NULL);
+	printf("PASS test_a_short_room_says_how_short_and_what_to_do\n");
 }
 
 /**
