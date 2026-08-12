@@ -8,9 +8,9 @@ static bool		room_probe(void *ctx, t_player_id pid);
 static int		deal_games(t_server_room *server_room);
 static void		tick_room(t_server_room *server_room, int elapsed_ms);
 static void		advance_and_push(t_server_room *server_room, int elapsed_ms);
-static void		push_all(t_server_room *server_room, int n, const t_body_state *snaps, const t_player_id *pids);
 static void		push_state(t_server_room *server_room, const char *room_name, t_player_id pid, const t_body_state *snap);
-static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
+static void		advance_games(t_server_room *server_room, int elapsed_ms);
+static void		build_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
 static void		number_snapshot(t_server_room *server_room, t_player_id pid, t_body_state *snap);
 static void		decorate_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
 static void		fill_opponents(t_server_room *server_room, int subject, t_body_state *snap);
@@ -1269,36 +1269,48 @@ static void	mark_all_dirty(t_server_room *server_room)
  * already inactive, so there is no gravity left to apply and the pass exists
  * only to carry out the snapshot that says so.
  *
+ * Three passes, and the order between them is the point. Every board is
+ * advanced before any garbage is settled, and all of that happens before any
+ * board is projected - so no player is ever shown a room half a tick old, with
+ * their own board advanced and a rival's not. That guarantee is about the three
+ * passes and not about collecting anything, which is why the third one is free
+ * to encode and push each snapshot as it builds it.
+ *
+ * It used to collect instead: one t_body_state per seat into an array on this
+ * stack, and a second walk to push them. At sixteen seats that is 17 KB and
+ * unremarkable, and at ninety-nine it is 103 KB - survivable, but paid on the
+ * reactor's own stack on every tick of every room, to hold snapshots that are
+ * each read exactly once by the line that would have followed. It also grows
+ * with the body: the arena section adds ~4 KB to a t_body_state, which takes
+ * the array past half a megabyte without anything about this function
+ * changing. One snapshot, reused, is a kilobyte whatever the room holds and
+ * whatever the body grows into.
+ *
  * @param server_room Room to advance.
  * @param elapsed_ms Milliseconds to advance by.
  */
 static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
 {
-	t_body_state	snaps[TD_MAX_GAMES];
-	t_player_id		pids[TD_MAX_GAMES];
+	t_body_state	snap;
+	char			name[ROOM_NAME_MAX];
+	int				slot;
 
-	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
-		snaps, pids);
-}
-
-/**
- * @brief Pushes a tick's snapshots to the players they belong to.
- *
- * @param server_room Room the snapshots came from.
- * @param n Number of snapshots collected.
- * @param snaps The snapshots.
- * @param pids The matching subject player ids.
- */
-static void	push_all(t_server_room *server_room, int n,
-				const t_body_state *snaps, const t_player_id *pids)
-{
-	char	name[ROOM_NAME_MAX];
-
+	advance_games(server_room, elapsed_ms);
+	settle_garbage(server_room);
+	spread_dirty(server_room);
 	snprintf(name, sizeof(name), "%s", server_room->room->name);
-	while (n > 0)
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		n--;
-		push_state(server_room, name, pids[n], &snaps[n]);
+		if (server_room->games[slot].player_id != 0
+			&& server_room->dirty[slot])
+		{
+			build_snapshot(server_room, slot, &snap);
+			push_state(server_room, name,
+				server_room->games[slot].player_id, &snap);
+			server_room->dirty[slot] = false;
+		}
+		slot++;
 	}
 }
 
@@ -1342,19 +1354,18 @@ static void	push_state(t_server_room *server_room, const char *room_name,
 }
 
 /**
- * @brief Advances every live game in the room and collects what changed.
+ * @brief Applies gravity to every live game in the room.
+ *
+ * The first of advance_and_push's three passes. It is its own function because
+ * the ordering guarantee depends on it finishing before the next one starts,
+ * and a pass with a name is harder to fold into the loop that follows it.
  *
  * @param server_room Room to advance.
  * @param elapsed_ms Milliseconds since the previous tick.
- * @param snaps Receives one snapshot per changed game.
- * @param pids Receives the matching subject player ids.
- * @return Number of snapshots collected.
  */
-static int	tick_once(t_server_room *server_room, int elapsed_ms,
-			t_body_state *snaps, t_player_id *pids)
+static void	advance_games(t_server_room *server_room, int elapsed_ms)
 {
 	int	slot;
-	int	n;
 
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
@@ -1364,28 +1375,25 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 			server_room->dirty[slot] = true;
 		slot++;
 	}
-	settle_garbage(server_room);
-	spread_dirty(server_room);
-	n = 0;
-	slot = 0;
-	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
-	{
-		if (server_room->games[slot].player_id != 0)
-		{
-			if (server_room->dirty[slot])
-			{
-				server_room->games[slot].seq++;
-				game_snapshot(&server_room->games[slot], &snaps[n]);
-				decorate_snapshot(server_room, slot, &snaps[n]);
-				pids[n] = server_room->games[slot].player_id;
-				number_snapshot(server_room, pids[n], &snaps[n]);
-				server_room->dirty[slot] = false;
-				n++;
-			}
-		}
-		slot++;
-	}
-	return (n);
+}
+
+/**
+ * @brief Projects one seat's board into the snapshot its player is owed.
+ *
+ * The sequence number is stepped here rather than by the caller, because it
+ * counts snapshots taken of this board and this is the only place one is.
+ *
+ * @param server_room Room holding the seat.
+ * @param slot 0-based slot to project.
+ * @param snap Receives the snapshot, overwriting whatever it held.
+ */
+static void	build_snapshot(t_server_room *server_room, int slot,
+			t_body_state *snap)
+{
+	server_room->games[slot].seq++;
+	game_snapshot(&server_room->games[slot], snap);
+	decorate_snapshot(server_room, slot, snap);
+	number_snapshot(server_room, server_room->games[slot].player_id, snap);
 }
 
 /**

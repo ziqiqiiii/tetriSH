@@ -88,15 +88,22 @@ Measured on this tree (`sizeof` under the project's own headers):
 | `t_server` | 2 403 896 | ~12.6 MB |
 | `t_body_state` (1 opponent) | 1 064 | — |
 | `t_body_opponent` | 496 | 48.6 KB in one snapshot |
-| `snaps[TD_MAX_GAMES]` on the tick's stack | 17 024 | **4.8 MB** |
+| `snaps[TD_MAX_GAMES]` on the tick's stack | 17 024 | **103 KB** |
+
+> **Corrected.** This row read **4.8 MB** in the first draft, and that figure is
+> reachable only in a design [D1](#d1--the-arena-is-a-second-detail-level-not-a-second-body)
+> rejects — it is 99 × `sizeof(t_body_state)` *with* `BODY_OPPONENTS_MAX` also
+> raised to 99 (99 × 496 = 49 104 per state). With `BODY_OPPONENTS_MAX` held at
+> 1, `sizeof(t_body_state)` stays 1 064 and the array is 105 336 bytes. Measured,
+> not inferred. The ordering argument below survives the correction and is
+> restated on the real number.
 
 Three of those numbers are the whole design:
 
 - **`t_body_opponent` × 98 = 48.6 KB inside one `t_body_state`.** The struct
-  would be bigger than the frame cap on its own, and `advance_and_push`
-  collects one per slot on the stack (`room.c:1116-1120`) — 4.8 MB of stack per
-  tick. The full-fidelity opponent projection does not scale, exactly as
-  `statusbody.h:46-57` already says in as many words.
+  would be bigger than the frame cap on its own. The full-fidelity opponent
+  projection does not scale, exactly as `statusbody.h:46-57` already says in as
+  many words.
 - **Encoded, one full opponent board is ~470 bytes** (a header line plus 20
   lines of 20 hex chars). Ninety-eight of them is **46 KB per snapshot**, against
   `TETRISD_BODY_MAX_BYTES` of 8192 (`tetrisd.h:127`) and a 64 KiB frame
@@ -330,7 +337,8 @@ a `t_body_opponent` (496) — ~4 KB in the struct rather than 48 KB.
 ### D2 — the tick encodes per slot; it stops collecting first
 
 `advance_and_push` collecting `t_body_state snaps[TD_MAX_GAMES]` on the stack
-was fine for 16 and is 4.8 MB at 99. It becomes a loop that builds one snapshot,
+was fine for 16 and is 103 KB at 99 — and grows to over half a megabyte once
+the arena section is in the body. It becomes a loop that builds one snapshot,
 encodes it, pushes it, and reuses the same buffer — one `t_body_state` on the
 tick's stack instead of ninety-nine. Nothing else about the pass changes; the
 ordering guarantee it provides (advance everything, settle garbage, *then*
@@ -1180,18 +1188,23 @@ Step 0 is a Double bug fix; 1–5 are the wire; 6 is the mode; 7–9 are the gam
 
 **Why the scale work is early and not last.** Steps 1 and 2 change no behaviour
 and pass every existing test, which makes them cheap to land and cheap to
-revert. They are also the two that cannot be deferred: a 4.8 MB stack frame does
-not fail gracefully, and discovering it under step 5 means debugging a crash in
-the middle of the only genuinely new code in the plan.
+revert — and doing them last means doing them underneath step 5, which is the
+only genuinely new code in the plan and the worst place to be changing the
+shape of a struct.
 
 **Why the encode fix comes before the constant, and not after.** The obvious
-order is "make the room big, then fix what the size broke". It is wrong by one
-step. `advance_and_push` declares `t_body_state snaps[TD_MAX_GAMES]`, so raising
-the constant first puts a **4.8 MB stack frame** in the reactor's own thread —
-which `server.c:39` creates with `pthread_create(..., NULL, ...)`, so it gets
-the default 8 MB and survives on margin rather than by design. Nothing in the
-existing suite would necessarily fail, which is worse than a failure: the tree
-would look green while standing on 3 MB of headroom.
+order is "make the room big, then fix what the size broke", and the first draft
+justified reversing it with a 4.8 MB stack frame that does not exist — see the
+correction under [the arithmetic](#the-arithmetic-that-decides-the-design). The
+real figure is 103 KB, which would not have crashed anything.
+
+The order still stands, on a smaller and more honest claim. `advance_and_push`
+declares `t_body_state snaps[TD_MAX_GAMES]`, so with the constant raised first
+every tick of every room pays 103 KB of the reactor's stack to hold snapshots
+each read exactly once — and that number is not stable, because step 3 puts the
+arena section inside `t_body_state` and takes the array past half a megabyte
+without touching this function. Landing the encode fix first means the array is
+gone before either number can be true.
 
 The incremental encode is correct at sixteen games as well as ninety-nine, so
 landing it first costs nothing and means the oversized frame never exists in any
