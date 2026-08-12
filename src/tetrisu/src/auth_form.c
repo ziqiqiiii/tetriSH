@@ -283,12 +283,15 @@ t_app_provider_result	auth_form_submit(t_auth_form *form,
 	}
 	if (form->feedback != AUTH_FEEDBACK_LOADING && !auth_form_validate(form))
 		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
 	if (provider == NULL)
 		result = APP_PROVIDER_UNAVAILABLE;
-	else if (form->mode == AUTH_FORM_SIGN_UP && provider->sign_up != NULL)
+	else if (form->mode == AUTH_FORM_SIGN_UP
+		&& provider->sign_up != NULL)
 		result = provider->sign_up(provider->userdata, form->username,
 				form->password, form->domain, view);
-	else if (form->mode == AUTH_FORM_LOGIN && provider->login != NULL)
+	else if (form->mode == AUTH_FORM_LOGIN
+		&& provider->login != NULL)
 		result = provider->login(provider->userdata, form->username,
 				form->password, form->domain, view);
 	else
@@ -297,6 +300,8 @@ t_app_provider_result	auth_form_submit(t_auth_form *form,
 		set_status(form, AUTH_FEEDBACK_SUCCESS,
 			form->mode == AUTH_FORM_SIGN_UP
 			? "ACCOUNT CREATED - SIGN IN" : "WELCOME TO TETRISU!");
+	else if (view->message[0] != '\0')
+		set_status(form, AUTH_FEEDBACK_ERROR, view->message);
 	else if (result == APP_PROVIDER_UNAVAILABLE)
 		set_status(form, AUTH_FEEDBACK_ERROR, "SERVER IS UNAVAILABLE");
 	else if (result == APP_PROVIDER_INVALID)

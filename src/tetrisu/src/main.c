@@ -1149,7 +1149,6 @@ static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			{
 				tetrisu_visual_selection_bind(ctx, provider,
 					&view.data.settings);
-				render_background_cache_reset(ctx);
 				audio_transition_music(audio, ctx->theme_assets.music, 0);
 			}
 			if (equip_result == SETTINGS_EQUIP_LOCKED)
@@ -1392,7 +1391,6 @@ static bool	apply_marketplace_equip(t_render_ctx *ctx, t_audio_ctx *audio,
 		tetrisu_visual_selection_bind(ctx, provider, &view->data.marketplace);
 		if (!marketplace_focused_is_character(state))
 		{
-			render_background_cache_reset(ctx);
 			audio_transition_music(audio, ctx->theme_assets.music, 0);
 			theme_changed = true;
 		}
