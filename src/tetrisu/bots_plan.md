@@ -75,6 +75,36 @@ a wall kicks the piece sideways), and the loop must wait for the board that
 took the drop (or every piece is planned against the board before the last one
 landed, which stacks straight to the ceiling).
 
+### The bug that was under all of it
+
+**The bot could not place a vertical I, and never had.** An I spawns at row -1
+(`piece_spawn`), and its two vertical rotations reach a cell one row above
+their anchor - so at the spawn row that cell is at row -2, where `board_get`
+answers `CELL_FILLED` for a wall, and `piece_is_valid` refuses the placement at
+*every column of the board*. The scan asked only at the piece's own row, so
+both vertical rotations were empty for it, every time.
+
+That is not a small loss. The vertical I is the piece that empties a well, so
+the bot could never take a Tetris; it also stops the bot filling any one-wide
+gap, which is why its boards ended up as tall combs with a permanently empty
+edge column. Played out locally on a clean board it topped out after **52
+pieces with 7 lines**.
+
+The fix is `scan_entry`: a placement is looked for at the piece's row and at
+the two rows below it, because by the time the caller has sent the rotation
+the piece really has fallen - a plan is a place to aim for, and gravity moves
+the piece before the first input lands. The window stays small so a placement
+under an overhang, which no sequence of moves could reach, is still refused.
+
+With it, the same weights on the same seeds survive **3000 pieces for 1197
+lines**. Every number in the section below was measured after the fix; before
+it, they were all measuring the same broken search.
+
+The rule now has one owner, `bot_entry`, because working it out again is how
+it was got wrong the second time too: the local simulation in the unit test
+checked the plan at the piece's own row, and so declared game over on the
+first I the bot tried to stand up.
+
 ### The finding that decides the difficulty tiers
 
 The bot as written sends **no garbage at all**. Not "little" — none:
@@ -249,15 +279,39 @@ taste.
 | `normal` | garbage-weighted | 1 ply + `next[0]` | Tetrises, because singles now score zero |
 | `ultra` | garbage-weighted | 2 ply + hold as a branch + live `TARGET` | the same per clear, but far more often and aimed |
 
-**`easy` needs the noise, not just the weak attack.** Today's weights are a
-near-perfect *survival* set: left alone, the bot does not die, it merely never
-attacks. That is not an easy opponent, it is a stalemate — in Battle Royale it
-would survive to the final few every time and do nothing. The random-placement
-injection is what makes it lose.
+Measured over 3000 pieces on a clean board, three seeds:
 
-**`normal` is one line.** Replace `lines * 760` with
-`garbage_lines_from_clear(lines) * W`. Singles drop to zero, so the bot starts
-holding rows back and building for a Tetris on its own — no new machinery.
+| Tier | Pieces survived | Lines | **Garbage sent** | Singles |
+|---|---|---|---|---|
+| `easy` | 36–68 | 1–10 | 0–1 | all of them |
+| today's weights, no noise | 1430–3000 | 555–1197 | 66–107 | 433–1016 |
+| `normal` | 3000 | 1192–1198 | **382–402** | 442–476 |
+
+Normal sends about **four times** what the same search sends under today's
+weights, off the same number of cleared lines — it is not clearing more, it is
+clearing in fours and threes instead of ones. That is the tier doing its job,
+and it is the number to watch if the weights are ever retuned.
+
+**`easy` needs the noise, not just the weak attack.** Today's weights are a
+near-perfect *survival* set — once the vertical I is placeable at all: left
+alone, the bot does not die, it merely never attacks. That is not an easy
+opponent, it is a stalemate; in Battle Royale it would survive to the final few
+every time and do nothing. The random-placement injection is what makes it
+lose, and one piece in four is enough to end it inside sixty.
+
+**`normal` is not one line, and the reason is worth keeping.** Replacing
+`lines * 760` with `garbage_lines_from_clear(lines) * W` changes almost
+nothing on its own, because it is not the line term that makes the bot take
+singles. `placement_score` clears the rows *before* it measures, so a clear is
+already paid for by the height it removes — up to `BOARD_WIDTH * 510 = 5100`
+of surface improvement for one row — and a bonus of 760 was never what
+decided it.
+
+So the price of a clear that sends nothing has to be an explicit cost large
+enough to cover that windfall (`BOT_W_WASTED_CLEAR`), and it has to stop
+applying above `BOT_DANGER_HEIGHT`: a bot that refuses singles unconditionally
+refuses them at row 19 too, and tops out holding the row that would have saved
+it. Building for a Tetris is a luxury of having room.
 
 **`ultra` cannot hit harder, so it hits oftener.** Two plies with hold as a
 search branch is about 6k boards per piece at roughly one piece a second: free.
@@ -426,8 +480,8 @@ The integration test is the one that would have caught every bug in this plan.
 
 | # | Step | Depends on |
 |---|---|---|
-| 0 | `bot_brain.c` — lift, tier, unit-test | — |
-| 1 | `match_smoke.c` calls it instead of its own copy | 0 |
+| 0 | ✅ `bot_brain.c` — lift, tier, unit-test | — |
+| 1 | ✅ `match_smoke.c` calls it instead of its own copy | 0 |
 | 2 | Reserved prefix + the three skip-list write guards | — |
 | 3 | Account pool: config, boot creation, claim/release | 2 |
 | 4 | `bot_main.c` + its Makefile target — a bot that joins a named room from the command line | 0, 3 |

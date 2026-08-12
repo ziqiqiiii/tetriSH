@@ -18,6 +18,7 @@
 /* ************************************************************************** */
 
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 // Static Functions
 static int	check_both_are_dealt_and_held(t_net_client *owner,
@@ -36,13 +37,6 @@ static int	check_an_ability_that_was_paid_for_lands(t_net_client *owner);
 
 static int	earn_charge(t_net_client *net, int wanted, int budget);
 static int	place_one_piece(t_net_client *net);
-static bool	plan_placement(const t_body_state *snap, bool may_rotate,
-				int *rotation, int *col);
-static bool	best_column(const t_board *board, const t_body_state *snap,
-				int rotation, int *best, int *col, bool *found);
-static int	placement_score(t_board *board);
-static int	column_profile(const t_board *board, int heights[BOARD_WIDTH]);
-static void	board_from_snapshot(t_board *out, const t_body_state *snap);
 static int	rows_were_fried(const t_body_state *snap, int rows);
 static int	act(t_net_client *net, t_solo_action action);
 static int	settle_active(t_net_client *net, int tries);
@@ -382,20 +376,25 @@ static int	earn_charge(t_net_client *net, int wanted, int budget)
  * the one before it. That stacks straight to the ceiling without ever
  * completing a row, which is exactly what it did.
  *
+ * The bot is built here rather than carried between pieces, and that is the
+ * same bot: only the easy tier keeps anything from one piece to the next, and
+ * this plays at normal, where the state a t_bot holds is never read.
+ *
  * @param net Client with a match running.
  * @return 1 when the piece was dropped and the board that took it has
  *         arrived, 0 on a transport failure.
  */
 static int	place_one_piece(t_net_client *net)
 {
+	t_bot		bot;
 	uint64_t	seq;
 	int			rotation;
 	int			target;
 	int			turns;
-	int			delta;
 
+	bot_init(&bot, BOT_NORMAL, BAG_FALLBACK_SEED);
 	seq = net->state_snapshot.seq;
-	if (plan_placement(&net->state_snapshot, true, &rotation, &target))
+	if (bot_plan(&bot, &net->state_snapshot, true, &rotation, &target))
 	{
 		turns = (rotation - net->state_snapshot.piece.rotation + 4) % 4;
 		while (turns > 0)
@@ -407,219 +406,20 @@ static int	place_one_piece(t_net_client *net)
 		/* best effort: a rotation the stack refused owes no frame at all */
 		settle_after(net, seq, 200);
 	}
-	if (plan_placement(&net->state_snapshot, false, &rotation, &target))
+	if (bot_plan(&bot, &net->state_snapshot, false, &rotation, &target))
 	{
-		delta = target - net->state_snapshot.piece.col;
-		while (delta != 0)
+		turns = target - net->state_snapshot.piece.col;
+		while (turns != 0)
 		{
-			if (!act(net, delta < 0 ? SOLO_MOVE_LEFT : SOLO_MOVE_RIGHT))
+			if (!act(net, turns < 0 ? SOLO_MOVE_LEFT : SOLO_MOVE_RIGHT))
 				return (0);
-			delta += (delta < 0) - (delta > 0);
+			turns += (turns < 0) - (turns > 0);
 		}
 	}
 	seq = net->state_snapshot.seq;
 	if (!act(net, SOLO_HARD_DROP))
 		return (0);
 	return (settle_after(net, seq, 600));
-}
-
-/**
- * @brief Picks the best landing place for the piece in this snapshot.
- *
- * @param snap The board and the piece to place on it.
- * @param may_rotate Whether rotations other than the current one are open.
- * @param rotation Receives the rotation to turn to.
- * @param col Receives the column to slide to.
- * @return true when at least one placement was legal, false otherwise.
- */
-static bool	plan_placement(const t_body_state *snap, bool may_rotate,
-			int *rotation, int *col)
-{
-	t_board	board;
-	int		best;
-	int		rot;
-	int		last;
-	bool	found;
-
-	board_from_snapshot(&board, snap);
-	rot = 0;
-	last = 3;
-	if (!may_rotate)
-	{
-		rot = snap->piece.rotation;
-		last = rot;
-	}
-	found = false;
-	best = 0;
-	*rotation = rot;
-	while (rot <= last)
-	{
-		if (best_column(&board, snap, rot, &best, col, &found))
-			*rotation = rot;
-		rot++;
-	}
-	return (found);
-}
-
-/**
- * @brief Scores every column this rotation can be dropped from.
- *
- * The scan runs past both walls because a piece's anchor is not its leftmost
- * cell: an I in one rotation is legal at a column no cell of it occupies, and
- * stopping the scan at the wall would lose that placement.
- *
- * @param board The settled board.
- * @param snap The snapshot the piece came from.
- * @param rotation Rotation to try.
- * @param best The best score so far, updated when this rotation beats it.
- * @param col The column that scored it, updated with it.
- * @param found Whether any placement has been legal yet.
- * @return true when this rotation produced the new best, false otherwise.
- */
-static bool	best_column(const t_board *board, const t_body_state *snap,
-			int rotation, int *best, int *col, bool *found)
-{
-	t_board	work;
-	t_piece	piece;
-	int		score;
-	int		candidate;
-	bool	improved;
-
-	improved = false;
-	candidate = -3;
-	while (candidate <= BOARD_WIDTH)
-	{
-		piece.type = (t_piece_type)snap->piece.type;
-		piece.rotation = rotation;
-		piece.col = candidate;
-		piece.row = snap->piece.row;
-		if (piece_is_valid(board, &piece))
-		{
-			piece_hard_drop(board, &piece);
-			board_copy(&work, board);
-			piece_stamp(&work, &piece);
-			score = placement_score(&work);
-			if (!*found || score > *best)
-			{
-				*found = true;
-				*best = score;
-				*col = candidate;
-				improved = true;
-			}
-		}
-		candidate++;
-	}
-	return (improved);
-}
-
-/**
- * @brief Prices one landed board on the four features that decide a stack.
- *
- * The weights are the well-known ones for this feature set, scaled to
- * integers - lines are worth having, and total height, buried holes and an
- * uneven surface are each worth avoiding. Bumpiness is the one that cannot be
- * left out: without it a scorer that only counts holes and height happily
- * builds a single column to the ceiling rather than accept one hole, which is
- * exactly how the first version of this bot topped out with two lines to its
- * name.
- *
- * The rows are cleared before anything is measured, because the board the
- * next piece falls on is the board after the clear, not the one that
- * triggered it.
- *
- * @param board Board with the candidate piece stamped in; cleared in place.
- * @return The score; higher is better.
- */
-static int	placement_score(t_board *board)
-{
-	int	heights[BOARD_WIDTH];
-	int	lines;
-	int	holes;
-	int	aggregate;
-	int	bumps;
-	int	col;
-
-	lines = board_clear_lines(board);
-	holes = column_profile(board, heights);
-	aggregate = 0;
-	bumps = 0;
-	col = 0;
-	while (col < BOARD_WIDTH)
-	{
-		aggregate += heights[col];
-		if (col + 1 < BOARD_WIDTH)
-			bumps += abs(heights[col] - heights[col + 1]);
-		col++;
-	}
-	return (lines * 760 - aggregate * 510 - holes * 357 - bumps * 184);
-}
-
-/**
- * @brief Measures how tall each column stands and how much is buried.
- *
- * A hole is any empty cell with a filled one somewhere above it in the same
- * column. It is the feature that cannot be undone in place: every row above a
- * hole has to be cleared before the hole can be reached.
- *
- * @param board Board to measure.
- * @param heights Receives each column's height.
- * @return How many holes the board carries.
- */
-static int	column_profile(const t_board *board, int heights[BOARD_WIDTH])
-{
-	int	holes;
-	int	col;
-	int	row;
-	int	top;
-
-	holes = 0;
-	col = 0;
-	while (col < BOARD_WIDTH)
-	{
-		top = BOARD_HEIGHT;
-		row = 0;
-		while (row < BOARD_HEIGHT)
-		{
-			if (board_get(board, col, row).type != CELL_EMPTY)
-			{
-				if (top == BOARD_HEIGHT)
-					top = row;
-			}
-			else if (top != BOARD_HEIGHT)
-				holes++;
-			row++;
-		}
-		heights[col] = BOARD_HEIGHT - top;
-		col++;
-	}
-	return (holes);
-}
-
-/**
- * @brief Turns the board on the wire back into one libtetrisbrain can plan on.
- *
- * @param out Receives the board.
- * @param snap Snapshot to read it from.
- */
-static void	board_from_snapshot(t_board *out, const t_body_state *snap)
-{
-	int	row;
-	int	col;
-
-	board_init(out);
-	row = 0;
-	while (row < BOARD_HEIGHT)
-	{
-		col = 0;
-		while (col < BOARD_WIDTH)
-		{
-			out->cells[row][col].type
-				= (t_cell_type)snap->cells[row][col].type;
-			out->cells[row][col].color = snap->cells[row][col].color;
-			col++;
-		}
-		row++;
-	}
 }
 
 /**
