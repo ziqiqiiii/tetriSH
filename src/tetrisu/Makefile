@@ -43,10 +43,13 @@ UNAME		:= $(shell uname -s)
 export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
 
 # Homebrew keeps each formula's pkg-config metadata under its own opt/ prefix.
+# openssl is keg-only there — its libraries are not on the linker's default
+# search path at all — so its .pc file is what turns -lssl into a -L that
+# resolves.
 ifeq ($(UNAME), Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
-export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
+export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(BREW_PREFIX)/opt/openssl@3/lib/pkgconfig:$(BREW_PREFIX)/opt/openssl/lib/pkgconfig:$(PKG_CONFIG_PATH)
 endif
 endif
 
@@ -92,6 +95,13 @@ AUDIO_CFLAGS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; th
 AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then $(PKG_CONFIG) --libs $(AUDIO_DEPS); fi)
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
+# OpenSSL the same way libtetrissh asks for it: pkg-config first, bare -l flags
+# as the fallback on a distribution that keeps it on the default paths. Asking
+# pkg-config is not decoration — on Homebrew the library lives under a keg the
+# linker does not search, and the bare flags alone fail with `library 'ssl' not
+# found`.
+OPENSSL_LIBS		 = $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null || printf '%s' "-lssl -lcrypto")
+
 # Header search path + generated defines shared by every target.
 # DEPFLAGS makes each object record the headers it actually included, so a
 # CoreStack header that changes the shape of a struct rebuilds every object
@@ -99,7 +109,7 @@ AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; th
 INC			:= -I. $(LIB_INC)
 DEPFLAGS	:= -MMD -MP
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
-LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
+LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) $(OPENSSL_LIBS) -lpthread
 
 ################################################################################
 #                                  SOURCES                                     #
@@ -163,7 +173,11 @@ $(NAME_PATH): $(OBJ) $(LIB_ARCS)
 # BOT_LDLIBS is therefore LDLIBS without the two render/audio groups. The
 # archive is the same one the unit tests link, so nothing here is a second
 # copy of the network layer.
-BOT_LDLIBS	:= -lssl -lcrypto -lpthread
+#
+# It has to name $(OPENSSL_LIBS) rather than -lssl -lcrypto: dropping the audio
+# group drops the -L that formerly carried OpenSSL in by accident on macOS.
+# Lazily expanded for the same reason the groups above are.
+BOT_LDLIBS	 = $(OPENSSL_LIBS) -lpthread
 
 $(BOT_PATH): $(SRC_DIR)/bot_main.c $(LOGIC_LIB) $(LIB_ARCS) $(BOT_HEADER) $(NET_HEADER)
 	@ mkdir -p $(BIN_DIR)
