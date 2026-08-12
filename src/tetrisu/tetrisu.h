@@ -221,6 +221,24 @@
 # define SOLO_DEFAULT_DAS_MS	167
 # define SOLO_DEFAULT_ARR_MS	33
 # define SOLO_DEFAULT_SOFT_DROP_FACTOR	20
+/*
+** The floor under every repeat, and it is ARR on purpose: no key repeats
+** faster than any other, so a held soft drop travels the board at the speed a
+** held move travels it and there is one handling rule instead of two.
+**
+** The number is not a feel decision, it is the server's budget divided in
+** half. Online, every repeat is a request, and TETRISD_DEFAULT_INPUT_RATE is
+** 60 a second: two keys held at 1000/33 each is exactly 60, with the burst of
+** 120 to absorb the transient. Without the floor, soft drop is
+** gravity_interval_ms(level) / 20 - 50 ms at level 1, but 9 ms at level 7 and
+** 3 ms at level 10, which is 111 and 333 requests a second against that 60.
+** A player merely holding a key was being answered 429 from level 6 up.
+**
+** It is applied offline too, though nothing there is rate-limited. Handling
+** that changed depending on whether a server was listening would be a worse
+** thing to own than a soft drop capped at thirty rows a second.
+*/
+# define SOLO_MIN_REPEAT_MS	SOLO_DEFAULT_ARR_MS
 # define SOLO_HANDLING_ACTION_CAP	64
 
 /* AUDIO.C */
@@ -240,6 +258,11 @@
 # define UI_NOTIFICATION_MESSAGE_MAX	31
 # define UI_NOTIFICATION_OWNERSHIP_TITLE	"ITEM NOT OWNED"
 # define UI_NOTIFICATION_OWNERSHIP_MESSAGE	"VISIT MARKETPLACE TO BUY"
+/*
+** An incoming ability holds longer than a volume bar. It is the only warning
+** the player gets, and it arrives while they are busy placing a piece.
+*/
+# define UI_NOTIFICATION_EFFECT_HOLD_MS	1600
 # define UI_NOTIFICATION_HOLD_MS	900
 # define UI_NOTIFICATION_FADE_MS	180
 # define UI_NOTIFICATION_FRAME_MS	33
@@ -690,6 +713,13 @@
 /* MULTIPLAYER_MATCH.C / RENDER_MULTIPLAYER_MATCH.C */
 # define MP_CHARACTER_SELECT_MS	15000
 # define MP_CHARACTER_TICK_AUDIO_SECONDS	5
+/*
+** How often an online roster screen asks the room where its clock is. The
+** window is the room's, not this client's, so the local number is only ever
+** an interpolation between two of these - often enough that a rival locking
+** in is felt immediately, rarely enough that it is not a request per frame.
+*/
+# define MP_MATCH_SELECT_POLL_MS	250
 # define MP_MATCH_FRAME_MS	16
 # define MP_MATCH_MAX_CATCHUP_MS	1000
 # define MP_MATCH_INPUT_BATCH_MAX	64
@@ -1234,6 +1264,13 @@ typedef enum e_app_room_state
 {
 	APP_ROOM_STATE_WAITING,
 	APP_ROOM_STATE_READY,
+	/*
+	** Everybody has committed, nobody is playing, and the room is holding a
+	** clock open for both players to choose a fighter in. It launches the
+	** match screen exactly as IN_GAME does - the difference is which phase
+	** that screen opens on.
+	*/
+	APP_ROOM_STATE_SELECTING,
 	APP_ROOM_STATE_IN_GAME,
 	APP_ROOM_STATE_FINISHED
 }	t_app_room_state;
@@ -1262,9 +1299,15 @@ typedef struct s_app_lobby_view_model
 
 typedef struct s_app_room_player_view_model
 {
-	char	username[APP_TEXT_MAX];
-	bool	owner;
-	bool	ready;
+	char		username[APP_TEXT_MAX];
+	bool		owner;
+	bool		ready;
+	/*
+	** The fighter this seat has settled on for the coming match, 0 while they
+	** are still choosing. It doubles as whether they have locked in, because
+	** on the server those are the same fact.
+	*/
+	uint32_t	character;
 }	t_app_room_player_view_model;
 
 /*
@@ -1289,6 +1332,12 @@ typedef struct s_app_room_view_model
 	int							capacity;
 	int							player_count;
 	int							local_slot;
+	/*
+	** Milliseconds left in the character-select window, 0 when none is
+	** running. The room's clock, not this client's: both players count down
+	** the same number and are dealt in together.
+	*/
+	int							select_ms;
 	t_app_room_player_view_model	players[APP_ROOM_MAX_PLAYERS];
 	int							chat_count;
 	t_app_room_chat_view_model	chat[APP_ROOM_CHAT_MAX];
@@ -1433,6 +1482,8 @@ typedef enum e_room_action
 {
 	ROOM_ACTION_NONE,
 	ROOM_ACTION_TOGGLE_READY,
+	ROOM_ACTION_CHARACTER_PREV,
+	ROOM_ACTION_CHARACTER_NEXT,
 	ROOM_ACTION_START,
 	ROOM_ACTION_SEND_CHAT,
 	ROOM_ACTION_LEAVE,
@@ -1450,6 +1501,21 @@ typedef enum e_room_action
 typedef struct s_waiting_room_state
 {
 	bool			chatting;
+	/*
+	 * Which owned character this player will take into the match, as an index
+	 * into the character catalogue. It is chosen here rather than in the
+	 * match screen because the match has already begun by the time that
+	 * screen opens - the room deals the boards the moment every seat has
+	 * declared - and it travels with READY rather than through EQUIP because
+	 * a character is picked for a match and equipping is account-wide.
+	 */
+	int				character_index;
+	/*
+	 * The chosen fighter's name, kept here rather than looked up at draw
+	 * time: the renderers are handed this state and the room, and the roster
+	 * it came from is neither.
+	 */
+	char			character_name[APP_TEXT_MAX];
 	bool			counting_down;
 	int				countdown;
 	int				roster_offset;
@@ -1468,12 +1534,30 @@ typedef struct s_mp_rect
 }	t_mp_rect;
 
 # define MP_MATCH_BOARD_CACHES 2
+# define MP_MATCH_PORTRAITS 2
 /*
 ** How many horizontal strips the local board is blitted as. Five is four board
 ** rows per band: small enough that a moving piece dirties one or two of them,
 ** large enough that the per-plane overhead stays negligible.
 */
 # define MP_MATCH_BOARD_BANDS 5
+/*
+** The floor under how often the opponent's region is re-presented, in
+** milliseconds. 50 is 20 Hz, which is faster than a piece falls at any level
+** and slower than a player can input, so it costs the opponent's board nothing
+** a viewer can see and gives the local board back every frame in between.
+**
+** It is a presentation rate and not a data rate: every snapshot is still
+** applied the moment it lands, and the pending garbage, the score and the
+** verdict are read from the model rather than from what was last drawn.
+*/
+# define MP_MATCH_OPPONENT_PRESENT_MS 50
+/*
+** How many rows below the falling piece stay visible under Dark. Enough to
+** place the piece in your hand and nothing else, which is the ability's whole
+** shape: it takes away your plan, not your turn.
+*/
+# define MP_MATCH_DARK_WINDOW_ROWS 3
 /*
 ** Danger is quantised into this many steps between clear and full. The signal
 ** itself is Solo's solo_game_danger_dim(), so the two modes enter and leave
@@ -1488,6 +1572,16 @@ typedef struct s_mp_rect
 ** the HOLD/NEXT column, which is far taller than the four lines it shows.
 */
 # define MP_MATCH_POPOVER_HEIGHT 190
+/*
+** The hover card, in terminal cells rather than pixels. Seven rows: a border,
+** the name with its slot, the cost, three wrapped lines of what it does, and
+** the closing border. Solo's card is five because Solo's four descriptions are
+** short constants it can clip; a character's come from the catalogue and run
+** to eighty characters, so they are wrapped instead of shrunk.
+*/
+# define MP_MATCH_POPOVER_ROWS	7
+# define MP_MATCH_POPOVER_COLS	42
+# define MP_MATCH_POPOVER_TEXT_ROWS	6
 
 /*
  * What a rendered board last showed, one number per cell with the falling
@@ -1563,6 +1657,15 @@ typedef struct s_mp_match_pixel_layout
 	t_mp_rect	ability_popover;
 	t_mp_rect	local_board;
 	t_mp_rect	opponent_board;
+	/*
+	** Double only: the same three rectangles mirrored past the rival's board,
+	** so the fighter opposite has a face and a meter where the local one has
+	** them. Battle Royale leaves them zeroed - it draws a grid of cards, and
+	** there is no single opponent to give a column to.
+	*/
+	t_mp_rect	opponent_loadout;
+	t_mp_rect	opponent_portrait;
+	t_mp_rect	opponent_ability_bar;
 	t_mp_rect	left_opponents;
 	t_mp_rect	right_opponents;
 	t_mp_rect	targeting;
@@ -1570,6 +1673,8 @@ typedef struct s_mp_match_pixel_layout
 	t_mp_rect	controls;
 	int		ability_center_x;
 	int		ability_center_y[APP_CHARACTER_ABILITY_COUNT];
+	int		opponent_ability_center_x;
+	int		opponent_ability_center_y[APP_CHARACTER_ABILITY_COUNT];
 	int		ability_hit_radius;
 }	t_mp_match_pixel_layout;
 
@@ -1661,6 +1766,19 @@ typedef struct s_app_data_provider
 				t_app_room_view_model *view);
 	t_app_provider_result	(*leave_room)(void *userdata, const char *room_id);
 	t_app_provider_result	(*start_room)(void *userdata, const char *room_id,
+				t_app_room_view_model *view);
+	/*
+	 * Declaring readiness, which is the server's fact and not the screen's.
+	 * A client that kept it locally had its own next refresh overrule it,
+	 * because the room it re-read had never been told.
+	 *
+	 * `character` is the fighter this player takes into the match, or 0 for
+	 * whatever the account has equipped. It rides with the declaration
+	 * because that is the last moment it can be chosen: the room deals the
+	 * boards as soon as every seat has declared.
+	 */
+	t_app_provider_result	(*ready_room)(void *userdata, const char *room_id,
+				bool ready, uint32_t character,
 				t_app_room_view_model *view);
 	/*
 	 * Posting to the room's feed. It answers with the room rather than with a
@@ -1851,7 +1969,14 @@ typedef struct
 typedef enum e_ui_notification_kind
 {
 	UI_NOTIFICATION_VOLUME,
-	UI_NOTIFICATION_OWNERSHIP
+	UI_NOTIFICATION_OWNERSHIP,
+	/*
+	 * A rival's ability landing on this player. The card is the whole of the
+	 * feedback for the effects that cannot be seen on a board: a refused
+	 * rotation and a rotate key that has stopped working look identical, and
+	 * before this the player had no way to tell them apart.
+	 */
+	UI_NOTIFICATION_EFFECT
 }	t_ui_notification_kind;
 
 typedef struct s_ui_notification
@@ -1981,26 +2106,17 @@ typedef struct
 	struct ncvisual		*marketplace_font_visual;
 	struct ncvisual		*mp_font_visual;
 	struct ncvisual		*mp_match_tile_visual;
-	struct ncvisual		*mp_match_portrait_visual;
+	struct ncvisual		*mp_match_portrait_visual[MP_MATCH_PORTRAITS];
 	/*
 	 * The portrait read out into plain memory, for the same reason the tetromino
 	 * atlas is: sampling it through ncvisual_at_yx once per output pixel made
 	 * the loadout region cost 52 ms, and that region redraws on every lock
 	 * because HOLD and NEXT live in it.
 	 */
-	uint32_t			*mp_match_portrait_pixels;
-	int					mp_match_portrait_px_width;
-	int					mp_match_portrait_px_height;
-	char				mp_match_portrait_source[APP_ASSET_PATH_MAX];
-	/*
-	 * The authored popover frame, read out the same way. The match shows the
-	 * hovered ability in Solo's shape - name, cost, effect, how to fire it -
-	 * over the same artwork, so the two modes teach the abilities identically.
-	 */
-	struct ncvisual		*mp_match_popover_visual;
-	uint32_t			*mp_match_popover_pixels;
-	int					mp_match_popover_px_width;
-	int					mp_match_popover_px_height;
+	uint32_t			*mp_match_portrait_pixels[MP_MATCH_PORTRAITS];
+	int					mp_match_portrait_px_width[MP_MATCH_PORTRAITS];
+	int					mp_match_portrait_px_height[MP_MATCH_PORTRAITS];
+	char				mp_match_portrait_source[MP_MATCH_PORTRAITS][APP_ASSET_PATH_MAX];
 	/*
 	 * The local board is banded rather than held on one plane. A terminal
 	 * bitmap has no partial update: re-blitting the board region re-encodes
@@ -2015,14 +2131,57 @@ typedef struct
 	 */
 	struct ncplane		*mp_match_local_bands[MP_MATCH_BOARD_BANDS];
 	uint64_t			mp_match_band_signatures[MP_MATCH_BOARD_BANDS];
+	/*
+	 * The opponent's board is banded on the same terms and for a sharper
+	 * reason. While it was a local fixture it changed only at gravity
+	 * intervals, so re-encoding it whole cost nothing anybody noticed; fed
+	 * from the wire it changes at the tick rate, with a piece moving across
+	 * it, and it would pay in full the cost the local banding was introduced
+	 * to avoid - on the same frame, out of the same budget, as the board the
+	 * player is actually steering.
+	 *
+	 * The caption strip below it keeps a plane of its own rather than joining
+	 * the last band: it is not made of cells, so no band signature describes
+	 * it, and folding it in would re-blit a fifth of the board every time a
+	 * score changed.
+	 */
+	struct ncplane		*mp_match_opponent_bands[MP_MATCH_BOARD_BANDS];
+	uint64_t			mp_match_opponent_band_signatures[MP_MATCH_BOARD_BANDS];
 	struct ncplane		*mp_match_opponent_plane;
+	/*
+	 * The earliest this client will re-present the opponent's region. The
+	 * opponent's board is information and the local one is control: presenting
+	 * theirs at MP_MATCH_OPPONENT_PRESENT_MS while ours goes out on every
+	 * input is a trade the player cannot feel, and it keeps the terminal's
+	 * bitmap budget on the piece in their hands. Nothing is skipped, only
+	 * deferred - the signature is left unstored, so the next frame past the
+	 * floor draws whatever the board has become by then.
+	 */
+	uint64_t			mp_match_opponent_due_ms;
+	bool				mp_match_opponent_deferred;
 	struct ncplane		*mp_match_left_plane;
 	struct ncplane		*mp_match_right_plane;
 	struct ncplane		*mp_match_loadout_plane;
 	struct ncplane		*mp_match_ability_plane;
+	/*
+	 * The rival's half of the same pair. It is a region of its own rather than
+	 * part of the opponent board's, because it changes on a different clock:
+	 * their meter moves when they clear a line, their board moves every
+	 * gravity tick, and the board's 20 Hz presentation floor has no business
+	 * holding back a portrait that only ever changes once a match.
+	 */
+	struct ncplane		*mp_match_opponent_loadout_plane;
+	struct ncplane		*mp_match_opponent_ability_plane;
 	struct ncplane		*mp_match_hud_plane;
 	struct ncplane		*mp_match_caption_plane;
 	struct ncplane		*mp_match_countdown_plane;
+	/*
+	 * The hovered ability's card. Alone among the match's surfaces it is a
+	 * plain terminal-cell plane rather than a slice of the composed bitmap,
+	 * for the reason Solo's is: the description is a sentence, and a sentence
+	 * scaled to fit a narrow column of a bitmap font is a sentence nobody can
+	 * read. The terminal's own glyphs are always legible at any board size.
+	 */
 	uint32_t			*mp_match_tile_atlas;
 	/*
 	 * Board tiles pre-scaled to the live cell size and pre-composited over the
@@ -2070,6 +2229,22 @@ typedef struct
 	struct ncplane		*compatibility_plane;
 	struct ncplane		*notification_art_planes[UI_NOTIFICATION_STACK_MAX];
 	struct ncplane		*notification_planes[UI_NOTIFICATION_STACK_MAX];
+	/*
+	** Set whenever a notification's planes appear or go away, and cleared by
+	** the screen that repaints because of it.
+	**
+	** A notification card is a bitmap, and so is most of what it covers.
+	** Notcurses cannot overlap two sprixels, so it annihilates the cells of
+	** the one underneath - and the screens cache their panels by signature,
+	** so once the card expires nothing considers those panels out of date and
+	** they never come back. Changing the volume left a room with its
+	** background, its title and its footer and no panels at all.
+	**
+	** The flag is the screen's cue to rebuild rather than trust its cache. It
+	** lives here rather than in the notification stack because it is a fact
+	** about the terminal's contents, which is what every renderer shares.
+	*/
+	bool				notification_repaint;
 	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
@@ -2167,6 +2342,7 @@ typedef struct
 	uint64_t			mp_match_left_signature;
 	uint64_t			mp_match_right_signature;
 	uint64_t			mp_match_loadout_signature;
+	uint64_t			mp_match_opponent_loadout_signature;
 	uint64_t			mp_match_hud_signature;
 	uint64_t			mp_match_countdown_signature;
 	uint64_t			auth_overlay_signatures[AUTH_OVERLAY_PLANE_MAX];
@@ -2294,6 +2470,28 @@ typedef enum e_solo_popover_phase
 	SOLO_POPOVER_FADING_OUT
 }	t_solo_popover_phase;
 
+/*
+** What the server says is riding on a player, as the client is told it.
+**
+** A mirror of libtetrisbrain's t_effect_state rather than that struct itself,
+** because these are counts the client displays and never acts on: tetrisu
+** links the brain for its offline rules, but an online board's effects belong
+** to tetrisd and arrive in a snapshot like everything else about it.
+*/
+# define SOLO_EFFECT_COUNT	8
+
+typedef struct s_solo_effects
+{
+	int		paralysis;
+	int		inversion;
+	int		nue;
+	int		thwack;
+	int		fry;
+	int		dark;
+	int		pals;
+	int		mirror;
+}	t_solo_effects;
+
 typedef struct s_solo_game
 {
 	t_board			board;
@@ -2328,6 +2526,19 @@ typedef struct s_solo_game
 	int				danger_safe_elapsed_ms;
 	int				danger_fade_elapsed_ms;
 	uint32_t		pending_events;
+	/*
+	 * The status effects the server says are on this player, straight from
+	 * the snapshot. The four piece-counted ones carry how many pieces are
+	 * left under them; the rest carry 1 or 0.
+	 *
+	 * They are here because an effect nobody can see is indistinguishable
+	 * from a bug. Paralysis has always worked and has always looked exactly
+	 * like a rotate key that stopped responding: the server refused the
+	 * input, and the client had no way to say why. Nothing here enforces
+	 * them - the server does that, as it does everything - this is only what
+	 * the screen needs to tell the player what is happening to them.
+	 */
+	t_solo_effects	effects;
 	int				lock_resets;
 	int				last_kick_index;
 	bool			last_action_was_rotation;
@@ -2365,7 +2576,21 @@ typedef struct s_mp_match_state
 	int				final_rank;
 	int				ko_count;
 	int				incoming_attackers;
+	/*
+	** Garbage rows queued against this player and not yet landed. They arrive
+	** at the next piece lock, so between being told and being buried there is
+	** a piece to place - which is the whole reason the count is shown. It is
+	** the server's number; nothing here counts rows of its own.
+	*/
+	int				incoming_garbage;
 	int				opponent_charge;
+	/*
+	** The catalogue id of the fighter opposite, as the server reported it. It
+	** is an id and not an index because catalogue ids carry gaps and are never
+	** a position - mp_match_opponent_character is what turns it back into a
+	** roster entry.
+	*/
+	uint32_t		opponent_character;
 	int				hovered_ability;
 	struct s_mp_opponent_snapshot
 	{
@@ -2401,6 +2626,36 @@ typedef struct s_solo_authority
 	bool			lost;
 	bool			countdown_hold;
 }	t_solo_authority;
+
+/*
+** Who owns the boards a match is played on - the same question
+** t_solo_authority answers for Solo, and split out for the same reason: a
+** loop that asked "am I online?" before each action would be one `if` away
+** from doing both.
+**
+** There is no countdown_hold here. Solo freezes the server's clock for its
+** own 3-2-1 by sending PAUSE, which a match cannot do and does not need to:
+** the countdown is the room's, it arrives in every snapshot, and the client
+** draws the number it is given.
+**
+** `local_slot` is which of the room's seats this client is sitting in, learnt
+** from the first snapshot rather than assumed, because the seat a player
+** holds can move under them when a room's owner leaves.
+*/
+typedef struct s_match_authority
+{
+	/*
+	 * The effects last reported to the player, so a card is raised only when
+	 * a count goes up. A snapshot says what is true now rather than what just
+	 * happened, so the arrival has to be worked out by comparison - see
+	 * solo_effects.c.
+	 */
+	t_solo_effects	reported;
+	t_net_client	*net;
+	bool			online;
+	bool			lost;
+	int				local_slot;
+}	t_match_authority;
 
 typedef struct s_solo_render
 {
@@ -2518,11 +2773,22 @@ typedef enum e_sign_in_result
 # define CONFIRMATION_MODAL_COLS	58
 # define CONFIRMATION_MODAL_ROWS	12
 
+/*
+** The four two-answer questions the client asks over whatever screen is up.
+**
+** CONFIRM_CONNECTION_LOST is not a confirmation of something the player did -
+** it reports something that happened to them, and its two answers are the two
+** ways out rather than yes and no. It shares this dialog anyway because a
+** modal that has to occlude a bitmap board is the whole difficulty here, and
+** that is solved once: the pixel tier draws it as a bitmap of its own,
+** because a cell plane cannot cover a sprixel however high it sits.
+*/
 typedef enum e_confirmation_kind
 {
 	CONFIRM_QUIT_APP,
 	CONFIRM_LEAVE_ROOM,
-	CONFIRM_LEAVE_MATCH
+	CONFIRM_LEAVE_MATCH,
+	CONFIRM_CONNECTION_LOST
 }	t_confirmation_kind;
 
 typedef enum e_confirmation_focus
@@ -2552,6 +2818,9 @@ t_confirmation_result	confirmation_dialog_handle_key(
 					t_confirmation_dialog *dialog, uint32_t key);
 const char		*confirmation_title(t_confirmation_kind kind);
 const char		*confirmation_body(t_confirmation_kind kind);
+const char		*confirmation_no_label(t_confirmation_kind kind);
+const char		*confirmation_yes_label(t_confirmation_kind kind);
+const char		*confirmation_hint(t_confirmation_kind kind);
 bool			confirmation_prompt_run(t_render_ctx *ctx,
 					t_audio_ctx *audio, t_confirmation_kind kind);
 bool			render_confirmation_pixel_show(t_render_ctx *ctx,
@@ -2705,12 +2974,24 @@ t_app_provider_result	auth_form_submit(t_auth_form *form,
 bool			auth_form_mask_password(const char *password, char *masked,
 					size_t size);
 
+/* SOLO_EFFECTS.C - noticing that something has been done to you */
+bool			solo_effects_take_arrival(const t_solo_effects *now,
+					t_solo_effects *last, char *title, size_t title_cap,
+					char *message, size_t message_cap);
+
+/* SOLO_EFFECTS.C - noticing that something has been done to you */
+bool			solo_effects_take_arrival(const t_solo_effects *now,
+					t_solo_effects *last, char *title, size_t title_cap,
+					char *message, size_t message_cap);
+
 /* UI_NOTIFICATION.C */
 void			ui_notification_stack_init(t_ui_notification_stack *stack);
 bool			ui_notification_show(t_ui_notification_stack *stack,
 					const char *title, int percent, uint64_t now_ms);
 bool			ui_notification_show_ownership(
 					t_ui_notification_stack *stack, uint64_t now_ms);
+bool			ui_notification_show_effect(t_ui_notification_stack *stack,
+					const char *title, const char *message, uint64_t now_ms);
 bool			ui_notification_update(t_ui_notification_stack *stack,
 					uint64_t now_ms);
 int				ui_notification_opacity(const t_ui_notification *notification,
@@ -2760,11 +3041,17 @@ void				render_notification_show_volume(t_render_ctx *ctx,
 void				render_notification_queue_volume(t_render_ctx *ctx,
 					int volume);
 void				render_notification_queue_ownership(t_render_ctx *ctx);
+void				render_notification_show_effect(t_render_ctx *ctx,
+						const char *title, const char *message);
+
 void				render_notification_tick(t_render_ctx *ctx);
 int					render_notification_next_wake_ms(
 					const t_render_ctx *ctx);
 void				render_notification_reflow(t_render_ctx *ctx);
 void				render_notification_raise(t_render_ctx *ctx);
+bool				render_notification_repaint_pending(
+					const t_render_ctx *ctx);
+bool				render_notification_take_repaint(t_render_ctx *ctx);
 void				render_notification_destroy(t_render_ctx *ctx);
 t_tetrisu_pixel_policy	tetrisu_pixel_policy_for(ncpixelimpl_e backend,
 					const char *term, t_tetrisu_renderer_mode forced);
@@ -3007,6 +3294,8 @@ const char		*waiting_room_badge_text(const t_app_room_view_model *room,
 					int index);
 const char		*waiting_room_feedback_text(const t_waiting_room_state *state,
 					char *out, size_t size);
+bool			waiting_room_is_under_way(
+					const t_app_room_view_model *room);
 t_app_nav_action	waiting_room_launch_action(
 					const t_app_room_view_model *room);
 
@@ -3027,6 +3316,8 @@ uint32_t		mp_match_character_update(t_mp_match_state *state,
 					int elapsed_ms);
 int				mp_match_character_seconds(const t_mp_match_state *state);
 const t_app_catalogue_item_view_model	*mp_match_selected_character(
+					const t_mp_match_state *state);
+const t_app_catalogue_item_view_model	*mp_match_opponent_character(
 					const t_mp_match_state *state);
 bool			mp_match_target_handle_key(t_mp_match_state *state,
 					uint32_t key);
@@ -3069,12 +3360,13 @@ void			render_multiplayer_match_destroy(t_render_ctx *ctx);
 bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 					const t_mp_match_state *state, bool rebuild_background);
 void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+int				render_multiplayer_match_deferred_ms(const t_render_ctx *ctx);
 
 /* MULTIPLAYER_MATCH_MODE.C */
 int				multiplayer_match_mode_run(t_render_ctx *ctx,
 					t_audio_ctx *audio, const t_app_data_provider *provider,
 					t_app_game_mode mode, const char *room_id,
-					const t_app_room_view_model *room);
+					const t_app_room_view_model *room, t_net_client *net);
 
 /* RENDER_MULTIPLAYER_FONT.C */
 bool			render_mp_pixel_show(t_render_ctx *ctx,
@@ -3192,6 +3484,7 @@ int				solo_handling_next_wake_ms(
 					const t_solo_handling_config *config, int gravity_ms);
 
 /* SOLO_ABILITIES.C — temporary local ability authority for Solo testing */
+bool			solo_abilities_enabled(void);
 int				solo_ability_cost(t_solo_ability ability);
 const char		*solo_ability_name(t_solo_ability ability);
 const char		*solo_ability_description(t_solo_ability ability);
@@ -3240,6 +3533,7 @@ int				net_solo_start(t_net_client *net, t_net_result *out);
 void			net_solo_leave(t_net_client *net);
 int				net_solo_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
+int				net_solo_send_action(t_net_client *net, t_solo_action action);
 int				net_solo_pause(t_net_client *net, bool paused,
 					t_net_result *out);
 int				net_solo_restart(t_net_client *net, t_net_result *out);
@@ -3248,7 +3542,31 @@ int				net_solo_ability(t_net_client *net, t_solo_ability ability,
 void			net_solo_ability_feedback(const t_net_result *result,
 					t_solo_ability ability, t_solo_game *game);
 bool			net_solo_apply(t_net_client *net, t_solo_game *game);
+void			net_state_apply(const t_body_state *snap, t_solo_game *game);
 bool			net_solo_pending(const t_net_client *net);
+
+/* NET_MATCH.C — Double played against tetrisd; both boards arrive together */
+int				net_match_join(t_net_client *net, const char *room);
+bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
+int				net_match_action(t_net_client *net, t_solo_action action,
+					t_net_result *out);
+int				net_match_send_action(t_net_client *net, t_solo_action action);
+int				net_match_ability(t_net_client *net, t_solo_ability ability,
+					t_net_result *out);
+
+/* MATCH_AUTHORITY.C — who owns the boards a match is played on */
+void			match_authority_open(t_match_authority *authority,
+					t_net_client *net, t_mp_match_state *state);
+bool			match_authority_is_online(const t_match_authority *authority);
+void			match_authority_close(t_match_authority *authority);
+int				match_authority_fd(const t_match_authority *authority);
+bool			match_authority_pending(const t_match_authority *authority);
+bool			match_authority_action(t_match_authority *authority,
+					t_mp_match_state *state, t_solo_action action);
+bool			match_authority_ability(t_match_authority *authority,
+					t_mp_match_state *state, t_solo_ability ability);
+bool			match_authority_update(t_match_authority *authority,
+					t_mp_match_state *state, int elapsed_ms);
 
 /* SOLO_AUTHORITY.C — the one place that knows who owns the board */
 void			solo_authority_open(t_solo_authority *authority,

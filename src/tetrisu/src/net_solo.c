@@ -29,6 +29,7 @@ static void	apply_cells(t_solo_game *game, const t_body_state *snap);
 static void	apply_counters(t_solo_game *game, const t_body_state *snap);
 static void	apply_phase(t_solo_game *game, const t_body_state *snap);
 static void	apply_clearing(t_solo_game *game, const t_body_state *snap);
+static void	apply_effects(t_solo_game *game, const t_body_state *snap);
 static void	apply_clear_label(t_solo_game *game, const t_body_state *snap,
 				uint64_t previous_score);
 static t_solo_ability_result	verdict_of(const char *reason);
@@ -141,6 +142,38 @@ int	net_solo_action(t_net_client *net, t_solo_action action,
 }
 
 /**
+ * @brief Sends one player action without waiting to be told it stood.
+ *
+ * This is the path the game loop uses, and net_solo_action is the path a
+ * caller uses when the verdict is the thing it wants - a test asserting that
+ * a second HOLD is refused, for instance. The request on the wire is the same
+ * either way.
+ *
+ * Waiting is what this drops, and the reason it can be dropped is the
+ * authority boundary: the board changes when the snapshot that follows says it
+ * did, so the response to a MOVE carries nothing the next snapshot does not.
+ * What waiting cost was a turn of the render loop per keypress - at 40 ms
+ * round trip a key repeating every 33 ms issues faster than replies come back,
+ * and both boards sit still for each one.
+ *
+ * @param net Client with a game running.
+ * @param action The action the player asked for.
+ * @return 0 when the request went out or was dropped under a back-off, -1 on
+ *         a transport failure or an action with no request behind it.
+ */
+int	net_solo_send_action(t_net_client *net, t_solo_action action)
+{
+	const char	*method;
+	const char	*body;
+
+	if (net == NULL || net->state != NET_IN_GAME)
+		return (-1);
+	if (!action_request(net, action, &method, &body))
+		return (-1);
+	return (net_send(net, method, net->play_path, body));
+}
+
+/**
  * @brief PAUSE or RESUME the server-side game.
  *
  * @param net Client with a game running.
@@ -240,12 +273,33 @@ void	net_solo_ability_feedback(const t_net_result *result,
  */
 bool	net_solo_apply(t_net_client *net, t_solo_game *game)
 {
-	const t_body_state	*snap;
-	uint64_t			previous_score;
-
 	if (net == NULL || game == NULL || !net->has_state)
 		return (false);
-	snap = &net->state_snapshot;
+	net_state_apply(&net->state_snapshot, game);
+	net->applied_seq = net->state_snapshot.seq;
+	return (true);
+}
+
+/**
+ * @brief Writes one decoded snapshot onto one view model.
+ *
+ * Split out of net_solo_apply so a match can use it for the board the player
+ * is steering. Both modes render the same t_solo_game and the server projects
+ * the same fields into it, so the mapping between them is one thing - and a
+ * second copy of it would be a second place for the two to drift.
+ *
+ * The snapshot is passed rather than the client, because a match reads one
+ * frame and applies parts of it to several view models.
+ *
+ * @param snap Snapshot to read.
+ * @param game View model to overwrite.
+ */
+void	net_state_apply(const t_body_state *snap, t_solo_game *game)
+{
+	uint64_t	previous_score;
+
+	if (snap == NULL || game == NULL)
+		return ;
 	previous_score = game->scoring.total;
 	apply_cells(game, snap);
 	game->active = piece_spawn((t_piece_type)snap->piece.type);
@@ -262,9 +316,31 @@ bool	net_solo_apply(t_net_client *net, t_solo_game *game)
 	apply_counters(game, snap);
 	apply_clearing(game, snap);
 	apply_clear_label(game, snap, previous_score);
+	apply_effects(game, snap);
 	apply_phase(game, snap);
-	net->applied_seq = snap->seq;
-	return (true);
+}
+
+/**
+ * @brief Copies the server's effect counts onto the view model.
+ *
+ * Copied and not interpreted. Whether a rotation is allowed is the server's
+ * answer and always was; this is the client learning enough to say why it was
+ * refused, and enough for the renderer to black a field out - which is the one
+ * effect nothing but a renderer can carry out.
+ *
+ * @param game View model being filled.
+ * @param snap Snapshot to read.
+ */
+static void	apply_effects(t_solo_game *game, const t_body_state *snap)
+{
+	game->effects.paralysis = snap->effect_paralysis;
+	game->effects.inversion = snap->effect_inversion;
+	game->effects.nue = snap->effect_nue;
+	game->effects.thwack = snap->effect_thwack;
+	game->effects.fry = snap->effect_fry;
+	game->effects.dark = snap->effect_dark;
+	game->effects.pals = snap->effect_pals;
+	game->effects.mirror = snap->effect_mirror;
 }
 
 /**

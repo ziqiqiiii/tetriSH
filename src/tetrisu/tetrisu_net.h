@@ -57,6 +57,17 @@
 */
 # define NET_CHAT_HISTORY		32
 
+/*
+** How often an idle client asks the server whether it is still there.
+**
+** Nothing on either end sends a keepalive, so an idle connection is silent
+** until the next thing the player does - which is when a drop that happened
+** twenty minutes ago finally surfaces, as a screen that will not load. One
+** small request on a timer is what turns that into a thing the client can say
+** at the moment it becomes true.
+*/
+# define NET_HEARTBEAT_MS	15000
+
 /* the routes tetrisd serves, spelled once (src/tetrisd/README.md) */
 # define TETRISU_ROUTE_ACCOUNT	"/account"
 # define TETRISU_ROUTE_SESSION	"/session"
@@ -148,6 +159,20 @@ typedef struct s_net_client
 	size_t			chat_head;
 	size_t			chat_held;
 	uint64_t		chat_received;
+	/*
+	** When the server last said "too fast", plus the Retry-After it asked
+	** for. Gameplay inputs are dropped until then rather than sent, because
+	** the alternative is a client that trips the limit and keeps tripping it:
+	** every refused request costs the same wire as an accepted one and buys a
+	** 429 back. A dropped input looks exactly like a refused one - the board
+	** does not move - so nothing is hidden from the player that the rate limit
+	** was not already hiding.
+	**
+	** Only send-only traffic honours it. A JOIN or a LEAVE is a thing the
+	** player asked for once and is entitled to an answer to.
+	*/
+	uint64_t		throttle_until_ms;
+	uint64_t		throttled;
 	char			error[NET_REASON_MAX];
 }	t_net_client;
 
@@ -177,6 +202,24 @@ void	net_disconnect(t_net_client *net);
 int		net_fd(const t_net_client *net);
 int		net_request(t_net_client *net, const char *method, const char *path,
 			const char *body, t_net_result *out);
+/*
+** The send-only path, for requests whose answer carries nothing the next
+** snapshot does not: it serialises, writes, and returns. The response is
+** drained later by net_pump like any other traffic.
+**
+** This is what a held key uses. net_request stops the loop for a round trip,
+** which on loopback is invisible and across a real link is the whole input
+** latency - at 40 ms RTT a key repeating every 33 ms issues faster than
+** replies return, and every one of those waits is a turn of the loop that
+** draws neither board.
+**
+** It is not a shortcut past the authority boundary: the client already applies
+** nothing optimistically, so the reply to a MOVE says only whether it stood,
+** and a move that did not stand is visible as a board that did not move.
+*/
+int		net_send(t_net_client *net, const char *method, const char *path,
+			const char *body);
+bool	net_throttled(const t_net_client *net);
 int		net_pump(t_net_client *net);
 bool	net_state_take(t_net_client *net, const t_htttp_message *msg);
 const char	*net_result_field(const t_net_result *result, const char *key,

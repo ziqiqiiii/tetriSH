@@ -1,9 +1,5 @@
 #include "tetrisu.h"
 
-# define CONFIRM_NO_BUTTON	"   NO   "
-# define CONFIRM_YES_BUTTON	"  YES   "
-# define CONFIRM_HINT		"ESC/N CANCEL  |  LEFT/RIGHT SELECT  |  ENTER CONFIRM"
-
 static bool	create_dialog_plane(t_render_ctx *ctx,
 				t_confirmation_dialog *dialog);
 static void	draw_dialog(t_confirmation_dialog *dialog);
@@ -137,10 +133,14 @@ static void	draw_dialog(t_confirmation_dialog *dialog)
 	uint64_t		channels;
 	int				rows;
 	int				cols;
+	const char		*no_label;
+	const char		*yes_label;
 	int				button_row;
 	int				no_x;
 	int				yes_x;
 
+	no_label = confirmation_no_label(dialog->kind);
+	yes_label = confirmation_yes_label(dialog->kind);
 	plane = dialog->plane;
 	rows = (int)ncplane_dim_y(plane);
 	cols = (int)ncplane_dim_x(plane);
@@ -158,16 +158,17 @@ static void	draw_dialog(t_confirmation_dialog *dialog)
 	put_centered(plane, rows / 2 - 1, cols,
 		confirmation_body(dialog->kind));
 	button_row = rows - 4;
-	no_x = (cols - (int)strlen(CONFIRM_NO_BUTTON)
-			- (int)strlen(CONFIRM_YES_BUTTON) - 6) / 2;
-	yes_x = no_x + (int)strlen(CONFIRM_NO_BUTTON) + 6;
-	draw_button(plane, button_row, no_x, CONFIRM_NO_BUTTON,
+	no_x = (cols - (int)strlen(no_label) - (int)strlen(yes_label) - 10) / 2;
+	if (no_x < 1)
+		no_x = 1;
+	yes_x = no_x + (int)strlen(no_label) + 10;
+	draw_button(plane, button_row, no_x, no_label,
 		dialog->focus == CONFIRM_FOCUS_NO);
-	draw_button(plane, button_row, yes_x, CONFIRM_YES_BUTTON,
+	draw_button(plane, button_row, yes_x, yes_label,
 		dialog->focus == CONFIRM_FOCUS_YES);
 	(void)ncplane_set_fg_rgb8(plane, 180, 148, 205);
 	(void)ncplane_set_bg_rgb8(plane, 18, 10, 28);
-	put_centered(plane, rows - 2, cols, CONFIRM_HINT);
+	put_centered(plane, rows - 2, cols, confirmation_hint(dialog->kind));
 }
 
 static void	draw_frame(struct ncplane *plane, int rows, int cols)

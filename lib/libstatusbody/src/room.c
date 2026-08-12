@@ -5,7 +5,7 @@ static const char	*g_modes[] = {
 	"single", "double", "battle-royale"
 };
 static const char	*g_statuses[] = {
-	"waiting", "ready", "in-game", "finished"
+	"waiting", "ready", "selecting", "in-game", "finished"
 };
 
 // Static Functions
@@ -38,6 +38,7 @@ int	body_room_encode(const t_body_room *in, char *out, size_t cap)
 		|| body_append(out, cap, &offset, "mode %s\n", g_modes[in->mode]) != 0
 		|| body_append(out, cap, &offset, "status %s\n",
 			g_statuses[in->status]) != 0
+		|| body_append(out, cap, &offset, "select %d\n", in->select_ms) != 0
 		|| body_append(out, cap, &offset, "required %d\n",
 			in->min_to_start) != 0
 		|| body_append(out, cap, &offset, "capacity %d\n", in->slot_count) != 0
@@ -86,6 +87,7 @@ static bool	room_valid(const t_body_room *room)
 	if (room->name[0] == '\0' || strchr(room->name, ' ') != NULL
 		|| room->mode < BODY_MODE_SINGLE || room->mode > BODY_MODE_BATTLE_ROYALE
 		|| room->status < BODY_ROOM_WAITING || room->status > BODY_ROOM_FINISHED
+		|| room->select_ms < 0 || room->select_ms > BODY_SELECT_MS_MAX
 		|| room->slot_count < 1 || room->slot_count > BODY_ROOM_MEMBERS_MAX
 		|| room->min_to_start < 1 || room->min_to_start > room->slot_count
 		|| room->member_count > (size_t)room->slot_count)
@@ -125,11 +127,12 @@ static int	encode_members(const t_body_room *room, char *out, size_t cap,
 	while (index < room->member_count)
 	{
 		member = &room->members[index];
-		if (body_append(out, cap, offset, "slot %d %" PRIu64 " %s %s %s\n",
+		if (body_append(out, cap, offset,
+				"slot %d %" PRIu64 " %s %s %" PRIu32 " %s\n",
 				member->slot, member->player_id,
 				member->owner ? "owner" : "player",
 				member->ready ? "ready" : "waiting",
-				member->username) != 0)
+				member->character, member->username) != 0)
 			return (-1);
 		index++;
 	}
@@ -158,10 +161,14 @@ static int	decode_header(t_body_cursor *cursor, t_body_room *room)
 	room->mode = (t_body_mode)index;
 	if (read_value(cursor, "status", value, sizeof(value)) != 0)
 		return (-1);
-	index = body_word_index(value, g_statuses, 4);
+	index = body_word_index(value, g_statuses, 5);
 	if (index < 0)
 		return (-1);
 	room->status = (t_body_room_status)index;
+	if (read_value(cursor, "select", value, sizeof(value)) != 0
+		|| body_parse_int(value, &room->select_ms, 0,
+			BODY_SELECT_MS_MAX) != 0)
+		return (-1);
 	if (read_value(cursor, "required", value, sizeof(value)) != 0
 		|| body_parse_int(value, &room->min_to_start, 1,
 			BODY_ROOM_MEMBERS_MAX) != 0
@@ -249,8 +256,9 @@ static int	decode_member(const char *line, t_body_room_member *member,
 
 	memset(member, 0, sizeof(*member));
 	used = 0;
-	if (sscanf(line, "slot %d %llu %15s %15s %31s%n", &member->slot,
-			&player_id, role, status, member->username, &used) != 5
+	if (sscanf(line, "slot %d %llu %15s %15s %" SCNu32 " %31s%n", &member->slot,
+			&player_id, role, status, &member->character, member->username,
+			&used) != 6
 		|| line[used] != '\0' || member->slot <= previous_slot
 		|| member->slot > slot_count || player_id == 0
 		|| (strcmp(role, "owner") != 0 && strcmp(role, "player") != 0)

@@ -140,6 +140,17 @@ test: all
 		$(MAKE) $(MAKE_FLAGS) -C $$d test DEPS_READY=1 || exit 1; \
 	done
 
+# --- load ------------------------------------------------------------------
+# Deliberately outside `test`: it reports what the server cost rather than
+# whether it was right, and takes as long as it is told to. STRESS_ARGS= passes
+# the fleet's shape through, HOST= drives a server that is already running:
+#   make stress STRESS_ARGS="--players 50 --seconds 30"
+#   make stress HOST=10.27.229.33
+STRESS_HOST_ENV	 = $(if $(HOST),HOST=$(HOST))
+
+stress:
+	@ $(STRESS_HOST_ENV) bash ./scripts/stress.sh $(STRESS_ARGS)
+
 ################################################################################
 #                                DEPENDENCIES                                  #
 ################################################################################

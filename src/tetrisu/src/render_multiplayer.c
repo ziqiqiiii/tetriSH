@@ -145,6 +145,14 @@ static bool	show_screen(t_render_ctx *ctx, const t_app_screen_view_model *view,
 
 	if (ctx == NULL || ctx->std == NULL || view == NULL || state == NULL)
 		return (false);
+	/*
+	 * A notification card is a bitmap over bitmaps, and notcurses wipes the
+	 * sprixel underneath rather than overlapping it. The panels it covered
+	 * are cached by signature, so nothing else would ever consider them
+	 * stale - the screen has to be told to rebuild instead of trusting it.
+	 */
+	if (render_notification_take_repaint(ctx))
+		rebuild_background = true;
 	render_menu_destroy(ctx);
 	if (!render_compatibility_mode(ctx)
 		&& render_mp_pixel_show(ctx, view, state, rebuild_background))
@@ -550,9 +558,16 @@ static void	draw_waiting_room(struct ncplane *plane,
 		put_line(plane, row + 2, 2, cols - 4, line);
 	}
 	(void)draw_chat(plane, room, state, row + 3, cols, rows - 2);
+	if (state->character_name[0] != '\0')
+	{
+		set_colour(plane, MP_PINK_R, MP_PINK_G, MP_PINK_B);
+		snprintf(line, sizeof(line), "FIGHTER  <  %s  >",
+			state->character_name);
+		put_centered(plane, rows - 3, cols, line, false);
+	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 	put_centered(plane, rows - 2, cols,
-		"[UP/DN] LIST [R] READY [S] START [C] CHAT [L] LEAVE", false);
+		"[<>] FIGHTER [R] READY [S] START [C] CHAT [L] LEAVE", false);
 }
 
 /**

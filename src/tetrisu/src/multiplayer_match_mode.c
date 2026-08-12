@@ -7,24 +7,36 @@ static int	preview_player_count(t_app_game_mode mode);
 static void	load_match_identity(const t_app_data_provider *provider,
 				t_app_profile_view_model *profile,
 				t_app_catalogue_view_model *characters);
-static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
+static bool	handle_match_key(t_match_authority *authority,
+				t_mp_match_state *state, t_render_ctx *ctx,
 				t_audio_ctx *audio, uint32_t key, const ncinput *input,
 				bool *rebuild, t_solo_handling_state *handling,
 				const t_solo_handling_config *handling_config);
-static bool	apply_game_key(t_mp_match_state *state, uint32_t key);
-static bool	apply_handling_actions(t_mp_match_state *state,
-				t_solo_handling_state *handling,
+static bool	apply_game_key(t_match_authority *authority,
+				t_mp_match_state *state, uint32_t key);
+static bool	apply_handling_actions(t_match_authority *authority,
+				t_mp_match_state *state, t_solo_handling_state *handling,
 				const t_solo_handling_config *config, int elapsed_ms);
-static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
-				uint32_t key);
+static void	select_power(t_match_authority *authority,
+				t_mp_match_state *state, t_audio_ctx *audio, uint32_t key);
+static bool	selection_online_update(const t_app_data_provider *provider,
+				const char *room_id, t_mp_match_state *state,
+				t_render_ctx *ctx, t_audio_ctx *audio, int elapsed_ms,
+				uint64_t *poll_due_ms);
+static void	selection_send_lock(const t_app_data_provider *provider,
+				const char *room_id, const t_mp_match_state *state);
 static void	play_match_events(t_audio_ctx *audio, uint32_t events);
+static bool	announce_effects(t_match_authority *authority,
+				const t_mp_match_state *state, t_render_ctx *ctx,
+				t_audio_ctx *audio);
 static bool	match_mouse_pixel_position(const t_render_ctx *ctx,
 				const ncinput *input, int *x, int *y);
 static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_mp_match_state *state,
 				const t_solo_handling_state *handling,
 				const t_solo_handling_config *config);
-static uint32_t	wait_match_input(t_render_ctx *ctx, int timeout_ms,
+static uint32_t	wait_match_input(t_render_ctx *ctx,
+					const t_match_authority *authority, int timeout_ms,
 					ncinput *input);
 
 /**
@@ -37,8 +49,9 @@ static uint32_t	wait_match_input(t_render_ctx *ctx, int timeout_ms,
  */
 int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_game_mode mode,
-	const char *room_id, const t_app_room_view_model *room)
+	const char *room_id, const t_app_room_view_model *room, t_net_client *net)
 {
+	t_match_authority		authority;
 	t_app_profile_view_model	profile;
 	t_app_catalogue_view_model	characters;
 	t_mp_match_state		state;
@@ -49,6 +62,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	uint32_t				selection_events;
 	uint64_t				previous_ms;
 	uint64_t				now_ms;
+	uint64_t				select_poll_ms;
+	bool					lock_sent;
 	int						elapsed_ms;
 	int						wait_ms;
 	bool					leave;
@@ -64,6 +79,30 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	mp_match_state_init(&state, mode, room_id, &profile, &characters,
 		match_seed());
 	mp_match_apply_room(&state, room, preview_player_count(mode));
+	match_authority_open(&authority, net, &state);
+	if (match_authority_is_online(&authority))
+	{
+		/*
+		 * Two ways to arrive online. If the room is still SELECTING the
+		 * server is holding its window open and the roster is exactly where
+		 * this screen should start; the clock is the room's, so the local
+		 * timer is left at zero and refreshed from the room instead. If the
+		 * boards are already dealt there is no selection left to run, and the
+		 * countdown in the first snapshot is what the player sees.
+		 */
+		if (room != NULL && room->state == APP_ROOM_STATE_SELECTING)
+		{
+			state.selection.locked = false;
+			state.selection.remaining_ms = room->select_ms;
+			state.phase = MP_MATCH_CHARACTER_SELECT;
+		}
+		else
+		{
+			state.selection.locked = true;
+			state.selection.remaining_ms = 0;
+			state.phase = MP_MATCH_PLAYING;
+		}
+	}
 	handling_config = solo_handling_default_config();
 	solo_handling_reset(&handling);
 	if (getenv("TETRISU_MATCH_PREVIEW_SKIP_SELECTION") != NULL)
@@ -89,6 +128,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	}
 	rebuild = false;
 	previous_ms = match_now_ms();
+	select_poll_ms = previous_ms;
+	lock_sent = false;
 	input_backlog = false;
 	while (!leave)
 	{
@@ -104,11 +145,13 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 				&handling_config);
 		if (wait_ms < 0 || wait_ms > RENDER_RESIZE_POLL_MS)
 			wait_ms = RENDER_RESIZE_POLL_MS;
+		if (match_authority_pending(&authority))
+			wait_ms = 0;
 		memset(&input, 0, sizeof(input));
 		if (input_backlog)
 			key = notcurses_get_nblock(ctx->nc, &input);
 		else
-			key = wait_match_input(ctx, wait_ms, &input);
+			key = wait_match_input(ctx, &authority, wait_ms, &input);
 		if (render_notification_next_wake_ms(ctx) == 0)
 			render_notification_tick(ctx);
 		now_ms = match_now_ms();
@@ -121,7 +164,24 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 		previous_ms = now_ms;
 		(void)audio_update(audio, elapsed_ms);
 		changed = false;
-		if (state.phase == MP_MATCH_CHARACTER_SELECT)
+		if (state.phase == MP_MATCH_CHARACTER_SELECT
+			&& match_authority_is_online(&authority))
+		{
+			/*
+			 * Online the window belongs to the room, so the local timer is
+			 * only ever an interpolation and the decision to start is never
+			 * this client's. Locking in is sent the moment it happens: it is
+			 * what lets the room stop waiting out its clock.
+			 */
+			if (state.selection.locked && !lock_sent)
+			{
+				selection_send_lock(provider, room_id, &state);
+				lock_sent = true;
+			}
+			changed = selection_online_update(provider, room_id, &state, ctx,
+					audio, elapsed_ms, &select_poll_ms) || changed;
+		}
+		else if (state.phase == MP_MATCH_CHARACTER_SELECT)
 		{
 			selection_events = mp_match_character_update(&state, elapsed_ms);
 			if ((selection_events & MP_SELECTION_EVENT_SECOND) != 0)
@@ -139,15 +199,31 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 		}
 		else if (state.phase == MP_MATCH_PLAYING)
 		{
-			changed = solo_game_update(&state.local_game, elapsed_ms) || changed;
-			changed = solo_game_update(&state.opponent_game, elapsed_ms) || changed;
+			changed = match_authority_update(&authority, &state, elapsed_ms)
+				|| changed;
 			if (!state.local_game.paused && !state.local_game.countdown_active
 				&& state.local_game.phase == SOLO_ACTIVE)
-				changed = apply_handling_actions(&state, &handling,
+				changed = apply_handling_actions(&authority, &state, &handling,
 						&handling_config, elapsed_ms) || changed;
 			play_match_events(audio, solo_game_take_events(&state.local_game));
 			(void)solo_game_take_events(&state.opponent_game);
-			if (state.local_game.phase == SOLO_GAME_OVER)
+			changed = announce_effects(&authority, &state, ctx, audio)
+				|| changed;
+			/*
+			 * A frame the opponent's presentation floor held back is due now,
+			 * and nothing else this turn is going to ask for a draw.
+			 */
+			if (render_multiplayer_match_deferred_ms(ctx) == 0)
+				changed = true;
+			/*
+			 * Only the fixture ends a match on a local top-out. Online the
+			 * verdict is the server's and arrives in a snapshot, because a
+			 * player who tops out has not necessarily lost yet - somebody else
+			 * may be about to do the same, and in Battle Royale the placing is
+			 * not known until they do.
+			 */
+			if (!match_authority_is_online(&authority) && !authority.lost
+				&& state.local_game.phase == SOLO_GAME_OVER)
 			{
 				mp_match_finish(&state, false,
 					state.mode == APP_GAME_MODE_BATTLE_ROYALE
@@ -179,8 +255,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 			 * signatures and returns early.
 			 */
 			changed = true;
-			leave = handle_match_key(&state, ctx, audio, key, &input, &rebuild,
-					&handling, &handling_config);
+			leave = handle_match_key(&authority, &state, ctx, audio, key,
+					&input, &rebuild, &handling, &handling_config);
 		}
 		input_backlog = false;
 		input_batch = 0;
@@ -196,8 +272,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 			key = notcurses_get_nblock(ctx->nc, &input);
 			if (key == 0 || key == (uint32_t)-1)
 				break ;
-			leave = handle_match_key(&state, ctx, audio, key, &input, &rebuild,
-					&handling, &handling_config);
+			leave = handle_match_key(&authority, &state, ctx, audio, key,
+					&input, &rebuild, &handling, &handling_config);
 		}
 		if (leave)
 			break ;
@@ -220,6 +296,7 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	}
 	if (mouse_enabled)
 		(void)notcurses_mice_disable(ctx->nc);
+	match_authority_close(&authority);
 	render_multiplayer_match_destroy(ctx);
 	return (0);
 }
@@ -234,33 +311,42 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
  * nothing ever hands the axis back, so one tap slides the piece to the wall.
  *
  * Solo reads the input descriptor itself for the same reason. This is that
- * function, minus the session socket a match has no use for.
+ * function, waiting on the session beside the terminal so a pushed snapshot
+ * wakes the loop as promptly as a keypress does - and a snapshot is now both
+ * boards, so sleeping through one stops the opponent as well.
  *
  * @param ctx Active render context.
+ * @param authority Authority whose session is waited on, if it has one.
  * @param timeout_ms Maximum wait in milliseconds.
  * @param input Output metadata for the received event.
  * @return A key code, 0 on timeout, or (uint32_t)-1 on failure.
  */
-static uint32_t	wait_match_input(t_render_ctx *ctx, int timeout_ms,
-	ncinput *input)
+static uint32_t	wait_match_input(t_render_ctx *ctx,
+	const t_match_authority *authority, int timeout_ms, ncinput *input)
 {
-	struct pollfd	poll_fd;
+	struct pollfd	poll_fd[2];
+	int				count;
 	int				result;
 
-	memset(&poll_fd, 0, sizeof(poll_fd));
-	poll_fd.fd = notcurses_inputready_fd(ctx->nc);
-	poll_fd.events = POLLIN;
-	if (poll_fd.fd < 0)
+	memset(poll_fd, 0, sizeof(poll_fd));
+	poll_fd[0].fd = notcurses_inputready_fd(ctx->nc);
+	poll_fd[0].events = POLLIN;
+	if (poll_fd[0].fd < 0)
 		return ((uint32_t)-1);
+	count = 1;
+	poll_fd[1].fd = match_authority_fd(authority);
+	poll_fd[1].events = POLLIN;
+	if (poll_fd[1].fd >= 0)
+		count = 2;
 	errno = 0;
-	result = poll(&poll_fd, 1, timeout_ms);
+	result = poll(poll_fd, (nfds_t)count, timeout_ms);
 	if (result < 0)
 	{
 		if (errno == EINTR)
 			return (0);
 		return ((uint32_t)-1);
 	}
-	if (result == 0 || (poll_fd.revents & POLLIN) == 0)
+	if (result == 0 || (poll_fd[0].revents & POLLIN) == 0)
 		return (0);
 	errno = 0;
 	return (notcurses_get_nblock(ctx->nc, input));
@@ -300,6 +386,9 @@ static int	next_match_wake_ms(t_render_ctx *ctx, t_audio_ctx *audio,
 		}
 	}
 	candidate = render_notification_next_wake_ms(ctx);
+	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
+		wake_ms = candidate;
+	candidate = render_multiplayer_match_deferred_ms(ctx);
 	if (wake_ms < 0 || (candidate >= 0 && candidate < wake_ms))
 		wake_ms = candidate;
 	candidate = audio_next_wake_ms(audio);
@@ -369,8 +458,9 @@ static void	load_match_identity(const t_app_data_provider *provider,
 			APP_CATALOGUE_CHARACTERS, characters);
 }
 
-static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
-	t_audio_ctx *audio, uint32_t key, const ncinput *input, bool *rebuild,
+static bool	handle_match_key(t_match_authority *authority,
+	t_mp_match_state *state, t_render_ctx *ctx, t_audio_ctx *audio,
+	uint32_t key, const ncinput *input, bool *rebuild,
 	t_solo_handling_state *handling,
 	const t_solo_handling_config *handling_config)
 {
@@ -394,7 +484,8 @@ static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
 		state->hovered_ability = ability;
 		if (key == NCKEY_BUTTON1 && ability > 0
 			&& input->evtype == NCTYPE_PRESS)
-			select_power(state, audio, (uint32_t)('0' + ability));
+			select_power(authority, state, audio,
+				(uint32_t)('0' + ability));
 		return (false);
 	}
 	if ((key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_DOWN)
@@ -403,7 +494,7 @@ static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
 		if (mp_match_movement_event(state, handling, handling_config, key,
 				input != NULL ? input->evtype : NCTYPE_UNKNOWN, &action))
 		{
-			(void)solo_game_apply_action(&state->local_game, action);
+			(void)match_authority_action(authority, state, action);
 			play_match_events(audio,
 				solo_game_take_events(&state->local_game));
 		}
@@ -462,7 +553,7 @@ static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
 	}
 	if (key >= '1' && key <= '4')
 	{
-		select_power(state, audio, key);
+		select_power(authority, state, audio, key);
 		return (false);
 	}
 	/*
@@ -471,7 +562,7 @@ static bool	handle_match_key(t_mp_match_state *state, t_render_ctx *ctx,
 	 * froze only the local board while rivals kept playing would be worse than
 	 * no key at all. P falls through to the game keys, where it means nothing.
 	 */
-	if (apply_game_key(state, key))
+	if (apply_game_key(authority, state, key))
 		play_match_events(audio, solo_game_take_events(&state->local_game));
 	return (false);
 }
@@ -503,22 +594,23 @@ static bool	match_mouse_pixel_position(const t_render_ctx *ctx,
 	return (true);
 }
 
-static bool	apply_game_key(t_mp_match_state *state, uint32_t key)
+static bool	apply_game_key(t_match_authority *authority,
+	t_mp_match_state *state, uint32_t key)
 {
 	if (key == NCKEY_UP || key == 'x' || key == 'X')
-		return (solo_game_apply_action(&state->local_game, SOLO_ROTATE_CW));
+		return (match_authority_action(authority, state, SOLO_ROTATE_CW));
 	if (key == 'z' || key == 'Z')
-		return (solo_game_apply_action(&state->local_game, SOLO_ROTATE_CCW));
+		return (match_authority_action(authority, state, SOLO_ROTATE_CCW));
 	if (key == ' ')
-		return (solo_game_apply_action(&state->local_game, SOLO_HARD_DROP));
+		return (match_authority_action(authority, state, SOLO_HARD_DROP));
 	if (key == 'c' || key == 'C')
-		return (solo_game_apply_action(&state->local_game, SOLO_HOLD));
+		return (match_authority_action(authority, state, SOLO_HOLD));
 	return (false);
 }
 
-static bool	apply_handling_actions(t_mp_match_state *state,
-	t_solo_handling_state *handling, const t_solo_handling_config *config,
-	int elapsed_ms)
+static bool	apply_handling_actions(t_match_authority *authority,
+	t_mp_match_state *state, t_solo_handling_state *handling,
+	const t_solo_handling_config *config, int elapsed_ms)
 {
 	t_solo_action	actions[SOLO_HANDLING_ACTION_CAP];
 	int				count;
@@ -532,15 +624,102 @@ static bool	apply_handling_actions(t_mp_match_state *state,
 	index = 0;
 	while (index < count)
 	{
-		changed = solo_game_apply_action(&state->local_game, actions[index])
+		changed = match_authority_action(authority, state, actions[index])
 			|| changed;
 		index++;
 	}
 	return (changed);
 }
 
-static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
-	uint32_t key)
+/**
+ * @brief Runs one frame of a roster screen whose clock belongs to the room.
+ *
+ * The local number is spent between polls so the seconds move smoothly, and
+ * corrected to the room's whenever one comes back - the room is the only thing
+ * that can know a rival has locked in and cut the window short. When the room
+ * stops selecting it has dealt the boards, and this screen has nothing left to
+ * decide: it becomes the match, and the countdown the server is already
+ * pushing is what the player sees next.
+ *
+ * @param provider Provider the room is read through.
+ * @param room_id The room being played in.
+ * @param state Match model whose selection and phase are advanced.
+ * @param ctx Render context, so a settled fighter can theme the screen.
+ * @param audio Audio context for the closing seconds.
+ * @param elapsed_ms Milliseconds since the previous frame.
+ * @param poll_due_ms In/out deadline for the next room read.
+ * @return true when something the renderer shows has changed.
+ */
+static bool	selection_online_update(const t_app_data_provider *provider,
+	const char *room_id, t_mp_match_state *state, t_render_ctx *ctx,
+	t_audio_ctx *audio, int elapsed_ms, uint64_t *poll_due_ms)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_app_screen_view_model					view;
+	uint64_t								now;
+	int										before;
+	bool									changed;
+
+	changed = false;
+	before = mp_match_character_seconds(state);
+	if (state->selection.remaining_ms > elapsed_ms)
+		state->selection.remaining_ms -= elapsed_ms;
+	else
+		state->selection.remaining_ms = 0;
+	if (mp_match_character_seconds(state) != before)
+	{
+		if (mp_match_character_seconds(state) <= MP_CHARACTER_TICK_AUDIO_SECONDS)
+			audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_TICK);
+		changed = true;
+	}
+	now = match_now_ms();
+	if (now < *poll_due_ms)
+		return (changed);
+	*poll_due_ms = now + MP_MATCH_SELECT_POLL_MS;
+	memset(&view, 0, sizeof(view));
+	view.screen = APP_SCREEN_WAITING_ROOM;
+	if (app_room_view_refresh(provider, room_id, &view) != APP_PROVIDER_OK)
+		return (changed);
+	state->selection.remaining_ms = view.data.room.select_ms;
+	if (view.data.room.state == APP_ROOM_STATE_SELECTING)
+		return (true);
+	state->selection.locked = true;
+	state->selection.remaining_ms = 0;
+	state->phase = MP_MATCH_PLAYING;
+	character = mp_match_selected_character(state);
+	if (character != NULL)
+		tetrisu_character_apply(ctx, character->name);
+	return (true);
+}
+
+/**
+ * @brief Tells the room which fighter this seat has settled on.
+ *
+ * It travels as a readiness because that is the route that carries a
+ * character: the seat is already ready, and re-declaring is how it names one.
+ * A failure is not reported to the player - the window has a clock behind it,
+ * so a lock that never arrived costs them the early start and nothing else.
+ *
+ * @param provider Provider the declaration is sent through.
+ * @param room_id The room being played in.
+ * @param state Match model holding the highlighted fighter.
+ */
+static void	selection_send_lock(const t_app_data_provider *provider,
+	const char *room_id, const t_mp_match_state *state)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_app_room_view_model					room;
+
+	character = mp_match_selected_character(state);
+	if (provider == NULL || provider->ready_room == NULL || character == NULL)
+		return ;
+	memset(&room, 0, sizeof(room));
+	(void)provider->ready_room(provider->userdata, room_id, true,
+		character->item_id, &room);
+}
+
+static void	select_power(t_match_authority *authority,
+	t_mp_match_state *state, t_audio_ctx *audio, uint32_t key)
 {
 	const t_app_catalogue_item_view_model	*character;
 	int								index;
@@ -549,6 +728,21 @@ static void	select_power(t_mp_match_state *state, t_audio_ctx *audio,
 	index = (int)(key - '1');
 	if (character == NULL || index < 0 || index >= APP_CHARACTER_ABILITY_COUNT)
 		return ;
+	if (match_authority_is_online(authority))
+	{
+		/*
+		 * The level goes up, never the ability: which four a level selects
+		 * from is decided by the character the account has equipped, and the
+		 * server reads that itself rather than taking a client's word for it.
+		 */
+		(void)match_authority_ability(authority, state,
+			(t_solo_ability)(SOLO_ABILITY_MIRURUN + index));
+		if (state->local_game.ability_result == SOLO_ABILITY_RESULT_ACTIVATED)
+			audio_play_sfx(audio, AUDIO_SFX_ABILITY_ACTIVATED);
+		else
+			audio_play_sfx(audio, AUDIO_SFX_ABILITY_REJECTED);
+		return ;
+	}
 	/*
 	 * The popover is hover-driven and the pointer leaving is what dismisses it,
 	 * so a keypress deliberately does not raise it: nothing would ever take it
@@ -591,4 +785,41 @@ static void	play_match_events(t_audio_ctx *audio, uint32_t events)
 		audio_play_sfx(audio, AUDIO_SFX_DOUBLE);
 	else if ((events & SOLO_EVENT_SINGLE) != 0)
 		audio_play_sfx(audio, AUDIO_SFX_SINGLE);
+}
+
+/**
+ * @brief Puts up a card for any ability that has just landed on this player.
+ *
+ * The effects themselves are the server's and were always enforced; what was
+ * missing was any way to tell. Paralysis and a rotate key that had stopped
+ * responding looked identical from this side, and the player had no reason to
+ * suspect the first.
+ *
+ * A card and a sound rather than a screen shake: the board is a terminal
+ * bitmap with no partial update, so moving it means re-encoding both boards
+ * for every frame of the shake - which would cost exactly the input latency
+ * the banding work went to remove, at the moment the player can least afford
+ * it. The card is drawn on its own plane over the top and costs one region.
+ *
+ * @param authority Authority holding what was last reported.
+ * @param state Match model carrying the server's latest counts.
+ * @param ctx Render context to raise the card on.
+ * @param audio Audio context, for the sting that goes with it.
+ * @return true when a card went up and the frame should be presented.
+ */
+static bool	announce_effects(t_match_authority *authority,
+		const t_mp_match_state *state, t_render_ctx *ctx, t_audio_ctx *audio)
+{
+	char	title[UI_NOTIFICATION_TITLE_MAX + 1];
+	char	message[UI_NOTIFICATION_MESSAGE_MAX + 1];
+
+	if (!match_authority_is_online(authority))
+		return (false);
+	if (!solo_effects_take_arrival(&state->local_game.effects,
+			&authority->reported, title, sizeof(title), message,
+			sizeof(message)))
+		return (false);
+	render_notification_show_effect(ctx, title, message);
+	audio_play_sfx(audio, AUDIO_SFX_ABILITY_REJECTED);
+	return (true);
 }

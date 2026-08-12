@@ -29,11 +29,26 @@ typedef struct s_mp_session
 	bool					create_pending;
 	t_app_screen_view_model	room_view;
 	t_waiting_room_state	room_state;
+	/*
+	 * The character catalogue, held so the waiting room can offer a choice of
+	 * fighter. Only owned entries are offered - the roster is what the player
+	 * bought, and the Marketplace is where buying happens.
+	 */
+	t_app_catalogue_view_model	characters;
 }	t_mp_session;
 
 // Static Functions
 static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 				bool refresh_geometry, bool replace_background);
+static void	restore_after_notification(t_render_ctx *ctx,
+				const t_menu_selection *menu);
+static bool	toggle_ready(const t_app_data_provider *provider,
+				t_app_room_view_model *room, t_mp_session *session);
+static void	load_room_characters(const t_app_data_provider *provider,
+				t_mp_session *session);
+static void	cycle_character(t_mp_session *session, int delta);
+static uint32_t	chosen_character(const t_mp_session *session);
+static void	name_character(t_mp_session *session);
 static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
@@ -45,6 +60,8 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
 				t_auth_action action);
+static void	adopt_account_loadout(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider);
 static int	activate_menu_selection(t_render_ctx *ctx, t_audio_ctx *audio,
 				t_app_navigation *navigation,
 				const t_menu_selection *menu,
@@ -87,6 +104,19 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 					const t_app_data_provider *provider,
 					t_app_navigation *navigation, t_mp_session *session,
 					t_room_action action);
+static bool	launch_match(t_render_ctx *ctx, t_audio_ctx *audio,
+					const t_app_data_provider *provider,
+					t_app_navigation *navigation, t_mp_session *session);
+static bool	waiting_room_counts_down_here(
+					const t_app_data_provider *provider);
+static bool	network_dropped(const t_app_data_provider *provider,
+					const t_app_net_session *session);
+static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
+					t_app_data_provider *provider,
+					t_app_navigation *navigation, t_mp_session *mp_session,
+					t_app_net_session *session);
+static void	network_heartbeat(const t_app_data_provider *provider,
+					t_app_net_session *session, uint64_t *due_ms);
 static bool	send_room_chat(const t_app_data_provider *provider,
 					t_app_room_view_model *room,
 					t_waiting_room_state *state);
@@ -111,6 +141,8 @@ static int	run_scaffold_step(t_render_ctx *ctx, t_audio_ctx *audio,
 static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 				uint32_t key);
 static void	enable_home_mouse(t_render_ctx *ctx);
+static t_net_client	*match_session(const t_app_data_provider *provider,
+						t_app_net_session *session);
 static void	apply_domain_to_config(t_net_config *cfg, const char *domain);
 
 /**
@@ -129,6 +161,7 @@ int	main(void)
 	t_audio_ctx			audio;
 	ncinput				input;
 	const char			*match_preview;
+	uint64_t			heartbeat_due_ms;
 	uint32_t			key;
 	int					hovered;
 	bool				direct_match_preview;
@@ -170,8 +203,18 @@ int	main(void)
 		direct_match_preview = navigation.current == APP_SCREEN_DOUBLE
 			|| navigation.current == APP_SCREEN_BATTLE_ROYALE;
 	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
+	heartbeat_due_ms = ui_notification_now_ms() + NET_HEARTBEAT_MS;
 	while (navigation.current != APP_SCREEN_QUIT)
 	{
+		/*
+		 * Every screen comes back through here, so this is the one place a
+		 * drop has to be noticed however it was discovered - a failed
+		 * request inside a screen, a poll that stopped answering, or the
+		 * heartbeat below.
+		 */
+		if (handle_network_drop(&ctx, &audio, &provider, &navigation,
+				&mp_session, &net_session))
+			continue ;
 		if (navigation.current == APP_SCREEN_ENTRY)
 		{
 			(void)app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN);
@@ -266,7 +309,8 @@ int	main(void)
 					? APP_GAME_MODE_DOUBLE : APP_GAME_MODE_BATTLE_ROYALE,
 					mp_session.room_id,
 					mp_session.room_view.screen == APP_SCREEN_WAITING_ROOM
-					? &mp_session.room_view.data.room : NULL) < 0)
+					? &mp_session.room_view.data.room : NULL,
+					match_session(&provider, &net_session)) < 0)
 			{
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 				continue ;
@@ -284,7 +328,18 @@ int	main(void)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
-		key = render_wait_input(&ctx, &input);
+		memset(&input, 0, sizeof(input));
+		key = render_wait_input_timeout(&ctx, &input, NET_HEARTBEAT_MS);
+		if (key == 0)
+		{
+			/*
+			 * The home screen is where a player leaves the client sitting,
+			 * so it is where a silent drop has to be found. Everything else
+			 * either polls the server already or is over in seconds.
+			 */
+			network_heartbeat(&provider, &net_session, &heartbeat_due_ms);
+			continue ;
+		}
 		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
 			continue ;
 		if (key == (uint32_t)-1)
@@ -329,11 +384,13 @@ int	main(void)
 		{
 			audio_volume_up(&audio);
 			render_notification_show_volume(&ctx, audio.music_volume);
+			restore_after_notification(&ctx, &menu);
 		}
 		else if (key == '-' || key == '_')
 		{
 			audio_volume_down(&audio);
 			render_notification_show_volume(&ctx, audio.music_volume);
+			restore_after_notification(&ctx, &menu);
 		}
 		else if ((key == 'q' || key == 'Q')
 			&& confirmation_prompt_run(&ctx, &audio, CONFIRM_QUIT_APP))
@@ -361,6 +418,43 @@ int	main(void)
 		return (1);
 	}
 	return (0);
+}
+
+/**
+ * @brief Puts the account's own loadout on screen, before the screen is drawn.
+ *
+ * The renderer is born wearing Classic and Mirurun (render_init), and until
+ * this existed nothing replaced them on the way in: tetrisu_visual_selection_
+ * bind() was reachable only from Settings and the Marketplace, so a returning
+ * player landed on home in the default theme and had to open Settings and
+ * re-equip a theme they already owned to get it back. The loadout is a fact
+ * about the account, so signing in is when it arrives.
+ *
+ * The Settings model is the carrier because it is the one the bind already
+ * takes - it is where the equipped ids come back from the server. Nothing is
+ * drawn here and nothing is written back; the caller reflows home immediately
+ * after, and it reads theme_assets.homepage.
+ *
+ * A provider that cannot answer, or an offline/preview session, leaves the
+ * defaults standing - which is what they are for.
+ *
+ * @param ctx Render context whose theme and character are being set.
+ * @param audio Audio context, moved to the theme's own music.
+ * @param provider Data provider the account is read through.
+ */
+static void	adopt_account_loadout(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider)
+{
+	t_app_screen_view_model	view;
+
+	if (provider == NULL)
+		return ;
+	memset(&view, 0, sizeof(view));
+	if (app_screen_view_load_for_session(provider, APP_SCREEN_SETTINGS, false,
+			&view) == APP_PROVIDER_INVALID)
+		return ;
+	tetrisu_visual_selection_bind(ctx, provider, &view.data.settings);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
 }
 
 /**
@@ -445,6 +539,7 @@ static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 	render_auth_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
+		adopt_account_loadout(ctx, audio, provider);
 		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		/*
@@ -1748,10 +1843,28 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	bool					polling;
 	bool					room_changed;
 
+	/*
+	 * A room that is not there is not a reason to close the game, and this is
+	 * the ordinary way to arrive at one: tetrisd destroys a room when its
+	 * match ends, so the room a player is returning *from* has already gone by
+	 * the time they get back to it. Answering that with -1 sent main.c
+	 * APP_NAV_QUIT, which is why pressing Enter or Escape on the results
+	 * screen closed the whole application.
+	 *
+	 * The lobby is where a player with no room belongs, so that is where they
+	 * go. Whether a finished room should instead be kept for a rematch is a
+	 * separate question, and a bigger one - until it is answered, going back a
+	 * screen is the honest thing to do rather than the last thing to do.
+	 */
 	if (!load_room_view(provider, session))
-		return (-1);
+	{
+		session->room_id[0] = '\0';
+		(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+		return (0);
+	}
 	(void)waiting_room_sync_state(&session->room_view.data.room);
 	waiting_room_state_init(&session->room_state);
+	load_room_characters(provider, session);
 	/*
 	 * Arriving from a finished match must not re-arm the countdown, for this
 	 * whole visit rather than only on entry. Reloading the room hands back a
@@ -1759,9 +1872,14 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	 * instant the player left the match, relaunched it, and left Escape looking
 	 * like it did nothing forever. The player asked to be back in the room;
 	 * starting the next match is their call, and S still does it.
+	 *
+	 * A server-backed room never arms it at all - the room decides when it is
+	 * under way and this screen learns that from a snapshot, so there is
+	 * nothing here to count down towards.
 	 */
 	auto_start = navigation->previous != APP_SCREEN_DOUBLE
-		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE;
+		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE
+		&& waiting_room_counts_down_here(provider);
 	if (auto_start
 		&& waiting_room_local_is_owner(&session->room_view.data.room)
 		&& waiting_room_auto_start_allowed(&session->room_view.data.room))
@@ -1801,7 +1919,30 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			{
 				refresh_deadline = now + WAITING_ROOM_REFRESH_MS;
 				refresh_waiting_room(provider, session, &room_changed);
-				if (session->room_view.data.room.state == APP_ROOM_STATE_IN_GAME)
+				/*
+				 * A poll that found nothing at the other end is the room's
+				 * heartbeat failing. Staying here would leave the player
+				 * watching a roster that has stopped updating; leaving lets
+				 * the main loop say so.
+				 */
+				if (provider != NULL && !provider->local_fixtures
+					&& provider->userdata != NULL
+					&& ((t_app_net_session *)provider->userdata)->net.state
+					== NET_OFFLINE)
+				{
+					(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+					continue ;
+				}
+				/*
+				 * SELECTING launches too. The room commits before it deals,
+				 * and the moment it does both players belong on the roster
+				 * screen - waiting for IN_GAME would leave them staring at
+				 * the waiting room through the whole select window and drop
+				 * them into a match already counting down.
+				 */
+				if (session->room_view.data.room.state == APP_ROOM_STATE_IN_GAME
+					|| session->room_view.data.room.state
+					== APP_ROOM_STATE_SELECTING)
 					action = ROOM_ACTION_LAUNCH;
 				else if (session->room_state.counting_down
 					&& !waiting_room_can_start(&session->room_view.data.room))
@@ -1854,7 +1995,8 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (waiting_room_action_leaves_screen(action))
 			discard_queued_input(ctx);
 		if (navigation->current == APP_SCREEN_WAITING_ROOM
-			&& (room_changed || waiting_room_state_view_changed(&previous,
+			&& (room_changed || render_notification_repaint_pending(ctx)
+				|| waiting_room_state_view_changed(&previous,
 					&session->room_state))
 			&& !render_waiting_room_show(ctx, &session->room_view,
 				&session->room_state, false))
@@ -1870,6 +2012,46 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
  * a network session cannot navigate away from a room state the server still
  * owns.
  */
+/**
+ * @brief Declares this player ready, through the server when there is one.
+ *
+ * A provider that owns the room owns readiness too: the declaration goes up
+ * and the roster that comes back is what gets drawn. Toggling locally as well
+ * would put the screen a step ahead of every other player, and the next
+ * refresh would take it away again - which is exactly what withdrawing
+ * readiness used to look like.
+ *
+ * With no such provider - an offline room - the local toggle is the whole of
+ * it, which is what the waiting room has always done.
+ *
+ * @param provider Data provider, possibly serving no room.
+ * @param room Room model, replaced with the server's answer on success.
+ * @param session Multiplayer screen session, whose feedback line is set.
+ * @return true when the declaration stood.
+ */
+static bool	toggle_ready(const t_app_data_provider *provider,
+	t_app_room_view_model *room, t_mp_session *session)
+{
+	bool	wanted;
+
+	wanted = !waiting_room_local_ready(room);
+	if (provider == NULL || provider->ready_room == NULL)
+	{
+		if (!waiting_room_toggle_ready(room))
+			return (true);
+		(void)waiting_room_sync_state(room);
+		session->room_state.feedback = waiting_room_local_ready(room)
+			? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+		return (true);
+	}
+	if (provider->ready_room(provider->userdata, room->id, wanted,
+			chosen_character(session), room) != APP_PROVIDER_OK)
+		return (false);
+	session->room_state.feedback = wanted
+		? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
+	return (true);
+}
+
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_navigation *navigation,
 	t_mp_session *session, t_room_action action)
@@ -1881,15 +2063,28 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	if (action == ROOM_ACTION_TOGGLE_READY)
 	{
 		audio_play_menu_select(audio);
-		if (waiting_room_toggle_ready(room))
-		{
-			(void)waiting_room_sync_state(room);
-			session->room_state.feedback = waiting_room_local_ready(room)
-				? ROOM_FEEDBACK_READY : ROOM_FEEDBACK_NOT_READY;
-		}
+		if (!toggle_ready(provider, room, session))
+			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
 		/* Un-readying mid-countdown stops it: the room is no longer eligible. */
 		if (session->room_state.counting_down && !waiting_room_can_start(room))
 			(void)waiting_room_cancel_countdown(&session->room_state);
+		return (true);
+	}
+	if (action == ROOM_ACTION_CHARACTER_PREV
+		|| action == ROOM_ACTION_CHARACTER_NEXT)
+	{
+		audio_play_menu_move(audio);
+		cycle_character(session,
+			action == ROOM_ACTION_CHARACTER_NEXT ? 1 : -1);
+		/*
+		 * A player who had already declared is re-declared, because the
+		 * declaration is what carries the choice - otherwise changing fighter
+		 * after pressing R would change nothing the server ever heard.
+		 */
+		if (waiting_room_local_ready(room) && provider != NULL
+			&& provider->ready_room != NULL)
+			(void)provider->ready_room(provider->userdata, room->id, true,
+				chosen_character(session), room);
 		return (true);
 	}
 	if (action == ROOM_ACTION_START)
@@ -1900,8 +2095,10 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		blocker = waiting_room_start_blocker(room);
 		if (blocker != ROOM_FEEDBACK_NONE)
 			session->room_state.feedback = blocker;
-		else
+		else if (waiting_room_counts_down_here(provider))
 			(void)waiting_room_begin_countdown(&session->room_state);
+		else
+			return (launch_match(ctx, audio, provider, navigation, session));
 		return (true);
 	}
 	if (action == ROOM_ACTION_SEND_CHAT)
@@ -1921,26 +2118,7 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		return (true);
 	}
 	if (action == ROOM_ACTION_LAUNCH)
-	{
-		if (room->state != APP_ROOM_STATE_IN_GAME
-			&& !waiting_room_local_is_owner(room))
-		{
-			(void)waiting_room_cancel_countdown(&session->room_state);
-			return (true);
-		}
-		if (room->state != APP_ROOM_STATE_IN_GAME
-			&& app_room_view_start(provider, room->id, &session->room_view)
-				!= APP_PROVIDER_OK)
-		{
-			(void)waiting_room_cancel_countdown(&session->room_state);
-			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
-			return (true);
-		}
-		audio_play_menu_select(audio);
-		(void)app_navigation_dispatch(navigation,
-			waiting_room_launch_action(&session->room_view.data.room));
-		return (true);
-	}
+		return (launch_match(ctx, audio, provider, navigation, session));
 	if (action == ROOM_ACTION_LEAVE)
 	{
 		if (app_room_view_leave(provider, room->id) == APP_PROVIDER_OK)
@@ -1954,6 +2132,170 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	else if (action == ROOM_ACTION_QUIT)
 		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	return (true);
+}
+
+/**
+ * @brief Leaves the waiting room for the match, starting it if it needs it.
+ *
+ * A room already under way is one to walk into, not one to start. SELECTING
+ * counts as under way: the server opened that window itself and will deal the
+ * boards once both players have chosen, so a START sent from here would be
+ * asking for a match that is already being set up.
+ *
+ * @param ctx Render context.
+ * @param audio Audio context.
+ * @param provider Data provider that may own the start.
+ * @param navigation Navigation state to dispatch through.
+ * @param session Multiplayer screen session.
+ * @return true unless the caller must tear the screen down.
+ */
+static bool	launch_match(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
+{
+	t_app_room_view_model	*room;
+
+	(void)ctx;
+	room = &session->room_view.data.room;
+	if (!waiting_room_is_under_way(room)
+		&& !waiting_room_local_is_owner(room))
+	{
+		(void)waiting_room_cancel_countdown(&session->room_state);
+		return (true);
+	}
+	if (!waiting_room_is_under_way(room)
+		&& app_room_view_start(provider, room->id, &session->room_view)
+			!= APP_PROVIDER_OK)
+	{
+		(void)waiting_room_cancel_countdown(&session->room_state);
+		session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
+		return (true);
+	}
+	audio_play_menu_select(audio);
+	(void)app_navigation_dispatch(navigation,
+		waiting_room_launch_action(&session->room_view.data.room));
+	return (true);
+}
+
+/**
+ * @brief Reports whether the link to the server has gone since it was up.
+ *
+ * The two halves matter separately. `connected` is the client's own record
+ * that it once reached the server, and NET_OFFLINE is where net_client parks
+ * a socket whose send or receive failed - so together they name a link that
+ * existed and does not any more, which is the only case worth interrupting
+ * the player over. A session that never connected is a sign-in that has not
+ * happened yet, not a drop.
+ *
+ * @param provider The app's data provider; fixtures have nothing to drop.
+ * @param session The app's network session.
+ * @return true when a live connection has been lost.
+ */
+static bool	network_dropped(const t_app_data_provider *provider,
+	const t_app_net_session *session)
+{
+	if (provider == NULL || provider->local_fixtures || session == NULL)
+		return (false);
+	return (session->connected && session->net.state == NET_OFFLINE);
+}
+
+/**
+ * @brief Tells the player the connection is gone and takes their answer.
+ *
+ * Falling back silently is what this replaces. Both authorities already swap
+ * themselves to the local rules when the server stops answering, so a dropped
+ * player kept playing - against a board that had quietly stopped being the
+ * server's, with a result nobody would record and a room that no longer knew
+ * them. The fallback is the right behaviour; being told is the missing half.
+ *
+ * Offline is the safe answer because it takes nothing away: the provider
+ * becomes the local fixture, which is the same one a player who never signed
+ * in uses, and the screens that need a server hide themselves behind the
+ * navigation's offline flag. Signing in again goes back to the auth screen,
+ * whose CHECK SERVER redials - a dead session is redialled there already.
+ *
+ * @param ctx Render context.
+ * @param audio Audio context.
+ * @param provider The app's data provider, replaced when offline is chosen.
+ * @param navigation Navigation state, moved to wherever the answer leads.
+ * @param mp_session Multiplayer session, whose room is gone with the link.
+ * @param session The network session being abandoned.
+ * @return true when a drop was handled and the caller must re-dispatch.
+ */
+static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *mp_session, t_app_net_session *session)
+{
+	bool	sign_in_again;
+
+	if (!network_dropped(provider, session))
+		return (false);
+	session->connected = false;
+	session->has_catalogue = false;
+	memset(mp_session->room_id, 0, sizeof(mp_session->room_id));
+	mp_session->create_pending = false;
+	sign_in_again = confirmation_prompt_run(ctx, audio,
+			CONFIRM_CONNECTION_LOST);
+	navigation->previous = navigation->current;
+	if (sign_in_again)
+	{
+		navigation->offline = false;
+		navigation->current = APP_SCREEN_LOGIN;
+	}
+	else
+	{
+		app_fixture_provider_init(provider);
+		navigation->offline = true;
+		navigation->current = APP_SCREEN_HOME;
+	}
+	return (true);
+}
+
+/**
+ * @brief Asks the server whether it is still there, at most so often.
+ *
+ * PROFILE rather than a method of its own: it is the cheapest thing the
+ * server already answers, and inventing a route for this would put a keepalive
+ * in the protocol to serve one client's idle screen. What matters is the
+ * round trip, not the body - net_request parks a failed socket at NET_OFFLINE
+ * on its way out, and that is the whole result this reads.
+ *
+ * @param provider The app's data provider; fixtures never ask.
+ * @param session The session to probe.
+ * @param due_ms When the next probe is due; advanced by one interval here.
+ */
+static void	network_heartbeat(const t_app_data_provider *provider,
+	t_app_net_session *session, uint64_t *due_ms)
+{
+	t_body_profile	profile;
+	uint64_t		now;
+
+	if (provider == NULL || provider->local_fixtures || session == NULL
+		|| !session->connected || session->net.state < NET_AUTHED)
+		return ;
+	now = ui_notification_now_ms();
+	if (now < *due_ms)
+		return ;
+	*due_ms = now + NET_HEARTBEAT_MS;
+	(void)net_profile(&session->net, &profile);
+}
+
+/**
+ * @brief Reports whether the pre-match countdown belongs to this client.
+ *
+ * It does when there is no server to own one. A room the server is running
+ * counts itself down - it opens the select window, holds its own clock, and
+ * deals both players in on the same tick - and a second countdown here ran
+ * three seconds in the waiting room before the request that starts any of
+ * that had even been sent. Both players then watched a number that meant
+ * nothing, and the one the match actually begins on arrived after it.
+ *
+ * @param provider Data provider backing the room.
+ * @return true when the local countdown is the only one there is.
+ */
+static bool	waiting_room_counts_down_here(const t_app_data_provider *provider)
+{
+	return (provider == NULL || provider->local_fixtures);
 }
 
 /**
@@ -2272,6 +2614,31 @@ static t_app_nav_action	scaffold_navigation_action(t_app_screen screen,
 /**
  * @brief Enables pointer movement and click reporting for the home menu.
  */
+/**
+ * @brief Hands a match the session it is to be played on, if there is one.
+ *
+ * A match needs more of a session than Solo does. Solo takes its own room on
+ * the way in, so being signed in is enough; a match is played in a room the
+ * waiting room already seated this client in, and the play path bound with
+ * that seat is what every pushed snapshot is matched against. Without it the
+ * client would connect, render, and silently discard every frame the server
+ * sent - so a session that has not got that far is not one to play on, and
+ * the fixture is the honest answer instead.
+ *
+ * @param provider The app's data provider; fixtures never carry a session.
+ * @param session The app's network session.
+ * @return The session to play against, or NULL to play the local fixture.
+ */
+static t_net_client	*match_session(const t_app_data_provider *provider,
+					t_app_net_session *session)
+{
+	if (provider->local_fixtures || !session->connected)
+		return (NULL);
+	if (session->net.state < NET_IN_ROOM || session->net.play_path[0] == '\0')
+		return (NULL);
+	return (&session->net);
+}
+
 static void	enable_home_mouse(t_render_ctx *ctx)
 {
 	(void)notcurses_mice_enable(ctx->nc, NCMICE_ALL_EVENTS);
@@ -2280,6 +2647,25 @@ static void	enable_home_mouse(t_render_ctx *ctx)
 /**
  * @brief Rebuilds the home screen after resize or scaffold navigation.
  */
+/**
+ * @brief Redraws the home screen a notification card has just covered.
+ *
+ * The card is a bitmap and so is the menu under it. Notcurses wipes the
+ * sprixel underneath rather than overlapping it, and the home loop redraws
+ * only on a keypress that changes the selection - so a volume press left the
+ * menu erased until something else happened to repaint it.
+ *
+ * @param ctx Active render context.
+ * @param menu Current selection, redrawn where it was.
+ */
+static void	restore_after_notification(t_render_ctx *ctx,
+	const t_menu_selection *menu)
+{
+	if (!render_notification_take_repaint(ctx))
+		return ;
+	(void)reflow_home(ctx, menu, false, false);
+}
+
 static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	bool refresh_geometry, bool replace_background)
 {
@@ -2293,4 +2679,119 @@ static int	reflow_home(t_render_ctx *ctx, const t_menu_selection *menu,
 	render_menu_move_bunny(ctx, menu);
 	render_notification_reflow(ctx);
 	return (0);
+}
+
+/**
+ * @brief Fetches the character catalogue the waiting room offers a choice from.
+ *
+ * A provider that serves no catalogue leaves the roster empty, and an empty
+ * roster is not a failure: it means the client has nothing to offer and sends
+ * no character, which the server reads as "whatever the account has equipped".
+ * That is exactly what a Single game does and what a client with no selector
+ * has always done.
+ *
+ * The index is started on the equipped character, so the default choice is the
+ * one the player already made in the Marketplace.
+ *
+ * @param provider Data provider, possibly serving no catalogue.
+ * @param session Multiplayer session whose roster is filled.
+ */
+static void	load_room_characters(const t_app_data_provider *provider,
+		t_mp_session *session)
+{
+	int	index;
+
+	memset(&session->characters, 0, sizeof(session->characters));
+	session->room_state.character_index = 0;
+	if (provider == NULL || provider->load_catalogue == NULL)
+		return ;
+	if (provider->load_catalogue(provider->userdata, APP_CATALOGUE_CHARACTERS,
+			&session->characters) != APP_PROVIDER_OK)
+	{
+		memset(&session->characters, 0, sizeof(session->characters));
+		return ;
+	}
+	index = 0;
+	while (index < session->characters.count)
+	{
+		if (session->characters.items[index].owned
+			&& session->characters.items[index].equipped)
+		{
+			session->room_state.character_index = index;
+			break ;
+		}
+		index++;
+	}
+	name_character(session);
+}
+
+/**
+ * @brief Moves the choice to the next owned character in either direction.
+ *
+ * Unowned entries are stepped over rather than refused, so the roster reads as
+ * the fighters this player has rather than as a catalogue with gaps in it. A
+ * player who owns exactly one lands back on it, which is the correct no-op.
+ *
+ * @param session Multiplayer session holding the roster and the index.
+ * @param delta +1 for the next fighter, -1 for the previous.
+ */
+static void	cycle_character(t_mp_session *session, int delta)
+{
+	int	count;
+	int	index;
+	int	tried;
+
+	count = session->characters.count;
+	if (count <= 0)
+		return ;
+	index = session->room_state.character_index;
+	tried = 0;
+	while (tried < count)
+	{
+		index = (index + delta + count) % count;
+		tried++;
+		if (session->characters.items[index].owned)
+		{
+			session->room_state.character_index = index;
+			break ;
+		}
+	}
+	name_character(session);
+}
+
+/**
+ * @brief The character id this player will take into the match.
+ *
+ * @param session Multiplayer session holding the roster and the index.
+ * @return The chosen item id, or 0 when there is no roster to choose from.
+ */
+static uint32_t	chosen_character(const t_mp_session *session)
+{
+	int	index;
+
+	index = session->room_state.character_index;
+	if (index < 0 || index >= session->characters.count)
+		return (0);
+	if (!session->characters.items[index].owned)
+		return (0);
+	return (session->characters.items[index].item_id);
+}
+
+/**
+ * @brief Copies the chosen fighter's name where the renderers can read it.
+ *
+ * @param session Multiplayer session whose roster and index are read.
+ */
+static void	name_character(t_mp_session *session)
+{
+	int	index;
+
+	session->room_state.character_name[0] = '\0';
+	index = session->room_state.character_index;
+	if (index < 0 || index >= session->characters.count
+		|| !session->characters.items[index].owned)
+		return ;
+	snprintf(session->room_state.character_name,
+		sizeof(session->room_state.character_name), "%s",
+		session->characters.items[index].name);
 }

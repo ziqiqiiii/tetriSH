@@ -54,6 +54,22 @@ bool	ui_notification_show_ownership(t_ui_notification_stack *stack,
 		0, now_ms));
 }
 
+/**
+ * @brief Adds or refreshes one incoming-ability notification.
+ *
+ * @param stack Destination stack.
+ * @param title What landed.
+ * @param message What it does, in the player's terms.
+ * @param now_ms Current monotonic timestamp.
+ * @return true when the stack's content changed.
+ */
+bool	ui_notification_show_effect(t_ui_notification_stack *stack,
+	const char *title, const char *message, uint64_t now_ms)
+{
+	return (show_notification(stack, UI_NOTIFICATION_EFFECT, title, message,
+			0, now_ms));
+}
+
 static bool	show_notification(t_ui_notification_stack *stack,
 	t_ui_notification_kind kind, const char *title, const char *message,
 	int percent, uint64_t now_ms)

@@ -87,28 +87,36 @@ stateDiagram-v2
         [*] --> R_WAITING
         state "WAITING" as R_WAITING
         state "READY" as R_READY
+        state "SELECTING" as R_SELECTING
         state "IN_GAME" as R_IN_GAME
         state "FINISHED" as R_FINISHED
 
         R_WAITING --> R_READY : players >= min
         R_READY --> R_WAITING : players below min
+        R_READY --> R_SELECTING : room_begin_selection
+        R_SELECTING --> R_WAITING : room_abort_selection
+        R_SELECTING --> R_IN_GAME : room_start
         R_READY --> R_IN_GAME : owner room_start
         R_IN_GAME --> R_READY : room_abort_start
         R_IN_GAME --> R_FINISHED : room_finish
+        R_IN_GAME --> R_WAITING : room_rematch
         R_FINISHED --> [*] : slots cleared
     }
 
     state "SLOT (per slot)" as SLOT {
         [*] --> S_WAITING
-        state "WAITING (empty)" as S_WAITING
+        state "WAITING (empty, or seated and not ready)" as S_WAITING
         state "JOINING" as S_JOINING
-        state "READY (occupied)" as S_READY
+        state "READY (seated and declared)" as S_READY
         state "LEAVING" as S_LEAVING
 
         S_WAITING --> S_JOINING : room_seat begins
-        S_JOINING --> S_READY : slot_occupy succeeds
+        S_JOINING --> S_WAITING : slot_occupy succeeds (seated, not ready)
         S_JOINING --> S_WAITING : probe fails mid-join (no partial seat)
+        S_WAITING --> S_READY : room_set_ready(true)
+        S_READY --> S_WAITING : room_set_ready(false)
         S_READY --> S_LEAVING : room_release begins
+        S_WAITING --> S_LEAVING : room_release begins
         S_LEAVING --> S_WAITING : slot_clear
     }
 
@@ -125,6 +133,11 @@ stateDiagram-v2
 ## The Connection Probe Seam
 
 `room_seat`, `room_release`, and `room_select_successor` take a
+Readiness is a seat's own fact, moved only by `room_set_ready`. Occupying a
+seat leaves it `WAITING`, because a room whose every occupant was ready by
+definition could never be told that one of them was not — which is what left a
+player unable to withdraw a readiness they had never declared.
+
 `bool (*probe)(void *ctx, t_player_id pid)` callback plus an opaque `ctx`;
 `NULL` means "everyone is connected". It is the library's only I/O-adjacent
 seam.
@@ -175,10 +188,13 @@ Single public header, `include/tetrisroom.h`. Slot indices are 1-based.
 
 | Function | Description |
 |---|---|
-| `room_can_start(r, requester)` | `START_ACCEPTED`, `START_NOT_OWNER`, `START_TOO_FEW_PLAYERS`, or `START_ALREADY_STARTED` |
+| `room_can_start(r, requester)` | `START_ACCEPTED`, `START_NOT_OWNER`, `START_TOO_FEW_PLAYERS`, or `START_ALREADY_STARTED`. A `SELECTING` room is startable, because starting is what closes the window |
 | `room_start(r, requester)` | Re-runs `room_can_start`; flips to `ROOM_IN_GAME` only on `START_ACCEPTED`, unchanged on every rejection |
 | `room_abort_start(r)` | Undo a start the caller could not carry out: `ROOM_IN_GAME` back to `WAITING`/`READY`, slots untouched. Only `IN_GAME` is undone, so a finished room stays finished |
-| `room_finish(r)` | Set `ROOM_FINISHED`, clear every slot, reset the count to `0` |
+| `room_begin_selection(r)` | Open the character-select window on a `READY` room: `ROOM_SELECTING`, nobody playing. `-1` from any other status, so the window cannot be opened on a room that could not have started |
+| `room_abort_selection(r)` | Close a window the room can no longer see through — a player leaving can take it below its minimum. Recomputes back to `WAITING`/`READY` |
+| `room_finish(r)` | Set `ROOM_FINISHED`, clear every slot, reset the count to `0`. The room is being handed back |
+| `room_rematch(r)` | End the match and keep everyone seated for another: straight back to `WAITING`/`READY`, memberships and owner untouched, readiness withdrawn. Never `FINISHED` in between |
 | `room_state_message(r)` | Map `t_room_status` to its fixed UI string |
 
 ### Lobby (`lobby.c`)

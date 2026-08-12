@@ -15,6 +15,7 @@ static int	generate_certs(t_fixture *fx);
 static int	connect_tcp(int port);
 static int	send_message(t_harness *hc, t_htttp_message *msg);
 static int	body_field(const t_htttp_message *msg, const char *key, char *out, size_t cap);
+static t_item_id	owned_character(t_fixture *fx, t_player_id pid);
 
 /**
  * @brief Starts a throwaway server: own port, own data directory, own certs.
@@ -319,6 +320,78 @@ int	hc_join_new(t_harness *hc, const char *mode, char *room_out, size_t cap)
 	}
 	htttp_message_free(&resp);
 	return (status);
+}
+
+/**
+ * @brief Declares ready and locks a fighter in, in one request.
+ *
+ * A room with an opponent in it no longer deals itself from READY or from
+ * START - both open the character-select window instead, and the boards are
+ * dealt when every seat has named a fighter. So a test that wants a match is
+ * a test that has to choose one, and this is that step: every suite that
+ * plays a Double game needs it, and none of them care which fighter it picks.
+ *
+ * The id is read out of the store rather than written down here, because
+ * hard-coding one would be a guess about config/characters.cfg. A player who
+ * owns none sends a bare declaration, which is still a ready seat - it just
+ * is not a locked one, and the room will wait out its clock.
+ *
+ * @param hc Connected, authenticated client that is seated in the room.
+ * @param fx Running fixture, whose store is reopened read-only.
+ * @param path Room route the declaration is sent to.
+ * @return The response status, or -1 when the request failed.
+ */
+int	hc_lock_in(t_harness *hc, t_fixture *fx, const char *path)
+{
+	t_htttp_message	resp;
+	t_item_id		pick;
+	char			body[64];
+	int				status;
+
+	pick = owned_character(fx, hc->player_id);
+	if (pick == 0)
+		snprintf(body, sizeof(body), "ready 1\n");
+	else
+		snprintf(body, sizeof(body), "ready 1\ncharacter %u\n",
+			(unsigned)pick);
+	if (hc_request(hc, "READY", path, body, &resp) != 0)
+		return (-1);
+	status = (int)resp.status_code;
+	htttp_message_free(&resp);
+	return (status);
+}
+
+/**
+ * @brief A character in the catalogue that this player already owns.
+ *
+ * @param fx Running fixture, whose store is reopened read-only.
+ * @param pid The player to ask about.
+ * @return An owned character id, or 0 when the player owns none.
+ */
+static t_item_id	owned_character(t_fixture *fx, t_player_id pid)
+{
+	t_character	roster[BODY_CATALOGUE_MAX];
+	t_db		*db;
+	t_item_id	found;
+	size_t		count;
+	size_t		i;
+
+	if (db_open(fx->cfg.data_dir, fx->cfg.config_dir, &db) != DB_OK)
+		return (0);
+	count = 0;
+	if (db_characters(db, roster, BODY_CATALOGUE_MAX, &count) != DB_OK)
+		count = 0;
+	found = 0;
+	i = 0;
+	while (i < count && found == 0)
+	{
+		if (db_player_owns_character(db, pid, roster[i].character_id)
+			== DB_TRUE)
+			found = roster[i].character_id;
+		i++;
+	}
+	db_close(db);
+	return (found);
 }
 
 /**

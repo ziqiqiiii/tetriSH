@@ -9,6 +9,11 @@ static bool				begin_clear(t_game *g);
 static void				finish_clear(t_game *g);
 static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
+static void				drain_garbage(t_game *g);
+static void				inject_rows(t_game *g, int lines);
+static void				age_server_effects(t_game *g);
+static void				drain_abilities(t_game *g);
+static void				apply_bomb(t_game *g);
 
 /**
  * @brief Blanks a game slot back to "nobody is playing here".
@@ -347,6 +352,15 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 		out->charge = BODY_CHARGE_MAX;
 	out->last_ability = g->last_ability;
 	out->last_clear = g->last_clear;
+	out->pending = g->pending_garbage + g->pending_ability_garbage;
+	out->effect_paralysis = g->effects.no_rotate_pieces;
+	out->effect_inversion = g->effects.inverted_pieces;
+	out->effect_nue = g->effects.no_fastdrop_pieces;
+	out->effect_thwack = g->effects.thwack_pieces;
+	out->effect_fry = g->effects.fry_rows;
+	out->effect_dark = g->dark_pieces;
+	out->effect_pals = g->pals_pieces;
+	out->effect_mirror = g->effects.mirror_armed;
 	out->clearing_count = g->clearing_count;
 	out->clearing_ms = g->clearing_ms;
 	row = 0;
@@ -454,6 +468,13 @@ static void	finish_clear(t_game *g)
 	cleared = board_clear_lines(&g->board);
 	if (cleared > 0 && effect_thwack_active(&g->effects))
 		cleared += board_cascade_clear(&g->board);
+	/*
+	 * Fry's second half. The rows it filled burn off this floor here - that
+	 * part always worked - and the count is taken before effect_on_piece_lock
+	 * consumes it, because they are owed to somebody. room.c passes them on;
+	 * a game does not know it has a Target.
+	 */
+	g->fry_owed += effect_fry_rows(&g->effects);
 	board_cut_bottom(&g->board, effect_fry_rows(&g->effects));
 	perfect = cleared > 0 && board_is_empty(&g->board);
 	score_apply_clear(&g->score, cleared, g->level, T_SPIN_NONE, perfect);
@@ -464,11 +485,290 @@ static void	finish_clear(t_game *g)
 		charge_on_clear(&g->charge, cleared);
 	}
 	g->last_clear = clear_label(cleared, perfect);
+	if (cleared > 0)
+		g->cleared_owed += cleared;
 	effect_on_piece_lock(&g->effects);
+	age_server_effects(g);
 	g->clearing_count = 0;
 	g->clearing_ms = 0;
 	g->accum_ms = 0;
+	drain_abilities(g);
+	drain_garbage(g);
 	spawn_next(g);
+}
+
+/**
+ * @brief Applies the abilities that were aimed at this player.
+ *
+ * Before the garbage and before the next piece, for the same reason as each
+ * other: there is no active piece to invalidate here, and a board that Sirtet
+ * inverted should take its garbage on top of the inversion rather than have
+ * the inversion applied to rows that arrived afterwards.
+ *
+ * The queue is emptied whether or not each entry did anything. An effect that
+ * cannot be applied is spent, not held: the sender paid for it and its moment
+ * has passed.
+ *
+ * @param g Game whose queue is being emptied.
+ */
+static void	drain_abilities(t_game *g)
+{
+	int	index;
+
+	index = 0;
+	while (index < g->pending_count)
+	{
+		if (g->pending[index].kind == PENDING_EFFECT)
+		{
+			effect_apply(&g->effects,
+				(t_status_effect)g->pending[index].argument);
+			/*
+			 * Dark carries no counter of its own, so its length is set where
+			 * it lands rather than where it was sent - the ageing below runs
+			 * on the holder's locks, and arming it any earlier would spend a
+			 * piece of it on the lock that delivered it.
+			 */
+			if (g->pending[index].argument == (int)EFFECT_DARK)
+				g->dark_pieces = TETRISD_DARK_PIECES;
+		}
+		else if (g->pending[index].kind == PENDING_BOMB)
+			apply_bomb(g);
+		else if (g->pending[index].kind == PENDING_SIRTET)
+			board_invert(&g->board);
+		index++;
+	}
+	g->pending_count = 0;
+}
+
+/**
+ * @brief Halloween L4 (Bomb): destroys scattered cells on this board.
+ *
+ * "Randomly selected" without a random source: the cells walk from the game's
+ * own counters, the same trick garbage's hole column uses. libtetrisbrain owns
+ * no RNG on purpose, and a scatter that moves with how long the game has run
+ * is unpredictable to a player without being unreproducible to a test.
+ *
+ * @param g Game whose board is bombed.
+ */
+static void	apply_bomb(t_game *g)
+{
+	int			cols[TETRISD_BOMB_CELLS];
+	int			rows[TETRISD_BOMB_CELLS];
+	uint32_t	walk;
+	int			index;
+
+	walk = (uint32_t)g->seq + g->garbage_seq * 31u + 17u;
+	index = 0;
+	while (index < TETRISD_BOMB_CELLS)
+	{
+		walk = walk * 1664525u + 1013904223u;
+		cols[index] = (int)((walk >> 16) % (uint32_t)BOARD_WIDTH);
+		rows[index] = (int)((walk >> 8) % (uint32_t)BOARD_HEIGHT);
+		index++;
+	}
+	g->garbage_seq++;
+	board_clear_cells(&g->board, cols, rows, TETRISD_BOMB_CELLS);
+}
+
+/**
+ * @brief Queues one ability against this player, to land at their next lock.
+ *
+ * Only ability_ctrl.c calls this, and only for an effect that lands on
+ * somebody other than the player who used it. A full queue drops its oldest
+ * entry rather than refusing the newest: the newest is the one somebody just
+ * spent charge on, and a queue this deep means no piece has locked in a very
+ * long time.
+ *
+ * A game that is over takes nothing, for the same reason it takes no garbage.
+ *
+ * @param g Game the ability is aimed at.
+ * @param kind Which transform it is.
+ * @param argument The effect for PENDING_EFFECT, otherwise unused.
+ */
+void	game_queue_ability(t_game *g, t_pending_kind kind, int argument)
+{
+	int	index;
+
+	if (g == NULL || kind == PENDING_NONE || !g->active || g->topped_out)
+		return ;
+	if (g->pending_count >= TD_MAX_PENDING)
+	{
+		index = 1;
+		while (index < TD_MAX_PENDING)
+		{
+			g->pending[index - 1] = g->pending[index];
+			index++;
+		}
+		g->pending_count = TD_MAX_PENDING - 1;
+	}
+	g->pending[g->pending_count].kind = kind;
+	g->pending[g->pending_count].argument = argument;
+	g->pending_count++;
+}
+
+/**
+ * @brief Lands whatever garbage was owed, now that the board is nobody's.
+ *
+ * The two neighbours here are the whole reason this is a separate step. It
+ * runs after the clear resolves, so a player watching their own rows go never
+ * takes rows in the middle of it and never has their own clear cancelled by
+ * somebody else's gift; and it runs before spawn_next, so the rows are part of
+ * the board the next piece is validated against rather than something that
+ * appears underneath a piece already falling.
+ *
+ * The hole walks by one column per row, from a counter this game owns. A run
+ * of rows sharing one hole would be a wall rather than a handicap, and drawing
+ * the column would put a random number generator inside libtetrisbrain, which
+ * is pure by contract.
+ *
+ * @param g Game whose queue is being emptied.
+ */
+static void	drain_garbage(t_game *g)
+{
+	int	ordinary;
+
+	ordinary = g->pending_garbage;
+	g->pending_garbage = 0;
+	/*
+	 * Pals turns the ordinary kind upside down: rows that would have raised
+	 * the stack take the same number off the floor instead. Ability garbage is
+	 * excluded by the ability text, which is the whole reason the two are
+	 * counted separately - Pentaris lands on a player holding Pals exactly as
+	 * it lands on one who is not.
+	 */
+	if (ordinary > 0 && g->effects.pals)
+	{
+		board_cut_bottom(&g->board, ordinary);
+		ordinary = 0;
+	}
+	inject_rows(g, ordinary);
+	inject_rows(g, g->pending_ability_garbage);
+	g->pending_ability_garbage = 0;
+}
+
+/**
+ * @brief Puts n garbage rows on the board, one at a time so the hole walks.
+ *
+ * @param g Game to raise.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+static void	inject_rows(t_game *g, int lines)
+{
+	if (lines > BOARD_HEIGHT)
+		lines = BOARD_HEIGHT;
+	while (lines > 0)
+	{
+		board_inject_garbage(&g->board, 1,
+			(int)(g->garbage_seq % (uint32_t)BOARD_WIDTH));
+		g->garbage_seq++;
+		lines--;
+	}
+}
+
+/**
+ * @brief Ages the two effects libtetrisbrain leaves for the server to end.
+ *
+ * Dark and Pals have no counter of their own - the brain's comment says the
+ * server decides when they end - so this is where "for a limited time" is
+ * given a length. Counted in the holder's own pieces, like every other timed
+ * effect, so a player under Dark is blinded for four placements rather than
+ * for four seconds of however fast they happen to be going.
+ *
+ * @param g Game whose server-timed effects are aged by one lock.
+ */
+static void	age_server_effects(t_game *g)
+{
+	if (g->dark_pieces > 0)
+	{
+		g->dark_pieces--;
+		if (g->dark_pieces == 0)
+			effect_clear(&g->effects, EFFECT_DARK);
+	}
+	if (g->pals_pieces > 0)
+	{
+		g->pals_pieces--;
+		if (g->pals_pieces == 0)
+			effect_clear(&g->effects, EFFECT_PALS);
+	}
+}
+
+/**
+ * @brief Queues garbage rows against this player, to land at their next lock.
+ *
+ * Only room.c calls this: how many rows a clear is worth is the brain's
+ * (garbage_lines_from_clear) and who owes them to whom is the room's, because
+ * a game does not know it has an opponent.
+ *
+ * A game that is over takes nothing. Burying a board nobody is playing would
+ * change a finished result.
+ *
+ * @param g Game the rows are owed to.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+void	game_queue_garbage(t_game *g, int lines)
+{
+	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
+		return ;
+	g->pending_garbage += lines;
+	if (g->pending_garbage > BOARD_HEIGHT)
+		g->pending_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Queues garbage an ability sent, which Pals does not absorb.
+ *
+ * Counted apart from the ordinary kind for one reason and it is the ability
+ * text's: Pals turns incoming garbage into a gift, "garbage created by
+ * abilities is excluded". A single counter could not tell Pentaris from a
+ * tetris, so Pals would either eat both or neither.
+ *
+ * @param g Game the rows are owed to.
+ * @param lines How many rows; zero or fewer is a no-op.
+ */
+void	game_queue_ability_garbage(t_game *g, int lines)
+{
+	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
+		return ;
+	g->pending_ability_garbage += lines;
+	if (g->pending_ability_garbage > BOARD_HEIGHT)
+		g->pending_ability_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Takes the Fry rows this player burned and has not passed on.
+ *
+ * @param g Game to take from.
+ * @return Rows burned since the last call.
+ */
+int	game_take_fry(t_game *g)
+{
+	int	rows;
+
+	if (g == NULL)
+		return (0);
+	rows = g->fry_owed;
+	g->fry_owed = 0;
+	return (rows);
+}
+
+/**
+ * @brief Takes the lines this game has cleared and not yet been credited for.
+ *
+ * Reading clears the count, so a clear is charged to the Target exactly once
+ * however many ticks pass before anybody asks.
+ *
+ * @param g Game to take from.
+ * @return Lines cleared since the last call.
+ */
+int	game_take_cleared(t_game *g)
+{
+	int	cleared;
+
+	if (g == NULL)
+		return (0);
+	cleared = g->cleared_owed;
+	g->cleared_owed = 0;
+	return (cleared);
 }
 
 /**

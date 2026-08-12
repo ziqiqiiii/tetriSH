@@ -61,6 +61,9 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
 static t_app_provider_result	net_leave_room(void *userdata,
 				const char *room_id);
+static t_app_provider_result	net_ready_room(void *userdata,
+					const char *room_id, bool ready, uint32_t character,
+					t_app_room_view_model *view);
 static t_app_provider_result	net_start_room(void *userdata,
 				const char *room_id, t_app_room_view_model *view);
 static t_app_provider_result	net_send_chat(void *userdata,
@@ -96,6 +99,7 @@ void	app_net_provider_init(t_app_data_provider *provider,
 	provider->refresh_room = net_refresh_room;
 	provider->leave_room = net_leave_room;
 	provider->start_room = net_start_room;
+	provider->ready_room = net_ready_room;
 	provider->send_chat = net_send_chat;
 	provider->buy_item = net_buy_item;
 	provider->equip_item = net_equip_item;
@@ -632,6 +636,8 @@ static t_app_room_state	map_body_status(t_body_room_status status)
 {
 	if (status == BODY_ROOM_READY)
 		return (APP_ROOM_STATE_READY);
+	if (status == BODY_ROOM_SELECTING)
+		return (APP_ROOM_STATE_SELECTING);
 	if (status == BODY_ROOM_IN_GAME)
 		return (APP_ROOM_STATE_IN_GAME);
 	if (status == BODY_ROOM_FINISHED)
@@ -800,6 +806,16 @@ static t_app_provider_result	net_refresh_room(void *userdata,
 	if (body_room_decode(result.body, strlen(result.body), &snapshot) != 0
 		|| !map_room_snapshot(session, &snapshot, view))
 		return (APP_PROVIDER_INVALID);
+	/*
+	 * Binding the play path here rather than at START is what lets a player
+	 * who did not start the match receive it. The path is what every pushed
+	 * STATE is matched against, and it used to be written only by the call
+	 * that takes a room for Solo - so a joiner had none, and discarded every
+	 * frame the server sent them. It also makes the first snapshot the signal
+	 * that the match has begun, which beats waiting half a second for a poll
+	 * of the room to say so.
+	 */
+	(void)net_match_join(&session->net, room_id);
 	fill_chat(&session->net, view);
 	return (APP_PROVIDER_OK);
 }
@@ -926,6 +942,53 @@ static t_app_provider_result	net_leave_room(void *userdata,
  * @param view Receives the authoritative in-game room model.
  * @return Provider result.
  */
+/**
+ * @brief Declares this client ready, or withdraws it, and re-reads the room.
+ *
+ * The answer is the room as the server now sees it, so the roster the screen
+ * draws is the one every other player is being shown - which is the whole
+ * point of the declaration having left the client.
+ *
+ * @param userdata Network session.
+ * @param room_id Room the declaration is for.
+ * @param ready true to declare ready, false to withdraw it.
+ * @param view Receives the room as it stands afterwards.
+ * @return Provider result.
+ */
+static t_app_provider_result	net_ready_room(void *userdata,
+	const char *room_id, bool ready, uint32_t character,
+	t_app_room_view_model *view)
+{
+	t_app_net_session	*session;
+	t_net_result		result;
+	char				path[NET_PATH_MAX];
+	char				body[64];
+
+	if (userdata == NULL || room_id == NULL || room_id[0] == '\0'
+		|| view == NULL)
+		return (APP_PROVIDER_INVALID);
+	session = (t_app_net_session *)userdata;
+	if (session->net.state < NET_IN_ROOM)
+		return (APP_PROVIDER_UNAVAILABLE);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, room_id);
+	/*
+	 * A character of 0 is left off the body rather than sent as a zero. The
+	 * server reads an absent field as "whatever the account has equipped",
+	 * which is the honest thing for a client with nothing to offer to say.
+	 */
+	if (character != 0)
+		snprintf(body, sizeof(body), "ready %d\ncharacter %u\n",
+			ready ? 1 : 0, character);
+	else
+		snprintf(body, sizeof(body), "ready %d\n", ready ? 1 : 0);
+	memset(&result, 0, sizeof(result));
+	if (net_request(&session->net, "READY", path, body, &result) != 0)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (result.status != 200)
+		return (APP_PROVIDER_INVALID);
+	return (net_refresh_room(userdata, room_id, view));
+}
+
 static t_app_provider_result	net_start_room(void *userdata,
 	const char *room_id, t_app_room_view_model *view)
 {
@@ -975,6 +1038,7 @@ static bool	map_room_snapshot(t_app_net_session *session,
 	view->required_players = body->min_to_start;
 	view->capacity = body->slot_count;
 	view->player_count = (int)body->member_count;
+	view->select_ms = body->select_ms;
 	view->local_slot = -1;
 	index = 0;
 	while (index < body->member_count)
@@ -984,6 +1048,7 @@ static bool	map_room_snapshot(t_app_net_session *session,
 			body->members[index].username);
 		view->players[index].owner = body->members[index].owner;
 		view->players[index].ready = body->members[index].ready;
+		view->players[index].character = body->members[index].character;
 		if (body->members[index].player_id == session->net.player_id)
 			view->local_slot = (int)index;
 		index++;

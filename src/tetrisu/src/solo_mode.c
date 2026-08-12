@@ -441,16 +441,23 @@ static bool	handle_solo_key(t_solo_authority *authority, t_solo_game *game,
 		*resize_pending = true;
 		return (false);
 	}
+	/*
+	 * The card is a bitmap over the board's bitmap, and notcurses wipes the
+	 * sprixel underneath rather than overlapping it - so the frame it covered
+	 * has to be drawn again, which nothing else here would ask for.
+	 */
 	if (key == '+' || key == '=')
 	{
 		audio_volume_up(audio);
 		render_notification_show_volume(ctx, audio->music_volume);
+		*state_changed = true;
 		return (false);
 	}
 	if (key == '-' || key == '_')
 	{
 		audio_volume_down(audio);
 		render_notification_show_volume(ctx, audio->music_volume);
+		*state_changed = true;
 		return (false);
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
@@ -502,7 +509,7 @@ static bool	handle_solo_mouse(t_solo_authority *authority, t_render_ctx *ctx,
 	int				canvas_y;
 
 	ability = SOLO_ABILITY_NONE;
-	if (display_ready && !resize_pending
+	if (solo_abilities_enabled() && display_ready && !resize_pending
 		&& solo_mouse_canvas_position(ctx, solo, input, &canvas_x, &canvas_y))
 		ability = solo_ability_at_canvas(canvas_x, canvas_y);
 	if (solo_popover_set_hover(solo, ability))

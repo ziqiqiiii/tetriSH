@@ -357,7 +357,8 @@ void	solo_canvas_compose_hud(t_solo_render *solo,
 		(size_t)SOLO_CANVAS_WIDTH * SOLO_CANVAS_HEIGHT
 		* sizeof(*solo->frame_pixels));
 	draw_next_queue(solo->frame_pixels, solo, game);
-	draw_crystal_meter(solo->frame_pixels, solo, game);
+	if (solo_abilities_enabled())
+		draw_crystal_meter(solo->frame_pixels, solo, game);
 	draw_score_panel(solo->frame_pixels, solo, game);
 }
 

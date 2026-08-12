@@ -266,6 +266,28 @@ $(TEST_BIN_DIR)/chat_smoke: $(TESTS_DIR)/chat_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# Two clients in one process, on two sockets. That is what lets one program
+# assert on both halves of the same instant - that the board one player steers
+# is the board the other is shown, in the same frame. Two processes could only
+# agree by talking to each other, which is the thing under test.
+$(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The load generator. Not a test and deliberately not in `integration`: it
+# reports what the server cost rather than whether it was right, and a fleet
+# of fifty is far too slow and far too machine-dependent to sit in `make test`.
+# ../../scripts/stress.sh starts a server and drives this against it.
+$(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.h $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+stress: $(TEST_BIN_DIR)/stress_client
+
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
 # indefinitely waiting for replies. A real terminal answers these instantly;
@@ -282,7 +304,8 @@ unit: $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
-			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke
+			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
+			 $(TEST_BIN_DIR)/match_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
@@ -306,6 +329,6 @@ re: fclean all
 
 .PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
 			check-dependencies check-tetrisu-deps test unit integration \
-			clean fclean re
+			stress clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

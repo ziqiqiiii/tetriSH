@@ -133,13 +133,11 @@ bool	solo_authority_pending(const t_solo_authority *authority)
 bool	solo_authority_action(t_solo_authority *authority, t_solo_game *game,
 		t_solo_action action)
 {
-	t_net_result	result;
-
 	if (!authority->online)
 		return (solo_game_apply_action(game, action));
 	if (authority->countdown_hold)
 		return (false);
-	if (net_solo_action(authority->net, action, &result) != 0)
+	if (net_solo_send_action(authority->net, action) != 0)
 	{
 		fall_offline(authority, game);
 		return (true);
@@ -160,6 +158,8 @@ bool	solo_authority_ability(t_solo_authority *authority, t_solo_game *game,
 {
 	t_net_result	result;
 
+	if (!solo_abilities_enabled())
+		return (false);
 	if (!authority->online)
 		return (solo_game_activate_ability(game, ability)
 			!= SOLO_ABILITY_RESULT_INVALID);
