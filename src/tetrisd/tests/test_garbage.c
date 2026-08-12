@@ -29,6 +29,7 @@ static void	test_a_finished_game_takes_nothing(void);
 static void	test_the_pending_count_reaches_the_wire(void);
 static void	test_cleared_lines_are_taken_once(void);
 static void	test_the_target_is_the_other_live_seat(void);
+static void	test_an_attacker_is_reported_at_the_lock_that_lands(void);
 
 static void	seat_a_pair(t_server_room *server_room, t_room *room);
 static void	fill_bottom_row(t_game *g);
@@ -45,6 +46,7 @@ int	main(void)
 	test_the_pending_count_reaches_the_wire();
 	test_cleared_lines_are_taken_once();
 	test_the_target_is_the_other_live_seat();
+	test_an_attacker_is_reported_at_the_lock_that_lands();
 	return (0);
 }
 
@@ -85,7 +87,7 @@ static void	test_queued_garbage_does_not_touch_the_board(void)
 
 	game_start(&g, 1, 20260811u);
 	held = g.piece;
-	game_queue_garbage(&g, 2);
+	game_queue_garbage(&g, 2, 7);
 	assert(g.pending_garbage == 2);
 	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == 0);
 	assert(g.piece.row == held.row && g.piece.col == held.col);
@@ -102,7 +104,7 @@ static void	test_garbage_lands_at_the_next_lock(void)
 	t_game	g;
 
 	game_start(&g, 1, 20260811u);
-	game_queue_garbage(&g, 3);
+	game_queue_garbage(&g, 3, 7);
 	assert(game_drop(&g, true));
 	assert(g.pending_garbage == 0);
 	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == BOARD_WIDTH - 1);
@@ -123,7 +125,7 @@ static void	test_garbage_waits_out_a_held_clear(void)
 
 	game_start(&g, 1, 20260809u);
 	fill_bottom_row(&g);
-	game_queue_garbage(&g, 1);
+	game_queue_garbage(&g, 1, 7);
 	assert(game_drop(&g, true));
 	assert(g.clearing_count > 0);
 	assert(g.pending_garbage == 1);
@@ -150,7 +152,7 @@ static void	test_the_hole_walks_between_rows(void)
 	t_game	g;
 
 	game_start(&g, 1, 20260811u);
-	game_queue_garbage(&g, 2);
+	game_queue_garbage(&g, 2, 7);
 	assert(game_drop(&g, true));
 	assert(row_hole(&g, BOARD_HEIGHT - 1) >= 0);
 	assert(row_hole(&g, BOARD_HEIGHT - 2) >= 0);
@@ -170,7 +172,7 @@ static void	test_a_finished_game_takes_nothing(void)
 	game_start(&g, 1, 20260811u);
 	g.topped_out = true;
 	g.active = false;
-	game_queue_garbage(&g, 4);
+	game_queue_garbage(&g, 4, 7);
 	assert(g.pending_garbage == 0);
 	printf("PASS test_a_finished_game_takes_nothing\n");
 }
@@ -189,7 +191,7 @@ static void	test_the_pending_count_reaches_the_wire(void)
 	int				len;
 
 	game_start(&g, 1, 20260811u);
-	game_queue_garbage(&g, 4);
+	game_queue_garbage(&g, 4, 7);
 	game_snapshot(&g, &sent);
 	assert(sent.pending == 4);
 	len = body_state_encode(&sent, body, sizeof(body));
@@ -302,4 +304,35 @@ static int	row_hole(const t_game *g, int row)
 		col++;
 	}
 	return (-1);
+}
+
+/*
+** Who sent the rows travels with them, and is reported at the landing rather
+** than at the queueing. That difference is the whole of a knockout being fair:
+** rows queued against a player who clears them away first buried nobody, and
+** rows that arrive after their sender has left the room still did.
+**
+** It is a one-shot report. A second reader would file the same attack twice,
+** and the count it feeds is a count of knockouts.
+*/
+static void	test_an_attacker_is_reported_at_the_lock_that_lands(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260811u);
+	/* nothing has landed, so there is nobody to name */
+	assert(game_take_attacker(&g) == 0);
+	game_queue_garbage(&g, 2, 77);
+	/* still nobody: the rows are owed and the board has not taken them */
+	assert(game_take_attacker(&g) == 0);
+	assert(game_drop(&g, true));
+	assert(g.pending_garbage == 0);
+	assert(game_take_attacker(&g) == 77);
+	assert(game_take_attacker(&g) == 0);
+	/* the last sender is the one credited when two of them queue */
+	game_queue_garbage(&g, 1, 77);
+	game_queue_ability_garbage(&g, 1, 91);
+	assert(game_drop(&g, true));
+	assert(game_take_attacker(&g) == 91);
+	printf("PASS test_an_attacker_is_reported_at_the_lock_that_lands\n");
 }

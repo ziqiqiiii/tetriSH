@@ -290,6 +290,22 @@ _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 # define TETRISD_BR_ARENA_MS					300
 # define TETRISD_BR_ARENA_DEAD_EVERY			5
 
+/*
+** How recently somebody's rows have to have landed on you for them to count
+** as attacking you, and how many attackers are remembered at once.
+**
+** Eight, because nobody has been usefully attacked by more than a handful of
+** people inside the window, and because the ring answers one question - who
+** has landed rows on me lately - which a TD_MAX_GAMES-wide array of timestamps
+** would answer no better at ten times the size.
+**
+** The window is measured on the room's own match clock rather than on the
+** wall, so a match is the same match however long the machine took to run it,
+** and a test can drive one without waiting out real seconds.
+*/
+# define TETRISD_BR_ATTACKER_MS					8000
+# define TETRISD_BR_ATTACKER_RING				8
+
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
 # define TETRISD_ROUTE_SESSION					"/session"
@@ -591,6 +607,25 @@ typedef struct s_game
 	*/
 	uint32_t			garbage_seq;
 	/*
+	** Who sent the rows waiting in the two queues, and who sent the rows that
+	** landed at the last lock.
+	**
+	** They are two fields and not one because a knockout is credited at the
+	** landing rather than at the sending: rows queued against a player who
+	** then survives them belong to nobody, and rows that arrived while their
+	** sender was disconnecting still belong to that sender. The board itself
+	** does not use either - it takes rows without asking who sent them, which
+	** is what keeps a t_game a board and not a participant in a room - it only
+	** carries the id far enough for room.c to file it against the player at
+	** the moment the rows land.
+	**
+	** The last sender wins when two players queue before one lock. That is the
+	** definition a knockout uses, "the last player whose garbage landed", and
+	** it is the only one that needs no history.
+	*/
+	t_player_id			garbage_from;
+	t_player_id			landed_from;
+	/*
 	** Lines this game has cleared that have not yet been charged to anybody.
 	**
 	** room.c takes it after each tick and turns it into garbage against the
@@ -652,6 +687,20 @@ typedef struct s_game
 ** moment a player disconnects, so anything living on the game goes with them -
 ** and a placing is exactly the thing a player who quits still owns.
 */
+/*
+** One player whose garbage landed on somebody, and when it did.
+**
+** The time is the room's match clock, not the wall clock: it is only ever
+** compared against another reading of the same clock, and a match that is
+** paused, slow or being driven by a test then behaves the same as one being
+** played.
+*/
+typedef struct s_attacker
+{
+	t_player_id		player_id;
+	uint64_t		when_ms;
+}	t_attacker;
+
 typedef struct s_participant
 {
 	t_player_id		player_id;
@@ -674,7 +723,46 @@ typedef struct s_participant
 	** board mid-match looks like.
 	*/
 	t_body_result	result;
+	/*
+	** The placing, taken the moment this player is eliminated rather than
+	** when the match ends. At the end it is the same number for everybody
+	** still out - nineteen losers all placed second - because by then the
+	** only fact left is that they lost. At the elimination it is a fact: how
+	** many players were still in the match when this one stopped being one.
+	**
+	** 0 while they are still playing, which is what the wire sends and what
+	** lets a card be drawn dead with its placing on it the instant it is
+	** decided.
+	*/
 	int				rank;
+	/*
+	** Whether this player is still in the match. It is not read off the game:
+	** a game is reset when its player disconnects, so the board of somebody
+	** who quit in third place says nothing at all a moment later, and the
+	** elimination sweep has to be able to tell "already placed" from "placed
+	** this tick".
+	*/
+	bool			alive;
+	/*
+	** Knockouts credited to this player - the ones whose last landed rows
+	** were theirs.
+	*/
+	int				ko;
+	/*
+	** Who last buried this player, stamped at the lock that lands the rows
+	** and not when they are queued. A player killed by rows that arrived
+	** after their sender left the room still credits that sender, which is
+	** why this is a player id and never a seat: seats move between players
+	** mid-match and ids do not.
+	*/
+	t_player_id		last_attacker_id;
+	/*
+	** Who has landed rows on this player lately, oldest overwritten first.
+	** It answers the arena's attacking-you flag, and it is per player rather
+	** than per board because it has to survive a board being reset.
+	*/
+	t_attacker		attackers[TETRISD_BR_ATTACKER_RING];
+	int				attacker_next;
 }	t_participant;
 
 /*
@@ -725,6 +813,24 @@ typedef struct s_server_room
 	** open with the last one's verdicts and fighters already written down.
 	*/
 	t_participant	participants[TD_MAX_GAMES];
+	/*
+	** How many players are still in this match, and how long it has been
+	** running.
+	**
+	** `alive` is the room's own number and is what every placing is taken
+	** from, so it is decremented by the size of an elimination group rather
+	** than one at a time - see sweep_eliminations. It is also what the head
+	** count on every frame is read from, which is why it cannot be recovered
+	** by counting live games: a player who has quit still owns their placing
+	** but no longer has a board.
+	**
+	** `match_ms` is milliseconds since the match was dealt, countdown
+	** excluded. Only the attacker window reads it, and it is the room's clock
+	** rather than the wall's so that the window means the same thing in a test
+	** as in a game.
+	*/
+	int				alive;
+	uint64_t		match_ms;
 	/*
 	** The arena's own clock, and the number of arenas this match has pushed.
 	**
@@ -1166,12 +1272,14 @@ bool			game_hold(t_game *g);
 bool			game_pause(t_game *g, bool paused);
 bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
-void			game_queue_garbage(t_game *g, int lines);
-void			game_queue_ability_garbage(t_game *g, int lines);
+void			game_queue_garbage(t_game *g, int lines, t_player_id from);
+void			game_queue_ability_garbage(t_game *g, int lines,
+					t_player_id from);
 int				game_take_fry(t_game *g);
 void			game_queue_ability(t_game *g, t_pending_kind kind,
 					int argument);
 int				game_take_cleared(t_game *g);
+t_player_id		game_take_attacker(t_game *g);
 
 /* ABILITY_CTRL.C */
 const t_ability_def	*ability_lookup(t_item_id character_id, int level);

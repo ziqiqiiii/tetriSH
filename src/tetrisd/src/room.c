@@ -33,6 +33,18 @@ static t_item_id			participant_character(
 static void					participant_close(t_server_room *server_room,
 								t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
+static void		place_leaver(t_server_room *server_room, t_player_id pid);
+static void		settle_attacks(t_server_room *server_room);
+static void		note_attacker(t_participant *victim, t_player_id from,
+					uint64_t when_ms);
+static bool		is_attacking(const t_participant *victim, t_player_id who,
+					uint64_t now_ms);
+static void		sweep_eliminations(t_server_room *server_room);
+static int		place_eliminated(t_server_room *server_room, int placing);
+static void		credit_knockout(t_server_room *server_room,
+					t_participant *victim, int placing);
+static const char	*name_of_player(const t_server_room *server_room,
+						t_player_id pid);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
@@ -881,6 +893,7 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	if (server_room != NULL)
 	{
 		snprintf(name, sizeof(name), "%s", server_room->room->name);
+		place_leaver(server_room, cli->player_id);
 		forfeit_slot(server_room, cli->binding.slot_index, &finished);
 		/*
 		 * The match record leaves with the player, unless a match is running -
@@ -1079,6 +1092,8 @@ static void	room_blank(t_server_room *server_room)
 	server_room->arena_ms = 0;
 	server_room->arena_push = 0;
 	server_room->arena_dirty = false;
+	server_room->alive = 0;
+	server_room->match_ms = 0;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
@@ -1147,6 +1162,7 @@ static int	deal_games(t_server_room *server_room)
 	server_room->arena_ms = TETRISD_BR_ARENA_MS;
 	server_room->arena_push = 0;
 	server_room->arena_dirty = true;
+	server_room->match_ms = 0;
 	started = 0;
 	i = 0;
 	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
@@ -1160,12 +1176,30 @@ static int	deal_games(t_server_room *server_room)
 			game_start(&server_room->games[i], slots[i].membership.player_id,
 				seed);
 			if (participant != NULL)
+			{
 				server_room->games[i].character_id = participant->character;
+				/*
+				 * The record survives the room between matches - it is what
+				 * carried the fighter here from READY - so everything the
+				 * last match wrote on it is cleared by the one starting.
+				 * Leaving it would open a rematch with the placings and the
+				 * knockouts of the game before it already written down.
+				 */
+				participant->alive = true;
+				participant->rank = 0;
+				participant->ko = 0;
+				participant->result = BODY_RESULT_NONE;
+				participant->last_attacker_id = 0;
+				memset(participant->attackers, 0,
+					sizeof(participant->attackers));
+				participant->attacker_next = 0;
+			}
 			server_room->dirty[i] = true;
 			started++;
 		}
 		i++;
 	}
+	server_room->alive = started;
 	return (started);
 }
 
@@ -1184,6 +1218,12 @@ static void	tick_room(t_server_room *server_room, int elapsed_ms)
 	}
 	if (server_room->countdown_ms > 0)
 		elapsed_ms = spend_countdown(server_room, elapsed_ms);
+	/*
+	 * The match's own clock, and the countdown is not part of it: nobody can
+	 * attack anybody while every board is being held, so a window measured
+	 * from the deal would start three seconds spent.
+	 */
+	server_room->match_ms += (uint64_t)elapsed_ms;
 	advance_and_push(server_room, elapsed_ms);
 	if (!room_is_over(server_room))
 		return ;
@@ -1331,6 +1371,16 @@ static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
 
 	advance_games(server_room, elapsed_ms);
 	settle_garbage(server_room);
+	/*
+	 * Both of these read what the boards did this tick and write it down
+	 * against the players who did it, so they sit between the advance and the
+	 * projection: after every board has moved, before any of them is drawn.
+	 * The elimination sweep in particular has to run once for the whole room
+	 * rather than per board - see sweep_eliminations for why a tie cannot be
+	 * broken by the order these loops walk the seats in.
+	 */
+	settle_attacks(server_room);
+	sweep_eliminations(server_room);
 	spread_dirty(server_room);
 	note_arena_change(server_room);
 	arena = arena_tick(server_room, elapsed_ms);
@@ -1523,7 +1573,8 @@ static void	settle_garbage(t_server_room *server_room)
 		}
 		if (cleared > 0)
 			game_queue_garbage(&server_room->games[target],
-				garbage_lines_from_clear(cleared));
+				garbage_lines_from_clear(cleared),
+				server_room->games[slot].player_id);
 		/*
 		 * Fry's rows go on whole rather than through
 		 * garbage_lines_from_clear's N-1: they are not a clear being
@@ -1533,7 +1584,8 @@ static void	settle_garbage(t_server_room *server_room)
 		 * made.
 		 */
 		if (fry > 0)
-			game_queue_ability_garbage(&server_room->games[target], fry);
+			game_queue_ability_garbage(&server_room->games[target], fry,
+				server_room->games[slot].player_id);
 		if (cleared > 0 || fry > 0)
 		{
 			server_room->dirty[target] = true;
@@ -1855,6 +1907,287 @@ static int	count_live_games(const t_server_room *server_room)
 }
 
 /**
+ * @brief Places a player who is leaving a match they were still in.
+ *
+ * Quitting at 40th place records 40th and not a bare defeat, which is the
+ * whole point of taking a placing when a player stops rather than when the
+ * match does. It has to happen here, before the seat is released and the board
+ * is reset: a moment later there is nothing left to say this player was in the
+ * match at all, and the elimination sweep will never see them.
+ *
+ * The leaver takes their placing alone rather than joining a tick's group.
+ * A departure arrives on a request and not on the clock, so there is nothing
+ * for it to be simultaneous with - the tie rule exists for boards that stopped
+ * on the same authoritative tick.
+ *
+ * @param server_room Room being left.
+ * @param pid The player leaving it.
+ */
+static void	place_leaver(t_server_room *server_room, t_player_id pid)
+{
+	t_participant	*participant;
+
+	if (server_room->room->status != ROOM_IN_GAME
+		|| server_room_is_solo(server_room))
+		return ;
+	participant = participant_open(server_room, pid);
+	if (participant == NULL || !participant->alive)
+		return ;
+	participant->alive = false;
+	participant->rank = server_room->alive;
+	if (participant->rank < 1)
+		participant->rank = 1;
+	if (server_room->alive > 0)
+		server_room->alive--;
+	server_room->arena_dirty = true;
+}
+
+/**
+ * @brief Files every attack that landed this tick against the player it hit.
+ *
+ * The rows land at a lock, which happens inside a game and can happen on an
+ * input as easily as on the clock, so the report is collected here rather than
+ * raised from there: every tick asks every board whether anything landed on it
+ * since the last one, and files what it is told.
+ *
+ * It is filed under the receiver and not the sender because both readers ask
+ * the receiver's question - who buried me (the knockout) and who is attacking
+ * me (the arena's flag). The sender is a player id and not a seat because a
+ * seat is somebody else's a moment after its owner leaves.
+ *
+ * @param server_room Room whose boards are being asked.
+ */
+static void	settle_attacks(t_server_room *server_room)
+{
+	t_participant	*victim;
+	t_player_id		from;
+	int				slot;
+
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		from = game_take_attacker(&server_room->games[slot]);
+		victim = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (from != 0 && victim != NULL && from != victim->player_id)
+		{
+			victim->last_attacker_id = from;
+			note_attacker(victim, from, server_room->match_ms);
+			server_room->arena_dirty = true;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Remembers one attacker on the victim's ring, oldest overwritten.
+ *
+ * A repeat attacker is moved forward rather than added again: the ring answers
+ * "who has landed rows on me lately", and one player landing eight in a row
+ * would otherwise be the whole of the answer.
+ *
+ * @param victim The player who took the rows.
+ * @param from The player who sent them.
+ * @param when_ms The room's match clock at the landing.
+ */
+static void	note_attacker(t_participant *victim, t_player_id from,
+		uint64_t when_ms)
+{
+	int	index;
+
+	index = 0;
+	while (index < TETRISD_BR_ATTACKER_RING)
+	{
+		if (victim->attackers[index].player_id == from)
+		{
+			victim->attackers[index].when_ms = when_ms;
+			return ;
+		}
+		index++;
+	}
+	index = victim->attacker_next % TETRISD_BR_ATTACKER_RING;
+	victim->attackers[index].player_id = from;
+	victim->attackers[index].when_ms = when_ms;
+	victim->attacker_next = (index + 1) % TETRISD_BR_ATTACKER_RING;
+}
+
+/**
+ * @brief Reports whether one player has landed rows on another lately.
+ *
+ * @param victim The player being attacked; NULL is nobody being attacked.
+ * @param who The player who might be attacking them.
+ * @param now_ms The room's match clock now.
+ * @return true when their rows landed inside TETRISD_BR_ATTACKER_MS.
+ */
+static bool	is_attacking(const t_participant *victim, t_player_id who,
+		uint64_t now_ms)
+{
+	int	index;
+
+	if (victim == NULL || who == 0)
+		return (false);
+	index = 0;
+	while (index < TETRISD_BR_ATTACKER_RING)
+	{
+		if (victim->attackers[index].player_id == who
+			&& now_ms - victim->attackers[index].when_ms
+			<= (uint64_t)TETRISD_BR_ATTACKER_MS)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Places everybody eliminated this tick, and credits who buried them.
+ *
+ * The placing is taken here rather than at the end of the match, because here
+ * it is a fact - how many players were still in it when this one stopped
+ * being one - and at the end it is the same number for everybody who lost.
+ *
+ * It is a two-pass step and not a per-board side effect, and that is the whole
+ * of the design. A tick advances every board before anything is settled, so
+ * two players can top out inside one authoritative tick with nothing to
+ * separate them but the order this loop walks the seats in. Letting that
+ * decide would mean seat 31 places 7th and seat 72 places 8th for identical
+ * deaths - an array index deciding a result. So everybody who went out on one
+ * tick shares one placing, and the next elimination skips the numbers they
+ * took, which is how every sport handles a tie and the only rule here that
+ * needs no tiebreak nobody can observe.
+ *
+ * @param server_room Room whose eliminations are being placed.
+ */
+static void	sweep_eliminations(t_server_room *server_room)
+{
+	int	placing;
+	int	group;
+
+	if (server_room_is_solo(server_room) || server_room->alive <= 0)
+		return ;
+	group = place_eliminated(server_room, 0);
+	if (group == 0)
+		return ;
+	placing = server_room->alive - group + 1;
+	if (placing < 1)
+		placing = 1;
+	place_eliminated(server_room, placing);
+	server_room->alive -= group;
+	if (server_room->alive < 0)
+		server_room->alive = 0;
+	server_room->arena_dirty = true;
+}
+
+/**
+ * @brief Counts the players eliminated this tick, or places them.
+ *
+ * Two passes over one condition, written once: called with a placing of 0 it
+ * only counts, which is what the group's shared number is computed from, and
+ * called with the placing it writes it. A player is eliminated when their
+ * record still says alive and the board they were playing has stopped - a
+ * board that is gone entirely belongs to somebody who left, and forfeiting
+ * places them on its own.
+ *
+ * @param server_room Room being swept.
+ * @param placing The placing to write, or 0 to count only.
+ * @return How many players the sweep found.
+ */
+static int	place_eliminated(t_server_room *server_room, int placing)
+{
+	t_participant	*participant;
+	int				found;
+	int				slot;
+
+	found = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		participant = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (participant != NULL && participant->alive
+			&& !server_room->games[slot].active)
+		{
+			found++;
+			if (placing > 0)
+			{
+				participant->alive = false;
+				participant->rank = placing;
+				credit_knockout(server_room, participant, placing);
+				server_room->dirty[slot] = true;
+			}
+		}
+		slot++;
+	}
+	return (found);
+}
+
+/**
+ * @brief Credits the knockout and tells the room about it.
+ *
+ * The credit goes to whoever last landed rows on this board, and to nobody at
+ * all when that is nobody: a player who buried themselves is not somebody
+ * else's knockout, which is what keeps the count a measure of aggression
+ * rather than of luck. An attacker who has since left the room still gets it -
+ * the record survives the seat and the connection both.
+ *
+ * The line goes out on the chat lane, which is the lane's whole reason for
+ * existing: a room narrating ninety-eight knockouts must not be able to fill a
+ * response FIFO and close a slow connection.
+ *
+ * @param server_room Room the knockout happened in.
+ * @param victim The player who was eliminated.
+ * @param placing The placing they finished at.
+ */
+static void	credit_knockout(t_server_room *server_room, t_participant *victim,
+		int placing)
+{
+	t_participant	*killer;
+	const char		*who;
+
+	who = name_of_player(server_room, victim->player_id);
+	if (who == NULL)
+		who = "somebody";
+	killer = participant_open(server_room, victim->last_attacker_id);
+	if (killer == NULL)
+	{
+		room_narrate(server_room, "PLAYER %s was knocked out (#%d)",
+			who, placing);
+		return ;
+	}
+	killer->ko++;
+	if (name_of_player(server_room, killer->player_id) == NULL)
+		room_narrate(server_room, "PLAYER %s was knocked out (#%d)",
+			who, placing);
+	else
+		room_narrate(server_room, "PLAYER %s knocked out PLAYER %s (#%d)",
+			name_of_player(server_room, killer->player_id), who, placing);
+}
+
+/**
+ * @brief Names the player sitting in this room, if they still are.
+ *
+ * @param server_room Room to look in.
+ * @param pid The player to name.
+ * @return Their username, or NULL when they are no longer seated here.
+ */
+static const char	*name_of_player(const t_server_room *server_room,
+						t_player_id pid)
+{
+	int	slot;
+
+	if (pid == 0)
+		return (NULL);
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& server_room->room->slots[slot].membership.player_id == pid)
+			return (server_room->room->slots[slot].membership.username);
+		slot++;
+	}
+	return (NULL);
+}
+
+/**
  * @brief Decides how the match ended for each player, once, before the last
  *        snapshot goes out.
  *
@@ -1891,11 +2224,21 @@ static void	settle_results(t_server_room *server_room)
 			{
 				participant->result = BODY_RESULT_WON;
 				participant->rank = 1;
+				participant->alive = false;
 			}
 			else
 			{
 				participant->result = BODY_RESULT_LOST;
-				participant->rank = count_live_games(server_room) + 1;
+				/*
+				 * The placing the elimination already took, and the count
+				 * only when there is none. A player is placed the moment
+				 * they go out (sweep_eliminations), so by the time the match
+				 * ends every loser has a number that says where they
+				 * finished; recomputing it here would flatten all of them
+				 * onto the same one, which is exactly what this used to do.
+				 */
+				if (participant->rank == 0)
+					participant->rank = count_live_games(server_room) + 1;
 			}
 			server_room->dirty[slot] = true;
 		}
@@ -1960,6 +2303,8 @@ static void	record_and_reset(t_server_room *server_room)
 	server_room->arena_ms = 0;
 	server_room->arena_push = 0;
 	server_room->arena_dirty = false;
+	server_room->alive = 0;
+	server_room->match_ms = 0;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	/*
@@ -2256,12 +2601,17 @@ static void	fill_arena(t_server_room *server_room, int subject,
  * the client keeps what it has in between - so a match gets cheaper as it
  * thins out rather than staying at its opening cost until the last player.
  *
- * The attacking-you and targeted-by-you flags are the two facts that are about
- * the recipient. Neither can be filled yet: knowing who attacked you needs the
- * attacker record, and knowing who you are aiming at needs the targeting mode,
- * and both are later steps. They are deliberately left clear rather than
- * guessed at - the codec has carried them since the section was written, the
- * room will write them when it can, and an arena without them is still legible.
+ * The attacking-you flag is the one fact on the card that is about the person
+ * being sent it rather than about the player on it, and it is the whole reason
+ * the arena is built per recipient instead of once and shared: this card is
+ * outlined in red on your screen and nobody else's. It is read off the
+ * recipient's own attacker ring, so it says "their rows landed on me lately"
+ * and not "they are aiming at me" - an attack that has been sent and not yet
+ * landed is already on the wire as your pending count.
+ *
+ * Targeted-by-you stays clear: a player does not choose a target yet, and the
+ * codec has carried the flag since the section was written so that the room
+ * can fill it in without the wire moving.
  *
  * @param server_room Room holding the seat.
  * @param slot The 0-based slot to project.
@@ -2273,8 +2623,8 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
 {
 	const t_game		*game;
 	const t_participant	*participant;
+	const t_participant	*watcher;
 
-	(void)subject;
 	game = &server_room->games[slot];
 	memset(out, 0, sizeof(*out));
 	out->slot = server_room->room->slots[slot].index;
@@ -2287,7 +2637,14 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
 		out->flags |= BODY_ARENA_CLEARING;
 	participant = participant_of(server_room, out->player_id);
 	if (participant != NULL)
+	{
 		out->rank = participant->rank;
+		out->ko = participant->ko;
+	}
+	watcher = participant_of(server_room,
+			server_room->games[subject].player_id);
+	if (is_attacking(watcher, out->player_id, server_room->match_ms))
+		out->flags |= BODY_ARENA_ATTACKING_YOU;
 	if (game->active
 		|| server_room->arena_push % TETRISD_BR_ARENA_DEAD_EVERY == 0)
 	{

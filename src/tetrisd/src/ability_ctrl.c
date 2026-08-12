@@ -264,7 +264,8 @@ static t_ability_verdict	apply_targeted(t_game *g, t_game *target,
 	else if (def->character_id == 2 && def->level == 2)
 		game_queue_ability(target, PENDING_EFFECT, (int)EFFECT_INVERSION);
 	else if (def->character_id == 2 && def->level == 3)
-		game_queue_ability_garbage(target, TETRISD_PENTARIS_ROWS);
+		game_queue_ability_garbage(target, TETRISD_PENTARIS_ROWS,
+			g->player_id);
 	else if (def->character_id == 2 && def->level == 4)
 		game_queue_ability(target, PENDING_SIRTET, 0);
 	else if (def->character_id == 3 && def->level == 3)

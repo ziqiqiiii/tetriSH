@@ -36,6 +36,7 @@ static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
 static void	apply_arena_card(t_mp_match_state *state,
 				const t_body_arena_slot *card, uint64_t local, bool *seated);
 static void	forget_empty_seats(t_mp_match_state *state, const bool *seated);
+static void	count_the_arena(t_mp_match_state *state);
 static void	apply_arena_mask(t_board *board,
 				const t_body_arena_slot *card);
 
@@ -420,6 +421,39 @@ static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
 		index++;
 	}
 	forget_empty_seats(state, seated);
+	count_the_arena(state);
+}
+
+/**
+ * @brief Reads the two HUD numbers that are properties of the whole arena.
+ *
+ * Both were invented before the server sent them: the knockout count was never
+ * written by any line in the client, and the attacker count was set once to
+ * the constant 2 by the fixture and never moved. They are read here rather
+ * than per card because each is a fact about the room - how many rivals this
+ * player has buried, and how many of them are currently burying them.
+ *
+ * @param state Match model whose arena has just been replaced.
+ */
+static void	count_the_arena(t_mp_match_state *state)
+{
+	int	attackers;
+	int	slot;
+
+	attackers = 0;
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS)
+	{
+		if (state->opponents[slot].present)
+		{
+			if (state->opponents[slot].local)
+				state->ko_count = state->opponents[slot].ko;
+			else if (state->opponents[slot].targeting_local)
+				attackers++;
+		}
+		slot++;
+	}
+	state->incoming_attackers = attackers;
 }
 
 /**

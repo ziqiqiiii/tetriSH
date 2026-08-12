@@ -471,13 +471,13 @@ static void	test_pals_turns_ordinary_garbage_into_a_gift(void)
 		== ABILITY_ACTIVATED);
 	assert(target.effects.pals);
 	before = filled_cells(&target);
-	game_queue_garbage(&target, 2);
+	game_queue_garbage(&target, 2, 7);
 	assert(game_drop(&target, true));
 	/* Two rows off the floor, not two rows onto it. */
 	assert(filled_cells(&target) < before);
 	/* Pentaris still lands, Pals or no Pals. */
 	before = filled_cells(&target);
-	game_queue_ability_garbage(&target, TETRISD_PENTARIS_ROWS);
+	game_queue_ability_garbage(&target, TETRISD_PENTARIS_ROWS, 7);
 	assert(game_drop(&target, true));
 	assert(filled_cells(&target) > before);
 	printf("PASS test_pals_turns_ordinary_garbage_into_a_gift\n");
