@@ -39,22 +39,22 @@
 ** default account should be able to do with the meter it is filling.
 */
 static const t_ability_def	g_abilities[] = {
-	{1, 1, "Fry", false},
-	{1, 2, "Dark", true},
-	{1, 3, "Vampire", true},
-	{1, 4, "Bomb", true},
-	{2, 1, "Mirurun", false},
-	{2, 2, "Inversion", true},
-	{2, 3, "Pentaris", true},
-	{2, 4, "Sirtet", true},
-	{3, 1, "Sol", false},
-	{3, 2, "Mirror", true},
-	{3, 3, "Paralysis", true},
-	{3, 4, "Copy", true},
-	{4, 1, "Cut", false},
-	{4, 2, "Nue", true},
-	{4, 3, "Pals", true},
-	{4, 4, "Thwack", false}
+	{1, 1, "Fry", false, false},
+	{1, 2, "Dark", true, true},
+	{1, 3, "Vampire", true, false},
+	{1, 4, "Bomb", true, true},
+	{2, 1, "Mirurun", false, false},
+	{2, 2, "Inversion", true, true},
+	{2, 3, "Pentaris", true, true},
+	{2, 4, "Sirtet", true, true},
+	{3, 1, "Sol", false, false},
+	{3, 2, "Mirror", true, false},
+	{3, 3, "Paralysis", true, true},
+	{3, 4, "Copy", true, false},
+	{4, 1, "Cut", false, false},
+	{4, 2, "Nue", true, true},
+	{4, 3, "Pals", true, false},
+	{4, 4, "Thwack", false, false}
 };
 
 // Static Functions
@@ -62,6 +62,8 @@ static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
 								int argument);
 static t_ability_verdict	apply_targeted(t_game *g, t_game *target,
 								const t_ability_def *def);
+static t_ability_verdict	apply_to_each(t_game *g, t_game **targets,
+								int count, const t_ability_def *def);
 static t_game				*mirror_redirect(t_game *g, t_game *target);
 static bool					apply_vampire(t_game *g, t_game *target);
 static bool					apply_copy(t_game *g, const t_game *target);
@@ -121,6 +123,35 @@ bool	ability_is_playable_solo(const t_ability_def *def)
 t_ability_verdict	game_ability(t_game *g, t_game *target,
 					const t_ability_def *def, int argument)
 {
+	int	count;
+
+	count = (target != NULL);
+	return (game_ability_spread(g, &target, count, def, argument));
+}
+
+/**
+ * @brief Activates one ability against every game it was aimed at.
+ *
+ * Charge is checked once and spent once, however many boards the sender's
+ * targeting mode reached. Paying per victim would make Attackers a tax on
+ * being attacked by several people at once, which is the situation the mode
+ * exists to answer.
+ *
+ * A verdict has to come back for a set, and the rule is "did anything
+ * happen": one landing is an activation, because the sender did what they
+ * asked and is charged for it. A set where every board refused reports the
+ * last refusal, which is the same verdict a single target would have given.
+ *
+ * @param g Game activating the ability.
+ * @param targets Games it lands on; ignored by an ability that needs none.
+ * @param count How many of them; 0 is what a room with no Target answers.
+ * @param def Ability being activated.
+ * @param argument Ability-specific parameter; Sol's aiming column, else 0.
+ * @return What the client should be told happened.
+ */
+t_ability_verdict	game_ability_spread(t_game *g, t_game **targets,
+					int count, const t_ability_def *def, int argument)
+{
 	t_ability_verdict	verdict;
 
 	if (g == NULL || def == NULL)
@@ -136,7 +167,7 @@ t_ability_verdict	game_ability(t_game *g, t_game *target,
 		return (ABILITY_NO_CHARGE);
 	}
 	if (def->needs_target)
-		verdict = apply_targeted(g, target, def);
+		verdict = apply_to_each(g, targets, count, def);
 	else
 		verdict = apply_self(g, def, argument);
 	if (verdict != ABILITY_ACTIVATED)
@@ -147,6 +178,44 @@ t_ability_verdict	game_ability(t_game *g, t_game *target,
 	charge_deduct(&g->charge, def->level);
 	remember(g, def->level, true);
 	return (ABILITY_ACTIVATED);
+}
+
+/**
+ * @brief Runs one targeted ability over a whole set of victims.
+ *
+ * An empty set answers NO_TARGET, which is what a Single room and a Battle
+ * Royale with nobody left both are, and what the one-target game_ability
+ * answered when it was handed NULL.
+ *
+ * @param g Game activating the ability.
+ * @param targets Games it lands on.
+ * @param count How many of them.
+ * @param def Ability being applied.
+ * @return ACTIVATED when at least one board took it, else the last refusal.
+ */
+static t_ability_verdict	apply_to_each(t_game *g, t_game **targets,
+							int count, const t_ability_def *def)
+{
+	t_ability_verdict	verdict;
+	t_ability_verdict	landed;
+	int					index;
+
+	if (targets == NULL || count <= 0)
+		return (ABILITY_NO_TARGET);
+	if (!def->hits_every_target)
+		return (apply_targeted(g, targets[0], def));
+	landed = ABILITY_NO_TARGET;
+	index = 0;
+	while (index < count)
+	{
+		verdict = apply_targeted(g, targets[index], def);
+		if (verdict == ABILITY_ACTIVATED)
+			landed = ABILITY_ACTIVATED;
+		else if (landed != ABILITY_ACTIVATED)
+			landed = verdict;
+		index++;
+	}
+	return (landed);
 }
 
 /**

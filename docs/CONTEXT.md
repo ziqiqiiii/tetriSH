@@ -44,19 +44,24 @@ Royale.
 **Target**:
 The player an offensive ability or garbage lands on. Single mode has no
 Target, so offensive abilities are unavailable there; Double implies the one
-other player; in Battle Royale a Target is drawn per resolution from the
-room's seeded random source, among players still in the game — narrowed
-first by the sender's Targeting mode.
+other player; in Battle Royale the Targets are whoever the sender's Targeting
+mode names — one player under Randoms and Badges, everyone matched under
+Attackers and KOs. Every Target is charged the whole amount; the rows are
+never divided between them.
 _Avoid_: victim, enemy, opponent (as a role)
 
 **Targeting mode**:
-Which kind of rival a Battle Royale player's garbage is drawn from: Randoms
-(every player still in the game), KOs (the tallest stacks), Attackers
-(whoever has landed rows on you recently), Badges (whoever has the most
-Knockouts). A mode chooses the urn and never the ball — the draw is still
-random, so a player can prefer a kind of rival and can never pick a person.
-A mode whose set is empty falls back to Randoms, so choosing one can never
-cost a player the garbage they earned.
+Which kind of rival a Battle Royale player's garbage goes to, and how many of
+them it reaches. Two of the four name a situation and hit all of it —
+Attackers (everyone who has landed rows on you recently) and KOs (every stack
+level with the tallest in the room, which is one player unless they are tied).
+Two name a person and hit one, drawn from the room's seeded random source —
+Randoms (every player still in the game) and Badges (whoever holds Knockouts),
+because both match a crowd and spraying either would put one clear on most of
+the room.
+A mode whose set is empty falls back to Randoms — one player, drawn — so
+choosing one can never cost a player the garbage they earned, and declaring
+Attackers before anybody has attacked never hits the whole room.
 _Avoid_: aim, lock-on (nothing is held; a mode narrows a set per resolution)
 
 ### Gameplay

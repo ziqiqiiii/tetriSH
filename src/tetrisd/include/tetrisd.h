@@ -916,6 +916,15 @@ typedef enum e_input_action
 ** unavailable there." An ability that lands on somebody else has nobody to
 ** land on in a one-player room, so it is refused rather than quietly
 ** redirected at the player who paid for it.
+**
+** `hits_every_target` splits the eleven that need somebody in two, and the
+** question it asks is "what does this put where". Seven queue something onto
+** the Target's board, so a targeting mode that named four rivals puts it onto
+** four boards. The other four need a Target to be legal but transform the
+** *sender* - Mirror and Pals set an effect on their own game, Vampire drains
+** one rival's charge into it, Copy takes one rival's board. Running those
+** once per victim would pay a player four times for one activation, so they
+** land on the first Target and stop.
 */
 typedef struct s_ability_def
 {
@@ -923,6 +932,7 @@ typedef struct s_ability_def
 	int			level;
 	const char	*name;
 	bool		needs_target;
+	bool		hits_every_target;
 }	t_ability_def;
 
 /* how an ABILITY request was answered */
@@ -1308,6 +1318,8 @@ const t_ability_def	*ability_lookup(t_item_id character_id, int level);
 bool			ability_is_playable_solo(const t_ability_def *def);
 t_ability_verdict	game_ability(t_game *g, t_game *target,
 					const t_ability_def *def, int argument);
+t_ability_verdict	game_ability_spread(t_game *g, t_game **targets,
+					int count, const t_ability_def *def, int argument);
 const char		*ability_verdict_reason(t_ability_verdict verdict);
 
 /* ROOM.C */
@@ -1331,6 +1343,12 @@ bool			server_room_is_arena(const t_server_room *server_room);
 bool			server_room_starts_on_ready(const t_server_room *server_room);
 int				server_room_target_of(t_server_room *server_room,
 					int from_slot);
+int				server_room_targets_of(t_server_room *server_room,
+					int from_slot, int *out);
+int				server_room_target_games(t_server_room *server_room,
+					const t_client *cli, t_game **out);
+void			server_room_charge_targets(t_server_room *server_room,
+					int from, const int *targets, int count);
 bool			server_room_set_target(t_server_room *server_room,
 					t_client *cli, t_target_mode mode);
 t_game			*server_room_target_game(t_server_room *server_room,

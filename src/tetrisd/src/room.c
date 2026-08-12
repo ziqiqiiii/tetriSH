@@ -36,6 +36,11 @@ static int		count_live_games(const t_server_room *server_room);
 static uint32_t	room_random(t_server_room *server_room);
 static int		candidate_slots(t_server_room *server_room, int from_slot,
 					int *out);
+static int		slots_matching_mode(t_server_room *server_room, int from_slot,
+					int *out);
+static int		live_slots(t_server_room *server_room, int from_slot,
+					int *out);
+static bool		mode_fans_out(t_target_mode mode);
 static bool		wanted_by_mode(t_server_room *server_room, int from_slot,
 					int slot, int tallest);
 static int		stack_height(const t_game *game);
@@ -1567,30 +1572,67 @@ static void	spread_dirty(t_server_room *server_room)
  * queue, and game_take_cleared is still called so nothing accumulates against
  * a mode change that never comes.
  *
+ * A clear can be owed to more than one board. Attackers and KOs answer with
+ * every rival they matched rather than with one drawn from them
+ * (server_room_targets_of), so the rows go to all of them - each gets the
+ * whole amount, because the garbage a clear is worth is a property of the
+ * clear and dividing it between the victims would make choosing a crowded
+ * mode a way of hitting softer.
+ *
  * @param server_room Room whose clears are being charged.
  */
 static void	settle_garbage(t_server_room *server_room)
 {
+	int	targets[TD_MAX_GAMES];
 	int	slot;
-	int	target;
-	int	cleared;
-	int	fry;
+	int	count;
 
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		cleared = game_take_cleared(&server_room->games[slot]);
-		fry = game_take_fry(&server_room->games[slot]);
-		target = server_room_target_of(server_room, slot);
-		if (target < 0)
-		{
-			slot++;
-			continue ;
-		}
+		count = server_room_targets_of(server_room, slot, targets);
+		server_room_charge_targets(server_room, slot, targets, count);
+		slot++;
+	}
+}
+
+/**
+ * @brief Puts one slot's clear and fry onto every board it is owed to.
+ *
+ * Split out of settle_garbage because the loop over the victims is the only
+ * thing that changed when a Target became a set, and the sender's bookkeeping
+ * is the same whether it is owed to one board or eight. Public for the reason
+ * server_room_target_of is: it is the half of the tick a test can drive
+ * without a socket, and the alternative is asserting the fan-out by
+ * reimplementing it.
+ *
+ * The two takes happen before the count is looked at, so a room with nobody
+ * to charge still drains what the board cleared. Letting it accumulate would
+ * hand the whole backlog to the first rival a mode change found.
+ *
+ * @param server_room Room being charged.
+ * @param from The 0-based slot that cleared.
+ * @param targets The 0-based victim slots.
+ * @param count How many of them.
+ */
+void	server_room_charge_targets(t_server_room *server_room, int from,
+		const int *targets, int count)
+{
+	int	cleared;
+	int	fry;
+	int	index;
+
+	cleared = game_take_cleared(&server_room->games[from]);
+	fry = game_take_fry(&server_room->games[from]);
+	if (count <= 0 || (cleared <= 0 && fry <= 0))
+		return ;
+	index = 0;
+	while (index < count)
+	{
 		if (cleared > 0)
-			game_queue_garbage(&server_room->games[target],
+			game_queue_garbage(&server_room->games[targets[index]],
 				garbage_lines_from_clear(cleared),
-				server_room->games[slot].player_id);
+				server_room->games[from].player_id);
 		/*
 		 * Fry's rows go on whole rather than through
 		 * garbage_lines_from_clear's N-1: they are not a clear being
@@ -1600,15 +1642,12 @@ static void	settle_garbage(t_server_room *server_room)
 		 * made.
 		 */
 		if (fry > 0)
-			game_queue_ability_garbage(&server_room->games[target], fry,
-				server_room->games[slot].player_id);
-		if (cleared > 0 || fry > 0)
-		{
-			server_room->dirty[target] = true;
-			server_room->dirty[slot] = true;
-		}
-		slot++;
+			game_queue_ability_garbage(&server_room->games[targets[index]],
+				fry, server_room->games[from].player_id);
+		server_room->dirty[targets[index]] = true;
+		index++;
 	}
+	server_room->dirty[from] = true;
 }
 
 /**
@@ -1647,6 +1686,68 @@ int	server_room_target_of(t_server_room *server_room, int from_slot)
 	if (count == 1)
 		return (candidates[0]);
 	return (candidates[room_random(server_room) % (uint32_t)count]);
+}
+
+/**
+ * @brief Names every player a slot's clears and abilities are aimed at.
+ *
+ * Two of the four modes name a person and two name a situation, and that is
+ * the whole rule for how many boards an attack reaches:
+ *
+ *   Randoms  - no preference, so one rival, drawn.
+ *   Badges   - the rivals holding knockouts, which is a crowd late in a
+ *              match; one of them, drawn, or a Battle Royale's whole
+ *              back half would take every clear anybody made.
+ *   KOs      - the tallest stack in the room. Usually one player; more only
+ *              when they are level, and two players who are equally close to
+ *              topping out are equally the answer, so both are hit.
+ *   Attackers- everyone whose garbage is currently landing on this player.
+ *              Hitting back at one of several attackers and letting the rest
+ *              carry on is the thing the mode exists to stop.
+ *
+ * The fan-out is over the *matched* set only. A mode that matched nobody
+ * still falls back to every live opponent (candidate_slots), and that
+ * fallback is drawn from rather than sprayed - it is the room saying "no
+ * preference applies", which is Randoms, and Randoms hits one person. Without
+ * that distinction, declaring Attackers before anybody had attacked would hit
+ * the entire room.
+ *
+ * @param server_room Room to resolve within.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the 0-based Target slots; at least TD_MAX_GAMES wide.
+ * @return How many Targets were written, 0 when there are none.
+ */
+int	server_room_targets_of(t_server_room *server_room, int from_slot,
+		int *out)
+{
+	const t_participant	*sender;
+	int					count;
+
+	if (server_room == NULL || server_room->room == NULL || out == NULL
+		|| server_room_is_solo(server_room))
+		return (0);
+	sender = participant_of(server_room,
+			server_room->games[from_slot].player_id);
+	count = slots_matching_mode(server_room, from_slot, out);
+	if (count > 0 && sender != NULL && mode_fans_out(sender->target_mode))
+		return (count);
+	if (count == 0)
+		count = live_slots(server_room, from_slot, out);
+	if (count == 0)
+		return (0);
+	out[0] = out[room_random(server_room) % (uint32_t)count];
+	return (1);
+}
+
+/**
+ * @brief Whether this mode hits everyone it matched or one drawn from them.
+ *
+ * @param mode The sender's declared mode.
+ * @return true when every match is a Target.
+ */
+static bool	mode_fans_out(t_target_mode mode)
+{
+	return (mode == TARGET_ATTACKERS || mode == TARGET_KO);
 }
 
 /**
@@ -1697,6 +1798,30 @@ bool	server_room_set_target(t_server_room *server_room, t_client *cli,
  */
 static int	candidate_slots(t_server_room *server_room, int from_slot, int *out)
 {
+	int	count;
+
+	count = slots_matching_mode(server_room, from_slot, out);
+	if (count > 0)
+		return (count);
+	return (live_slots(server_room, from_slot, out));
+}
+
+/**
+ * @brief The live opponents this sender's declared mode singles out.
+ *
+ * No fallback: an empty answer means the mode matched nobody, and that is a
+ * fact its callers need. server_room_targets_of decides whether to spray or
+ * to draw on exactly this distinction, and folding the fallback in here is
+ * what would let "Attackers, before anybody attacked" hit the whole room.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the matched slots.
+ * @return How many matched.
+ */
+static int	slots_matching_mode(t_server_room *server_room, int from_slot,
+		int *out)
+{
 	int	tallest;
 	int	count;
 	int	slot;
@@ -1712,8 +1837,23 @@ static int	candidate_slots(t_server_room *server_room, int from_slot, int *out)
 			out[count++] = slot;
 		slot++;
 	}
-	if (count > 0)
-		return (count);
+	return (count);
+}
+
+/**
+ * @brief Every opponent still playing, whatever mode was declared.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the live slots.
+ * @return How many there are.
+ */
+static int	live_slots(t_server_room *server_room, int from_slot, int *out)
+{
+	int	count;
+	int	slot;
+
+	count = 0;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -1868,6 +2008,42 @@ t_game	*server_room_target_game(t_server_room *server_room,
 	if (target < 0)
 		return (NULL);
 	return (&server_room->games[target]);
+}
+
+/**
+ * @brief Every game one client's abilities land on.
+ *
+ * The plural of server_room_target_game, and the same resolution garbage
+ * uses - an offensive ability and a clear are the same act aimed the same
+ * way, so a mode that hits three boards with rows hits three boards with
+ * Thwack too.
+ *
+ * @param server_room Room to resolve within.
+ * @param cli The connection acting.
+ * @param out Receives the Targets' games; at least TD_MAX_GAMES wide.
+ * @return How many Targets were written, 0 when there are none.
+ */
+int	server_room_target_games(t_server_room *server_room, const t_client *cli,
+		t_game **out)
+{
+	int	slots[TD_MAX_GAMES];
+	int	count;
+	int	from;
+	int	index;
+
+	if (server_room == NULL || cli == NULL || out == NULL)
+		return (0);
+	from = slot_of_player(server_room, cli->player_id);
+	if (from < 0)
+		return (0);
+	count = server_room_targets_of(server_room, from, slots);
+	index = 0;
+	while (index < count)
+	{
+		out[index] = &server_room->games[slots[index]];
+		index++;
+	}
+	return (count);
 }
 
 /**
@@ -2870,12 +3046,15 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
 	if (is_attacking(watcher, out->player_id, server_room->match_ms))
 		out->flags |= BODY_ARENA_ATTACKING_YOU;
 	/*
-	 * The rivals this player's mode has singled out - not the one their next
-	 * clear will hit, because there is no such person: the Target is drawn
-	 * per resolution and a flag naming one would be a promise the next draw
-	 * breaks. Under Randoms nothing is marked, which is the honest drawing of
-	 * "no preference": every live rival is eligible, and outlining all of
-	 * them says nothing.
+	 * The rivals this player's mode has singled out. Under Attackers and KOs
+	 * that is exactly who the next clear lands on, because those two hit
+	 * everything they matched - the outline is a promise the resolution
+	 * keeps. Under Badges it is the urn and not the ball: one of the marked
+	 * cards is drawn, and marking the rest is still worth doing because the
+	 * mode is a statement about which crowd a player is playing against.
+	 * Under Randoms nothing is marked, which is the honest drawing of "no
+	 * preference": every live rival is eligible, and outlining all of them
+	 * says nothing.
 	 */
 	if (game->active && slot != subject && watcher != NULL
 		&& watcher->target_mode != TARGET_RANDOM

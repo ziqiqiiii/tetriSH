@@ -238,10 +238,17 @@ int				effect_fry_rows(const t_effect_state *state);
 ** draws the diamond and sends the word, tetrisd narrows the candidates and
 ** draws from what is left.
 **
-** Every mode chooses the urn and never the ball. The Target is still drawn at
-** random from the room's own source among the players still in the game
-** (docs/CONTEXT.md); a mode says which of them are eligible, so a player can
-** prefer a kind of rival and can never pick a person.
+** No mode names a person, but they differ in how many they reach. ATTACKERS
+** and KO describe a situation - being hit by these people, being the tallest
+** stack - and hit everyone in it, because answering one of three attackers
+** and leaving the other two is what the mode exists to stop, and two players
+** equally close to topping out are equally the answer. RANDOM and BADGES
+** describe a crowd, so they hit one drawn at random from the room's own
+** source; spraying either would put a single clear onto most of the room.
+**
+** A mode that matched nobody falls back to every live opponent and draws one
+** from that, so choosing a mode never costs a player the garbage they earned
+** and never turns "nobody has attacked me yet" into a room-wide attack.
 **
 ** The values are on the wire only as words, but the numbers are pinned by
 ** test_garbage.c so that a reordering is a test failure rather than a client

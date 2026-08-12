@@ -39,6 +39,10 @@ static void	test_dark_blinds_for_four_pieces(void);
 static void	test_pals_turns_ordinary_garbage_into_a_gift(void);
 static void	test_fry_sends_its_burned_rows_on(void);
 
+static void	test_a_spread_ability_reaches_every_target(void);
+static void	test_a_spread_costs_one_activation(void);
+static void	test_an_ability_that_pays_its_caster_lands_once(void);
+
 static void	pair(t_game *sender, t_game *target);
 static void	arm(t_game *g);
 static const t_ability_def	*ability(t_item_id character, int level);
@@ -61,7 +65,108 @@ int	main(void)
 	test_dark_blinds_for_four_pieces();
 	test_pals_turns_ordinary_garbage_into_a_gift();
 	test_fry_sends_its_burned_rows_on();
+	test_a_spread_ability_reaches_every_target();
+	test_a_spread_costs_one_activation();
+	test_an_ability_that_pays_its_caster_lands_once();
 	return (0);
+}
+
+/*
+** Attackers and KOs answer with a set, so an ability aimed through one lands
+** on all of it. Pentaris is the clearest of the seven that queue something
+** onto the Target: five rows on each of three boards, and no board left out.
+*/
+static void	test_a_spread_ability_reaches_every_target(void)
+{
+	t_game	sender;
+	t_game	victims[3];
+	t_game	*targets[3];
+	int		index;
+
+	game_start(&sender, 1, 20260813u);
+	while (sender.charge.charges < 8)
+		charge_on_clear(&sender.charge, 4);
+	index = 0;
+	while (index < 3)
+	{
+		game_start(&victims[index], (t_player_id)(2 + index),
+			(uint32_t)(20260813u + index));
+		targets[index] = &victims[index];
+		index++;
+	}
+	assert(game_ability_spread(&sender, targets, 3, ability(2, 3), 0)
+		== ABILITY_ACTIVATED);
+	index = 0;
+	while (index < 3)
+	{
+		assert(victims[index].pending_ability_garbage
+			== TETRISD_PENTARIS_ROWS);
+		index++;
+	}
+	printf("PASS test_a_spread_ability_reaches_every_target\n");
+}
+
+/*
+** Charge is spent once however many boards it reached. Paying per victim
+** would make Attackers a tax on being attacked by several people at once,
+** which is the situation the mode exists to answer.
+*/
+static void	test_a_spread_costs_one_activation(void)
+{
+	t_game	sender;
+	t_game	victims[3];
+	t_game	*targets[3];
+	int		before;
+	int		index;
+
+	game_start(&sender, 1, 20260813u);
+	while (sender.charge.charges < 8)
+		charge_on_clear(&sender.charge, 4);
+	index = 0;
+	while (index < 3)
+	{
+		game_start(&victims[index], (t_player_id)(2 + index), 7u);
+		targets[index] = &victims[index];
+		index++;
+	}
+	before = sender.charge.charges;
+	assert(game_ability_spread(&sender, targets, 3, ability(2, 3), 0)
+		== ABILITY_ACTIVATED);
+	assert(before - sender.charge.charges == ability_cost(3));
+	printf("PASS test_a_spread_costs_one_activation\n");
+}
+
+/*
+** The four abilities that need a Target but transform their caster do not
+** fan out. Vampire drains one rival's charge into the sender's, and running
+** it once per victim would pay three times for one activation - so it takes
+** the first Target and stops, leaving the others untouched.
+*/
+static void	test_an_ability_that_pays_its_caster_lands_once(void)
+{
+	t_game	sender;
+	t_game	victims[3];
+	t_game	*targets[3];
+	int		index;
+
+	game_start(&sender, 1, 20260813u);
+	while (sender.charge.charges < 8)
+		charge_on_clear(&sender.charge, 4);
+	index = 0;
+	while (index < 3)
+	{
+		game_start(&victims[index], (t_player_id)(2 + index), 7u);
+		while (victims[index].charge.charges < 8)
+			charge_on_clear(&victims[index].charge, 4);
+		targets[index] = &victims[index];
+		index++;
+	}
+	assert(game_ability_spread(&sender, targets, 3, ability(1, 3), 0)
+		== ABILITY_ACTIVATED);
+	assert(victims[0].charge.charges < 8);
+	assert(victims[1].charge.charges == 8);
+	assert(victims[2].charge.charges == 8);
+	printf("PASS test_an_ability_that_pays_its_caster_lands_once\n");
 }
 
 /*
