@@ -7,9 +7,10 @@ static const char *const	g_modes[] = {
 								"BATTLE_ROYALE"
 							};
 static const char *const	g_statuses[] = {
-								"WAITING", 
-								"READY", 
-								"IN_GAME", 
+								"WAITING",
+								"READY",
+								"SELECTING",
+								"IN_GAME",
 								"FINISHED"
 							};
 
@@ -134,7 +135,7 @@ static int	decode_row(const char *line, t_body_room_row *row)
 	if (strlen(word[0]) >= BODY_NAME_MAX || strlen(word[3]) >= BODY_USER_MAX)
 		return (-1);
 	mode = body_word_index(word[1], g_modes, 3);
-	status = body_word_index(word[2], g_statuses, 4);
+	status = body_word_index(word[2], g_statuses, 5);
 	if (mode < 0 || status < 0)
 		return (-1);
 	strcpy(row->name, word[0]);

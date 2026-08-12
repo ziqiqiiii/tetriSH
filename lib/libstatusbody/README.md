@@ -119,7 +119,7 @@ board
 00000000000000000000
 ...                     (exactly 20 rows)
 opponents 1
-opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
+opp 2 7 1 clearing 4200 9 3 4 2 6 3 8 3 rival
 00000000000000000000
 ...                     (exactly 20 rows, per opponent)
 ```
@@ -138,7 +138,7 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival
 | `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
-| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <ptype> <protation> <pcol> <prow> <username>` |
+| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <ptype> <protation> <pcol> <prow> <charge> <character> <username>` — `charge` is the same 0–10 meter the frame's own subject carries, and `character` the catalogue id of the fighter they took into this match (`0` when they named none). Both are here so a client can draw the rival's column beside their board rather than guessing at it; `username` stays last because it runs to end of line |
 
 `phase` reads `active`, `clearing`, `paused`, `topout`, or `countdown`.
 `countdown` is a dealt board being held still before a match starts — it is
@@ -200,7 +200,7 @@ One line per room:
 ```
 
 - `mode`  ∈ `SINGLE | DOUBLE | BATTLE_ROYALE` 
-- `status` ∈ `WAITING | READY | IN_GAME | FINISHED`
+- `status` ∈ `WAITING | READY | SELECTING | IN_GAME | FINISHED`. `SELECTING` is the character-select window: the room is committed and nobody is playing yet
 - Rooms travel by **name** (`S-01`, `BR-10`), never by id. The ids run per mode, so only the prefixed name is unique. `mode` rides as its own field so clients never parse the prefix.
 
 ### Room — `LIST /room/<name>` snapshot (`room.c`)
@@ -210,10 +210,19 @@ One line per room:
 | `body_room_encode(in, out, cap)` | Serialise one authoritative waiting-room snapshot |
 | `body_room_decode(buf, len, out)` | Parse the fixed room header and its ordered occupied-seat rows |
 
-The header carries the room name, mode, status, minimum players, capacity, and
-occupied-seat count. Each following row carries the server slot, player id,
-owner/player role, ready/waiting state, and username. Rows must be in strictly
-increasing server-slot order; refreshes therefore preserve a stable roster.
+The header carries the room name, mode, status, the milliseconds left in the
+character-select window, minimum players, capacity, and occupied-seat count.
+Each following row carries the server slot, player id, owner/player role,
+ready/waiting state, the character that seat has declared for this match, and
+username. Rows must be in strictly increasing server-slot order; refreshes
+therefore preserve a stable roster.
+
+`select` is `0` when no window is running. It is the room's clock and not each
+client's, so two players browsing the same roster are shown the same number and
+are dealt in at the same instant. A seat is locked in exactly when its
+`character` is non-zero — there is no second flag that could disagree with it,
+and opening a window clears every seat's character so the fact belongs to this
+match rather than the last one.
 
 ### Chat — `application/tetris-chat` (`chat.c`)
 

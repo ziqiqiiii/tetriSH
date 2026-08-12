@@ -19,6 +19,12 @@ static bool	apply_handling_actions(t_match_authority *authority,
 				const t_solo_handling_config *config, int elapsed_ms);
 static void	select_power(t_match_authority *authority,
 				t_mp_match_state *state, t_audio_ctx *audio, uint32_t key);
+static bool	selection_online_update(const t_app_data_provider *provider,
+				const char *room_id, t_mp_match_state *state,
+				t_render_ctx *ctx, t_audio_ctx *audio, int elapsed_ms,
+				uint64_t *poll_due_ms);
+static void	selection_send_lock(const t_app_data_provider *provider,
+				const char *room_id, const t_mp_match_state *state);
 static void	play_match_events(t_audio_ctx *audio, uint32_t events);
 static bool	announce_effects(t_match_authority *authority,
 				const t_mp_match_state *state, t_render_ctx *ctx,
@@ -56,6 +62,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	uint32_t				selection_events;
 	uint64_t				previous_ms;
 	uint64_t				now_ms;
+	uint64_t				select_poll_ms;
+	bool					lock_sent;
 	int						elapsed_ms;
 	int						wait_ms;
 	bool					leave;
@@ -75,13 +83,25 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	if (match_authority_is_online(&authority))
 	{
 		/*
-		 * The server dealt the boards when it accepted START, so there is no
-		 * character select left to run: the match has already begun and the
+		 * Two ways to arrive online. If the room is still SELECTING the
+		 * server is holding its window open and the roster is exactly where
+		 * this screen should start; the clock is the room's, so the local
+		 * timer is left at zero and refreshed from the room instead. If the
+		 * boards are already dealt there is no selection left to run, and the
 		 * countdown in the first snapshot is what the player sees.
 		 */
-		state.selection.locked = true;
-		state.selection.remaining_ms = 0;
-		state.phase = MP_MATCH_PLAYING;
+		if (room != NULL && room->state == APP_ROOM_STATE_SELECTING)
+		{
+			state.selection.locked = false;
+			state.selection.remaining_ms = room->select_ms;
+			state.phase = MP_MATCH_CHARACTER_SELECT;
+		}
+		else
+		{
+			state.selection.locked = true;
+			state.selection.remaining_ms = 0;
+			state.phase = MP_MATCH_PLAYING;
+		}
 	}
 	handling_config = solo_handling_default_config();
 	solo_handling_reset(&handling);
@@ -108,6 +128,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	}
 	rebuild = false;
 	previous_ms = match_now_ms();
+	select_poll_ms = previous_ms;
+	lock_sent = false;
 	input_backlog = false;
 	while (!leave)
 	{
@@ -142,7 +164,24 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 		previous_ms = now_ms;
 		(void)audio_update(audio, elapsed_ms);
 		changed = false;
-		if (state.phase == MP_MATCH_CHARACTER_SELECT)
+		if (state.phase == MP_MATCH_CHARACTER_SELECT
+			&& match_authority_is_online(&authority))
+		{
+			/*
+			 * Online the window belongs to the room, so the local timer is
+			 * only ever an interpolation and the decision to start is never
+			 * this client's. Locking in is sent the moment it happens: it is
+			 * what lets the room stop waiting out its clock.
+			 */
+			if (state.selection.locked && !lock_sent)
+			{
+				selection_send_lock(provider, room_id, &state);
+				lock_sent = true;
+			}
+			changed = selection_online_update(provider, room_id, &state, ctx,
+					audio, elapsed_ms, &select_poll_ms) || changed;
+		}
+		else if (state.phase == MP_MATCH_CHARACTER_SELECT)
 		{
 			selection_events = mp_match_character_update(&state, elapsed_ms);
 			if ((selection_events & MP_SELECTION_EVENT_SECOND) != 0)
@@ -590,6 +629,93 @@ static bool	apply_handling_actions(t_match_authority *authority,
 		index++;
 	}
 	return (changed);
+}
+
+/**
+ * @brief Runs one frame of a roster screen whose clock belongs to the room.
+ *
+ * The local number is spent between polls so the seconds move smoothly, and
+ * corrected to the room's whenever one comes back - the room is the only thing
+ * that can know a rival has locked in and cut the window short. When the room
+ * stops selecting it has dealt the boards, and this screen has nothing left to
+ * decide: it becomes the match, and the countdown the server is already
+ * pushing is what the player sees next.
+ *
+ * @param provider Provider the room is read through.
+ * @param room_id The room being played in.
+ * @param state Match model whose selection and phase are advanced.
+ * @param ctx Render context, so a settled fighter can theme the screen.
+ * @param audio Audio context for the closing seconds.
+ * @param elapsed_ms Milliseconds since the previous frame.
+ * @param poll_due_ms In/out deadline for the next room read.
+ * @return true when something the renderer shows has changed.
+ */
+static bool	selection_online_update(const t_app_data_provider *provider,
+	const char *room_id, t_mp_match_state *state, t_render_ctx *ctx,
+	t_audio_ctx *audio, int elapsed_ms, uint64_t *poll_due_ms)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_app_screen_view_model					view;
+	uint64_t								now;
+	int										before;
+	bool									changed;
+
+	changed = false;
+	before = mp_match_character_seconds(state);
+	if (state->selection.remaining_ms > elapsed_ms)
+		state->selection.remaining_ms -= elapsed_ms;
+	else
+		state->selection.remaining_ms = 0;
+	if (mp_match_character_seconds(state) != before)
+	{
+		if (mp_match_character_seconds(state) <= MP_CHARACTER_TICK_AUDIO_SECONDS)
+			audio_play_sfx(audio, AUDIO_SFX_COUNTDOWN_TICK);
+		changed = true;
+	}
+	now = match_now_ms();
+	if (now < *poll_due_ms)
+		return (changed);
+	*poll_due_ms = now + MP_MATCH_SELECT_POLL_MS;
+	memset(&view, 0, sizeof(view));
+	view.screen = APP_SCREEN_WAITING_ROOM;
+	if (app_room_view_refresh(provider, room_id, &view) != APP_PROVIDER_OK)
+		return (changed);
+	state->selection.remaining_ms = view.data.room.select_ms;
+	if (view.data.room.state == APP_ROOM_STATE_SELECTING)
+		return (true);
+	state->selection.locked = true;
+	state->selection.remaining_ms = 0;
+	state->phase = MP_MATCH_PLAYING;
+	character = mp_match_selected_character(state);
+	if (character != NULL)
+		tetrisu_character_apply(ctx, character->name);
+	return (true);
+}
+
+/**
+ * @brief Tells the room which fighter this seat has settled on.
+ *
+ * It travels as a readiness because that is the route that carries a
+ * character: the seat is already ready, and re-declaring is how it names one.
+ * A failure is not reported to the player - the window has a clock behind it,
+ * so a lock that never arrived costs them the early start and nothing else.
+ *
+ * @param provider Provider the declaration is sent through.
+ * @param room_id The room being played in.
+ * @param state Match model holding the highlighted fighter.
+ */
+static void	selection_send_lock(const t_app_data_provider *provider,
+	const char *room_id, const t_mp_match_state *state)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_app_room_view_model					room;
+
+	character = mp_match_selected_character(state);
+	if (provider == NULL || provider->ready_room == NULL || character == NULL)
+		return ;
+	memset(&room, 0, sizeof(room));
+	(void)provider->ready_room(provider->userdata, room_id, true,
+		character->item_id, &room);
 }
 
 static void	select_power(t_match_authority *authority,

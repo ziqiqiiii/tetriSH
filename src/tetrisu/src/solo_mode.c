@@ -509,7 +509,7 @@ static bool	handle_solo_mouse(t_solo_authority *authority, t_render_ctx *ctx,
 	int				canvas_y;
 
 	ability = SOLO_ABILITY_NONE;
-	if (display_ready && !resize_pending
+	if (solo_abilities_enabled() && display_ready && !resize_pending
 		&& solo_mouse_canvas_position(ctx, solo, input, &canvas_x, &canvas_y))
 		ability = solo_ability_at_canvas(canvas_x, canvas_y);
 	if (solo_popover_set_hover(solo, ability))

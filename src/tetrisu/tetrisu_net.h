@@ -57,6 +57,17 @@
 */
 # define NET_CHAT_HISTORY		32
 
+/*
+** How often an idle client asks the server whether it is still there.
+**
+** Nothing on either end sends a keepalive, so an idle connection is silent
+** until the next thing the player does - which is when a drop that happened
+** twenty minutes ago finally surfaces, as a screen that will not load. One
+** small request on a timer is what turns that into a thing the client can say
+** at the moment it becomes true.
+*/
+# define NET_HEARTBEAT_MS	15000
+
 /* the routes tetrisd serves, spelled once (src/tetrisd/README.md) */
 # define TETRISU_ROUTE_ACCOUNT	"/account"
 # define TETRISU_ROUTE_SESSION	"/session"

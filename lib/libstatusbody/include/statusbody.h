@@ -35,6 +35,8 @@
 # define BODY_NEXT_COUNT		3
 # define BODY_CLEARING_MAX	4
 # define BODY_CHARGE_MAX		10
+/* an hour, which no select window is; a bound, not a policy */
+# define BODY_SELECT_MS_MAX		3600000
 # define BODY_COLOR_MAX		15
 /* one store front: the catalogue caps in libmacminidb are 64 per kind, but
 ** what tetrisd sells is a fixed roster of four characters and seven themes */
@@ -114,10 +116,16 @@ typedef enum e_body_mode
 	BODY_MODE_BATTLE_ROYALE
 }	t_body_mode;
 
+/*
+** Kept positionally identical to libtetrisroom's t_room_status: tetrisd casts
+** one to the other rather than mapping them, so a value inserted in one has to
+** be inserted at the same place in the other.
+*/
 typedef enum e_body_room_status
 {
 	BODY_ROOM_WAITING,
 	BODY_ROOM_READY,
+	BODY_ROOM_SELECTING,
 	BODY_ROOM_IN_GAME,
 	BODY_ROOM_FINISHED
 }	t_body_room_status;
@@ -181,6 +189,15 @@ typedef struct s_body_opponent
 	** draws a board with.
 	*/
 	t_body_piece	piece;
+	/*
+	** What the recipient needs to draw the other side of the screen and
+	** cannot work out for itself: how much power they are holding, and who
+	** they are holding it as. The charge is the same 0-10 the frame's own
+	** carries; the character is a catalogue id, so 0 means they have not
+	** chosen one rather than naming the first of them.
+	*/
+	int			charge;
+	uint32_t	character;
 	char		username[BODY_USER_MAX];
 	t_body_cell	cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
 }	t_body_opponent;
@@ -308,6 +325,13 @@ typedef struct s_body_room_member
 	uint64_t	player_id;
 	bool		owner;
 	bool		ready;
+	/*
+	** The fighter this seat has settled on, as a catalogue id, and 0 for
+	** "still choosing". Locking in is not a second flag beside it: a seat is
+	** locked exactly when it names a character, so the two facts cannot
+	** disagree about whether the room may start.
+	*/
+	uint32_t	character;
 	char		username[BODY_USER_MAX];
 }	t_body_room_member;
 
@@ -317,6 +341,13 @@ typedef struct s_body_room
 	char				name[BODY_NAME_MAX];
 	t_body_mode			mode;
 	t_body_room_status	status;
+	/*
+	** Milliseconds left in the character-select window, 0 when none is
+	** running. It is the room's clock and not each client's, so two players
+	** browsing the same roster are shown the same number and the match starts
+	** for both at the same instant.
+	*/
+	int				select_ms;
 	int				min_to_start;
 	int				slot_count;
 	size_t				member_count;

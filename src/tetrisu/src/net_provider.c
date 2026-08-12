@@ -636,6 +636,8 @@ static t_app_room_state	map_body_status(t_body_room_status status)
 {
 	if (status == BODY_ROOM_READY)
 		return (APP_ROOM_STATE_READY);
+	if (status == BODY_ROOM_SELECTING)
+		return (APP_ROOM_STATE_SELECTING);
 	if (status == BODY_ROOM_IN_GAME)
 		return (APP_ROOM_STATE_IN_GAME);
 	if (status == BODY_ROOM_FINISHED)
@@ -1036,6 +1038,7 @@ static bool	map_room_snapshot(t_app_net_session *session,
 	view->required_players = body->min_to_start;
 	view->capacity = body->slot_count;
 	view->player_count = (int)body->member_count;
+	view->select_ms = body->select_ms;
 	view->local_slot = -1;
 	index = 0;
 	while (index < body->member_count)
@@ -1045,6 +1048,7 @@ static bool	map_room_snapshot(t_app_net_session *session,
 			body->members[index].username);
 		view->players[index].owner = body->members[index].owner;
 		view->players[index].ready = body->members[index].ready;
+		view->players[index].character = body->members[index].character;
 		if (body->members[index].player_id == session->net.player_id)
 			view->local_slot = (int)index;
 		index++;

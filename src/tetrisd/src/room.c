@@ -16,6 +16,7 @@ static void		decorate_snapshot(t_server_room *server_room, int slot, t_body_stat
 static void		fill_opponents(t_server_room *server_room, int subject, t_body_state *snap);
 static void		project_opponent(t_server_room *server_room, int slot, t_body_opponent *out);
 static t_body_phase	game_phase(const t_game *game);
+static void		spend_selection(t_server_room *server_room, int elapsed_ms);
 static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
 static void		spread_dirty(t_server_room *server_room);
@@ -250,6 +251,17 @@ int	server_room_open(t_server *srv, t_client *cli, t_game_mode mode)
 /**
  * @brief Seats a client in a room that already exists.
  *
+ * Joining a room the caller is already sitting in gives back the seat they
+ * have. The room refuses a duplicate player, which is right - one player is
+ * not two - but that refusal used to come back as a failed JOIN, and a client
+ * returning to its own room from a finished match read that as the room being
+ * gone and went to the lobby. So the answer to "put me in this room" is the
+ * seat, whether the caller had to be given one or already had it.
+ *
+ * The check comes before room_can_accept deliberately: a room in game is
+ * closed to newcomers and is exactly where somebody already seated has the
+ * most reason to ask.
+ *
  * @param server_room Room being joined.
  * @param cli Client joining; bound to the room when it takes a slot.
  * @param slot Receives the 1-based slot taken, or -1 when none was.
@@ -260,10 +272,18 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
 			int *slot)
 {
 	t_join_verdict	verdict;
+	int				seated;
 
 	*slot = -1;
 	if (server_room == NULL || cli == NULL)
 		return (JOIN_FULL);
+	seated = slot_of_player(server_room, cli->player_id);
+	if (seated >= 0)
+	{
+		*slot = seated + 1;
+		bind_client(cli, server_room, *slot);
+		return (JOIN_ACCEPTED);
+	}
 	verdict = room_can_accept(server_room->room);
 	if (verdict != JOIN_ACCEPTED)
 		return (verdict);
@@ -373,6 +393,13 @@ bool	server_room_all_ready(const t_server_room *server_room)
  * left to leak - and dealing the boards happens here, with the flag, rather
  * than a caller away from it.
  *
+ * Only a Single room is dealt from here. Anywhere two people are playing, the
+ * owner's start opens the character-select window instead, exactly as the
+ * last readiness does - otherwise the same room reached a match by two
+ * different routes, and the one the owner took skipped the moment in which
+ * either of them was allowed to choose a fighter. The match still begins from
+ * this request; it is the window that begins first.
+ *
  * @param server_room Room whose game is starting.
  * @param cli Client asking to start; the room decides whether it may.
  * @return The room's verdict; the game runs only on START_ACCEPTED.
@@ -383,6 +410,21 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
 
 	if (server_room == NULL || cli == NULL)
 		return (START_NOT_OWNER);
+	if (!server_room_is_solo(server_room))
+	{
+		verdict = room_can_start(server_room->room, cli->player_id);
+		if (verdict != START_ACCEPTED)
+			return (verdict);
+		/*
+		 * A window that will not open is one that is already open: the domain
+		 * takes a READY room and nothing else, so the only way past the
+		 * verdict above and into this refusal is a room that is already
+		 * choosing. That is a start the owner has already made.
+		 */
+		if (!server_room_begin_selection(server_room))
+			return (START_ALREADY_STARTED);
+		return (START_ACCEPTED);
+	}
 	verdict = room_start(server_room->room, cli->player_id);
 	if (verdict != START_ACCEPTED)
 		return (verdict);
@@ -394,6 +436,82 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
 	}
 	server_room->ticking = true;
 	return (verdict);
+}
+
+/**
+ * @brief Opens the character-select window on a room that has readied itself.
+ *
+ * What readiness now completes, in place of the match. A Double room used to
+ * be dealt the instant its last seat declared, which meant the fighter a
+ * player took into a match was whichever their account happened to have
+ * equipped - there was no moment between committing and playing in which to
+ * choose one. This is that moment, and the room owns its clock so both players
+ * are shown the same number and are dealt in at the same instant.
+ *
+ * Every seat's declared character is cleared as the window opens. That is what
+ * makes "locked in" a fact about this match rather than a leftover from the
+ * last one, and it is why the room can decide to start early by asking whether
+ * every seat has named one.
+ *
+ * @param server_room Room to hold open.
+ * @return true when the window is now running.
+ */
+bool	server_room_begin_selection(t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (false);
+	if (room_begin_selection(server_room->room) != 0)
+		return (false);
+	slot = 0;
+	while (slot < TD_MAX_GAMES)
+	{
+		server_room->character[slot] = 0;
+		slot++;
+	}
+	server_room->select_ms = TETRISD_MATCH_SELECT_MS;
+	server_room->select_second = -1;
+	server_room->ticking = true;
+	room_narrate(server_room, "ROOM choosing fighters");
+	return (true);
+}
+
+/**
+ * @brief Reports whether every seated player has settled on a fighter.
+ *
+ * A seat is locked exactly when it names a character, so there is no second
+ * flag that could disagree with this one. An empty room is not locked in -
+ * there is nobody in it to have chosen.
+ *
+ * Only a room with a window open can answer yes. Outside one the question has
+ * no meaning: a Single player who equipped a fighter last week would otherwise
+ * be "all locked" the moment they declared, and the room would deal itself a
+ * match nobody asked it for.
+ *
+ * @param server_room Room to ask.
+ * @return true when a select window is open and every occupied seat has
+ *         declared a character.
+ */
+bool	server_room_all_locked(const t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room == NULL)
+		return (false);
+	if (server_room->room->status != ROOM_SELECTING)
+		return (false);
+	if (server_room->room->number_of_players < server_room->room->min_to_start)
+		return (false);
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& server_room->character[slot] == 0)
+			return (false);
+		slot++;
+	}
+	return (true);
 }
 
 /**
@@ -578,6 +696,18 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 		rehome_successor(server_room, cli, &res);
 		narrate_departure(server_room, cli->username, name, &res);
+		/*
+		 * Leaving during the select window closes it. The room can no longer
+		 * deal the match it was setting up, and whoever is left would sit on
+		 * a roster screen waiting out a clock with nothing behind it.
+		 */
+		if (server_room->room->status == ROOM_SELECTING)
+		{
+			room_abort_selection(server_room->room);
+			server_room->select_ms = 0;
+			server_room->select_second = -1;
+			server_room->ticking = false;
+		}
 	}
 	if (finished.player_id != 0)
 		award_game(srv, &finished, false);
@@ -634,6 +764,7 @@ bool	server_room_snapshot(const t_server_room *server_room,
 	snprintf(out->name, sizeof(out->name), "%s", server_room->room->name);
 	out->mode = (t_body_mode)server_room->room->mode;
 	out->status = (t_body_room_status)server_room->room->status;
+	out->select_ms = server_room->select_ms;
 	out->min_to_start = server_room->room->min_to_start;
 	out->slot_count = server_room->room->slot_count;
 	index = 0;
@@ -651,6 +782,8 @@ bool	server_room_snapshot(const t_server_room *server_room,
 				= membership_is_owner(&slot->membership);
 			out->members[out->member_count].ready
 				= slot->status == SLOT_READY;
+			out->members[out->member_count].character
+				= (uint32_t)server_room->character[index];
 			snprintf(out->members[out->member_count].username,
 				sizeof(out->members[out->member_count].username), "%s",
 				slot->membership.username);
@@ -749,6 +882,8 @@ static void	room_blank(t_server_room *server_room)
 	server_room->chat_seq = 0;
 	server_room->countdown_ms = 0;
 	server_room->countdown_second = -1;
+	server_room->select_ms = 0;
+	server_room->select_second = -1;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
@@ -837,6 +972,11 @@ static int	deal_games(t_server_room *server_room)
  */
 static void	tick_room(t_server_room *server_room, int elapsed_ms)
 {
+	if (server_room->room->status == ROOM_SELECTING)
+	{
+		spend_selection(server_room, elapsed_ms);
+		return ;
+	}
 	if (server_room->countdown_ms > 0)
 		elapsed_ms = spend_countdown(server_room, elapsed_ms);
 	advance_and_push(server_room, elapsed_ms);
@@ -847,6 +987,50 @@ static void	tick_room(t_server_room *server_room, int elapsed_ms)
 	server_room->ticking = false;
 	record_and_reset(server_room);
 	room_close(server_room);
+}
+
+/**
+ * @brief Runs the character-select window, and deals the match when it ends.
+ *
+ * The window ends either way it can: every seat has locked in, or the clock
+ * ran out. Locking in early is therefore worth something - the two players who
+ * both know who they are playing are not made to wait out fifteen seconds -
+ * and a player who never chooses still gets a match, played as whatever their
+ * account has equipped.
+ *
+ * No game exists yet, so there is nothing to advance and nothing to push but
+ * the room itself; the clients read the remaining milliseconds out of the room
+ * snapshot they are already polling.
+ *
+ * @param server_room Room whose window is running.
+ * @param elapsed_ms Milliseconds this tick is worth.
+ */
+static void	spend_selection(t_server_room *server_room, int elapsed_ms)
+{
+	int	second;
+
+	if (server_room->select_ms > elapsed_ms
+		&& !server_room_all_locked(server_room))
+	{
+		server_room->select_ms -= elapsed_ms;
+		second = (server_room->select_ms + 999) / 1000;
+		if (second != server_room->select_second)
+			server_room->select_second = second;
+		return ;
+	}
+	server_room->select_ms = 0;
+	server_room->select_second = -1;
+	if (!server_room_autostart(server_room))
+	{
+		/*
+		 * Nothing left to start - the room emptied under the window, or fell
+		 * below its minimum while it was open. Closing it puts the room back
+		 * where the remaining player can wait for another opponent rather
+		 * than sitting on a roster screen forever.
+		 */
+		room_abort_selection(server_room->room);
+		server_room->ticking = false;
+	}
 }
 
 /**
@@ -1260,9 +1444,10 @@ static void	fill_opponents(t_server_room *server_room, int subject,
  *
  * Only what the other player is entitled to see: the board, the piece on it,
  * how they are doing and what is queued against them. Deliberately absent are
- * the next queue, the hold slot and the charge meter - knowing which piece an
- * opponent is about to be dealt is not watching their board, it is reading
- * their hand.
+ * the next queue and the hold slot - knowing which piece an opponent is about
+ * to be dealt is not watching their board, it is reading their hand. The
+ * charge meter and the fighter they chose are on the other side of that line
+ * and are sent.
  *
  * The name is taken from the seat rather than from the game, because a game
  * knows a player id and nothing else about who is playing it.
@@ -1291,6 +1476,18 @@ static void	project_opponent(t_server_room *server_room, int slot,
 	out->piece.rotation = game->piece.rotation;
 	out->piece.col = game->piece.col;
 	out->piece.row = game->piece.row;
+	/*
+	 * The charge is the exception to what is withheld, and the character with
+	 * it. Both are what the opponent's side of the screen is drawn from - a
+	 * meter filling opposite you is the warning that an ability is coming, and
+	 * a match where you cannot see who you are fighting reads as a board with
+	 * nobody behind it. Neither says what they will do with it, which is the
+	 * line the next queue and the hold slot are still on the wrong side of.
+	 */
+	out->charge = game->charge.charges;
+	if (out->charge > BODY_CHARGE_MAX)
+		out->charge = BODY_CHARGE_MAX;
+	out->character = (uint32_t)server_room->character[slot];
 	snprintf(out->username, sizeof(out->username), "%s",
 		server_room->room->slots[slot].membership.username);
 	row = 0;
@@ -1441,11 +1638,19 @@ static void	settle_results(t_server_room *server_room)
 }
 
 /**
- * @brief Records every finished game and empties the room.
+ * @brief Records every finished game and returns the room to its players.
  *
- * Finishing a game clears every slot (the room domain's rule), so the room
- * ends empty and is handed back to the lobby; players who want another game
- * join a fresh one.
+ * The room outlives the match. It used to be finished instead, which cleared
+ * every slot and handed the room back to the lobby the moment the last board
+ * stopped - so two players who had just played each other came back from the
+ * results screen to a room that had been destroyed underneath them, and were
+ * dropped in the lobby to find one another again. room_rematch keeps the seats
+ * and the owner and withdraws only readiness, so the same room is waiting when
+ * they get back and either of them can ask for another match.
+ *
+ * The room still dies when the last player leaves it - that rule is
+ * server_room_forfeit's, and it is the one that keeps the lobby from filling
+ * with the ghosts of finished games.
  *
  * A game is a win if it was still being played when the match ended, which is
  * the same question settle_results asked a moment earlier and the same answer.
@@ -1473,9 +1678,36 @@ static void	record_and_reset(t_server_room *server_room)
 		}
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
+		/*
+		 * The verdict has already gone out - advance_and_push sent it a
+		 * moment ago and this is the last thing the match does - so it is
+		 * cleared here rather than left for room_blank, which a room that
+		 * survives its match never reaches. Left standing, the next match
+		 * would open with the last one's WON or LOST in its first snapshot.
+		 */
+		server_room->result[slot] = BODY_RESULT_NONE;
+		server_room->rank[slot] = 0;
+		/*
+		 * The fighter goes with the match it was chosen for. A room that kept
+		 * it would open its next select window with every seat already
+		 * locked, and start again before anybody had looked at the roster.
+		 */
+		server_room->character[slot] = 0;
 		slot++;
 	}
-	room_finish(server_room->room);
+	server_room->select_ms = 0;
+	server_room->select_second = -1;
+	/*
+	 * Single is the exception, and it is not an oversight: a solo room has
+	 * nobody to play again, restarting a solo game is RESTART's job and never
+	 * needed a room to survive for it, and the player who tops out is expected
+	 * to come out of that room free to open another. Only a match keeps its
+	 * room, because only a match has someone on the other side of it.
+	 */
+	if (server_room_is_solo(server_room))
+		room_finish(server_room->room);
+	else
+		room_rematch(server_room->room);
 	while (n > 0)
 	{
 		n--;

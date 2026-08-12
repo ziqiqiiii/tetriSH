@@ -158,6 +158,8 @@ bool	solo_authority_ability(t_solo_authority *authority, t_solo_game *game,
 {
 	t_net_result	result;
 
+	if (!solo_abilities_enabled())
+		return (false);
 	if (!authority->online)
 		return (solo_game_activate_ability(game, ability)
 			!= SOLO_ABILITY_RESULT_INVALID);

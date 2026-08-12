@@ -258,8 +258,14 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 	if (provider->start_room(session, created.id, &joined)
 		!= APP_PROVIDER_INVALID)
 		return (0);
+	/*
+	 * The owner's start commits the room without dealing it: a room with an
+	 * opponent in it goes to the roster first, and the boards follow once
+	 * both seats have chosen. SELECTING is what the waiting room walks out
+	 * on, so it is what this asserts.
+	 */
 	if (provider->start_room(helper, created.id, &refreshed)
-		!= APP_PROVIDER_OK || refreshed.state != APP_ROOM_STATE_IN_GAME)
+		!= APP_PROVIDER_OK || refreshed.state != APP_ROOM_STATE_SELECTING)
 		return (0);
 	if (provider->leave_room(session, created.id) != APP_PROVIDER_OK)
 		return (0);

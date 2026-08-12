@@ -68,6 +68,7 @@ static bool					apply_copy(t_game *g, const t_game *target);
 static bool					apply_fry(t_game *g);
 static bool					apply_mirurun(t_game *g);
 static bool					apply_cut(t_game *g);
+static int					highest_occupied_row(const t_board *b);
 static bool					apply_sol(t_game *g, int argument);
 static void					remember(t_game *g, int level, bool accepted);
 
@@ -379,19 +380,81 @@ static bool	apply_mirurun(t_game *g)
 /**
  * @brief Wolf-man L1 (Cut): clears the player's own top four rows.
  *
+ * The top four rows *of the stack*, not of the board. board_cut_top is the
+ * other reading and it is the one this used to take: it discards the board's
+ * first four rows and slides everything below them up, which for a stack
+ * standing on the floor deletes four rows of empty space and lifts the stack
+ * four rows closer to the ceiling. That made Cut do nothing at every height
+ * it was legal at, and made it illegal at the one height a player would ever
+ * spend a charge on it - a stack reaching into those rows lands under the
+ * falling piece after the slide, so piece_is_valid refused the whole thing.
+ *
+ * Clearing where the stack actually starts needs no shift at all. Everything
+ * above the highest occupied row is already empty, and everything below the
+ * cut stays where it is, so the four rows come off the top and the rest of
+ * the field is untouched. That also makes Cut unrefusable, which is right:
+ * an ability that only ever removes cells cannot leave a piece inside them.
+ *
  * @param g Game to transform.
  * @return true when the transform was kept.
  */
 static bool	apply_cut(t_game *g)
 {
 	t_board	next;
+	t_cell	empty;
+	int		row;
+	int		stop;
+	int		col;
 
+	row = highest_occupied_row(&g->board);
+	if (row >= BOARD_HEIGHT)
+		return (false);
+	stop = row + 4;
+	if (stop > BOARD_HEIGHT)
+		stop = BOARD_HEIGHT;
 	board_copy(&next, &g->board);
-	board_cut_top(&next, 4);
+	empty.type = CELL_EMPTY;
+	empty.color = 0;
+	while (row < stop)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			board_set(&next, col, row, empty);
+			col++;
+		}
+		row++;
+	}
 	if (!piece_is_valid(&next, &g->piece))
 		return (false);
 	board_copy(&g->board, &next);
 	return (true);
+}
+
+/**
+ * @brief Finds the topmost row holding anything at all.
+ *
+ * @param b Board to scan.
+ * @return That row, or BOARD_HEIGHT when the board is empty.
+ */
+static int	highest_occupied_row(const t_board *b)
+{
+	int	row;
+	int	col;
+
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (board_get(b, col, row).type != CELL_EMPTY)
+				return (row);
+			col++;
+		}
+		row++;
+	}
+	return (BOARD_HEIGHT);
 }
 
 /**

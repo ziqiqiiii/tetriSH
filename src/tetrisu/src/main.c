@@ -102,6 +102,19 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 					const t_app_data_provider *provider,
 					t_app_navigation *navigation, t_mp_session *session,
 					t_room_action action);
+static bool	launch_match(t_render_ctx *ctx, t_audio_ctx *audio,
+					const t_app_data_provider *provider,
+					t_app_navigation *navigation, t_mp_session *session);
+static bool	waiting_room_counts_down_here(
+					const t_app_data_provider *provider);
+static bool	network_dropped(const t_app_data_provider *provider,
+					const t_app_net_session *session);
+static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
+					t_app_data_provider *provider,
+					t_app_navigation *navigation, t_mp_session *mp_session,
+					t_app_net_session *session);
+static void	network_heartbeat(const t_app_data_provider *provider,
+					t_app_net_session *session, uint64_t *due_ms);
 static bool	send_room_chat(const t_app_data_provider *provider,
 					t_app_room_view_model *room,
 					t_waiting_room_state *state);
@@ -146,6 +159,7 @@ int	main(void)
 	t_audio_ctx			audio;
 	ncinput				input;
 	const char			*match_preview;
+	uint64_t			heartbeat_due_ms;
 	uint32_t			key;
 	int					hovered;
 	bool				direct_match_preview;
@@ -187,8 +201,18 @@ int	main(void)
 		direct_match_preview = navigation.current == APP_SCREEN_DOUBLE
 			|| navigation.current == APP_SCREEN_BATTLE_ROYALE;
 	auth_form_init(&auth_form, AUTH_FORM_LOGIN);
+	heartbeat_due_ms = ui_notification_now_ms() + NET_HEARTBEAT_MS;
 	while (navigation.current != APP_SCREEN_QUIT)
 	{
+		/*
+		 * Every screen comes back through here, so this is the one place a
+		 * drop has to be noticed however it was discovered - a failed
+		 * request inside a screen, a poll that stopped answering, or the
+		 * heartbeat below.
+		 */
+		if (handle_network_drop(&ctx, &audio, &provider, &navigation,
+				&mp_session, &net_session))
+			continue ;
 		if (navigation.current == APP_SCREEN_ENTRY)
 		{
 			(void)app_navigation_dispatch(&navigation, APP_NAV_OPEN_LOGIN);
@@ -302,7 +326,18 @@ int	main(void)
 				(void)app_navigation_dispatch(&navigation, APP_NAV_QUIT);
 			continue ;
 		}
-		key = render_wait_input(&ctx, &input);
+		memset(&input, 0, sizeof(input));
+		key = render_wait_input_timeout(&ctx, &input, NET_HEARTBEAT_MS);
+		if (key == 0)
+		{
+			/*
+			 * The home screen is where a player leaves the client sitting,
+			 * so it is where a silent drop has to be found. Everything else
+			 * either polls the server already or is over in seconds.
+			 */
+			network_heartbeat(&provider, &net_session, &heartbeat_due_ms);
+			continue ;
+		}
 		if (input.evtype == NCTYPE_RELEASE && !nckey_mouse_p(key))
 			continue ;
 		if (key == (uint32_t)-1)
@@ -1797,9 +1832,14 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 	 * instant the player left the match, relaunched it, and left Escape looking
 	 * like it did nothing forever. The player asked to be back in the room;
 	 * starting the next match is their call, and S still does it.
+	 *
+	 * A server-backed room never arms it at all - the room decides when it is
+	 * under way and this screen learns that from a snapshot, so there is
+	 * nothing here to count down towards.
 	 */
 	auto_start = navigation->previous != APP_SCREEN_DOUBLE
-		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE;
+		&& navigation->previous != APP_SCREEN_BATTLE_ROYALE
+		&& waiting_room_counts_down_here(provider);
 	if (auto_start
 		&& waiting_room_local_is_owner(&session->room_view.data.room)
 		&& waiting_room_auto_start_allowed(&session->room_view.data.room))
@@ -1839,7 +1879,30 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			{
 				refresh_deadline = now + WAITING_ROOM_REFRESH_MS;
 				refresh_waiting_room(provider, session, &room_changed);
-				if (session->room_view.data.room.state == APP_ROOM_STATE_IN_GAME)
+				/*
+				 * A poll that found nothing at the other end is the room's
+				 * heartbeat failing. Staying here would leave the player
+				 * watching a roster that has stopped updating; leaving lets
+				 * the main loop say so.
+				 */
+				if (provider != NULL && !provider->local_fixtures
+					&& provider->userdata != NULL
+					&& ((t_app_net_session *)provider->userdata)->net.state
+					== NET_OFFLINE)
+				{
+					(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
+					continue ;
+				}
+				/*
+				 * SELECTING launches too. The room commits before it deals,
+				 * and the moment it does both players belong on the roster
+				 * screen - waiting for IN_GAME would leave them staring at
+				 * the waiting room through the whole select window and drop
+				 * them into a match already counting down.
+				 */
+				if (session->room_view.data.room.state == APP_ROOM_STATE_IN_GAME
+					|| session->room_view.data.room.state
+					== APP_ROOM_STATE_SELECTING)
 					action = ROOM_ACTION_LAUNCH;
 				else if (session->room_state.counting_down
 					&& !waiting_room_can_start(&session->room_view.data.room))
@@ -1992,8 +2055,10 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		blocker = waiting_room_start_blocker(room);
 		if (blocker != ROOM_FEEDBACK_NONE)
 			session->room_state.feedback = blocker;
-		else
+		else if (waiting_room_counts_down_here(provider))
 			(void)waiting_room_begin_countdown(&session->room_state);
+		else
+			return (launch_match(ctx, audio, provider, navigation, session));
 		return (true);
 	}
 	if (action == ROOM_ACTION_SEND_CHAT)
@@ -2013,26 +2078,7 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		return (true);
 	}
 	if (action == ROOM_ACTION_LAUNCH)
-	{
-		if (room->state != APP_ROOM_STATE_IN_GAME
-			&& !waiting_room_local_is_owner(room))
-		{
-			(void)waiting_room_cancel_countdown(&session->room_state);
-			return (true);
-		}
-		if (room->state != APP_ROOM_STATE_IN_GAME
-			&& app_room_view_start(provider, room->id, &session->room_view)
-				!= APP_PROVIDER_OK)
-		{
-			(void)waiting_room_cancel_countdown(&session->room_state);
-			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
-			return (true);
-		}
-		audio_play_menu_select(audio);
-		(void)app_navigation_dispatch(navigation,
-			waiting_room_launch_action(&session->room_view.data.room));
-		return (true);
-	}
+		return (launch_match(ctx, audio, provider, navigation, session));
 	if (action == ROOM_ACTION_LEAVE)
 	{
 		if (app_room_view_leave(provider, room->id) == APP_PROVIDER_OK)
@@ -2046,6 +2092,170 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	else if (action == ROOM_ACTION_QUIT)
 		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
 	return (true);
+}
+
+/**
+ * @brief Leaves the waiting room for the match, starting it if it needs it.
+ *
+ * A room already under way is one to walk into, not one to start. SELECTING
+ * counts as under way: the server opened that window itself and will deal the
+ * boards once both players have chosen, so a START sent from here would be
+ * asking for a match that is already being set up.
+ *
+ * @param ctx Render context.
+ * @param audio Audio context.
+ * @param provider Data provider that may own the start.
+ * @param navigation Navigation state to dispatch through.
+ * @param session Multiplayer screen session.
+ * @return true unless the caller must tear the screen down.
+ */
+static bool	launch_match(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *session)
+{
+	t_app_room_view_model	*room;
+
+	(void)ctx;
+	room = &session->room_view.data.room;
+	if (!waiting_room_is_under_way(room)
+		&& !waiting_room_local_is_owner(room))
+	{
+		(void)waiting_room_cancel_countdown(&session->room_state);
+		return (true);
+	}
+	if (!waiting_room_is_under_way(room)
+		&& app_room_view_start(provider, room->id, &session->room_view)
+			!= APP_PROVIDER_OK)
+	{
+		(void)waiting_room_cancel_countdown(&session->room_state);
+		session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
+		return (true);
+	}
+	audio_play_menu_select(audio);
+	(void)app_navigation_dispatch(navigation,
+		waiting_room_launch_action(&session->room_view.data.room));
+	return (true);
+}
+
+/**
+ * @brief Reports whether the link to the server has gone since it was up.
+ *
+ * The two halves matter separately. `connected` is the client's own record
+ * that it once reached the server, and NET_OFFLINE is where net_client parks
+ * a socket whose send or receive failed - so together they name a link that
+ * existed and does not any more, which is the only case worth interrupting
+ * the player over. A session that never connected is a sign-in that has not
+ * happened yet, not a drop.
+ *
+ * @param provider The app's data provider; fixtures have nothing to drop.
+ * @param session The app's network session.
+ * @return true when a live connection has been lost.
+ */
+static bool	network_dropped(const t_app_data_provider *provider,
+	const t_app_net_session *session)
+{
+	if (provider == NULL || provider->local_fixtures || session == NULL)
+		return (false);
+	return (session->connected && session->net.state == NET_OFFLINE);
+}
+
+/**
+ * @brief Tells the player the connection is gone and takes their answer.
+ *
+ * Falling back silently is what this replaces. Both authorities already swap
+ * themselves to the local rules when the server stops answering, so a dropped
+ * player kept playing - against a board that had quietly stopped being the
+ * server's, with a result nobody would record and a room that no longer knew
+ * them. The fallback is the right behaviour; being told is the missing half.
+ *
+ * Offline is the safe answer because it takes nothing away: the provider
+ * becomes the local fixture, which is the same one a player who never signed
+ * in uses, and the screens that need a server hide themselves behind the
+ * navigation's offline flag. Signing in again goes back to the auth screen,
+ * whose CHECK SERVER redials - a dead session is redialled there already.
+ *
+ * @param ctx Render context.
+ * @param audio Audio context.
+ * @param provider The app's data provider, replaced when offline is chosen.
+ * @param navigation Navigation state, moved to wherever the answer leads.
+ * @param mp_session Multiplayer session, whose room is gone with the link.
+ * @param session The network session being abandoned.
+ * @return true when a drop was handled and the caller must re-dispatch.
+ */
+static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
+	t_app_data_provider *provider, t_app_navigation *navigation,
+	t_mp_session *mp_session, t_app_net_session *session)
+{
+	bool	sign_in_again;
+
+	if (!network_dropped(provider, session))
+		return (false);
+	session->connected = false;
+	session->has_catalogue = false;
+	memset(mp_session->room_id, 0, sizeof(mp_session->room_id));
+	mp_session->create_pending = false;
+	sign_in_again = confirmation_prompt_run(ctx, audio,
+			CONFIRM_CONNECTION_LOST);
+	navigation->previous = navigation->current;
+	if (sign_in_again)
+	{
+		navigation->offline = false;
+		navigation->current = APP_SCREEN_LOGIN;
+	}
+	else
+	{
+		app_fixture_provider_init(provider);
+		navigation->offline = true;
+		navigation->current = APP_SCREEN_HOME;
+	}
+	return (true);
+}
+
+/**
+ * @brief Asks the server whether it is still there, at most so often.
+ *
+ * PROFILE rather than a method of its own: it is the cheapest thing the
+ * server already answers, and inventing a route for this would put a keepalive
+ * in the protocol to serve one client's idle screen. What matters is the
+ * round trip, not the body - net_request parks a failed socket at NET_OFFLINE
+ * on its way out, and that is the whole result this reads.
+ *
+ * @param provider The app's data provider; fixtures never ask.
+ * @param session The session to probe.
+ * @param due_ms When the next probe is due; advanced by one interval here.
+ */
+static void	network_heartbeat(const t_app_data_provider *provider,
+	t_app_net_session *session, uint64_t *due_ms)
+{
+	t_body_profile	profile;
+	uint64_t		now;
+
+	if (provider == NULL || provider->local_fixtures || session == NULL
+		|| !session->connected || session->net.state < NET_AUTHED)
+		return ;
+	now = ui_notification_now_ms();
+	if (now < *due_ms)
+		return ;
+	*due_ms = now + NET_HEARTBEAT_MS;
+	(void)net_profile(&session->net, &profile);
+}
+
+/**
+ * @brief Reports whether the pre-match countdown belongs to this client.
+ *
+ * It does when there is no server to own one. A room the server is running
+ * counts itself down - it opens the select window, holds its own clock, and
+ * deals both players in on the same tick - and a second countdown here ran
+ * three seconds in the waiting room before the request that starts any of
+ * that had even been sent. Both players then watched a number that meant
+ * nothing, and the one the match actually begins on arrived after it.
+ *
+ * @param provider Data provider backing the room.
+ * @return true when the local countdown is the only one there is.
+ */
+static bool	waiting_room_counts_down_here(const t_app_data_provider *provider)
+{
+	return (provider == NULL || provider->local_fixtures);
 }
 
 /**

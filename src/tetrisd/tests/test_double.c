@@ -16,7 +16,7 @@
 
 // Static Functions
 static void	test_readiness_is_the_rooms_and_survives_a_refresh(void);
-static void	test_both_declaring_ready_starts_the_match(void);
+static void	test_both_declaring_ready_opens_the_select_window(void);
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
 static void	test_each_snapshot_carries_the_other_board(void);
@@ -26,7 +26,6 @@ static void	test_both_players_are_recorded_once_each(void);
 static void	test_an_unowned_fighter_is_refused(void);
 static void	test_a_declared_fighter_is_the_matchs(void);
 
-
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static t_item_id	starter_character(t_fixture *fx, t_player_id pid);
 static t_item_id	unowned_character(t_fixture *fx, t_player_id pid);
@@ -34,7 +33,8 @@ static int		simple(t_harness *hc, const char *method, const char *path,
 					const char *body);
 static int		seat_two(t_fixture *fx, t_harness *amber, t_harness *blake,
 					char *room, size_t cap);
-static int		start_match(t_harness *owner, const char *room);
+static int		start_match(t_fixture *fx, t_harness *owner, t_harness *joiner,
+					const char *room);
 static int		list_room(t_harness *hc, const char *path, t_body_room *out);
 static void		play_path(const t_harness *hc, const char *room, char *out,
 					size_t cap);
@@ -50,7 +50,7 @@ static int		recorded(t_fixture *fx, t_player_id pid, bool won);
 int	main(void)
 {
 	test_readiness_is_the_rooms_and_survives_a_refresh();
-	test_both_declaring_ready_starts_the_match();
+	test_both_declaring_ready_opens_the_select_window();
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
 	test_each_snapshot_carries_the_other_board();
@@ -99,18 +99,27 @@ static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
 }
 
 /*
-** Both seats declaring is what starts a Double room, and the player who
+** Both seats declaring is what commits a Double room, and the player who
 ** declares last is as often the joiner as the owner - so the start cannot be
 ** the owner's request. Nobody sends START here.
+**
+** What declaring no longer does is deal the boards. It opens the
+** character-select window instead, and the boards are dealt when both seats
+** have named a fighter - which is the same READY route carrying one. Locking
+** in early is what ends the window early: neither player waits out the clock
+** once there is nothing left to decide.
 */
-static void	test_both_declaring_ready_starts_the_match(void)
+static void	test_both_declaring_ready_opens_the_select_window(void)
 {
 	t_body_state	state;
+	t_body_room		snapshot;
 	t_fixture		fx;
 	t_harness		amber;
 	t_harness		blake;
+	t_item_id		pick;
 	char			room[ROOM_NAME_MAX];
 	char			path[64];
+	char			body[64];
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
@@ -118,6 +127,24 @@ static void	test_both_declaring_ready_starts_the_match(void)
 	assert(simple(&amber, "READY", path, "ready 1") == 200);
 	assert(hc_wait_state(&amber, &state, 300) != 0);
 	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	/* committed, holding a clock, and no board dealt to either of them */
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.status == BODY_ROOM_SELECTING);
+	assert(snapshot.select_ms > 0);
+	assert(snapshot.members[0].character == 0);
+	assert(snapshot.members[1].character == 0);
+	assert(hc_wait_state(&amber, &state, 300) != 0);
+	pick = starter_character(&fx, amber.player_id);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)pick);
+	assert(simple(&amber, "READY", path, body) == 200);
+	/* one of two locked in is not two: still no board */
+	assert(hc_wait_state(&amber, &state, 300) != 0);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.status == BODY_ROOM_SELECTING);
+	assert(snapshot.members[0].character == (uint32_t)pick);
+	pick = starter_character(&fx, blake.player_id);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)pick);
+	assert(simple(&blake, "READY", path, body) == 200);
 	assert(wait_phase(&amber, &state, BODY_PHASE_COUNTDOWN,
 			HC_TIMEOUT_MS) == 0);
 	assert(wait_phase(&blake, &state, BODY_PHASE_COUNTDOWN,
@@ -125,7 +152,7 @@ static void	test_both_declaring_ready_starts_the_match(void)
 	hc_close(&amber);
 	hc_close(&blake);
 	fx_stop(&fx);
-	printf("PASS test_both_declaring_ready_starts_the_match\n");
+	printf("PASS test_both_declaring_ready_opens_the_select_window\n");
 }
 
 /*
@@ -147,7 +174,7 @@ static void	test_a_dealt_match_is_held_before_it_begins(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	assert(wait_phase(&amber, &amber_state, BODY_PHASE_COUNTDOWN,
 			HC_TIMEOUT_MS) == 0);
 	assert(wait_phase(&blake, &blake_state, BODY_PHASE_COUNTDOWN,
@@ -183,7 +210,7 @@ static void	test_the_hold_refuses_inputs(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	play_path(&amber, room, path, sizeof(path));
 	assert(wait_phase(&amber, &state, BODY_PHASE_COUNTDOWN,
 			HC_TIMEOUT_MS) == 0);
@@ -216,7 +243,7 @@ static void	test_each_snapshot_carries_the_other_board(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	play_path(&blake, room, path, sizeof(path));
 	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
 			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
@@ -252,7 +279,7 @@ static void	test_a_move_reaches_the_other_players_view(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	play_path(&blake, room, path, sizeof(path));
 	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
 			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
@@ -283,7 +310,7 @@ static void	test_a_top_out_ends_the_match_for_both_players(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	play_path(&amber, room, path, sizeof(path));
 	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
 			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
@@ -320,7 +347,7 @@ static void	test_both_players_are_recorded_once_each(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
-	assert(start_match(&amber, room) == 200);
+	assert(start_match(&fx, &amber, &blake, room) == 200);
 	play_path(&amber, room, path, sizeof(path));
 	play_path(&blake, room, other, sizeof(other));
 	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
@@ -406,18 +433,34 @@ static int	seat_two(t_fixture *fx, t_harness *amber, t_harness *blake,
 }
 
 /**
- * @brief Starts the room, as its owner.
+ * @brief Starts the room as its owner, and takes it all the way to a match.
  *
+ * The owner's start no longer deals - it opens the character-select window,
+ * exactly as the last readiness does, so that a match is reached the same way
+ * whichever of the two routes asked for it. Locking both seats in is what
+ * closes that window without waiting out its clock, which is why every test
+ * that just wants boards on the wire goes through here.
+ *
+ * @param fx Running fixture, for the characters each player owns.
  * @param owner The connection that created the room.
+ * @param joiner The other seat.
  * @param room The room's name.
- * @return The status code the server answered.
+ * @return 200 when the match was dealt, otherwise the first refusal.
  */
-static int	start_match(t_harness *owner, const char *room)
+static int	start_match(t_fixture *fx, t_harness *owner, t_harness *joiner,
+			const char *room)
 {
 	char	path[64];
+	int		status;
 
 	snprintf(path, sizeof(path), "/room/%s", room);
-	return (simple(owner, "START", path, NULL));
+	status = simple(owner, "START", path, NULL);
+	if (status != 200)
+		return (status);
+	status = hc_lock_in(owner, fx, path);
+	if (status != 200)
+		return (status);
+	return (hc_lock_in(joiner, fx, path));
 }
 
 /**
@@ -669,10 +712,17 @@ static void	test_an_unowned_fighter_is_refused(void)
 ** account's equipped one is that it is fixed for the match: deal_games copies
 ** it onto the game, so nothing done to the account afterwards can change
 ** which four abilities a level selects from.
+**
+** It is declared inside the select window and not before it. Opening the
+** window clears every seat's choice on purpose - that is what stops a room
+** from opening its next window with everyone already locked in from the last
+** match - so a fighter named before both players had even committed would be
+** thrown away, and the seat would be dealt whatever the account has equipped.
 */
 static void	test_a_declared_fighter_is_the_matchs(void)
 {
 	t_body_state	state;
+	t_body_room		snapshot;
 	t_fixture		fx;
 	t_harness		amber;
 	t_harness		blake;
@@ -686,9 +736,15 @@ static void	test_a_declared_fighter_is_the_matchs(void)
 	owned = starter_character(&fx, amber.player_id);
 	assert(owned != 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&amber, "READY", path, "ready 1\n") == 200);
+	assert(simple(&blake, "READY", path, "ready 1\n") == 200);
 	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
 	assert(simple(&amber, "READY", path, body) == 200);
-	assert(simple(&blake, "READY", path, "ready 1\n") == 200);
+	owned = starter_character(&fx, blake.player_id);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
+	assert(simple(&blake, "READY", path, body) == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[0].character != 0);
 	assert(wait_phase(&amber, &state, BODY_PHASE_ACTIVE,
 			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) == 0);
 	hc_close(&amber);

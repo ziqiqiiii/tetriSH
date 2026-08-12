@@ -21,11 +21,16 @@ static int	read_character(t_request_context *ctx, t_item_id *character);
 /**
  * @brief READY /room/<name> - declare or withdraw readiness for a match.
  *
- * Starting is left to the room rather than done here. Double begins when the
- * last seat declares, and the tick that follows is what deals the boards -
- * so the answer to this request is the room as it stands, and the client
- * learns the match began the same way it learns everything else about it,
- * from the snapshot that arrives next.
+ * Starting is left to the room rather than done here. The last seat to declare
+ * opens the character-select window, and the tick that ends that window is
+ * what deals the boards - so the answer to this request is the room as it
+ * stands, and the client learns what happened next the same way it learns
+ * everything else about the room, from the snapshot that arrives after.
+ *
+ * The same request carries a lock: during the window a seat that names a
+ * character has chosen, and once every seat has, the room stops waiting out
+ * its clock and is dealt immediately. So this route is pressed twice per
+ * match by design - once to commit, once to choose.
  *
  * @param msg The request (unused).
  * @param context The request context.
@@ -56,9 +61,11 @@ int	ready_handler(const t_htttp_message *msg, void *context)
 		return (404);
 	if (!server_room_set_ready(server_room, ctx->cli, ready, character))
 		return (request_refuse(ctx, "already-started"));
-	if (server_room_all_ready(server_room)
-		&& !server_room_is_solo(server_room))
+	if (server_room_all_locked(server_room))
 		(void)server_room_autostart(server_room);
+	else if (server_room_all_ready(server_room)
+		&& !server_room_is_solo(server_room))
+		(void)server_room_begin_selection(server_room);
 	if (!server_room_snapshot(server_room, &snapshot))
 		return (500);
 	len = body_room_encode(&snapshot, ctx->body, sizeof(ctx->body));

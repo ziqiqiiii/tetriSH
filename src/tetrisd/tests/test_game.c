@@ -265,7 +265,13 @@ static void	test_a_disconnect_ends_the_match_and_the_survivor_wins(void)
 	assert(hc_join_new(&amber, "double", room, sizeof(room)) == 201);
 	snprintf(path, sizeof(path), "/room/%s", room);
 	assert(simple(&blake, "JOIN", path, NULL) == 200);
+	/*
+	 * The owner's start opens the select window rather than dealing, so the
+	 * match this test needs is the one both players lock themselves into.
+	 */
 	assert(simple(&amber, "START", path, NULL) == 200);
+	assert(hc_lock_in(&amber, &fx, path) == 200);
+	assert(hc_lock_in(&blake, &fx, path) == 200);
 	assert(hc_wait_state(&blake, &state, HC_TIMEOUT_MS) == 0);
 	assert(state.phase == BODY_PHASE_COUNTDOWN);
 	assert(state.countdown_ms > 0);

@@ -642,6 +642,25 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
  * @param room Room snapshot to read.
  * @return APP_NAV_START_DOUBLE or APP_NAV_START_BATTLE_ROYALE.
  */
+/**
+ * @brief Answers whether the room has already committed to its next match.
+ *
+ * Two states mean it has: the boards are dealt, or the select window that
+ * precedes them is open. Both are the server's doing and neither wants a
+ * START from a client - which is the whole reason this is one question rather
+ * than two comparisons repeated at every call site.
+ *
+ * @param room The room to ask.
+ * @return true when the match is already being set up or played.
+ */
+bool	waiting_room_is_under_way(const t_app_room_view_model *room)
+{
+	if (room == NULL)
+		return (false);
+	return (room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_SELECTING);
+}
+
 t_app_nav_action	waiting_room_launch_action(
 	const t_app_room_view_model *room)
 {

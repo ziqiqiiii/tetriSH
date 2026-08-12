@@ -227,6 +227,7 @@
 ** moving it would change a mode this step is not touching.
 */
 # define TETRISD_MATCH_COUNTDOWN_MS				3000
+# define TETRISD_MATCH_SELECT_MS				15000
 
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
@@ -593,6 +594,15 @@ typedef struct s_server_room
 	*/
 	int				countdown_ms;
 	int				countdown_second;
+	/*
+	** The character-select window, and the second of it last narrated. It runs
+	** before the countdown does and on the same principle: the room owns the
+	** clock, so both players see the same number and the match is dealt for
+	** them at the same instant. It closes early the moment every seat has
+	** named a fighter, which is what makes locking in worth doing.
+	*/
+	int				select_ms;
+	int				select_second;
 	/*
 	** How the match ended, per slot, decided once when it ends and read by
 	** the final snapshot each player is sent. It cannot be derived from the
@@ -1064,6 +1074,8 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
 bool			server_room_set_ready(t_server_room *server_room, t_client *cli, bool ready, t_item_id character);
 bool			server_room_all_ready(const t_server_room *server_room);
 bool			server_room_autostart(t_server_room *server_room);
+bool			server_room_begin_selection(t_server_room *server_room);
+bool			server_room_all_locked(const t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
 int				server_room_target_of(t_server_room *server_room,

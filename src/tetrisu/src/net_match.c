@@ -229,6 +229,14 @@ static void	apply_opponents(t_mp_match_state *state, const t_body_state *snap)
 			apply_opponent_game(&state->opponent_game, &snap->opponents[0]);
 			snprintf(state->opponent_name, sizeof(state->opponent_name), "%s",
 				snap->opponents[0].username);
+			/*
+			 * The two facts the other half of the screen is drawn from. They
+			 * used to be a hardcoded 6 and nothing, because the server did
+			 * not send them - so the rival's meter was a constant and there
+			 * was no fighter opposite to put a face to.
+			 */
+			state->opponent_charge = snap->opponents[0].charge;
+			state->opponent_character = snap->opponents[0].character;
 		}
 		apply_opponent_card(state, (int)index, &snap->opponents[index]);
 		index++;

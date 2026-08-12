@@ -93,6 +93,8 @@ static void	fill_opponent(t_body_opponent *opponent)
 	opponent->piece.rotation = 2;
 	opponent->piece.col = 6;
 	opponent->piece.row = 3;
+	opponent->charge = 8;
+	opponent->character = 3;
 	strcpy(opponent->username, "rival");
 	opponent->cells[19][0].type = 1;
 	opponent->cells[19][0].color = 4;
@@ -484,10 +486,18 @@ void	test_state_opponent_round_trips_whole(void)
 	n = body_state_encode(&in, out, sizeof(out));
 	assert(n > 0);
 	assert(strstr(out, "opponents 1\n") != NULL);
-	assert(strstr(out, "opp 2 7 1 clearing 4200 9 3 4 2 6 3 rival\n") != NULL);
+	assert(strstr(out, "opp 2 7 1 clearing 4200 9 3 4 2 6 3 8 3 rival\n")
+		!= NULL);
 	memset(&back, 0, sizeof(back));
 	assert(body_state_decode(out, (size_t)n, &back) == 0);
 	assert(memcmp(&in, &back, sizeof(in)) == 0);
+	/*
+	 * The charge is bounded exactly as the frame's own is. It is the one new
+	 * field with a range, and a rival drawn with eleven segments of a
+	 * ten-segment meter is a body the encoder should never have written.
+	 */
+	in.opponents[0].charge = BODY_CHARGE_MAX + 1;
+	assert(body_state_encode(&in, out, sizeof(out)) == -1 && errno == EINVAL);
 	printf("PASS test_state_opponent_round_trips_whole\n");
 }
 

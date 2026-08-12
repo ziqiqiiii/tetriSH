@@ -57,7 +57,13 @@ t_join_verdict	room_can_accept(const t_room *r)
 {
 	if (!r)
 		return (JOIN_FULL);
-	if (r->status == ROOM_IN_GAME || r->status == ROOM_FINISHED)
+	/*
+	 * SELECTING refuses a newcomer for the same reason IN_GAME does: the
+	 * match is already being set up for the players in it, and a seat taken
+	 * halfway through the window would be one nobody had chosen a fighter for.
+	 */
+	if (r->status == ROOM_SELECTING || r->status == ROOM_IN_GAME
+		|| r->status == ROOM_FINISHED)
 		return (JOIN_IN_GAME);
 	if (r->number_of_players >= r->slot_count)
 		return (JOIN_FULL);
