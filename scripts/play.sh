@@ -4,21 +4,16 @@
 #   bash scripts/play.sh            set everything up, then play
 #   bash scripts/play.sh --help     every flag
 #
-# The whole reason this script exists is that tetriSH cannot be run from one
-# place on macOS. tetrisd's reactor is epoll and timerfd and libcoreipc's
-# message queues are POSIX mqueue, none of which Darwin has, so the server does
-# not compile there at all - while tetrisu wants the host's own terminal,
-# because the board is drawn with Kitty-protocol bitmaps that a container has no
-# way to hand to a Mac. So the two halves live in different places, and this
-# walks the path between them: engine, certificates, image, server, client.
+# tetrisd's reactor is epoll and timerfd and libcoreipc's message queues are
+# POSIX mqueue, none of which Darwin has, so the server does not compile there
+# at all. On Linux this walks the path to a playable client - certificates,
+# server, client - by running `make stack` and then launching tetrisu. On
+# macOS there is no local server path at all: use --host to play against a
+# server running elsewhere.
 #
-# On Linux both halves are native and there is no container in the picture; the
-# script runs the same five steps against `make stack` instead.
-#
-# It is deliberately re-runnable. Every step checks before it acts - an image
-# that exists is not rebuilt, a valid certificate is not reissued, a server
-# already listening is left alone - so the second run is fast and the tenth is
-# the normal way to restart the client.
+# It is deliberately re-runnable. Every step checks before it acts - a valid
+# certificate is not reissued, a server already listening is left alone - so
+# the second run is fast and the tenth is the normal way to restart the client.
 
 set -uo pipefail
 
@@ -31,14 +26,6 @@ BLU=$(printf '\033[1;34m'); RST=$(printf '\033[0m')
 
 UNAME_S="$(uname -s)"
 
-# The image tag and container name are the Makefile's to choose. It passes them
-# in from the `play` target, so overriding DOCKER_TAG there does not leave this
-# script inspecting an image nobody built; the defaults are for a direct run.
-IMAGE="${DOCKER_REF:-tetrish:dev}"
-SERVER="${DOCKER_SERVER:-tetrish-server}"
-
-ASSUME_YES=0
-DO_REBUILD=0
 WANT_SERVER=1
 WANT_CLIENT=1
 DO_STOP=0
@@ -63,9 +50,7 @@ Usage: bash scripts/play.sh [options]
   --port N        port to serve and connect on (default: TETRISD_PORT in .tetrishrc)
   --server-only   bring the server up and stop, without launching a client
   --client-only   launch a client against a server that is already up
-  --rebuild       rebuild the container image even if one exists
   --stop          stop the server and exit
-  -y, --yes       install anything missing without asking
   -h, --help      this text
 
 With no --host a server is started here and the client connects to it; the
@@ -82,9 +67,7 @@ while [ $# -gt 0 ]; do
         --port=*)      PORT="${1#*=}"; shift ;;
         --server-only) WANT_CLIENT=0; shift ;;
         --client-only) WANT_SERVER=0; shift ;;
-        --rebuild)     DO_REBUILD=1; shift ;;
         --stop)        DO_STOP=1; shift ;;
-        -y|--yes)      ASSUME_YES=1; shift ;;
         -h|--help)     usage; exit 0 ;;
         *)             usage >&2; die "unknown option: $1" ;;
     esac
@@ -94,17 +77,15 @@ if [ "$WANT_SERVER" = "0" ] && [ "$WANT_CLIENT" = "0" ]; then
     die "--server-only and --client-only ask for opposite halves; pick one"
 fi
 
-# A named host is somebody else's machine, so there is nothing here to start,
-# stop or build an image for. Rather than quietly ignoring the flags that say
-# otherwise, refuse them: --server-only with a remote host asks this script to
-# start a server it has no reach into, and would otherwise appear to succeed.
+# A named host is somebody else's machine, so there is nothing here to start or
+# stop. Rather than quietly ignoring the flags that say otherwise, refuse them:
+# --server-only with a remote host asks this script to start a server it has no
+# reach into, and would otherwise appear to succeed.
 if [ -n "$HOST" ]; then
     [ "$WANT_CLIENT" = "0" ] \
         && die "--host names a server elsewhere; --server-only cannot start one there"
     [ "$DO_STOP" = "1" ] \
         && die "--host names a server elsewhere; --stop only reaches the local one"
-    [ "$DO_REBUILD" = "1" ] \
-        && die "--host needs no image; --rebuild only applies to a server started here"
     WANT_SERVER=0
     REMOTE=1
 else
@@ -112,23 +93,9 @@ else
     REMOTE=0
 fi
 
-# Asks, unless --yes was given or nothing is attached to answer. A script that
-# assumed consent when it could not ask would install a virtual machine inside
-# somebody's CI run.
-confirm() {
-    [ "$ASSUME_YES" = "1" ] && return 0
-    if [ ! -t 0 ]; then
-        warn "not a terminal, so nothing will be installed; re-run with --yes"
-        return 1
-    fi
-    printf '%b' "    ${BOLD}$1${RST} [y/N] "
-    read -r reply
-    case "$reply" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
-}
-
-# The port is one number shared by four places - the server's listener, the
-# published container port, the client's dial and .tetrishrc - so it is read
-# from .tetrishrc once and passed everywhere from here.
+# The port is one number shared by three places - the server's listener, the
+# client's dial and .tetrishrc - so it is read from .tetrishrc once and passed
+# everywhere from here.
 resolve_port() {
     [ -n "$PORT" ] && return 0
     PORT=$(sed -n \
@@ -139,9 +106,9 @@ resolve_port() {
 }
 
 # Is anything accepting connections there? nc where it exists, and bash's own
-# /dev/tcp otherwise; this is the same check for a container-published port, a
-# native daemon and a server across the room, which is the point - it tests the
-# path the client will take, not whether a process exists.
+# /dev/tcp otherwise; this is the same check for a native daemon and a server
+# across the room, which is the point - it tests the path the client will
+# take, not whether a process exists.
 #
 # nc needs an explicit connect timeout, and which flag supplies one is not the
 # same everywhere. macOS spells it -G (its -w bounds idle reads and was measured
@@ -186,87 +153,12 @@ wait_for_port() {
 }
 
 ################################################################################
-#                            step 1 - the engine                               #
-################################################################################
-
-docker_ready() { docker info >/dev/null 2>&1; }
-
-wait_for_docker() {
-    local waited=0
-    while [ "$waited" -lt 90 ]; do
-        docker_ready && return 0
-        sleep 2
-        waited=$((waited + 2))
-    done
-    return 1
-}
-
-install_docker() {
-    command -v brew >/dev/null 2>&1 \
-        || die "Homebrew is needed to install Docker: https://brew.sh"
-    # colima rather than Docker Desktop: it installs without a GUI installer or
-    # an admin password, and `colima start` is scriptable in a way that clicking
-    # through Docker.app's first-run screens is not.
-    warn "no container engine found"
-    confirm "install colima + the docker CLI with Homebrew?" \
-        || die "nothing to run the server in; install Docker Desktop or colima"
-    say "installing colima and the docker CLI..."
-    brew install colima docker || die "the Homebrew install failed"
-}
-
-start_engine() {
-    if docker_ready; then
-        ok "container engine is running"
-        return 0
-    fi
-    if [ -d /Applications/Docker.app ]; then
-        say "starting Docker Desktop..."
-        open -a Docker || die "could not start Docker Desktop"
-    elif command -v colima >/dev/null 2>&1; then
-        say "starting colima..."
-        colima start || die "colima could not start"
-    else
-        install_docker
-        say "starting colima..."
-        colima start || die "colima could not start"
-    fi
-    say "waiting for the engine..."
-    wait_for_docker || die "the container engine did not come up"
-    ok "container engine is running"
-}
-
-################################################################################
-#                       steps 2-4 - certificates, image, server                 #
+#                       steps 1-2 - certificates, server                       #
 ################################################################################
 
 ensure_certs() {
     say "checking the development certificates..."
     make certs || die "could not mint certificates (is openssl installed?)"
-}
-
-ensure_image() {
-    if [ "$DO_REBUILD" = "0" ] \
-            && docker image inspect "$IMAGE" >/dev/null 2>&1; then
-        ok "image $IMAGE is present (--rebuild to build it again)"
-        return 0
-    fi
-    say "building the image - first time takes a while, notcurses is built from source"
-    make docker-build DOCKER_PORT="$PORT" || die "the image build failed"
-}
-
-start_server_docker() {
-    if port_open; then
-        ok "something is already serving port $PORT; leaving it alone"
-        return 0
-    fi
-    make docker-server DOCKER_PORT="$PORT" || die "the server container did not start"
-    say "waiting for tetrisd to listen on $PORT..."
-    if ! wait_for_port; then
-        warn "tetrisd never answered on $PORT. Its own log says why:"
-        docker logs --tail 40 "$SERVER" 2>&1 | sed 's/^/    /' >&2
-        die "the server did not come up"
-    fi
-    ok "tetrisd is listening on $HOST:$PORT"
 }
 
 start_server_native() {
@@ -281,19 +173,14 @@ start_server_native() {
 }
 
 stop_server() {
-    if [ "$UNAME_S" = "Darwin" ]; then
-        docker_ready || die "the container engine is not running; nothing to stop"
-        make docker-stop && ok "server stopped"
-    else
-        [ -x ./bin/tetrisctl ] \
-            || die "./bin/tetrisctl is not built; nothing was started from here"
-        PATH="$ROOT/bin:$PATH" TETRISHRC="$ROOT/.tetrishrc" \
-            ./bin/tetrisctl stop && ok "daemons stopped"
-    fi
+    [ -x ./bin/tetrisctl ] \
+        || die "./bin/tetrisctl is not built; nothing was started from here"
+    PATH="$ROOT/bin:$PATH" TETRISHRC="$ROOT/.tetrishrc" \
+        ./bin/tetrisctl stop && ok "daemons stopped"
 }
 
 ################################################################################
-#                             step 5 - the client                              #
+#                             step 3 - the client                              #
 ################################################################################
 
 ensure_client() {
@@ -379,10 +266,7 @@ fi
 case "$UNAME_S" in
     Darwin)
         if [ "$WANT_SERVER" = "1" ]; then
-            start_engine
-            ensure_certs
-            ensure_image
-            start_server_docker
+            die "tetrisd cannot be built or run on macOS (needs epoll, timerfd, POSIX mqueue); use --host to play against a server running elsewhere"
         fi
         ;;
     Linux)

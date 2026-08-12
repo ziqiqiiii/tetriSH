@@ -11,7 +11,6 @@ Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of 
 - [Status](#status)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
-- [Docker](#docker)
 - [Run](#run)
 - [Binaries](#binaries)
 - [Libraries](#libraries)
@@ -52,8 +51,6 @@ GCC/binutils, `make`, `pkg-config`, OpenSSL, Readline, and ncurses. `tetrisu` ad
 
 Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode Command Line Tools) are supported for dependency install; where no notcurses package exists, it is built from source.
 
-On macOS a container engine joins that list, and not as a convenience: it is the only way to run a server there at all, so `make deps` installs colima and the `docker` CLI when nothing is already present. A missing engine is a warning rather than an error, because everything that *can* build on macOS builds without one; `REQUIRE_DOCKER=1 make check-deps` makes it fatal. See [Playing on macOS](#playing-on-macos).
-
 **A plain `make` does not complete on macOS.** It recurses into every `lib/lib*/` in turn, and `lib/libcoreipc` stops it: `include/coreipc.h` includes `<mqueue.h>`, which Darwin does not ship, so the build fails at the first object with ``fatal error: 'mqueue.h' file not found`` — before it ever reaches `tetrisu`. `tetrisd` is unbuildable there for the same family of reasons: its reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd` (`src/tetrisd/src/{server,client,clientio,reactor,handshake_pool}.c`), which Darwin has no equivalent for.
 
 So on macOS, build the one component that does compile rather than the tree: `make play` (build `tetrisu` and launch it) or `make -C src/tetrisu` on its own. Run the server side — `tetrisd`, and anything linking `libcoreipc`'s mqueue module — on Linux or WSL; a client-only macOS checkout connects to a `tetrisd` running elsewhere.
@@ -67,7 +64,7 @@ make deps-info           # show detected OS/WSL and dependency policy
 make -C src/tetrisu deps # tetrisu render/audio deps only
 ```
 
-Installation may request sudo. Set `AUTO_INSTALL_DEPS=0` to keep it check-only, as in CI, or use [Docker](#docker) to build without touching the host. Valgrind is needed only for memory-safety runs, and is unreliable on current macOS — run those on Linux or WSL; `REQUIRE_VALGRIND=1 make check-deps` enforces its presence.
+Installation may request sudo. Set `AUTO_INSTALL_DEPS=0` to keep it check-only, as in CI. Valgrind is needed only for memory-safety runs, and is unreliable on current macOS — run those on Linux or WSL; `REQUIRE_VALGRIND=1 make check-deps` enforces its presence.
 
 ---
 
@@ -117,39 +114,11 @@ Networked binaries additionally link OpenSSL (`-lssl -lcrypto`); `libmacminidb` 
 
 ---
 
-## Docker
-
-Builds the whole stack without installing anything on the host — the image carries the toolchain, builds every component, and mints the development certificates.
-
-```bash
-make docker-build                     # build the image
-make docker-run                       # shell + daemons, publishing 4242
-make docker-run DOCKER_PORT=5252      # any variable below overrides per run
-```
-
-| Target | Description |
-|---|---|
-| `make docker-build` | Build the image — installs every dependency, builds all components, mints certs |
-| `make docker-run` | Run the shell with the daemons up, publishing `TETRISD_PORT` |
-| `make docker-server` | Run the daemons alone, detached, for a client on the host |
-| `make docker-logs` | Follow the detached server's daemon logs |
-| `make docker-test` | Run every component test suite inside a container |
-| `make docker-shell` | Open a `bash` prompt inside a container |
-| `make docker-stop` | Remove the running containers, freeing the port and the names |
-| `make docker-clean` | Remove the image |
-| `make docker-reset` | Stop the containers and drop the state volume (players, wallets, leaderboard) |
-
-`docker-run` names its container and removes any predecessor first — the shell it starts never exits on its own, so a stale one would keep the port bound. `docker-test` and `docker-shell` publish no port and run alongside it. Override `DOCKER_TAG`, `DOCKER_NAME`, or `DOCKER_PORT` on any target; `DOCKER_PORT` travels into the container as `TETRISD_PORT`, so the published port and the listener never disagree.
-
-Both run targets mount the named volume `tetrish-state` at `/tetrish/tmp`, where `.tetrishrc` points `TETRISD_DATA_DIR` and the logger's sink. Without it the player store's append-only log lives in the container's writable layer, and every account, wallet and leaderboard row is lost the moment the container is replaced — which `--rm` does on every run.
-
-notcurses is built from source at the tag `src/tetrisu/Makefile` pins, read at build time so bumping it there rebuilds the image to match. No distro package works: Ubuntu's predates the `NCBLIT_4x2` blitter `tetrisu` uses, and Debian ships none.
-
 ### Playing on macOS
 
-macOS cannot run the server at all, and this is not a packaging gap: `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`. Darwin implements none of the three, so no flag or shim reaches them. `tetrisu`, meanwhile, wants the host's own terminal, which a container has no way to hand to a Mac. So the two halves run in different places.
+macOS cannot run the server at all, and this is not a packaging gap: `tetrisd`'s reactor is `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and `libcoreipc`'s message-queue module is POSIX `mq_open`/`mq_send`/`mq_receive`. Darwin implements none of the three, so no flag or shim reaches them.
 
-A Mac playing on somebody else's server needs only the client, and no container at all:
+A Mac playing on somebody else's server needs only the client:
 
 ```bash
 make play
@@ -161,24 +130,16 @@ The server's address is typed into **SERVER ID** on the sign-in screen, not conf
 
 `TETRISU_NET=1` is the one thing that matters. Without it the client builds its fixture provider instead of a session, and CHECK SERVER reports offline **without opening a socket** — indistinguishable from a wrong address, and unfixable by correcting one.
 
-To host the server on this machine instead, `make play-local` walks the whole path: it installs a container engine if none is there (colima + the `docker` CLI via Homebrew — no GUI installer, no admin password), starts it, mints the certificates, builds the image, brings the server up detached, waits for the port, builds `tetrisu` and launches it against `127.0.0.1`. Every step checks before it acts, so re-running is how you restart the client.
-
 ```bash
 make play-local HOST=10.27.229.33      # client against a server elsewhere, checked first
-bash scripts/play.sh --server-only     # server up, no client
 bash scripts/play.sh --client-only     # client against a server already up
 bash scripts/play.sh --port 5252       # some other port
-bash scripts/play.sh --rebuild         # rebuild the image first
-bash scripts/play.sh --stop            # take the server down
+bash scripts/play.sh --stop            # take the server down (Linux)
 ```
 
-`certs/` is bind-mounted into the container read-only rather than baked into the image, because the host's `tetrisu` has to verify the server against the same CA and the image's own certificates sit in a filesystem the host cannot read. The host mints them (`make certs`), the container uses them, and the client trusts them.
+There is no local server target for macOS: `make play-local` with no `HOST=` fails there outright. On Linux it runs the server natively via `make stack` and skips straight to the client.
 
 Prefer **kitty or Ghostty**, which get the pixel board. Terminal.app has no bitmap protocol, but that is a downgrade rather than a wall: only `NCPIXEL_NONE` loses bitmaps outright, and Solo composites a true-colour cell board instead, so it plays there in compatibility mode. WezTerm and iTerm2 draw bitmaps but never free replaced ones, so `tetrisu` holds them at a stationary tier on purpose — see the renderer tiers in [`src/tetrisu/README.md`](src/tetrisu/README.md), and `TETRISU_RENDERER=cell` pins the compatibility path anywhere.
-
-On Linux `make play-local` skips the container entirely and runs the same five steps against `make stack`.
-
-Inside the container, `scripts/docker_server.sh` is what pid 1 runs. Both daemons double-fork and return, so `CMD tetrisd` would exit immediately and take the detached daemons down with the pid namespace; the script starts them through `tetrisctl`, blocks on their logs, and traps `TERM` so `docker stop` becomes an ordered `tetrisctl stop` rather than a killed namespace.
 
 ---
 
@@ -425,10 +386,8 @@ MacMini_tetriSH/
 │   └── bugs/                      Post-mortem notes on design defects
 ├── .claude/skills/                Code, Makefile, and README style guides
 ├── scripts/                       Dependency, certificate, and launch helpers
-│   ├── play.sh                    One command from a fresh clone to a client
-│   └── docker_server.sh           Pid 1 in the server container
+│   └── play.sh                    One command from a fresh clone to a client
 ├── .tetrishrc                     Shell start-up file — launches the daemons
-├── Dockerfile                     Containerised build of the whole stack
 ├── Makefile                       Umbrella; recurses into every component
 └── README.md
 ```
@@ -462,7 +421,7 @@ make -C lib/libtetrisbrain test FILTER=abilities   # one library suite
 make -C src/tetrish unit FILTER=lexer              # one shell suite
 ```
 
-Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macOS. `make docker-test` runs the whole suite in a container, which also gets a Linux valgrind on a macOS host.
+Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macOS.
 
 ---
 
