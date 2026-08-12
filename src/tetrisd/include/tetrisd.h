@@ -130,8 +130,25 @@
 
 /* buffers */
 # define TETRISD_FRAME_MAX_BYTES				HTTTP_MAX_MESSAGE_SIZE
-# define TETRISD_BODY_MAX_BYTES					8192
+/*
+** The widest body this server builds, which is a Battle Royale STATE: 8192 did
+** not hold one, and a full arena silently failing to encode would have shown
+** up as a client whose rivals stopped moving rather than as an error.
+**
+** It is the next power of two above BODY_STATE_MAX_BYTES rather than a number
+** chosen to look sufficient, and the assertion below is what keeps the two in
+** step - libstatusbody derives its own ceiling from the constants that produce
+** it, so a field added to an arena card fails the build here instead of
+** overrunning this buffer at run time.
+*/
+# define TETRISD_BODY_MAX_BYTES					16384
 # define TETRISD_CONFIG_LINE_MAX				512
+_Static_assert(TETRISD_BODY_MAX_BYTES >= BODY_STATE_MAX_BYTES,
+	"TETRISD_BODY_MAX_BYTES cannot hold the widest state body libstatusbody "
+	"can produce - raise it to the next power of two above "
+	"BODY_STATE_MAX_BYTES");
+_Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
+	"a body that cannot fit in a frame would be built and then refused");
 # define TETRISD_OUTBOX_CAPACITY				32
 /*
 ** The chat lane is its own ring and its own size. It is small because a

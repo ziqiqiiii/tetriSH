@@ -776,7 +776,7 @@ its position:
 
 ```
 arena <full|absent> <count>
-a <slot> <pid> <flags> <score> <lines> <pending> <ko> <rank> <mask>
+a <slot> <pid> <flags> <lines> <pending> <ko> <rank> [mask]
                                    ... repeated <count> times
 ```
 
@@ -791,11 +791,21 @@ a <slot> <pid> <flags> <score> <lines> <pending> <ko> <rank> <mask>
   See [D3](#d3--the-arena-is-a-full-compact-snapshot-on-its-own-clock).
 - `pid` is the player id, because attribution and the KO feed name a player and
   a slot is not one ([D15](#d15--attribution-and-match-state-key-on-player-id-not-on-slot)).
+  It is written in **hex**, so its worst case is 16 bytes rather than 20.
   `slot` stays because it is where the card is drawn.
-- `flags` is a bitfield: alive, attacking-you, targeted-by-you, in-clear.
+- `flags` is a bitfield: alive, attacking-you, targeted-by-you, in-clear, and
+  **mask-present**.
 - `mask` is 50 hex chars — 20 rows of 10 bits, MSB-first per row, 1 = occupied.
   Cell type and colour are deliberately not carried; see [D1](#d1--the-arena-is-a-second-detail-level-not-a-second-body).
+  It is **optional**, and the mask-present flag is what says whether the field
+  is there: a dead board never changes again, so its card carries the mask only
+  on every fifth push and the client keeps the last one it holds
+  ([D3a](#d3a--the-four-levers-on-arena-bandwidth-and-the-one-that-does-not-exist)).
+  A live card always carries it.
 - `rank` is 0 while the player is alive and their placing once they are out.
+- **`score` is not carried.** No card at thumbnail size draws it, the tiering
+  sorts on placing and attacks, and at 21 bytes it was 18% of the line. The
+  compatibility renderer's HUD, its one reader, shows the placing instead.
 
 An eliminated player's card is still sent, alive bit clear — absence means "not
 in this room", never "knocked out".
@@ -835,21 +845,25 @@ One `a` line, worst case, field by field:
 |---|---:|
 | `a ` | 2 |
 | `slot` + space | 3 |
-| `pid` (uint64) + space | 21 |
+| `pid` (uint64, hex) + space | 17 |
 | `flags` + space | 3 |
-| `score` (uint64) + space | 21 |
 | `lines` + space | 5 |
 | `pending` + space | 4 |
 | `ko` + space | 3 |
 | `rank` + space | 3 |
-| `mask` (20 × 10 bits) | 50 |
+| `mask` (20 × 10 bits), when present | 50 |
 | newline | 1 |
-| **total** | **116** |
+| **total** | **91** |
 
-So `BODY_ARENA_LINE_MAX` = 116, and the arena section's ceiling is
-`14 + BODY_ARENA_MAX × BODY_ARENA_LINE_MAX` = 11 498 bytes at 99. The rest of a
+So `BODY_ARENA_LINE_MAX` = 91, and the arena section's ceiling is
+`14 + BODY_ARENA_MAX × BODY_ARENA_LINE_MAX` = 9 023 bytes at 99. The rest of a
 Battle Royale body (no opponents section — it sends `opponents 0`) is ~520
-bytes, giving `BODY_STATE_MAX_BYTES` ≈ **12 KB**.
+bytes, giving `BODY_STATE_MAX_BYTES` ≈ **9.6 KB**.
+
+The line is sized with the mask present, because that is the worst case and a
+buffer is sized by its worst case. The elision in
+[D3a](#d3a--the-four-levers-on-arena-bandwidth-and-the-one-that-does-not-exist)
+saves bandwidth, never bytes of buffer.
 
 `TETRISD_BODY_MAX_BYTES` therefore becomes `16384`: the computed ceiling rounded
 up to the next power of two, with a `_Static_assert` in `statusbody.h` tying it
