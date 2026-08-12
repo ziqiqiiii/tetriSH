@@ -80,6 +80,36 @@
 # define BOT_ENTRY_ROWS			2
 
 /*
+** The pool's credentials, kept here as a second copy of the server's.
+**
+** tetrisu cannot link libmacminidb and does not include tetrisd.h, so these
+** are duplicated the same way auth_form.c duplicates the username charset
+** rule, and for the same reason: the client needs to know what the server
+** will accept before it asks. The originals are DB_RESERVED_PREFIX in
+** macminidb.h and TETRISD_BOT_SECRET in tetrisd.h; change either and this has
+** to move with it, which is what the shared test in tests/integration is for.
+**
+** BOT_POOL_MAX is how far up the pool a bot will look for a free account, not
+** how many the server keeps - the server's count is its own setting, and a
+** name past the end simply answers 401 and ends the walk.
+*/
+# define BOT_ACCOUNT_PREFIX		"BOT_"
+# define BOT_ACCOUNT_SECRET		"tetrish-bot-"
+# define BOT_POOL_MAX			256
+
+/* how long a bot waits for the board that took its drop, in poll rounds */
+# define BOT_SETTLE_TRIES		600
+# define BOT_POLL_MS			5
+
+/*
+** How many idle poll rounds pass before a bot asks the room whether a select
+** window has opened. At BOT_POLL_MS that is about a fifth of a second, which
+** is fast against TETRISD_MATCH_SELECT_MS and quiet enough that a bot sitting
+** in a waiting room is not a request per frame.
+*/
+# define BOT_SELECT_POLL_ROUNDS	40
+
+/*
 ** Difficulty. The split is decided by two facts about the game rather than by
 ** taste, and both are worth stating where the enum is read.
 **
@@ -122,6 +152,47 @@ typedef struct s_bot
 	uint32_t	rng;
 	bool		sloppy;
 }	t_bot;
+
+/*
+** How many bots one player may add to one room. Four is enough to reach a
+** Battle Royale's minimum of four from a single person, and one is enough for
+** a Double.
+*/
+# define BOT_FARM_MAX			4
+# define BOT_PATH_MAX			4096
+# define BOT_BINARY_NAME		"tetrisu-bot"
+# define BOT_LOG_DEFAULT		"tmp/tetrisu-bot.log"
+
+/*
+** One spawned bot, from the parent's side.
+**
+** `deadman` is the *write* end of a pipe whose read end the child holds.
+** Closing it is what tells an orphaned bot to go: a parent that exits by any
+** means - cleanly, killed, crashed - closes it, and the child's read returns
+** EOF. That is the hole D2 would otherwise leave, because SIGTERM only works
+** while there is somebody left to send it.
+*/
+typedef struct s_bot_handle
+{
+	int			pid;
+	int			deadman;
+	t_bot_level	level;
+}	t_bot_handle;
+
+typedef struct s_bot_farm
+{
+	t_bot_handle	bots[BOT_FARM_MAX];
+	int				count;
+}	t_bot_farm;
+
+/* BOT_PROC.C — spawning, holding and letting go of bots */
+void			bot_farm_init(t_bot_farm *farm);
+int				bot_farm_binary(char *out, size_t cap);
+int				bot_farm_add(t_bot_farm *farm, const char *room,
+					t_bot_level level);
+int				bot_farm_drop(t_bot_farm *farm);
+void			bot_farm_clear(t_bot_farm *farm);
+int				bot_farm_reap_exited(t_bot_farm *farm);
 
 /* BOT_BRAIN.C */
 void			bot_init(t_bot *bot, t_bot_level level, uint32_t seed);

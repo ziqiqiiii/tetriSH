@@ -15,6 +15,7 @@
 #     make -C src/tetrisu run
 
 NAME		:= tetrisu
+BOT_NAME	:= tetrisu-bot
 CC			:= gcc
 BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
@@ -57,9 +58,11 @@ SRC_DIR		:= src
 OBJ_DIR		:= obj
 BIN_DIR		:= bin
 NAME_PATH	:= $(BIN_DIR)/$(NAME)
+BOT_PATH	:= $(BIN_DIR)/$(BOT_NAME)
 
 HEADER		:= tetrisu.h
 NET_HEADER	:= tetrisu_net.h
+BOT_HEADER	:= tetrisu_bot.h
 ASSET_DIR	:= $(CURDIR)/assets
 
 # One archive per CoreStack library, each with the include path that goes with
@@ -103,7 +106,11 @@ LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
 ################################################################################
 
 # Binary : every .c under src/            -> bin/tetrisu
-SRC			:= $(wildcard $(SRC_DIR)/*.c)
+#
+# bot_main.c is the one exception: it carries a main() of its own, so leaving
+# it in would link two into tetrisu. It is the entry point of the second
+# binary below.
+SRC			:= $(filter-out $(SRC_DIR)/bot_main.c, $(wildcard $(SRC_DIR)/*.c))
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 DEP			:= $(OBJ:.o=.d)
 
@@ -120,7 +127,7 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 #                                   BUILD                                      #
 ################################################################################
 
-all: check-dependencies libs $(NAME_PATH)
+all: check-dependencies libs $(NAME_PATH) $(BOT_PATH)
 
 # A standalone tetrisu build can ask root for shared deps, then this Makefile
 # owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
@@ -145,6 +152,24 @@ $(NAME_PATH): $(OBJ) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $(OBJ) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built ✔️"
+
+# --- tetrisu-bot binary -----------------------------------------------------
+# The opponent a player adds to their own room, as its own process. It links
+# the logic archive and the CoreStack libraries and deliberately not
+# NOTCURSES_LIBS or AUDIO_LIBS: a bot has no screen, and a binary that pulled
+# in a terminal library would be one more thing to install on a machine that
+# only ever wanted to fill a seat.
+#
+# BOT_LDLIBS is therefore LDLIBS without the two render/audio groups. The
+# archive is the same one the unit tests link, so nothing here is a second
+# copy of the network layer.
+BOT_LDLIBS	:= -lssl -lcrypto -lpthread
+
+$(BOT_PATH): $(SRC_DIR)/bot_main.c $(LOGIC_LIB) $(LIB_ARCS) $(BOT_HEADER) $(NET_HEADER)
+	@ mkdir -p $(BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(BOT_LDLIBS) -o $@
+	@ echo "ok"
 
 run: $(NAME_PATH)
 	@ ./$(NAME_PATH)
@@ -211,7 +236,7 @@ $(LOGIC_LIB): $(LOGIC_OBJ)
 	@ ar rcs $@ $(LOGIC_OBJ)
 
 # --- unit test binaries -----------------------------------------------------
-$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER)
+$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(BOT_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
@@ -288,6 +313,16 @@ $(TEST_BIN_DIR)/arena_smoke: $(TESTS_DIR)/arena_smoke.c $(LOGIC_LIB) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# One person and three bots in a Battle Royale, against a live tetrisd. It
+# spawns processes as well as talking to a server, which is why it is a client
+# binary and not a unit test: what it proves is that bot_proc.c's children
+# really do reach a seat, play, and leave when they are let go.
+$(TEST_BIN_DIR)/bots_smoke: $(TESTS_DIR)/bots_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER) $(BOT_HEADER) $(BOT_PATH)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The load generator. Not a test and deliberately not in `integration`: it
 # reports what the server cost rather than whether it was right, and a fleet
 # of fifty is far too slow and far too machine-dependent to sit in `make test`.
@@ -299,6 +334,8 @@ $(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.
 	@ echo "ok"
 
 stress: $(TEST_BIN_DIR)/stress_client
+
+bot: $(BOT_PATH)
 
 # The renderer has no automated test: notcurses queries the terminal for
 # capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
@@ -317,7 +354,8 @@ unit: $(UNIT_BINS)
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
 			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
-			 $(TEST_BIN_DIR)/match_smoke $(TEST_BIN_DIR)/arena_smoke
+			 $(TEST_BIN_DIR)/match_smoke $(TEST_BIN_DIR)/arena_smoke \
+			 $(TEST_BIN_DIR)/bots_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
@@ -341,6 +379,6 @@ re: fclean all
 
 .PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
 			check-dependencies check-tetrisu-deps test unit integration \
-			stress clean fclean re
+			stress bot clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

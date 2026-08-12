@@ -2403,16 +2403,7 @@ typedef enum e_solo_phase
 	SOLO_GAME_OVER
 }	t_solo_phase;
 
-typedef enum e_solo_action
-{
-	SOLO_MOVE_LEFT,
-	SOLO_MOVE_RIGHT,
-	SOLO_ROTATE_CW,
-	SOLO_ROTATE_CCW,
-	SOLO_SOFT_DROP,
-	SOLO_HARD_DROP,
-	SOLO_HOLD
-}	t_solo_action;
+/* t_solo_action moved to tetrisu_net.h - it is what goes on the wire. */
 
 typedef enum e_solo_event
 {
@@ -3620,12 +3611,17 @@ bool			net_solo_apply(t_net_client *net, t_solo_game *game);
 void			net_state_apply(const t_body_state *snap, t_solo_game *game);
 bool			net_solo_pending(const t_net_client *net);
 
-/* NET_MATCH.C — Double played against tetrisd; both boards arrive together */
-int				net_match_join(t_net_client *net, const char *room);
+/*
+** NET_MATCH.C — Double played against tetrisd; both boards arrive together.
+**
+** net_match_join and net_match_send_action are declared in tetrisu_net.h
+** instead, because they are the two a bot needs and a bot has no screen. The
+** rest stay here: they speak in view models and ability enums that only a
+** client with something to draw on has any use for.
+*/
 bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
 int				net_match_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
-int				net_match_send_action(t_net_client *net, t_solo_action action);
 int				net_match_set_target(t_net_client *net, t_target_mode mode,
 					t_net_result *out);
 const char		*net_target_mode_word(t_target_mode mode);
