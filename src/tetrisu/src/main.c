@@ -60,6 +60,8 @@ static bool	apply_auth_action(t_render_ctx *ctx, t_audio_ctx *audio,
 				const t_app_data_provider *provider,
 				t_app_navigation *navigation, t_auth_form *form,
 				t_auth_action action);
+static void	adopt_account_loadout(t_render_ctx *ctx, t_audio_ctx *audio,
+				const t_app_data_provider *provider);
 static int	activate_menu_selection(t_render_ctx *ctx, t_audio_ctx *audio,
 				t_app_navigation *navigation,
 				const t_menu_selection *menu,
@@ -419,6 +421,43 @@ int	main(void)
 }
 
 /**
+ * @brief Puts the account's own loadout on screen, before the screen is drawn.
+ *
+ * The renderer is born wearing Classic and Mirurun (render_init), and until
+ * this existed nothing replaced them on the way in: tetrisu_visual_selection_
+ * bind() was reachable only from Settings and the Marketplace, so a returning
+ * player landed on home in the default theme and had to open Settings and
+ * re-equip a theme they already owned to get it back. The loadout is a fact
+ * about the account, so signing in is when it arrives.
+ *
+ * The Settings model is the carrier because it is the one the bind already
+ * takes - it is where the equipped ids come back from the server. Nothing is
+ * drawn here and nothing is written back; the caller reflows home immediately
+ * after, and it reads theme_assets.homepage.
+ *
+ * A provider that cannot answer, or an offline/preview session, leaves the
+ * defaults standing - which is what they are for.
+ *
+ * @param ctx Render context whose theme and character are being set.
+ * @param audio Audio context, moved to the theme's own music.
+ * @param provider Data provider the account is read through.
+ */
+static void	adopt_account_loadout(t_render_ctx *ctx, t_audio_ctx *audio,
+	const t_app_data_provider *provider)
+{
+	t_app_screen_view_model	view;
+
+	if (provider == NULL)
+		return ;
+	memset(&view, 0, sizeof(view));
+	if (app_screen_view_load_for_session(provider, APP_SCREEN_SETTINGS, false,
+			&view) == APP_PROVIDER_INVALID)
+		return ;
+	tetrisu_visual_selection_bind(ctx, provider, &view.data.settings);
+	audio_transition_music(audio, ctx->theme_assets.music, 0);
+}
+
+/**
  * @brief Runs the complete login/sign-up/offline entry experience.
  */
 static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
@@ -500,6 +539,7 @@ static int	run_auth_flow(t_render_ctx *ctx, t_audio_ctx *audio,
 	render_auth_destroy(ctx);
 	if (navigation->current == APP_SCREEN_HOME)
 	{
+		adopt_account_loadout(ctx, audio, provider);
 		if (reflow_home(ctx, menu, false, true) < 0)
 			return (-1);
 		/*
