@@ -337,7 +337,7 @@ static void	test_room_roster_controls_opponent_count(void)
 	assert(state.players_total == 4);
 	present = 0;
 	index = 0;
-	while (index < APP_ROOM_MAX_PLAYERS)
+	while (index < MP_ARENA_SEATS)
 	{
 		present += state.opponents[index].present;
 		index++;
@@ -372,7 +372,7 @@ static void	test_room_roster_controls_opponent_count(void)
 static void	test_the_arena_puts_what_matters_in_the_near_columns(void)
 {
 	t_mp_match_state	state;
-	int					cards[APP_ROOM_MAX_PLAYERS];
+	int					cards[MP_ARENA_SEATS];
 	int					count;
 
 	memset(&state, 0, sizeof(state));
@@ -389,7 +389,7 @@ static void	test_the_arena_puts_what_matters_in_the_near_columns(void)
 	state.opponents[4].targeted_by_local = true;
 	state.opponents[5].present = true;
 	state.opponents[5].local = true;
-	count = mp_match_collect_cards(&state, cards, APP_ROOM_MAX_PLAYERS);
+	count = mp_match_collect_cards(&state, cards, MP_ARENA_SEATS);
 	/* four rivals; the local card is drawn full size elsewhere */
 	assert(count == 4);
 	assert(cards[0] == 3);

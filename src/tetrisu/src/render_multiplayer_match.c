@@ -311,7 +311,7 @@ static void	draw_battle_royale(struct ncplane *plane,
 	const t_mp_match_state *state, const t_mp_match_layout *layout)
 {
 	char	line[APP_TEXT_MAX * 2];
-	int		cards[APP_ROOM_MAX_PLAYERS];
+	int		cards[MP_ARENA_SEATS];
 	int		opponents;
 	int		left_count;
 
@@ -345,7 +345,7 @@ static void	draw_battle_royale(struct ncplane *plane,
 	 * that has ever had somebody leave, so the occupied seats are gathered
 	 * first and the grid is laid out over that.
 	 */
-	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
 	left_count = (opponents + 1) / 2;
 	draw_mini_arena(plane, &layout->left_opponents, state, cards, left_count);
 	draw_mini_arena(plane, &layout->right_opponents, state,

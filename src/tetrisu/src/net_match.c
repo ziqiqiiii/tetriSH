@@ -467,7 +467,7 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
 static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
 		uint64_t local)
 {
-	bool	seated[APP_ROOM_MAX_PLAYERS];
+	bool	seated[MP_ARENA_SEATS];
 	size_t	index;
 
 	if (!snap->arena_present)
@@ -501,7 +501,7 @@ static void	count_the_arena(t_mp_match_state *state)
 
 	attackers = 0;
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (state->opponents[slot].present)
 		{
@@ -530,7 +530,7 @@ static void	forget_empty_seats(t_mp_match_state *state, const bool *seated)
 	int	slot;
 
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (!seated[slot])
 			memset(&state->opponents[slot], 0,
@@ -558,7 +558,7 @@ static void	apply_arena_card(t_mp_match_state *state,
 	int	slot;
 
 	slot = card->slot;
-	if (slot < 0 || slot >= APP_ROOM_MAX_PLAYERS)
+	if (slot < 1 || slot >= MP_ARENA_SEATS)
 		return ;
 	seated[slot] = true;
 	state->opponents[slot].present = true;

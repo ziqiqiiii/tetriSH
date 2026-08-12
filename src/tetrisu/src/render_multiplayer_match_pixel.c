@@ -1030,7 +1030,7 @@ static bool regions_opponent_caption(t_match_regions *pass,
 */
 static int regions_battle(t_match_regions *pass)
 {
-	int cards[APP_ROOM_MAX_PLAYERS];
+	int cards[MP_ARENA_SEATS];
 	uint64_t signature[2];
 	int opponents;
 	int left;
@@ -1039,7 +1039,7 @@ static int regions_battle(t_match_regions *pass)
 	if (pass->state->mode != APP_GAME_MODE_BATTLE_ROYALE)
 		return (0);
 	opponents = mp_match_collect_cards(pass->state, cards,
-			APP_ROOM_MAX_PLAYERS);
+			MP_ARENA_SEATS);
 	left = (opponents + 1) / 2;
 	signature[0] = opponents_signature(pass->state, cards, left);
 	signature[1] = opponents_signature(pass->state, cards + left,
@@ -1561,7 +1561,7 @@ static void destroy_region_planes(t_render_ctx *ctx)
 static uint64_t match_signature(const t_mp_match_state *state,
 	int width, int height)
 {
-	int cards[APP_ROOM_MAX_PLAYERS];
+	int cards[MP_ARENA_SEATS];
 	uint64_t hash;
 	uint64_t arena;
 	int opponents;
@@ -1606,7 +1606,7 @@ static uint64_t match_signature(const t_mp_match_state *state,
 	 * of it is holes at one end and unread cards at the other - and a rival
 	 * whose card changed in one of those would never dirty the frame.
 	 */
-	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
 	arena = opponents_signature(state, cards, opponents);
 	hash = hash_bytes(hash, &arena, sizeof(arena));
 	return (hash_bytes(hash, state->status, strlen(state->status)));
@@ -2019,7 +2019,7 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_match_state *state)
 {
 	t_mp_match_pixel_layout layout;
-	int cards[APP_ROOM_MAX_PLAYERS];
+	int cards[MP_ARENA_SEATS];
 	int opponents;
 	int left_count;
 
@@ -2029,7 +2029,7 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	draw_ability_bar(ctx, pixels, width, height, &layout, state);
 	draw_game_board(ctx, pixels, width, height, &layout.local_board,
 		&state->local_game, "", true);
-	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
 	left_count = (opponents + 1) / 2;
 	draw_opponent_region(ctx, pixels, width, height, &layout.left_opponents,
 		state, cards, left_count);

@@ -176,6 +176,14 @@
 # define APP_LOBBY_MAX_ROOMS	8
 # define LOBBY_VISIBLE_ROOMS	6
 # define APP_ROOM_MAX_PLAYERS	99
+
+/*
+** The card array is indexed by seat, and a room numbers its seats from 1 - so
+** it is one wider than the room is, and seat 0 is a hole nobody is ever in.
+** Sized to the seat count instead, the last seat of a full room had nowhere to
+** live and every loop that walked the array stopped one short of it.
+*/
+# define MP_ARENA_SEATS			(APP_ROOM_MAX_PLAYERS + 1)
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
@@ -2646,7 +2654,7 @@ typedef struct s_mp_match_state
 		int			rank;
 		int			lines;
 		char		name[APP_TEXT_MAX];
-	} opponents[APP_ROOM_MAX_PLAYERS];
+	} opponents[MP_ARENA_SEATS];
 	char				opponent_name[APP_TEXT_MAX];
 	char				room_id[APP_TEXT_MAX];
 	char				status[MP_MATCH_STATUS_MAX];

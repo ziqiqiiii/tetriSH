@@ -278,7 +278,16 @@ static int	decode_mask(const char *text, t_body_arena_slot *out)
  */
 static int	validate_card(const t_body_arena_slot *card)
 {
-	if (card->slot < 0 || card->slot >= BODY_ARENA_MAX)
+	/*
+	 * A slot is the seat number a room hands out, and a room numbers its
+	 * seats from 1 - so the last seat of a full room is BODY_ARENA_MAX
+	 * itself. Read as a 0-based index into an array of that size, seat 99
+	 * failed to validate, and because one bad card fails the whole body, a
+	 * full ninety-nine player room encoded no arena at all: every client
+	 * drew an empty grid for the whole match, and the only symptom was
+	 * silence.
+	 */
+	if (card->slot < 1 || card->slot > BODY_ARENA_MAX)
 		return (-1);
 	if (card->lines < 0 || card->pending < 0 || card->ko < 0)
 		return (-1);

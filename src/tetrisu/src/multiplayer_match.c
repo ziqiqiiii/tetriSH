@@ -187,7 +187,7 @@ int	mp_match_collect_cards(const t_mp_match_state *state, int *slots, int cap)
 		return (0);
 	count = 0;
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS && count < cap)
+	while (slot < MP_ARENA_SEATS && count < cap)
 	{
 		if (state->opponents[slot].present && !state->opponents[slot].local)
 			slots[count++] = slot;
@@ -283,7 +283,7 @@ int	mp_match_target_candidates(const t_mp_match_state *state)
 		return (0);
 	count = 0;
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (state->opponents[slot].present
 			&& state->opponents[slot].targeted_by_local)

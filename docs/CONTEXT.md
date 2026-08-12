@@ -45,8 +45,19 @@ Royale.
 The player an offensive ability or garbage lands on. Single mode has no
 Target, so offensive abilities are unavailable there; Double implies the one
 other player; in Battle Royale a Target is drawn per resolution from the
-room's seeded random source, among players still in the game.
+room's seeded random source, among players still in the game — narrowed
+first by the sender's Targeting mode.
 _Avoid_: victim, enemy, opponent (as a role)
+
+**Targeting mode**:
+Which kind of rival a Battle Royale player's garbage is drawn from: Randoms
+(every player still in the game), KOs (the tallest stacks), Attackers
+(whoever has landed rows on you recently), Badges (whoever has the most
+Knockouts). A mode chooses the urn and never the ball — the draw is still
+random, so a player can prefer a kind of rival and can never pick a person.
+A mode whose set is empty falls back to Randoms, so choosing one can never
+cost a player the garbage they earned.
+_Avoid_: aim, lock-on (nothing is held; a mode narrows a set per resolution)
 
 ### Gameplay
 
@@ -67,6 +78,33 @@ _Avoid_: settle, land (landing is what starts the delay, not what ends it)
 
 **Top-out**:
 Losing a game because the stack leaves no room for the next piece to spawn.
+
+**Knockout**:
+A Top-out credited to the player whose garbage most recently *landed* on that
+board — at the lock that took the rows, not when they were sent. Rows queued
+against a player who clears them away first buried nobody; rows that arrive
+after their sender left the room still did. A player who buried themselves is
+nobody's Knockout, which keeps the count a measure of aggression rather than
+of luck.
+_Avoid_: kill, elimination (an elimination is the event; the Knockout is who
+is credited for it)
+
+**Placing**:
+Where a player finished a Battle Royale, taken the moment they leave the
+match rather than when it ends: the number of players still in it, including
+them. Everybody eliminated on the same tick shares one Placing and the next
+elimination skips the numbers they took, because nothing observable separates
+two boards that stopped on the same tick. Leaving mid-match takes a Placing
+too — quitting in 40th records 40th.
+_Avoid_: rank (that is the leaderboard's word), position, score
+
+**Arena**:
+The Battle Royale projection of every occupied seat in a room: one card per
+player carrying a one-bit-per-cell mask of their board, their Knockouts,
+their Placing and whether they are still alive. It rides its own clock rather
+than the board's, and every push is the complete roster — so a seat that does
+not appear is a seat nobody is in, never a player who was knocked out.
+_Avoid_: grid, minimap, spectator view
 
 **Forfeit**:
 The immediate, irrevocable end of a player's participation in an in-progress

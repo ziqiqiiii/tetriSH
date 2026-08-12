@@ -37,6 +37,7 @@ void		test_state_arena_mask_survives_the_wire(void);
 void		test_state_arena_mask_is_optional_per_card(void);
 void		test_state_decode_rejects_arena_count_mismatch(void);
 void		test_state_arena_fits_the_derived_cap(void);
+void		test_state_arena_seats_are_numbered_from_one(void);
 static void	fill_card(t_body_arena_slot *card, int slot, bool with_mask);
 static bool	mask_bit(const t_body_arena_slot *card, int row, int col);
 static void	set_mask_bit(t_body_arena_slot *card, int row, int col);
@@ -625,6 +626,7 @@ int	main(void)
 	test_state_encode_rejects_unusable_opponent_username();
 	test_state_build_body_is_valid();
 	test_state_absent_arena_is_not_an_empty_one();
+	test_state_arena_seats_are_numbered_from_one();
 	test_state_arena_round_trips_every_card();
 	test_state_arena_mask_survives_the_wire();
 	test_state_arena_mask_is_optional_per_card();
@@ -711,7 +713,7 @@ void	test_state_arena_round_trips_every_card(void)
 	i = 0;
 	while (i < 3)
 	{
-		fill_card(&st.arena[i], i * 7, true);
+		fill_card(&st.arena[i], i * 7 + 1, true);
 		i++;
 	}
 	len = body_state_encode(&st, body, sizeof(body));
@@ -729,7 +731,7 @@ void	test_state_arena_round_trips_every_card(void)
 		 * is how an assertion ends up agreeing with itself instead of with the
 		 * codec.
 		 */
-		fill_card(&expect, i * 7, true);
+		fill_card(&expect, i * 7 + 1, true);
 		assert(st.arena[i].slot == expect.slot);
 		assert(st.arena[i].player_id == expect.player_id);
 		assert(st.arena[i].lines == expect.lines);
@@ -763,7 +765,7 @@ void	test_state_arena_mask_survives_the_wire(void)
 	st.alive = 2;
 	st.arena_present = true;
 	st.arena_count = 1;
-	fill_card(&st.arena[0], 0, true);
+	fill_card(&st.arena[0], 1, true);
 	memset(st.arena[0].mask, 0, sizeof(st.arena[0].mask));
 	set_mask_bit(&st.arena[0], 0, 0);
 	set_mask_bit(&st.arena[0], 0, 9);
@@ -802,9 +804,9 @@ void	test_state_arena_mask_is_optional_per_card(void)
 	st.alive = 1;
 	st.arena_present = true;
 	st.arena_count = 3;
-	fill_card(&st.arena[0], 0, false);
-	fill_card(&st.arena[1], 1, true);
-	fill_card(&st.arena[2], 2, false);
+	fill_card(&st.arena[0], 1, false);
+	fill_card(&st.arena[1], 2, true);
+	fill_card(&st.arena[2], 3, false);
 	st.arena[0].flags = 0;
 	st.arena[2].flags = 0;
 	len = body_state_encode(&st, body, sizeof(body));
@@ -815,8 +817,8 @@ void	test_state_arena_mask_is_optional_per_card(void)
 	assert(!st.arena[0].mask_valid && !st.arena[2].mask_valid);
 	assert(st.arena[1].mask_valid);
 	/* the card after a mask-less one is still read whole */
-	assert(st.arena[1].slot == 1 && st.arena[1].ko == 2);
-	assert(st.arena[2].slot == 2 && st.arena[2].lines == 5);
+	assert(st.arena[1].slot == 2 && st.arena[1].ko == 3);
+	assert(st.arena[2].slot == 3 && st.arena[2].lines == 6);
 	printf("PASS test_state_arena_mask_is_optional_per_card\n");
 }
 
@@ -834,7 +836,7 @@ void	test_state_decode_rejects_arena_count_mismatch(void)
 	make_state(&st);
 	st.arena_present = true;
 	st.arena_count = 1;
-	fill_card(&st.arena[0], 0, true);
+	fill_card(&st.arena[0], 1, true);
 	len = body_state_encode(&st, body, sizeof(body));
 	assert(len > 0);
 	strcpy(strstr(body, "arena full 1\n"), "arena full 2\n");
@@ -864,7 +866,7 @@ void	test_state_arena_fits_the_derived_cap(void)
 	i = 0;
 	while (i < BODY_ARENA_MAX)
 	{
-		fill_card(&st.arena[i], i, true);
+		fill_card(&st.arena[i], i + 1, true);
 		st.arena[i].player_id = UINT64_MAX;
 		st.arena[i].lines = 9999;
 		st.arena[i].pending = 999;
@@ -913,4 +915,49 @@ static bool	mask_bit(const t_body_arena_slot *card, int row, int col)
 static void	set_mask_bit(t_body_arena_slot *card, int row, int col)
 {
 	card->mask[row][col / 8] |= (unsigned char)(1u << (col % 8));
+}
+
+/*
+** A slot is the seat number a room hands out, and a room numbers its seats
+** from 1 - so the last seat of a full room is BODY_ARENA_MAX itself, and
+** there is no seat 0.
+**
+** Read as a 0-based index into an array of that size, seat 99 failed to
+** validate; and because one bad card fails the whole body, a full
+** ninety-nine player room encoded no arena at all. Nothing said so: the
+** encoder returned -1, the push was dropped, and every client in the biggest
+** room the mode supports drew an empty grid for the whole match. It is the
+** last seat that is the assertion here, because it is the only one that was
+** ever wrong.
+*/
+void	test_state_arena_seats_are_numbered_from_one(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.players = BODY_ARENA_MAX;
+	st.alive = BODY_ARENA_MAX;
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], BODY_ARENA_MAX, true);
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(st.arena_count == 1 && st.arena[0].slot == BODY_ARENA_MAX);
+	/* and neither end of the range beyond it is a seat */
+	make_state(&st);
+	st.players = 1;
+	st.alive = 1;
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], 0, true);
+	assert(body_state_encode(&st, body, sizeof(body)) == -1);
+	assert(errno == EINVAL);
+	fill_card(&st.arena[0], BODY_ARENA_MAX + 1, true);
+	assert(body_state_encode(&st, body, sizeof(body)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_arena_seats_are_numbered_from_one\n");
 }

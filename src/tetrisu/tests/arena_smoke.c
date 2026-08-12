@@ -123,7 +123,7 @@ static int	check_the_arena_carries_every_seat(t_net_client *bots,
 		return (0);
 	present = 0;
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (view[0].opponents[slot].present)
 			present++;
@@ -159,7 +159,7 @@ static int	check_cards_are_filed_by_seat(t_net_client *bots,
 			return (0);
 		seen[index] = -1;
 		slot = 0;
-		while (slot < APP_ROOM_MAX_PLAYERS)
+		while (slot < MP_ARENA_SEATS)
 		{
 			if (view[index].opponents[slot].local)
 			{
@@ -412,7 +412,7 @@ static int	dead_slot(t_net_client *net, t_mp_match_state *view)
 		if (!pump_arena(net, view, 400))
 			return (-1);
 		slot = 0;
-		while (slot < APP_ROOM_MAX_PLAYERS)
+		while (slot < MP_ARENA_SEATS)
 		{
 			if (view->opponents[slot].present && !view->opponents[slot].alive)
 				return (slot);
@@ -485,7 +485,7 @@ static int	check_a_targeting_mode_reaches_the_server(t_net_client *bots,
 		return (0);
 	marked = 0;
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (view[1].opponents[slot].targeted_by_local)
 		{
@@ -511,7 +511,7 @@ static int	local_slot(const t_mp_match_state *view)
 	int	slot;
 
 	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS)
+	while (slot < MP_ARENA_SEATS)
 	{
 		if (view->opponents[slot].local)
 			return (slot);
