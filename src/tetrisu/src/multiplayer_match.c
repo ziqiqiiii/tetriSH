@@ -78,6 +78,7 @@ void	mp_match_apply_room(t_mp_match_state *state,
 	int	player_count;
 	int	room_index;
 	int	opponent_index;
+	int	card;
 	bool	local;
 
 	if (state == NULL)
@@ -110,20 +111,30 @@ void	mp_match_apply_room(t_mp_match_state *state,
 				continue ;
 			}
 		}
-		state->opponents[opponent_index].present = true;
-		state->opponents[opponent_index].alive = true;
-		state->opponents[opponent_index].targeting_local
+		/*
+		 * A Battle Royale's cards are filed by seat, so the fixture files
+		 * itself by seat too - the seats a room hands out start at 1, and a
+		 * preview that laid its cards out from 0 would label every one of
+		 * them as the seat next door. Double's single card keeps position 0,
+		 * which is where the opponents section of a real frame puts it.
+		 */
+		card = opponent_index;
+		if (state->mode == APP_GAME_MODE_BATTLE_ROYALE)
+			card = opponent_index + 1;
+		state->opponents[card].present = true;
+		state->opponents[card].alive = true;
+		state->opponents[card].targeting_local
 			= opponent_index < state->incoming_attackers;
-		state->opponents[opponent_index].garbage_pending
+		state->opponents[card].garbage_pending
 			= (opponent_index * 3 + 1) % 5;
 		if (room != NULL && room_index < room->player_count
 			&& room->players[room_index].username[0] != '\0')
-			snprintf(state->opponents[opponent_index].name,
-				sizeof(state->opponents[opponent_index].name), "%s",
+			snprintf(state->opponents[card].name,
+				sizeof(state->opponents[card].name), "%s",
 				room->players[room_index].username);
 		else
-			snprintf(state->opponents[opponent_index].name,
-				sizeof(state->opponents[opponent_index].name), "PLAYER %02d",
+			snprintf(state->opponents[card].name,
+				sizeof(state->opponents[card].name), "PLAYER %02d",
 				opponent_index + 2);
 		/*
 		 * A fixture board, and only when nothing real is coming. Online these
@@ -135,7 +146,7 @@ void	mp_match_apply_room(t_mp_match_state *state,
 		 * behind it is the one thing the fixture is for.
 		 */
 		if (seed_boards)
-			seed_opponent_board(&state->opponents[opponent_index].board,
+			seed_opponent_board(&state->opponents[card].board,
 				opponent_index + 2);
 		room_index++;
 		opponent_index++;
@@ -143,6 +154,43 @@ void	mp_match_apply_room(t_mp_match_state *state,
 	if (state->mode == APP_GAME_MODE_DOUBLE && state->opponents[0].present)
 		snprintf(state->opponent_name, sizeof(state->opponent_name), "%s",
 			state->opponents[0].name);
+}
+
+/**
+ * @brief Gathers the seats that hold a rival's card, in seat order.
+ *
+ * The arena is indexed by seat, so that a card keeps its place on screen when
+ * somebody above it is knocked out. That makes the array sparse, and a grid is
+ * not: a grid wants n cards to lay out in n cells. This is where the two meet,
+ * and both renderers meet it here rather than each walking the array by
+ * position - which draws the holes as empty boxes and stops short of the last
+ * rival in any room somebody has left.
+ *
+ * The recipient's own card is left out. It is in the arena because the arena
+ * is a picture of the whole room, and it is drawn full size elsewhere on both
+ * screens - a thumbnail of it among the rivals would be the same board twice.
+ *
+ * @param state Match model holding the cards.
+ * @param slots Receives the occupied seat indices.
+ * @param cap How many it can hold.
+ * @return How many seats were gathered.
+ */
+int	mp_match_collect_cards(const t_mp_match_state *state, int *slots, int cap)
+{
+	int	count;
+	int	slot;
+
+	if (state == NULL || slots == NULL)
+		return (0);
+	count = 0;
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS && count < cap)
+	{
+		if (state->opponents[slot].present && !state->opponents[slot].local)
+			slots[count++] = slot;
+		slot++;
+	}
+	return (count);
 }
 
 /**

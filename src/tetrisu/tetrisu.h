@@ -2602,9 +2602,11 @@ typedef struct s_mp_match_state
 	** The arena, indexed by the seat each card sits in rather than by where it
 	** appeared in the frame.
 	**
-	** A push is the whole roster, so the array is cleared and rewritten from
-	** each one - `present` means "somebody is in this seat now", and a seat the
-	** push does not mention is a seat nobody is in. Indexing by slot is what
+	** A push is the whole roster, so a seat the push does not mention is
+	** blanked - `present` means "somebody is in this seat now". A seat it does
+	** mention keeps the board it already holds unless the card carried a mask,
+	** because a dead board never changes again and its mask rides only every
+	** fifth push. Indexing by slot is what
 	** keeps a card in the same place on screen between pushes: filed by
 	** position in the frame, every rival above a knocked-out player would slide
 	** one square left the moment that player was removed from the roster, and
@@ -3372,6 +3374,8 @@ bool			mp_match_movement_event(const t_mp_match_state *state,
 void			mp_match_apply_room(t_mp_match_state *state,
 					const t_app_room_view_model *room, int preview_players,
 					bool seed_boards);
+int				mp_match_collect_cards(const t_mp_match_state *state,
+					int *slots, int cap);
 
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,

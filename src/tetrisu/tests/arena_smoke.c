@@ -9,7 +9,8 @@
 /*   or a player is invisible; a card is filed by seat or the whole screen    */
 /*   shuffles when somebody is knocked out; the head count comes from the     */
 /*   frame or it reads 2/40; and a frame carrying no arena must leave the     */
-/*   cards it is not talking about exactly where they were.                   */
+/*   cards it is not talking about exactly where they were; and a card's      */
+/*   mask is a projection of a board somebody is really playing.              */
 /*                                                                            */
 /*   Everything is asserted through net_match_apply, which is the function    */
 /*   the screen actually uses - so what is tested is the client's own         */
@@ -19,23 +20,9 @@
 
 #include "tetrisu.h"
 
-/*
-** NOT YET COVERED: that a card's mask is a projection of a real board.
-**
-** The check was written and does not pass, and the reason is not the mask. A
-** client hard drops six times, every drop is answered 200, and its own
-** authoritative board comes back from the server still empty - so nothing has
-** settled to project, and the arena is faithfully reporting an empty room.
-** Whether that is a Battle Royale input path that accepts and discards, or a
-** test that has not actually put a client in the state it thinks it has, is
-** unresolved.
-**
-** Left out rather than left failing, and written down rather than deleted:
-** a mask that were always empty would draw every card blank, and nothing
-** below would notice.
-*/
-
 # define ARENA_SEATS	4
+/* TETRISD_BR_ARENA_DEAD_EVERY: how often a dead card carries its mask. */
+# define ARENA_DEAD_CYCLE	5
 
 // Static Functions
 static int	check_the_arena_carries_every_seat(t_net_client *bots,
@@ -46,6 +33,17 @@ static int	check_the_counts_are_the_rooms(t_net_client *bots,
 				t_mp_match_state *view);
 static int	check_a_frame_without_an_arena_keeps_the_cards(t_net_client *bots,
 				t_mp_match_state *view);
+static int	check_a_card_is_a_projection_of_a_board(t_net_client *bots,
+				t_mp_match_state *view);
+static int	check_a_dead_card_keeps_its_board(t_net_client *bots,
+				t_mp_match_state *view);
+static int	stack_a_board(t_net_client *net, int pieces);
+static int	local_cells(const t_mp_match_state *view);
+static int	local_slot(const t_mp_match_state *view);
+static int	top_out(t_net_client *net);
+static int	dead_slot(t_net_client *net, t_mp_match_state *view);
+static int	wait_dead_mask(t_net_client *net, t_mp_match_state *view,
+				int slot);
 
 static int	seat_everyone(t_net_client *bots, char *room, size_t cap);
 static int	sign_up_and_in(t_net_client *net, const char *name);
@@ -92,6 +90,10 @@ int	main(void)
 		check_the_counts_are_the_rooms(bots, view), &failures);
 	report("a frame without an arena keeps the cards",
 		check_a_frame_without_an_arena_keeps_the_cards(bots, view), &failures);
+	report("a card is a projection of a real board",
+		check_a_card_is_a_projection_of_a_board(bots, view), &failures);
+	report("a dead card keeps its board between masks",
+		check_a_dead_card_keeps_its_board(bots, view), &failures);
 	index = 0;
 	while (index < ARENA_SEATS)
 		net_disconnect(&bots[index++]);
@@ -240,6 +242,256 @@ static int	check_a_frame_without_an_arena_keeps_the_cards(t_net_client *bots,
 		tries--;
 	}
 	return (printf("    never saw a frame without an arena\n"), 0);
+}
+
+/*
+** The mask is the whole point of the arena, and it is the one thing nothing
+** above would notice the loss of: a mask that were always empty draws every
+** card blank, and a complete roster of blank cards passes every check in this
+** file. So one client stacks a board and the arena has to show that stack -
+** to its owner, in their own card, and to a rival in the same seat.
+**
+** A card is counted against the board that arrived in the same frame, which
+** is what makes the two comparable at all: the arena rides the recipient's
+** own snapshot, so a card and the board beside it are one instant by
+** construction. The rival's copy is a second frame and a later instant, and
+** it is still an equality because at level 1 a piece takes eighteen seconds
+** of gravity to land - nothing settles between the two pumps that was not
+** hard dropped.
+*/
+static int	check_a_card_is_a_projection_of_a_board(t_net_client *bots,
+		t_mp_match_state *view)
+{
+	int	mine;
+	int	cells;
+
+	if (!stack_a_board(&bots[0], 6))
+		return (0);
+	if (!pump_arena(&bots[0], &view[0], 400))
+		return (0);
+	cells = local_cells(&view[0]);
+	if (cells == 0)
+		return (printf("    the local board came back empty\n"), 0);
+	mine = local_slot(&view[0]);
+	if (mine < 0)
+		return (printf("    no card of my own\n"), 0);
+	if (card_cells(&view[0], mine) != cells)
+		return (printf("    my card holds %d cells, my board holds %d\n",
+				card_cells(&view[0], mine), cells), 0);
+	if (!pump_arena(&bots[1], &view[1], 400))
+		return (0);
+	if (card_cells(&view[1], mine) != cells)
+		return (printf("    a rival draws seat %d with %d cells, not %d\n",
+				mine, card_cells(&view[1], mine), cells), 0);
+	return (1);
+}
+
+/*
+** A dead board never changes again, so the server stops paying for it: its
+** card carries a mask on every fifth push and none in between, and the client
+** keeps the last one it holds. A client that instead reads "no mask" as "no
+** board" draws a knocked-out player's thumbnail four pushes in five and blank
+** for the other four fifths of the match.
+**
+** What is promised is bounded staleness and not immediacy: the first push
+** after an elimination may well be one of the four that carry no mask, and the
+** board the client is holding for that seat is then whatever it last saw. The
+** cycle is five pushes long, so the buried board is drawn within five of the
+** burial - and from there it must never move again, because a dead board
+** never does.
+**
+** So this waits for the mask, then watches the seat across more pushes than
+** the cycle is long. A dead card that flickers and a dead card that moves are
+** the same failure.
+*/
+static int	check_a_dead_card_keeps_its_board(t_net_client *bots,
+		t_mp_match_state *view)
+{
+	int	slot;
+	int	cells;
+	int	pushes;
+
+	if (!top_out(&bots[ARENA_SEATS - 1]))
+		return (printf("    could not top a board out\n"), 0);
+	slot = dead_slot(&bots[0], &view[0]);
+	if (slot < 0)
+		return (printf("    no knocked-out card in the arena\n"), 0);
+	cells = wait_dead_mask(&bots[0], &view[0], slot);
+	if (cells <= 0)
+		return (printf("    seat %d stayed blank for a whole cycle\n",
+				slot), 0);
+	pushes = 0;
+	while (pushes < 8)
+	{
+		if (!pump_arena(&bots[0], &view[0], 400))
+			return (printf("    the arena stopped after %d pushes\n",
+					pushes), 0);
+		if (card_cells(&view[0], slot) != cells)
+			return (printf("    push %d drew seat %d with %d cells, not %d\n",
+					pushes, slot, card_cells(&view[0], slot), cells), 0);
+		pushes++;
+	}
+	return (1);
+}
+
+/**
+ * @brief Pumps until a dead seat's board has arrived, within the elision cycle.
+ *
+ * @param net The connection to watch the room through.
+ * @param view The match model to write.
+ * @param slot The seat to wait on.
+ * @return How many cells that seat's board holds, or 0 if it never arrived.
+ */
+static int	wait_dead_mask(t_net_client *net, t_mp_match_state *view, int slot)
+{
+	int	pushes;
+
+	pushes = 0;
+	while (pushes < ARENA_DEAD_CYCLE)
+	{
+		if (card_cells(view, slot) > 0)
+			return (card_cells(view, slot));
+		if (!pump_arena(net, view, 400))
+			return (0);
+		pushes++;
+	}
+	return (card_cells(view, slot));
+}
+
+/**
+ * @brief Hard drops until the board tops out.
+ *
+ * The refusal is the signal: an input into a game that is over is answered
+ * 409, which is how a test reads an elimination without a screen to see it on.
+ *
+ * @param net The connection to bury.
+ * @return 1 when the board topped out, 0 when it never did.
+ */
+static int	top_out(t_net_client *net)
+{
+	t_net_result	result;
+	int				guard;
+
+	guard = 0;
+	while (guard < 400)
+	{
+		if (net_match_action(net, SOLO_HARD_DROP, &result) != 0
+			&& result.status != 409)
+			return (0);
+		if (result.status == 409)
+			return (1);
+		if (net_pump(net) < 0)
+			return (0);
+		usleep(20000);
+		guard++;
+	}
+	return (0);
+}
+
+/**
+ * @brief Pumps until the arena carries a card with its alive bit clear.
+ *
+ * @param net The connection to watch the room through.
+ * @param view The match model to write.
+ * @return The seat that card sits in, or -1 when none arrived.
+ */
+static int	dead_slot(t_net_client *net, t_mp_match_state *view)
+{
+	int	tries;
+	int	slot;
+
+	tries = 40;
+	while (tries-- > 0)
+	{
+		if (!pump_arena(net, view, 400))
+			return (-1);
+		slot = 0;
+		while (slot < APP_ROOM_MAX_PLAYERS)
+		{
+			if (view->opponents[slot].present && !view->opponents[slot].alive)
+				return (slot);
+			slot++;
+		}
+	}
+	return (-1);
+}
+
+/**
+ * @brief Hard drops a number of pieces, letting each one settle.
+ *
+ * The wait is the settle: a drop is answered before the tick that encodes
+ * what it did, so a drop sent on the reply to the last one is a drop the
+ * arena has not been told about yet.
+ *
+ * @param net The connection to play.
+ * @param pieces How many pieces to drop.
+ * @return 1 when every drop was accepted, 0 otherwise.
+ */
+static int	stack_a_board(t_net_client *net, int pieces)
+{
+	t_net_result	result;
+	int				tries;
+
+	while (pieces > 0)
+	{
+		if (net_match_action(net, SOLO_HARD_DROP, &result) != 0
+			|| result.status != 200)
+			return (printf("    a drop was answered %d\n", result.status), 0);
+		tries = 40;
+		while (tries-- > 0)
+		{
+			if (net_pump(net) < 0)
+				return (0);
+			usleep(3000);
+		}
+		pieces--;
+	}
+	return (1);
+}
+
+/**
+ * @brief Finds the seat this client's own card sits in.
+ *
+ * @param view The match model to read.
+ * @return The slot, or -1 when the arena carries no card of this client's.
+ */
+static int	local_slot(const t_mp_match_state *view)
+{
+	int	slot;
+
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS)
+	{
+		if (view->opponents[slot].local)
+			return (slot);
+		slot++;
+	}
+	return (-1);
+}
+
+/**
+ * @brief Counts filled cells on the client's own authoritative board.
+ *
+ * @param view The match model to read.
+ * @return How many cells are filled.
+ */
+static int	local_cells(const t_mp_match_state *view)
+{
+	int	total;
+	int	row;
+	int	col;
+
+	total = 0;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+			total += board_get(&view->local_game.board, col++, row).type
+				!= CELL_EMPTY;
+		row++;
+	}
+	return (total);
 }
 
 /**
@@ -407,6 +659,11 @@ static int	wait_playing(t_net_client *net, int tries)
 /**
  * @brief Pumps until a frame carrying an arena has been applied.
  *
+ * The frame has to be one this client has not applied yet, which is what
+ * net_solo_pending answers and what `has_state` does not: a client holds its
+ * last snapshot for good, so a caller asking twice for an arena would be
+ * handed the same one twice and would be watching nothing.
+ *
  * @param net The connection.
  * @param view The match model to write.
  * @param tries How many polls to spend.
@@ -418,7 +675,7 @@ static int	pump_arena(t_net_client *net, t_mp_match_state *view, int tries)
 	{
 		if (net_pump(net) < 0)
 			return (0);
-		if (net->has_state)
+		if (net_solo_pending(net))
 		{
 			if (net->state_snapshot.arena_present)
 			{

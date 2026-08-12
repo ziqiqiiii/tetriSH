@@ -49,7 +49,7 @@ static int regions_local(t_match_regions *pass);
 static int regions_opponent(t_match_regions *pass);
 static int regions_battle(t_match_regions *pass);
 static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-				int first, int count, struct ncplane **slot);
+				const int *cards, int count, struct ncplane **slot);
 static int regions_loadout(t_match_regions *pass);
 static int regions_opponent_loadout(t_match_regions *pass);
 static int regions_hud(t_match_regions *pass);
@@ -82,7 +82,7 @@ static uint64_t loadout_signature(const t_mp_match_state *state);
 static uint64_t opponent_loadout_signature(const t_mp_match_state *state);
 static uint64_t hud_signature(const t_mp_match_state *state);
 static uint64_t opponents_signature(const t_mp_match_state *state,
-				int first, int count);
+				const int *cards, int count);
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size);
 static uint32_t *new_canvas(t_render_ctx *ctx, int width, int height);
 static uint32_t *canvas_keep(t_render_ctx *ctx, int width, int height);
@@ -175,7 +175,7 @@ static t_color danger_backing(int step);
 static t_color danger_frame(int step, bool local);
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *rect,
-				const t_mp_match_state *state, int first, int count);
+				const t_mp_match_state *state, const int *cards, int count);
 static void opponent_grid(int count, const t_mp_rect *rect,
 				int *columns, int *rows);
 static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -1016,43 +1016,50 @@ static bool regions_opponent_caption(t_match_regions *pass,
 			pass->height, &strip, &pass->ctx->mp_match_opponent_plane));
 }
 
+/*
+** The cards are gathered before either half is measured, because the array is
+** indexed by seat and is therefore sparse: the count is how many seats hold a
+** rival, not how many players the room has, and the nth card of a side is the
+** nth occupied seat rather than the nth entry.
+*/
 static int regions_battle(t_match_regions *pass)
 {
-	uint64_t left_signature;
-	uint64_t right_signature;
+	int cards[APP_ROOM_MAX_PLAYERS];
+	uint64_t signature[2];
 	int opponents;
 	int left;
 	int changed;
 
 	if (pass->state->mode != APP_GAME_MODE_BATTLE_ROYALE)
 		return (0);
-	opponents = clamp_int(pass->state->players_total - 1, 0,
-			APP_ROOM_MAX_PLAYERS - 1);
+	opponents = mp_match_collect_cards(pass->state, cards,
+			APP_ROOM_MAX_PLAYERS);
 	left = (opponents + 1) / 2;
-	left_signature = opponents_signature(pass->state, 0, left);
-	right_signature = opponents_signature(pass->state, left, opponents - left);
+	signature[0] = opponents_signature(pass->state, cards, left);
+	signature[1] = opponents_signature(pass->state, cards + left,
+			opponents - left);
 	changed = 0;
-	if (pass->force || pass->ctx->mp_match_left_signature != left_signature)
+	if (pass->force || pass->ctx->mp_match_left_signature != signature[0])
 	{
-		if (!regions_side(pass, &pass->layout->left_opponents, 0, left,
+		if (!regions_side(pass, &pass->layout->left_opponents, cards, left,
 				&pass->ctx->mp_match_left_plane))
 			return (-1);
-		pass->ctx->mp_match_left_signature = left_signature;
+		pass->ctx->mp_match_left_signature = signature[0];
 		changed = 1;
 	}
-	if (pass->force || pass->ctx->mp_match_right_signature != right_signature)
+	if (pass->force || pass->ctx->mp_match_right_signature != signature[1])
 	{
-		if (!regions_side(pass, &pass->layout->right_opponents, left,
+		if (!regions_side(pass, &pass->layout->right_opponents, cards + left,
 				opponents - left, &pass->ctx->mp_match_right_plane))
 			return (-1);
-		pass->ctx->mp_match_right_signature = right_signature;
+		pass->ctx->mp_match_right_signature = signature[1];
 		changed = 1;
 	}
 	return (changed);
 }
 
 static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-	int first, int count, struct ncplane **slot)
+	const int *cards, int count, struct ncplane **slot)
 {
 	if (!regions_prepare(pass))
 		return (false);
@@ -1060,7 +1067,7 @@ static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
 	{
 		clear_rect(pass->pixels, pass->width, pass->height, rect);
 		draw_opponent_region(pass->ctx, pass->pixels, pass->width,
-			pass->height, rect, pass->state, first, count);
+			pass->height, rect, pass->state, cards, count);
 	}
 	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
 			pass->height, rect, slot));
@@ -1548,7 +1555,9 @@ static void destroy_region_planes(t_render_ctx *ctx)
 static uint64_t match_signature(const t_mp_match_state *state,
 	int width, int height)
 {
+	int cards[APP_ROOM_MAX_PLAYERS];
 	uint64_t hash;
+	uint64_t arena;
 	int opponents;
 	int seconds;
 
@@ -1584,10 +1593,15 @@ static uint64_t match_signature(const t_mp_match_state *state,
 		sizeof(state->opponent_game.phase));
 	hash = hash_bytes(hash, &state->opponent_game.scoring,
 		sizeof(state->opponent_game.scoring));
-	opponents = clamp_int(state->players_total - 1, 0,
-		APP_ROOM_MAX_PLAYERS - 1);
-	hash = hash_bytes(hash, state->opponents,
-		(size_t)opponents * sizeof(state->opponents[0]));
+	/*
+	 * The occupied seats, not the first players_total of them: the array is
+	 * indexed by seat and the seats a room hands out start at 1, so a prefix
+	 * of it is holes at one end and unread cards at the other - and a rival
+	 * whose card changed in one of those would never dirty the frame.
+	 */
+	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
+	arena = opponents_signature(state, cards, opponents);
+	hash = hash_bytes(hash, &arena, sizeof(arena));
 	return (hash_bytes(hash, state->status, strlen(state->status)));
 }
 
@@ -1745,18 +1759,28 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 			sizeof(state->local_game.scoring.total)));
 }
 
+/*
+** Over the cards this side draws, in the order it draws them - so a card that
+** moved between the sides changes both signatures, and a seat that emptied
+** changes the one that held it. Hashing a byte range of the array cannot say
+** either now that the array is indexed by seat: the range is mostly holes.
+*/
 static uint64_t opponents_signature(const t_mp_match_state *state,
-	int first, int count)
+	const int *cards, int count)
 {
 	uint64_t hash;
+	int index;
 
 	hash = 1469598103934665603ULL;
-	if (count <= 0 || first < 0 || first >= APP_ROOM_MAX_PLAYERS - 1)
-		return (hash);
-	if (first + count > APP_ROOM_MAX_PLAYERS - 1)
-		count = APP_ROOM_MAX_PLAYERS - 1 - first;
-	return (hash_bytes(hash, &state->opponents[first],
-			(size_t)count * sizeof(state->opponents[0])));
+	index = 0;
+	while (index < count)
+	{
+		hash = hash_bytes(hash, &cards[index], sizeof(cards[index]));
+		hash = hash_bytes(hash, &state->opponents[cards[index]],
+				sizeof(state->opponents[0]));
+		index++;
+	}
+	return (hash);
 }
 
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size)
@@ -1960,6 +1984,7 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_match_state *state)
 {
 	t_mp_match_pixel_layout layout;
+	int cards[APP_ROOM_MAX_PLAYERS];
 	int opponents;
 	int left_count;
 
@@ -1969,13 +1994,12 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	draw_ability_bar(ctx, pixels, width, height, &layout, state);
 	draw_game_board(ctx, pixels, width, height, &layout.local_board,
 		&state->local_game, "", true);
-	opponents = clamp_int(state->players_total - 1, 0,
-		APP_ROOM_MAX_PLAYERS - 1);
+	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
 	left_count = (opponents + 1) / 2;
 	draw_opponent_region(ctx, pixels, width, height, &layout.left_opponents,
-		state, 0, left_count);
+		state, cards, left_count);
 	draw_opponent_region(ctx, pixels, width, height, &layout.right_opponents,
-		state, left_count, opponents - left_count);
+		state, cards + left_count, opponents - left_count);
 }
 
 static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -2839,7 +2863,7 @@ static bool load_tile_atlas(t_render_ctx *ctx)
 
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_rect *rect,
-	const t_mp_match_state *state, int first, int count)
+	const t_mp_match_state *state, const int *cards, int count)
 {
 	t_mp_rect board;
 	int columns;
@@ -2858,7 +2882,7 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 		(slot_height - 28) / BOARD_HEIGHT);
 	tile = max_int(1, tile);
 	index = 0;
-	while (index < count && first + index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < count)
 	{
 		board.width = tile * BOARD_WIDTH;
 		board.height = tile * BOARD_HEIGHT;
@@ -2867,7 +2891,7 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 		board.y = rect->y + (index / columns) * slot_height
 			+ max_int(22, (slot_height - board.height) / 2);
 		draw_snapshot_board(ctx, pixels, width, height, &board,
-			&state->opponents[first + index], first + index + 2,
+			&state->opponents[cards[index]], cards[index],
 			tile <= 2);
 		index++;
 	}

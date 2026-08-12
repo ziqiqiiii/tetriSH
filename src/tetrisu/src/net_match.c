@@ -34,7 +34,8 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
 static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
 				uint64_t local);
 static void	apply_arena_card(t_mp_match_state *state,
-				const t_body_arena_slot *card, uint64_t local);
+				const t_body_arena_slot *card, uint64_t local, bool *seated);
+static void	forget_empty_seats(t_mp_match_state *state, const bool *seated);
 static void	apply_arena_mask(t_board *board,
 				const t_body_arena_slot *card);
 
@@ -392,6 +393,13 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
  * those would blink the whole screen between pushes. `arena_present` is the
  * difference and it is why the codec sends `absent` rather than a count of 0.
  *
+ * The clearing is of the seats the push did not mention, and not of the whole
+ * array, because a card is allowed to arrive without a board: a dead board
+ * never changes again, so the server sends its mask on every fifth push only
+ * and the client keeps the one it holds in between. Blanking every card first
+ * and rewriting the ones the push describes throws that away four pushes in
+ * five, and a knocked-out player's thumbnail blinks for the rest of the match.
+ *
  * @param state Match model to write.
  * @param snap Snapshot that may carry an arena.
  * @param local This client's player id, so its own card can be marked.
@@ -399,16 +407,42 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
 static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
 		uint64_t local)
 {
+	bool	seated[APP_ROOM_MAX_PLAYERS];
 	size_t	index;
 
 	if (!snap->arena_present)
 		return ;
-	memset(state->opponents, 0, sizeof(state->opponents));
+	memset(seated, 0, sizeof(seated));
 	index = 0;
 	while (index < snap->arena_count && index < BODY_ARENA_MAX)
 	{
-		apply_arena_card(state, &snap->arena[index], local);
+		apply_arena_card(state, &snap->arena[index], local, seated);
 		index++;
+	}
+	forget_empty_seats(state, seated);
+}
+
+/**
+ * @brief Blanks every seat the push did not carry a card for.
+ *
+ * A push is the whole roster, so a seat missing from it is a seat nobody is
+ * in - a player who left the room rather than one who was knocked out, whose
+ * card is still sent with its alive bit clear.
+ *
+ * @param state Match model holding the cards.
+ * @param seated Which seats the push described.
+ */
+static void	forget_empty_seats(t_mp_match_state *state, const bool *seated)
+{
+	int	slot;
+
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS)
+	{
+		if (!seated[slot])
+			memset(&state->opponents[slot], 0,
+				sizeof(state->opponents[slot]));
+		slot++;
 	}
 }
 
@@ -423,15 +457,17 @@ static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
  * @param state Match model holding the cards.
  * @param card The card to file.
  * @param local The player id this frame was built for.
+ * @param seated Records that this seat was in the push.
  */
 static void	apply_arena_card(t_mp_match_state *state,
-		const t_body_arena_slot *card, uint64_t local)
+		const t_body_arena_slot *card, uint64_t local, bool *seated)
 {
 	int	slot;
 
 	slot = card->slot;
 	if (slot < 0 || slot >= APP_ROOM_MAX_PLAYERS)
 		return ;
+	seated[slot] = true;
 	state->opponents[slot].present = true;
 	state->opponents[slot].alive = (card->flags & BODY_ARENA_ALIVE) != 0;
 	state->opponents[slot].targeting_local
@@ -443,8 +479,14 @@ static void	apply_arena_card(t_mp_match_state *state,
 	state->opponents[slot].ko = card->ko;
 	state->opponents[slot].rank = card->rank;
 	state->opponents[slot].lines = card->lines;
+	/*
+	 * The seat, which a room numbers from 1 - not the seat plus one. Until the
+	 * arena carries a username, the seat is the only name a card has, and a
+	 * card that said P2 while the roster said seat 1 was two names for one
+	 * player.
+	 */
 	snprintf(state->opponents[slot].name,
-		sizeof(state->opponents[slot].name), "P%d", card->slot + 1);
+		sizeof(state->opponents[slot].name), "P%d", card->slot);
 	/*
 	 * A card without a mask is a dead board that has not changed since the
 	 * last one carrying one, so the board already held is still correct and is

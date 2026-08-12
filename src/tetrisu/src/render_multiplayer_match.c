@@ -44,7 +44,6 @@ static void	draw_targeting(struct ncplane *plane,
 				const t_mp_match_state *state, const t_mp_rect *rect);
 static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 				const t_mp_match_state *state, const int *slots, int count);
-static int	collect_cards(const t_mp_match_state *state, int *slots, int cap);
 static void	draw_abilities(struct ncplane *plane, const t_mp_rect *rect,
 				const t_mp_match_state *state, bool compact);
 static void	draw_result(struct ncplane *plane,
@@ -332,7 +331,7 @@ static void	draw_battle_royale(struct ncplane *plane,
 	 * that has ever had somebody leave, so the occupied seats are gathered
 	 * first and the grid is laid out over that.
 	 */
-	opponents = collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
+	opponents = mp_match_collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
 	left_count = (opponents + 1) / 2;
 	draw_mini_arena(plane, &layout->left_opponents, state, cards, left_count);
 	draw_mini_arena(plane, &layout->right_opponents, state,
@@ -476,7 +475,7 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 	while (index < count)
 	{
 		opponent = &state->opponents[slots[index]];
-		player = slots[index] + 1;
+		player = slots[index];
 		x = rect->x + (index % grid_cols) * cell_width;
 		y = rect->y + (index / grid_cols) * cell_height;
 		cell = (t_mp_rect){x, y, cell_width - 1, cell_height - 1};
@@ -924,32 +923,3 @@ static void	effect_line(const t_solo_effects *effects, char *out, size_t size)
 		snprintf(out, size, "MIRROR READY");
 }
 
-/**
- * @brief Gathers the seats that actually hold a card, in seat order.
- *
- * The arena is indexed by seat so that a card keeps its place on screen when
- * somebody above it is knocked out. That makes the array sparse, and a grid is
- * not: it wants n cards to lay out in n cells. This is the one place the two
- * meet, and doing it here rather than in the model is what lets the model stay
- * the server's picture of the room.
- *
- * @param state Match model holding the cards.
- * @param slots Receives the occupied seat indices.
- * @param cap How many it can hold.
- * @return How many seats were gathered.
- */
-static int	collect_cards(const t_mp_match_state *state, int *slots, int cap)
-{
-	int	count;
-	int	slot;
-
-	count = 0;
-	slot = 0;
-	while (slot < APP_ROOM_MAX_PLAYERS && count < cap)
-	{
-		if (state->opponents[slot].present && !state->opponents[slot].local)
-			slots[count++] = slot;
-		slot++;
-	}
-	return (count);
-}

@@ -319,16 +319,23 @@ static void	test_room_roster_controls_opponent_count(void)
 	assert(state.players_total == 4);
 	present = 0;
 	index = 0;
-	while (index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < APP_ROOM_MAX_PLAYERS)
 	{
 		present += state.opponents[index].present;
 		index++;
 	}
 	assert(present == 3);
-	assert(strcmp(state.opponents[0].name, "roster-0") == 0);
-	assert(strcmp(state.opponents[1].name, "roster-2") == 0);
+	/*
+	 * From seat 1, because a Battle Royale's cards are filed by seat and a
+	 * room numbers its seats from 1. The fixture lays itself out the way the
+	 * server's arena does, or the preview labels every card as the seat next
+	 * door to the one it draws.
+	 */
+	assert(strcmp(state.opponents[1].name, "roster-0") == 0);
+	assert(strcmp(state.opponents[2].name, "roster-2") == 0);
+	assert(!state.opponents[0].present);
 	mp_match_apply_room(&state, NULL, 99, true);
 	assert(state.players_total == 99);
-	assert(state.opponents[97].present);
+	assert(state.opponents[98].present);
 	printf("PASS test_room_roster_controls_opponent_count\n");
 }
