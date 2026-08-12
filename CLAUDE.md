@@ -160,6 +160,15 @@ Non-obvious rules that have each already cost a bug.
   The container engine gets its own step in `scripts/deps.sh` for the same
   reason; `WANT_ENGINE=0` turns it off and `make play` sets it, since a native
   build should not install Docker as a side effect.
+- **`--network host` is decided by the daemon, not by `uname`.** On WSL the CLI
+  is in the distro and Docker Desktop's daemon is in another VM, so the "host"
+  namespace is not this distro's and a containerised client dialling `127.0.0.1`
+  never reaches a local `tetrisd`. `engine_is_desktop` in
+  `scripts/container.sh` asks `docker info`, and that case drops host networking
+  and rewrites loopback to the distro's own address (`wsl_distro_address`) —
+  never `host.docker.internal`, which is the *Windows* host and reaches this
+  distro only if WSL's localhost forwarding relays it. A distro-local
+  `docker.io` really does share the namespace and keeps the Linux answer.
 - **Sound does not ride the pty the way the board does.** The board is escape
   sequences the host terminal renders, so the container needs no display; audio
   is SDL2 opening a device, and a container has none. `audio_args` in

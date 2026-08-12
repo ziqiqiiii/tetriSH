@@ -58,6 +58,27 @@ engine_ready() {
     "$engine" info >/dev/null 2>&1
 }
 
+is_wsl() {
+    grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease /proc/version \
+        2>/dev/null
+}
+
+# Whose daemon is on the far end of the socket, which is a different question
+# from which CLI is on PATH. Docker Desktop's WSL integration puts a docker
+# binary in the distro that talks to a daemon in a *separate* WSL VM, so the
+# container is not in this distro's network namespace even though the command
+# was typed here - and that is the one difference the run path has to know
+# about (see network_args). `info` is asked because it is the only answer that
+# comes from the daemon itself; the CLI's own path and version say nothing.
+engine_is_desktop() {
+    local engine="$1"
+
+    case "$("$engine" info --format '{{.OperatingSystem}}' 2>/dev/null)" in
+        *"Docker Desktop"*) return 0 ;;
+    esac
+    return 1
+}
+
 resolve_sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         SUDO=""
@@ -222,18 +243,81 @@ build_image() {
 # VM and there is no host namespace to join, so a loopback address has to be
 # rewritten to the name the engine publishes for the host. A server somewhere
 # else on the network is reached the same way from either.
+#
+# WSL is the case that looks like the first and behaves like the second, and it
+# is decided by the daemon rather than by uname: `uname -s` says Linux, so
+# --network host was passed, but under Docker Desktop that host is the
+# docker-desktop VM and not this distro. Measured on a WSL2 distro with a
+# listener on 0.0.0.0: `--network host` plus 127.0.0.1 does not connect and
+# nothing reaches the listener at all, which is `play.sh --local` failing with
+# no clue that the address was the problem. With a distro-local daemon
+# (docker.io installed in WSL itself) the namespace really is shared and the
+# Linux answer is correct, so this asks which daemon it is.
+DESKTOP_IN_WSL=0
+
+detect_desktop_in_wsl() {
+    local engine="$1"
+
+    DESKTOP_IN_WSL=0
+    if [ "$UNAME_S" = "Linux" ] && is_wsl && engine_is_desktop "$engine"; then
+        DESKTOP_IN_WSL=1
+    fi
+}
+
 network_args() {
-    if [ "$UNAME_S" = "Linux" ]; then
+    if [ "$UNAME_S" = "Linux" ] && [ "$DESKTOP_IN_WSL" != "1" ]; then
         printf '%s' "--network host"
     fi
 }
 
+# The address this distro answers on as seen from outside it, which is what a
+# container in the neighbouring VM has to dial. The source address of a route
+# out is asked rather than `hostname -I`, because that lists every address the
+# machine has - docker's own bridges included - and the first is not reliably
+# the routable one. It is eth0's under WSL's default NAT and the mirrored
+# Windows interface's under networkingMode=mirrored, and both are right.
+wsl_distro_address() {
+    local addr
+
+    addr="$(ip -4 route get 1.1.1.1 2>/dev/null \
+        | sed -n 's/.*[[:space:]]src[[:space:]]\([0-9.]\{7,\}\).*/\1/p' \
+        | head -n 1)"
+    [ -n "$addr" ] || return 1
+    printf '%s' "$addr"
+}
+
+# Only a loopback address is ever rewritten: it is the one that means "this
+# machine" to the caller and something else inside a container. A named server
+# is left exactly as typed, here and on macOS both.
+#
+# Under Desktop-in-WSL the distro's own address is preferred over
+# host.docker.internal, because they are not the same machine: that name is the
+# *Windows* host, and it reaches a server in this distro only if WSL's
+# localhost forwarding relays it - a Windows-side setting this script cannot
+# see. The distro's address needs no relay and was measured to carry data;
+# host.docker.internal stays as the fallback for a distro with no route out.
 resolve_host() {
-    local host="$1"
+    local host="$1" addr
+
+    case "$host" in
+        127.0.0.1|localhost|::1) ;;
+        *) printf '%s' "$host"; return 0 ;;
+    esac
+
+    if [ "$DESKTOP_IN_WSL" = "1" ]; then
+        if addr="$(wsl_distro_address)"; then
+            warn "Docker Desktop's containers are not in this distro's network"
+            warn "namespace, so the local server is dialled at $addr."
+            printf '%s' "$addr"
+        else
+            warn "could not find this distro's address; trying the Windows host."
+            printf 'host.docker.internal'
+        fi
+        return 0
+    fi
     if [ "$UNAME_S" != "Linux" ]; then
-        case "$host" in
-            127.0.0.1|localhost|::1) printf 'host.docker.internal'; return 0 ;;
-        esac
+        printf 'host.docker.internal'
+        return 0
     fi
     printf '%s' "$host"
 }
@@ -311,6 +395,10 @@ audio_args() {
 run_client() {
     local engine host port ca net
     engine="$(ensure_engine)"
+
+    # Before anything asks how to reach the host, because that answer depends
+    # on which daemon accepted the connection rather than on this OS.
+    detect_desktop_in_wsl "$engine"
 
     host="$(resolve_host "${TETRISU_HOST:-127.0.0.1}")"
     port="${TETRISU_PORT:-4242}"

@@ -142,6 +142,8 @@ bash scripts/play.sh --stop            # take the local server down (Linux)
 
 The shared server's address is `DEFAULT_HOST` in [`scripts/play.sh`](scripts/play.sh), overridden by `TETRISH_HOST=` or `HOST=`.
 
+`--local` plus `--container` is the one combination where *whose* Docker daemon it is matters. Under Docker Desktop on WSL the daemon lives in another VM, so `--network host` is not this distro's namespace and `127.0.0.1` reaches nothing; [`scripts/container.sh`](scripts/container.sh) detects that from `docker info` and dials the distro's own address instead. A `docker.io` installed inside WSL shares the namespace and needs none of it.
+
 **Only one CA is trusted per run**, paired with the host launched against — `certs/demo-ca.crt` for a named server, the scratch `certs/ca.crt` for `--local`. Typing a *different* address into **SERVER ID** on the sign-in screen fails with `certificate signature failure`; concatenating both CAs is not a workaround, since `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate and ignores the rest.
 
 One concern per script: [`scripts/container.sh`](scripts/container.sh) the engine, image and run; [`scripts/terminal.sh`](scripts/terminal.sh) which terminal draws; [`scripts/play.sh`](scripts/play.sh) the order.
