@@ -22,6 +22,7 @@
 # Environment:
 #   TETRISU_TERMINAL   force a choice: kitty, wezterm, none, or a path
 #   AUTO_INSTALL_DEPS  1 to install a missing terminal, 0 to only report
+#   KITTY_MIN_VERSION  lowest kitty that can draw the board (default 0.20.0)
 
 set -euo pipefail
 
@@ -36,6 +37,13 @@ die()  { printf '%b\n' "${RED}terminal.sh:${RST} $*" >&2; exit 1; }
 
 UNAME_S="$(uname -s)"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
+
+# The placement-id (p=) and quiet (q=) graphics keys and the kitty keyboard
+# protocol all arrive in kitty 0.20.0. Below that the client's escape sequences
+# are not merely unsupported but unparseable, so the window opens and fills with
+# "Malformed GraphicsCommand" instead of a board.
+KITTY_MIN_VERSION="${KITTY_MIN_VERSION:-0.20.0}"
+KITTY_INSTALLER_URL="https://sw.kovidgoyal.net/kitty/installer.sh"
 
 ################################################################################
 #                                  DETECTION                                   #
@@ -143,6 +151,83 @@ terminal_binary() {
     esac
 }
 
+# True when dotted version $1 is at least $2. Compared field by field rather
+# than with `sort -V`, which is a GNU extension the macOS sort does not carry.
+version_ge() {
+    local i have want
+    local -a hp wp
+    IFS=. read -r -a hp <<< "$1"
+    IFS=. read -r -a wp <<< "$2"
+    for i in 0 1 2; do
+        have="${hp[i]:-0}"; want="${wp[i]:-0}"
+        have="${have%%[!0-9]*}"; want="${want%%[!0-9]*}"
+        [ -n "$have" ] || have=0
+        [ -n "$want" ] || want=0
+        [ "$have" -gt "$want" ] && return 0
+        [ "$have" -lt "$want" ] && return 1
+    done
+    return 0
+}
+
+# "kitty 0.47.0 created by Kovid Goyal" -> "0.47.0". Empty when the binary
+# cannot run at all, which is its own failure and reported separately.
+kitty_version() {
+    "$1" --version 2>/dev/null | awk 'NR == 1 { print $2; exit }'
+}
+
+# A kitty on PATH is not the same as a kitty that can draw. Two ways it fails,
+# and they need different advice: a distro package too old to parse the protocol
+# (Ubuntu 20.04 still ships 0.15.0, from 2019), or a binary too new for the
+# system it was unpacked onto — kitty 0.48+ bundles a libpython needing
+# GLIBC_2.35, so on an older release it installs cleanly and then refuses to
+# start. Installing is left to the user for the same reason WezTerm is: the fix
+# is an upstream tarball outside the package manager, which is not something to
+# do silently behind `make play`.
+kitty_usable() {
+    local path="$1" have why
+    have="$(kitty_version "$path")" || have=""
+
+    if [ -z "$have" ]; then
+        # The binary is expected to fail here, so its non-zero exit must not
+        # discard the diagnosis it just printed — hence the inner `|| true`
+        # rather than a `||` on the assignment.
+        why="$({ "$path" --version 2>&1 || true; } | head -1)"
+        warn "${BOLD}$path${RST} is installed but will not start:"
+        [ -n "$why" ] && warn "    $why"
+        warn "A kitty built for a newer glibc does this; install one that matches"
+        warn "this system with ${BOLD}installer=version-<X.Y.Z>${RST} below."
+        kitty_install_hint
+        return 1
+    fi
+
+    if ! version_ge "$have" "$KITTY_MIN_VERSION"; then
+        warn "kitty ${BOLD}$have${RST} at $path is too old to draw the board"
+        warn "(need ${BOLD}$KITTY_MIN_VERSION${RST} or newer). It cannot parse the graphics"
+        warn "protocol the client speaks, so the window fills with"
+        warn "${BOLD}Malformed GraphicsCommand${RST} errors and no board appears."
+        kitty_install_hint
+        return 1
+    fi
+    return 0
+}
+
+kitty_install_hint() {
+    warn "Install a current kitty for this user only:"
+    warn "    ${BOLD}curl -fsSL $KITTY_INSTALLER_URL | sh /dev/stdin launch=n${RST}"
+    warn "then put ${BOLD}~/.local/bin${RST} on PATH ahead of /usr/bin:"
+    warn "    ${BOLD}ln -sf ~/.local/kitty.app/bin/kitty ~/.local/bin/kitty${RST}"
+}
+
+# Only kitty is version-gated. WezTerm has spoken the graphics protocol for as
+# long as it has been an option here, and a path the caller named through
+# TETRISU_TERMINAL is their choice to make.
+verify_terminal() {
+    case "$1" in
+        kitty) kitty_usable "$2" ;;
+        *)     return 0 ;;
+    esac
+}
+
 ################################################################################
 #                                   INSTALL                                    #
 ################################################################################
@@ -196,7 +281,14 @@ instruct_wezterm() {
 ensure_terminal() {
     local choice="$1" path
     path="$(terminal_binary "$choice")"
-    [ -n "$path" ] && { printf '%s' "$path"; return 0; }
+    if [ -n "$path" ]; then
+        # Already present, so installing again cannot help: a package manager
+        # that shipped this kitty has no newer one to offer. Refuse with the
+        # advice rather than spending a sudo prompt to reinstall the same file.
+        verify_terminal "$choice" "$path" || return 1
+        printf '%s' "$path"
+        return 0
+    fi
 
     if [ "$AUTO_INSTALL_DEPS" != "1" ]; then
         warn "$choice is not installed and automatic installation is disabled."
@@ -224,6 +316,7 @@ ensure_terminal() {
 
     path="$(terminal_binary "$choice")"
     [ -n "$path" ] || { warn "$choice still not found after installing."; return 1; }
+    verify_terminal "$choice" "$path" || return 1
     printf '%s' "$path"
 }
 
@@ -258,12 +351,14 @@ launch_in_terminal() {
     esac
 }
 
-# No window to open: run here, and say what that costs if the surrounding
-# terminal cannot draw bitmaps. This is not an error path — the game plays in
-# compatibility mode, and saying so beats a board that silently looks wrong.
+# Run here, and say what that costs if the surrounding terminal cannot draw
+# bitmaps. This is not an error path — the game plays in compatibility mode, and
+# saying so beats a board that silently looks wrong. Reached two ways, so the
+# message names neither cause: there may be no display to open a window on, or
+# there may be one whose kitty was rejected as unable to draw.
 run_in_place() {
     if ! current_term_has_graphics; then
-        warn "no display to open a terminal on, and ${BOLD}TERM=${TERM:-unset}${RST} does not"
+        warn "running in this terminal, and ${BOLD}TERM=${TERM:-unset}${RST} does not"
         warn "speak the Kitty graphics protocol, so the board will draw in"
         warn "compatibility mode (cells, not pixel art)."
         if is_ssh; then
@@ -289,6 +384,10 @@ case "$action" in
         if [ "$choice" = "none" ]; then
             echo "terminal: none (no display; will run in the current terminal)"
         elif [ -n "$path" ]; then
+            if ! verify_terminal "$choice" "$path"; then
+                echo "terminal: $choice ($path, cannot draw the board)"
+                exit 1
+            fi
             echo "terminal: $choice ($path)"
         else
             echo "terminal: $choice (not installed)"
