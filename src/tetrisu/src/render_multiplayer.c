@@ -567,7 +567,8 @@ static void	draw_waiting_room(struct ncplane *plane,
 	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 	put_centered(plane, rows - 2, cols,
-		"[<>] FIGHTER [R] READY [S] START [C] CHAT [L] LEAVE", false);
+		"[<>] FIGHTER [R] READY [S] START [B] BOT [K] KICK [C] CHAT [L] LEAVE",
+		false);
 }
 
 /**

@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 // Static Functions
 static t_room_action	handle_room_key(t_waiting_room_state *state,
@@ -11,6 +12,7 @@ static bool	valid_slot(const t_app_room_view_model *room, int index);
 static bool	valid_room_snapshot(const t_app_room_view_model *room);
 static void	append_fighter(const t_waiting_room_state *state, char *out,
 				size_t size);
+static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size);
 static void	move_roster(t_waiting_room_state *state,
 					const t_app_room_view_model *room, int delta);
 
@@ -570,13 +572,32 @@ const char	*waiting_room_slot_label(const t_app_room_view_model *room,
 		snprintf(out, size, "%d. (empty)", index + 1);
 		return (out);
 	}
-	if (room->players[index].owner)
-		snprintf(out, size, "%d. %s (owner)", index + 1,
-			room->players[index].username);
-	else
-		snprintf(out, size, "%d. %s", index + 1,
-			room->players[index].username);
+	snprintf(out, size, "%d. %s%s", index + 1, room->players[index].username,
+		room->players[index].owner ? " (owner)"
+		: waiting_room_seat_is_bot(room, index) ? " (bot)" : "");
 	return (out);
+}
+
+/**
+ * @brief Is this seat one of the room's bots?
+ *
+ * Asked of the name, because the name is all the server says about it: a bot
+ * is an ordinary client on an ordinary account, and the only thing that marks
+ * the account is the reserved prefix no person may sign up with. That is what
+ * makes this answerable from a room snapshot at all, and it is right for
+ * *every* client in the room rather than only for the one that spawned them -
+ * a player who joined somebody else's room sees the bots in it as bots.
+ *
+ * @param room Room snapshot to read.
+ * @param index Seat index.
+ * @return true when the seat is occupied by a bot account.
+ */
+bool	waiting_room_seat_is_bot(const t_app_room_view_model *room, int index)
+{
+	if (room == NULL || index < 0 || index >= room->player_count)
+		return (false);
+	return (strncmp(room->players[index].username, BOT_ACCOUNT_PREFIX,
+			sizeof(BOT_ACCOUNT_PREFIX) - 1) == 0);
 }
 
 /**
@@ -640,7 +661,34 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
 		snprintf(out, size, "CHAT IS FULL");
 	else if (state->feedback == ROOM_FEEDBACK_VOLUME)
 		snprintf(out, size, "MUSIC VOLUME %d%%", state->feedback_value);
+	else
+		bot_feedback_text(state->feedback, out, size);
 	return (out);
+}
+
+/**
+ * @brief Writes the line for whichever bot outcome the last key produced.
+ *
+ * Separate from the rest so that the chain above stays one `if` per feedback:
+ * five more branches in it is the point at which a reader stops finding the
+ * one they are looking for.
+ *
+ * @param feedback The outcome to describe.
+ * @param out Buffer receiving the line.
+ * @param size Size of out.
+ */
+static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size)
+{
+	if (feedback == ROOM_FEEDBACK_BOT_ADDED)
+		snprintf(out, size, "BOT ADDED");
+	else if (feedback == ROOM_FEEDBACK_BOT_KICKED)
+		snprintf(out, size, "BOT KICKED");
+	else if (feedback == ROOM_FEEDBACK_BOT_LIMIT)
+		snprintf(out, size, "NO MORE ROOM FOR BOTS");
+	else if (feedback == ROOM_FEEDBACK_BOT_NONE)
+		snprintf(out, size, "NO BOT TO KICK");
+	else if (feedback == ROOM_FEEDBACK_BOT_UNAVAILABLE)
+		snprintf(out, size, "NO BOT COULD BE STARTED");
 }
 
 /**
@@ -704,6 +752,15 @@ static t_room_action	handle_room_key(t_waiting_room_state *state,
 		return (ROOM_ACTION_CHARACTER_NEXT);
 	if (key == 's' || key == 'S')
 		return (ROOM_ACTION_START);
+	/*
+	 * B fills a seat and K empties one. Both are refused to anybody but the
+	 * owner here rather than further in, so that a player who is not the owner
+	 * is told why instead of watching nothing happen.
+	 */
+	if (key == 'b' || key == 'B')
+		return (ROOM_ACTION_ADD_BOT);
+	if (key == 'k' || key == 'K')
+		return (ROOM_ACTION_KICK_BOT);
 	if (key == NCKEY_UP)
 		move_roster(state, room, -1);
 	else if (key == NCKEY_DOWN)

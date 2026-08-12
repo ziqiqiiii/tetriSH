@@ -12,6 +12,7 @@ static void	test_chat_ring_drops_the_oldest(void);
 static void	test_slot_labels_and_badges(void);
 static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
+static void	test_bot_keys_and_seat_marks(void);
 static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
@@ -29,7 +30,53 @@ int	main(void)
 	test_slot_labels_and_badges();
 	test_status_and_feedback_copy();
 	test_launch_action_matches_the_mode();
+	test_bot_keys_and_seat_marks();
 	return (0);
+}
+
+/*
+** B and K are the two keys that fill and empty a seat, and both are the
+** owner's - the screen only says which action was asked for, and main.c is
+** where a non-owner is turned away, so what is asserted here is the mapping
+** and the mark rather than the permission.
+**
+** The mark is read off the username, because that is all the server says
+** about a bot: it is an ordinary client on an ordinary account, and the only
+** thing that distinguishes the account is the prefix no person may sign up
+** with. That is what makes a bot visible as one to *every* client in the
+** room, not only to the one that spawned it.
+*/
+static void	test_bot_keys_and_seat_marks(void)
+{
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
+	char					line[APP_TEXT_MAX * 2];
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	waiting_room_state_init(&state);
+	assert(waiting_room_handle_key(&state, &room, 'b') == ROOM_ACTION_ADD_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'B') == ROOM_ACTION_ADD_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'k') == ROOM_ACTION_KICK_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'K') == ROOM_ACTION_KICK_BOT);
+	/* A person is never marked, whatever their seat. */
+	assert(!waiting_room_seat_is_bot(&room, 1));
+	assert(strstr(waiting_room_slot_label(&room, 1, line, sizeof(line)),
+			"(bot)") == NULL);
+	snprintf(room.players[1].username, sizeof(room.players[1].username),
+		"BOT_02");
+	assert(waiting_room_seat_is_bot(&room, 1));
+	assert(strstr(waiting_room_slot_label(&room, 1, line, sizeof(line)),
+			"(bot)") != NULL);
+	/* An owner is an owner first: the two tags never both appear. */
+	snprintf(room.players[0].username, sizeof(room.players[0].username),
+		"BOT_01");
+	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"(owner)") != NULL);
+	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"(bot)") == NULL);
+	assert(!waiting_room_seat_is_bot(&room, 99));
+	assert(!waiting_room_seat_is_bot(NULL, 0));
+	printf("PASS test_bot_keys_and_seat_marks\n");
 }
 
 /**

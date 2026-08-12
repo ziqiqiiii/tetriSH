@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 # define SETTINGS_INPUT_BATCH_MAX	64
 # define LEADERBOARD_INPUT_BATCH_MAX	64
@@ -35,6 +36,13 @@ typedef struct s_mp_session
 	 * bought, and the Marketplace is where buying happens.
 	 */
 	t_app_catalogue_view_model	characters;
+	/*
+	 * The bots this player has added to this room, as child processes. They
+	 * live on the session rather than on the room model because they are this
+	 * client's processes and not the room's members: the server knows them
+	 * only as four more clients that logged in.
+	 */
+	t_bot_farm					bots;
 }	t_mp_session;
 
 // Static Functions
@@ -44,6 +52,9 @@ static void	restore_after_notification(t_render_ctx *ctx,
 				const t_menu_selection *menu);
 static bool	toggle_ready(const t_app_data_provider *provider,
 				t_app_room_view_model *room, t_mp_session *session);
+static void	add_bot(t_mp_session *session);
+static void	kick_bot(t_mp_session *session);
+static t_bot_level	default_bot_level(void);
 static void	load_room_characters(const t_app_data_provider *provider,
 				t_mp_session *session);
 static void	cycle_character(t_mp_session *session, int delta);
@@ -410,6 +421,14 @@ int	main(void)
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
 	render_teardown(&ctx);
+	/*
+	 * The last chance to collect the bots. Every ordinary way out of a room
+	 * has already done it, so reaching here with children still running means
+	 * the client is exiting from somewhere that did not - and a bot whose
+	 * parent is gone would notice through its deadman pipe anyway, but a
+	 * process this one started is this one's to wait for.
+	 */
+	bot_farm_clear(&mp_session.bots);
 	if (net_session.connected)
 		net_disconnect(&net_session.net);
 	if (g_exit_reason != NULL)
@@ -2052,6 +2071,70 @@ static bool	toggle_ready(const t_app_data_provider *provider,
 	return (true);
 }
 
+/**
+ * @brief Add one bot to this room, as a child of this process.
+ *
+ * The bot joins over its own socket, from the server's own account pool, so
+ * nothing here names an account and nothing here seats anybody: the roster
+ * grows when the room's next refresh shows one more member, exactly as it
+ * would for a person who walked in.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+static void	add_bot(t_mp_session *session)
+{
+	if (session->bots.count >= BOT_FARM_MAX)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_LIMIT;
+		return ;
+	}
+	if (bot_farm_add(&session->bots, session->room_id,
+			default_bot_level()) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_UNAVAILABLE;
+		return ;
+	}
+	session->room_state.feedback = ROOM_FEEDBACK_BOT_ADDED;
+}
+
+/**
+ * @brief Kick the most recently added bot, and never anybody else.
+ *
+ * There is no authorisation question and no route, because a bot is this
+ * client's own child: kicking is a signal, and a client can only signal the
+ * processes it started. A room with people in it and no bots answers that
+ * there is nothing to kick rather than doing something to a person.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+static void	kick_bot(t_mp_session *session)
+{
+	if (bot_farm_drop(&session->bots) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NONE;
+		return ;
+	}
+	session->room_state.feedback = ROOM_FEEDBACK_BOT_KICKED;
+}
+
+/**
+ * @brief The difficulty a new bot is added at.
+ *
+ * TETRISU_BOT_LEVEL for now, defaulting to normal. It belongs in Settings -
+ * one setting for the room rather than a prompt per bot, because four prompts
+ * to add four bots is worse than one choice made once.
+ *
+ * @return The level to spawn at.
+ */
+static t_bot_level	default_bot_level(void)
+{
+	t_bot_level	level;
+
+	level = BOT_NORMAL;
+	bot_level_parse(getenv("TETRISU_BOT_LEVEL"), &level);
+	return (level);
+}
+
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_navigation *navigation,
 	t_mp_session *session, t_room_action action)
@@ -2101,6 +2184,17 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 			return (launch_match(ctx, audio, provider, navigation, session));
 		return (true);
 	}
+	if (action == ROOM_ACTION_ADD_BOT || action == ROOM_ACTION_KICK_BOT)
+	{
+		audio_play_menu_select(audio);
+		if (!waiting_room_local_is_owner(room))
+			session->room_state.feedback = ROOM_FEEDBACK_NOT_OWNER;
+		else if (action == ROOM_ACTION_ADD_BOT)
+			add_bot(session);
+		else
+			kick_bot(session);
+		return (true);
+	}
 	if (action == ROOM_ACTION_SEND_CHAT)
 	{
 		if (send_room_chat(provider, room, &session->room_state))
@@ -2124,13 +2218,23 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (app_room_view_leave(provider, room->id) == APP_PROVIDER_OK)
 		{
 			audio_play_menu_select(audio);
+			/*
+			 * The bots go with the player who added them. Leaving them behind
+			 * would strand seats nobody can reach: the only client that can
+			 * stop them is the one that started them, and it has just walked
+			 * out of the room they are in.
+			 */
+			bot_farm_clear(&session->bots);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
 		else
 			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
 	}
 	else if (action == ROOM_ACTION_QUIT)
+	{
+		bot_farm_clear(&session->bots);
 		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
 	return (true);
 }
 

@@ -456,13 +456,21 @@ point of D1.
 
 ## UX and UI
 
-- The waiting room's seat list marks bot seats and their level.
-- `B` adds one at the room's current default level; the level is chosen in
-  Settings, not per bot, because four separate prompts to add four bots is
-  worse than one setting.
+- The waiting room's seat list marks bot seats, read off the reserved prefix
+  in the username. That is all the server says about a bot, and it is enough —
+  which also means a player who *joined* somebody else's room sees the bots in
+  it as bots, rather than only the client that spawned them.
+- `B` adds one at the room's current default level. **Not yet in Settings**:
+  the level comes from `TETRISU_BOT_LEVEL` and defaults to normal. Settings is
+  where it belongs — one choice for the room rather than a prompt per bot,
+  because four prompts to add four bots is worse than one setting made once —
+  and it is the one piece of this plan's UX still outstanding.
 - `B` at four bots, or with the pool empty, says why and adds nobody.
-- `K` kicks the highlighted seat only when it is a bot, and is silent
-  otherwise — a key that sometimes kicks people is a key nobody presses.
+- `K` kicks the most recently added bot, and can only ever kick a bot: the
+  farm holds this client's own children, and a room with people in it and no
+  bots answers that there is nothing to kick. It is not silent about that — a
+  key that sometimes does nothing and never says so reads as a key that is
+  broken.
 - Bots appear in chat narration exactly like players (`joined the room`),
   because they did.
 
@@ -502,10 +510,10 @@ The integration test is the one that would have caught every bug in this plan.
 | 1 | ✅ `match_smoke.c` calls it instead of its own copy | 0 |
 | 2 | ✅ Reserved prefix + the three skip-list write guards | — |
 | 3 | ✅ Account pool: config, boot creation, refuse-not-displace | 2 |
-| 4 | `bot_main.c` + its Makefile target — a bot that joins a named room from the command line | 0, 3 |
-| 5 | `bot_proc.c` — binary lookup, stdio redirect, spawn, deadman pipe, reap | 4 |
-| 6 | `B` / `K` in the waiting room, seat list marks | 5 |
-| 7 | `test_bots.sh` end to end | 6 |
+| 4 | ✅ `bot_main.c` + its Makefile target — a bot that joins a named room from the command line | 0, 3 |
+| 5 | ✅ `bot_proc.c` — binary lookup, stdio redirect, spawn, deadman pipe, reap | 4 |
+| 6 | ✅ `B` / `K` in the waiting room, seat list marks | 5 |
+| 7 | ✅ `test_bots.sh` end to end | 6 |
 | 8 | `ultra`: 2-ply, hold, live `TARGET` | 0, 7 |
 
 Steps 0–2 are independent and could land in any order. Step 8 is deliberately

@@ -1489,7 +1489,17 @@ typedef enum e_room_feedback
 	ROOM_FEEDBACK_CHAT_SENT,
 	ROOM_FEEDBACK_CHAT_EMPTY,
 	ROOM_FEEDBACK_CHAT_FULL,
-	ROOM_FEEDBACK_VOLUME
+	ROOM_FEEDBACK_VOLUME,
+	/*
+	 * The five a bot can produce. ROOM_FEEDBACK_BOT_NONE is the answer to K
+	 * with nothing to kick, and is deliberately not silence: a key that
+	 * sometimes does nothing and never says so reads as a key that is broken.
+	 */
+	ROOM_FEEDBACK_BOT_ADDED,
+	ROOM_FEEDBACK_BOT_KICKED,
+	ROOM_FEEDBACK_BOT_LIMIT,
+	ROOM_FEEDBACK_BOT_NONE,
+	ROOM_FEEDBACK_BOT_UNAVAILABLE
 }	t_room_feedback;
 
 typedef enum e_room_action
@@ -1504,6 +1514,13 @@ typedef enum e_room_action
 	ROOM_ACTION_LAUNCH,
 	ROOM_ACTION_VOLUME_DOWN,
 	ROOM_ACTION_VOLUME_UP,
+	/*
+	 * Adding and kicking a bot. Both are the owner's, for the same reason
+	 * starting is - and kicking is only ever a bot, because a bot is this
+	 * client's own child process and a person is not.
+	 */
+	ROOM_ACTION_ADD_BOT,
+	ROOM_ACTION_KICK_BOT,
 	ROOM_ACTION_QUIT
 }	t_room_action;
 
@@ -3341,6 +3358,8 @@ bool			waiting_room_send_chat(t_app_room_view_model *room,
 					t_waiting_room_state *state);
 const char		*waiting_room_status_text(const t_app_room_view_model *room,
 					const t_waiting_room_state *state, char *out, size_t size);
+bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
+					int index);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,
 					int index, char *out, size_t size);
 const char		*waiting_room_badge_text(const t_app_room_view_model *room,
