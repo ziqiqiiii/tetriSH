@@ -146,17 +146,20 @@ The container never draws: `tetrisu`'s board is Kitty-graphics-protocol escape s
 
 No packaging removes that last row: with no display there is no window to open, so the client runs in the terminal you are already in and only its protocol support matters. **kitty**, **Ghostty** and **WezTerm** speak it; Windows Terminal gets the cell board. `TETRISU_RENDERER=cell` pins that path anywhere — renderer tiers in [`src/tetrisu/README.md`](src/tetrisu/README.md).
 
+**Both play on the shared tetriSH server**, and neither starts one here. Its address lives in [`scripts/play.sh`](scripts/play.sh) as `DEFAULT_HOST` — named once there, beside the CA it has to be paired with — and `TETRISH_HOST=` or `HOST=` overrides it.
+
 ```bash
-make play HOST=tetrish.dev             # against a server elsewhere, checked first
+make play HOST=tetrish.dev             # against another server, checked first
 make play-image REBUILD=1              # rebuild the client image first
-bash scripts/play.sh --client-only     # against a server already up
+bash scripts/play.sh --local           # start a server here and play on it
+bash scripts/play.sh --client-only     # against a local server already up
 bash scripts/play.sh --container       # what make play-image runs
 bash scripts/play.sh --stop            # take the local server down (Linux)
 ```
 
 The server's address is typed into **SERVER ID** on the sign-in screen, which wins over the environment; the certificate needs no configuring, `certs/demo-ca.crt` being committed and bind-mounted into the container read-only rather than baked in.
 
-**Only one CA is trusted per run**, picked from the host `play.sh` launched against — the scratch `certs/ca.crt` for a local server, `certs/demo-ca.crt` for one named with `HOST=`. A *different* SERVER ID than that host fails with `certificate signature failure`: reachable server, other CA. Name it up front; concatenating both CAs is not a workaround, since `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate with `PEM_read_X509` and ignores the rest.
+**Only one CA is trusted per run**, picked from the host `play.sh` launched against — `certs/demo-ca.crt` for the shared server or one named with `HOST=`, the scratch `certs/ca.crt` for a `--local` one. A *different* SERVER ID than that host fails with `certificate signature failure`: reachable server, other CA. Name it up front; concatenating both CAs is not a workaround, since `load_cert_file` in the frozen [`common.c`](lib/libtetrissh/src/common.c) reads one certificate with `PEM_read_X509` and ignores the rest.
 
 macOS runs the client and never the server, so the server steps are skipped there.
 

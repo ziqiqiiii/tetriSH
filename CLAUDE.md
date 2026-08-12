@@ -90,12 +90,19 @@ open, so the client runs in the terminal already attached and only that
 terminal's protocol support matters. kitty, Ghostty and WezTerm speak it;
 Windows Terminal does not and gets the cell renderer.
 
+`make play` and `make play-image` default to the **shared server**, whose
+address is `DEFAULT_HOST` in `scripts/play.sh` (overridable with `TETRISH_HOST=`
+or `HOST=`); neither target starts a server, and `--local` is the flag that
+brings the game back to this machine. The three flags that are about a server
+here — `--local`, `--stop`, `--server-only`, plus `--client-only` — select it
+themselves rather than colliding with a default pointing elsewhere.
+
 The client trusts **exactly one CA per run**, and `scripts/play.sh` picks it
-from the host it was launched against: the local scratch `certs/ca.crt` for a
-server started here, the committed `certs/demo-ca.crt` for one named with
-`--host`. Typing a different address into SERVER ID than the one it launched
-against therefore fails with `certificate signature failure` — reachable
-server, wrong CA — so a remote server is named up front (`make play
+from the host it was launched against: the committed `certs/demo-ca.crt` for the
+shared server or one named with `--host`, the local scratch `certs/ca.crt` for a
+`--local` one. Typing a different address into SERVER ID than the one it
+launched against therefore fails with `certificate signature failure` —
+reachable server, wrong CA — so another server is named up front (`make play
 HOST=...`). Concatenating both CAs into one file is not a fix: `load_cert_file`
 in the frozen `common.c` reads a single certificate with `PEM_read_X509` and
 ignores the rest.

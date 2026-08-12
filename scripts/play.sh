@@ -61,12 +61,23 @@ DO_REBUILD=0
 # question already answered.
 NATIVE=1
 CLIENT_ONLY=0
+WANT_LOCAL=0
 PORT=""
-# Where the server is. Empty means here, which is the only case with a server to
-# start; --host names somebody else's, and then this script has a client to
-# launch and nothing to bring up.
+# Where the server is. Empty means "not asked for", and that now resolves to the
+# shared server rather than to this machine: playing together is the common
+# case, and a bare `make play` that quietly served itself was a game nobody else
+# could see. --host names a different one, --local brings it back here.
 HOST=""
 LOCAL_HOST="127.0.0.1"
+
+# The shared tetriSH server, and the CA question rides on it: it is signed by
+# the committed certs/demo-ca.crt, which is exactly what REMOTE=1 selects below.
+#
+# The address rather than tetrish.dev, because this is the one string in the
+# path that cannot fall back - an unresolvable name fails inside the client's
+# connect as a timeout, several screens away from anything naming DNS. Override
+# either way with TETRISH_HOST=tetrish.dev or `make play HOST=...`.
+DEFAULT_HOST="${TETRISH_HOST:-159.65.11.120}"
 
 say()  { printf '%b\n' "${BLU}==>${RST} ${BOLD}$*${RST}"; }
 ok()   { printf '%b\n' "    ${GRN}$*${RST}"; }
@@ -77,11 +88,13 @@ usage() {
     cat <<'EOF'
 Usage: bash scripts/play.sh [options]
 
-  --host ADDR     play on somebody else's server (e.g. --host 10.27.229.33);
+  --host ADDR     play on a different server (e.g. --host 10.27.229.33);
                   nothing is started locally and the demo CA is used
+  --local         play on a server on this machine, starting one if needed,
+                  verified against this machine's own certs/ca.crt
   --port N        port to serve and connect on (default: TETRISD_PORT in .tetrishrc)
-  --server-only   bring the server up and stop, without launching a client
-  --client-only   launch a client against a server that is already up
+  --server-only   bring a local server up and stop, without launching a client
+  --client-only   launch a client against a local server that is already up
   --container     build and run the client in a container instead of on this
                   host; the image carries the toolchain, so nothing is
                   installed here (this is what `make play-image` runs)
@@ -90,11 +103,13 @@ Usage: bash scripts/play.sh [options]
   --stop          stop the server and exit
   -h, --help      this text
 
-With no --host a server is started here and the client connects to it; the
-server is left running when the client exits, so the next run starts a client
-immediately. `bash scripts/play.sh --stop` takes it down.
+With neither --host nor --local the client plays on the shared tetriSH server
+and nothing is started here. --local is the old behaviour: a server is started
+on this machine and left running when the client exits, so the next run starts a
+client immediately; `bash scripts/play.sh --stop` takes it down.
 
 Environment:
+  TETRISH_HOST      the shared server used when no --host is given
   TETRISU_TERMINAL  force the terminal: kitty, wezterm, or none (run in place)
   TETRISU_IMAGE     client image tag (default tetrish/tetrisu)
   TETRISU_RENDERER  pin the renderer tier: cell, stationary, pixel
@@ -106,6 +121,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --host)        HOST="${2:-}"; shift 2 || die "--host needs an address" ;;
         --host=*)      HOST="${1#*=}"; shift ;;
+        --local)       WANT_LOCAL=1; shift ;;
         --port)        PORT="${2:-}"; shift 2 || die "--port needs a number" ;;
         --port=*)      PORT="${1#*=}"; shift ;;
         --server-only) WANT_CLIENT=0; shift ;;
@@ -124,20 +140,34 @@ if [ "$WANT_SERVER" = "0" ] && [ "$WANT_CLIENT" = "0" ]; then
     die "--server-only and --client-only ask for opposite halves; pick one"
 fi
 
-# A named host is somebody else's machine, so there is nothing here to start or
-# stop. Rather than quietly ignoring the flags that say otherwise, refuse them:
+# Three ways to name the server and only one of them has anything to start here.
+#
+# A named host is another machine, so there is nothing local to start or stop.
+# Rather than quietly ignoring the flags that say otherwise, refuse them:
 # --server-only with a remote host asks this script to start a server it has no
 # reach into, and would otherwise appear to succeed.
+#
+# The three flags that are *about* a server on this machine - start one, stop
+# one, connect to one already up - name it by saying so, so they select local
+# rather than colliding with a default that points away from here. That keeps
+# `--stop` meaning what it always meant after the default moved off this host.
 if [ -n "$HOST" ]; then
+    [ "$WANT_LOCAL" = "1" ] \
+        && die "--host and --local name different servers; pick one"
     [ "$WANT_CLIENT" = "0" ] \
         && die "--host names a server elsewhere; --server-only cannot start one there"
     [ "$DO_STOP" = "1" ] \
         && die "--host names a server elsewhere; --stop only reaches the local one"
     WANT_SERVER=0
     REMOTE=1
-else
+elif [ "$WANT_LOCAL" = "1" ] || [ "$DO_STOP" = "1" ] \
+     || [ "$WANT_CLIENT" = "0" ] || [ "$CLIENT_ONLY" = "1" ]; then
     HOST="$LOCAL_HOST"
     REMOTE=0
+else
+    HOST="$DEFAULT_HOST"
+    WANT_SERVER=0
+    REMOTE=1
 fi
 
 # macOS cannot run the server at all, so there is never a local one to start
@@ -371,7 +401,10 @@ launch_client() {
     # certificate (PEM_read_X509, in the frozen common.c), so a bundle holding
     # both CAs is not an option - the second one would be ignored.
     printf '%b\n' "    verifying against ${BOLD}${ca#$ROOT/}${RST}"
-    if [ "$REMOTE" = "1" ]; then
+    if [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ]; then
+        printf '%b\n' "    play again: ${BOLD}make play${RST}" \
+            "    on this machine instead: ${BOLD}bash scripts/play.sh --local${RST}"
+    elif [ "$REMOTE" = "1" ]; then
         printf '%b\n' "    play again: ${BOLD}make play HOST=$HOST${RST}"
     else
         printf '%b\n' \
@@ -448,7 +481,14 @@ fi
 # Only these two cases name a server that is supposed to be up already. A Mac
 # with no --host names nothing yet: the address is about to be typed into
 # SERVER ID, so there is no address here to probe and nothing to warn about.
-if [ "$REMOTE" = "1" ] && ! port_open; then
+if [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ] && ! port_open; then
+    warn "nothing answered the shared server $HOST:$PORT within 5s."
+    warn "It is not this machine, so nothing here can bring it up. Either:"
+    warn "    play on this machine     ${BOLD}bash scripts/play.sh --local${RST}"
+    warn "    name another server      ${BOLD}make play HOST=<address>${RST}"
+    warn "    or wait for it to return"
+    die "no server at $HOST:$PORT"
+elif [ "$REMOTE" = "1" ] && ! port_open; then
     warn "nothing answered $HOST:$PORT within 5s. On that machine, check that:"
     warn "    tetrisd is up            ./bin/tetrisctl status"
     warn "    it listens on all interfaces, not just loopback"
