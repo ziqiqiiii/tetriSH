@@ -579,6 +579,33 @@ const char	*waiting_room_slot_label(const t_app_room_view_model *room,
 }
 
 /**
+ * @brief The control legend, at whichever length the panel can print.
+ *
+ * Two keys were added to a line that already fitted exactly. The cell
+ * renderer's narrowest supported panel is MP_COMPAT_MIN_COLS wide and
+ * put_centered clips to two columns less than that, so the full legend went in
+ * at 68 characters and took `[C] CHAT [L] LEAVE` off the end of it - losing
+ * the key that gets a player *out* of the room in order to advertise the one
+ * that fills it.
+ *
+ * So the length is chosen rather than assumed. The short form abbreviates
+ * rather than dropping keys, because a legend that silently omits a control on
+ * a small terminal is the same bug written more politely.
+ *
+ * The pixel renderer needs none of this - it scales the glyphs to the box -
+ * and always asks for the full one.
+ *
+ * @param cols Columns the panel has, or 0 to ask for the full legend.
+ * @return A static string, never NULL.
+ */
+const char	*waiting_room_legend(int cols)
+{
+	if (cols <= 0 || cols - 2 >= (int)sizeof(WAITING_ROOM_LEGEND) - 1)
+		return (WAITING_ROOM_LEGEND);
+	return (WAITING_ROOM_LEGEND_SHORT);
+}
+
+/**
  * @brief Is this seat one of the room's bots?
  *
  * Asked of the name, because the name is all the server says about it: a bot

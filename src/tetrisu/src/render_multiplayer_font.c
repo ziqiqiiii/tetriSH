@@ -665,7 +665,7 @@ static void	draw_room_chrome(uint32_t *pixels, int width, int height,
 		ROOM_REF_CONTROLS_Y - 16, MULTIPLAYER_REFERENCE_WIDTH
 		- 2 * ROOM_REF_CONTENT_X, g_mp_lavender);
 	draw_text_ref(pixels, width, height, layout, font,
-		"[LEFT/RIGHT] FIGHTER   [R] READY   [S] START   [C] CHAT   [L] LEAVE",
+		waiting_room_legend(0),
 		ROOM_REF_CONTENT_X, ROOM_REF_CONTROLS_Y,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * ROOM_REF_CONTENT_X, 13, g_mp_cream,
 		true);

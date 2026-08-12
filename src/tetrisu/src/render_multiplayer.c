@@ -34,7 +34,7 @@
  * stacks the join field under the table rather than beside it, which is what
  * keeps that minimum inside a conventional 80-column terminal.
  */
-# define MP_COMPAT_MIN_COLS	58
+/* MP_COMPAT_MIN_COLS is in tetrisu.h: the legend has to fit inside it. */
 # define MP_COMPAT_MIN_ROWS	20
 # define MP_COL_ID		4
 # define MP_COL_MODE	18
@@ -566,9 +566,7 @@ static void	draw_waiting_room(struct ncplane *plane,
 		put_centered(plane, rows - 3, cols, line, false);
 	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
-	put_centered(plane, rows - 2, cols,
-		"[<>] FIGHTER [R] READY [S] START [B] BOT [K] KICK [C] CHAT [L] LEAVE",
-		false);
+	put_centered(plane, rows - 2, cols, waiting_room_legend(cols), false);
 }
 
 /**

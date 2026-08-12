@@ -3358,6 +3358,27 @@ bool			waiting_room_send_chat(t_app_room_view_model *room,
 					t_waiting_room_state *state);
 const char		*waiting_room_status_text(const t_app_room_view_model *room,
 					const t_waiting_room_state *state, char *out, size_t size);
+/*
+** The narrowest panel the cell renderer will draw into. It is here rather than
+** beside the renderer because it is also the legend's budget: put_centered
+** clips to two columns less than this, so a control line longer than
+** MP_COMPAT_MIN_COLS - 2 loses whichever keys are printed last. Stating the
+** two constants apart is how that happened once already.
+*/
+# define MP_COMPAT_MIN_COLS	58
+
+/*
+** The waiting room's control legend, in two lengths. See waiting_room_legend:
+** the short one abbreviates every key rather than dropping any, because a
+** legend that omits a control on a narrow terminal is a bug that looks like a
+** layout choice.
+*/
+# define WAITING_ROOM_LEGEND \
+	"[<>] FIGHTER [R] READY [S] START [B] BOT [K] KICK [C] CHAT [L] LEAVE"
+# define WAITING_ROOM_LEGEND_SHORT \
+	"[<>]FIGHT [R]EADY [S]TART [B]OT [K]ICK [C]HAT [L]EAVE"
+
+const char		*waiting_room_legend(int cols);
 bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
 					int index);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,

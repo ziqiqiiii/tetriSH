@@ -13,6 +13,7 @@ static void	test_slot_labels_and_badges(void);
 static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
 static void	test_bot_keys_and_seat_marks(void);
+static void	test_the_legend_fits_the_narrowest_panel(void);
 static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
@@ -31,6 +32,7 @@ int	main(void)
 	test_status_and_feedback_copy();
 	test_launch_action_matches_the_mode();
 	test_bot_keys_and_seat_marks();
+	test_the_legend_fits_the_narrowest_panel();
 	return (0);
 }
 
@@ -77,6 +79,43 @@ static void	test_bot_keys_and_seat_marks(void)
 	assert(!waiting_room_seat_is_bot(&room, 99));
 	assert(!waiting_room_seat_is_bot(NULL, 0));
 	printf("PASS test_bot_keys_and_seat_marks\n");
+}
+
+/*
+** Adding two keys to the legend made it 68 characters, on a line that fitted
+** the narrowest supported panel exactly. put_centered clips to two columns
+** less than the panel, so the overflow took `[C] CHAT [L] LEAVE` off the end -
+** advertising the key that fills a seat by dropping the one that gets a player
+** out of the room.
+**
+** Both forms are asserted to fit, and the short one is asserted to still name
+** every key: abbreviating is fine, and quietly omitting a control on a small
+** terminal is the same bug written more politely.
+*/
+static void	test_the_legend_fits_the_narrowest_panel(void)
+{
+	const char	*wide;
+	const char	*narrow;
+	const char	*key;
+	size_t		index;
+
+	wide = waiting_room_legend(0);
+	narrow = waiting_room_legend(MP_COMPAT_MIN_COLS);
+	assert(strlen(narrow) <= (size_t)MP_COMPAT_MIN_COLS - 2);
+	assert(strcmp(wide, WAITING_ROOM_LEGEND) == 0);
+	assert(strcmp(narrow, WAITING_ROOM_LEGEND_SHORT) == 0);
+	/* A panel with room for the whole thing gets the whole thing. */
+	assert(strcmp(waiting_room_legend((int)strlen(wide) + 2), wide) == 0);
+	assert(strcmp(waiting_room_legend((int)strlen(wide) + 1), narrow) == 0);
+	index = 0;
+	while (index < sizeof("<>RSBKCL") - 1)
+	{
+		key = "<>RSBKCL" + index;
+		assert(memchr(wide, *key, strlen(wide)) != NULL);
+		assert(memchr(narrow, *key, strlen(narrow)) != NULL);
+		index++;
+	}
+	printf("PASS test_the_legend_fits_the_narrowest_panel\n");
 }
 
 /**
