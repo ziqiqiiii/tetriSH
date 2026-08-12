@@ -40,6 +40,7 @@ void	config_defaults(t_config *cfg)
 	cfg->br_slots = TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS;
 	cfg->handshake_workers = TETRISD_DEFAULT_HANDSHAKE_WORKERS;
 	cfg->handshake_timeout_ms = TETRISD_DEFAULT_HANDSHAKE_TIMEOUT_MS;
+	cfg->bot_accounts = TETRISD_DEFAULT_BOT_ACCOUNTS;
 }
 
 /**
@@ -134,6 +135,9 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 		return (set_int(&cfg->handshake_workers, value, 1, TETRISD_HANDSHAKE_WORKERS_MAX));
 	if (strcmp(key, "HANDSHAKE_TIMEOUT_MS") == 0)
 		return (set_int(&cfg->handshake_timeout_ms, value, TETRISD_HANDSHAKE_TIMEOUT_MIN, TETRISD_HANDSHAKE_TIMEOUT_MAX));
+	/* 0 is a real setting: a server that hands out no bots at all. */
+	if (strcmp(key, "BOT_ACCOUNTS") == 0)
+		return (set_int(&cfg->bot_accounts, value, 0, TETRISD_BOT_ACCOUNTS_MAX));
 	return (-1);
 }
 
@@ -385,6 +389,7 @@ static int	apply_env(t_config *cfg)
 		"TETRISD_BR_SLOTS", 
 		"TETRISD_HANDSHAKE_WORKERS", 
 		"TETRISD_HANDSHAKE_TIMEOUT_MS", 
+		"TETRISD_BOT_ACCOUNTS", 
 		NULL
 	};
 	const char			*value;

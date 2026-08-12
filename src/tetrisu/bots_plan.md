@@ -200,9 +200,21 @@ and should not be bent: **a player holds at most one connection — a second
 `LOGIN` displaces the first.** Four fixed names means four bots for the whole
 server, and the fifth silently evicts the first from a match in progress.
 
-So: `TETRISD_BOT_ACCOUNTS` (default 32) accounts created at boot if absent. A
-bot logging in takes the first free one; disconnecting releases it. A room that
-wants a bot and finds the pool empty is told so and adds nobody.
+So: `TETRISD_BOT_ACCOUNTS` (default 32) accounts created at boot if absent, and
+a bot walks the pool until one takes it.
+
+**There is no claim table, and there was never a need for one.** The registry
+already knows every player that has a connection, so "is BOT_01 taken" is
+`registry_find_other` — and a claim then ends exactly when the connection does,
+including when it dies. Nothing to release, nothing to leak on a crash, and no
+state that can disagree with what is actually connected.
+
+What the login path needed instead was one inverted rule: **a reserved account
+is refused rather than displaced.** A person's second `LOGIN` displaces their
+first, which is right — they know they logged in twice and want the session in
+front of them. Two bots are two different players' rooms, and displacing there
+would take a bot out of a stranger's match in progress, leaving them a seat
+that emptied for no reason they could observe.
 
 Bot multi-login is explicitly **not** the answer. The one-connection rule is an
 invariant other things lean on, and bots are the worst possible place to put a
@@ -365,7 +377,11 @@ already assumed to have.
 
 - `TETRISD_BOT_ACCOUNTS` in `config.c`, documented in `.tetrishrc`.
 - Pool creation at boot: sign up any missing pool account, ignore `DB_EXISTS`.
-- Claim and release on the login and disconnect paths.
+  A failure is logged and not fatal — a server that cannot make bot accounts is
+  a server without bots, not one that should refuse to start and take
+  everybody's game with it.
+- One line on the login path: a reserved account that is already connected
+  answers `409` instead of displacing. No claim table (see D4).
 - Nothing else. No new route, no new method, no seat that is not a client.
 
 ---
@@ -464,8 +480,10 @@ point of D1.
 | ″ | ″ | Closing the parent's pipe end exits the child |
 | ″ | ″ | A child's stdout and stderr are the log, not the inherited terminal |
 | ″ | ″ | An unresolvable binary path refuses rather than forking |
-| `test_bot_pool.c` | `tetrisd` | A claimed account is not claimed twice; disconnect releases it |
-| ″ | ″ | An empty pool refuses rather than displacing a logged-in bot |
+| `test_bot_pool.c` | `tetrisd` | The pool exists at boot with nobody having made it |
+| ″ | ″ | A taken bot account is refused, and the first connection still works |
+| ″ | ″ | A person's second login still displaces their first |
+| ″ | ″ | A bot that finishes a game never appears on the leaderboard |
 | `test_leaderboard.c` | `libmacminidb` | A reserved account never appears in a page or a rank |
 | ″ | ″ | A reserved account that has *played a game* still appears in neither — the `skiplist_update` guard |
 | ″ | ″ | Recovery does not replay a reserved account onto the board |
@@ -482,8 +500,8 @@ The integration test is the one that would have caught every bug in this plan.
 |---|---|---|
 | 0 | ✅ `bot_brain.c` — lift, tier, unit-test | — |
 | 1 | ✅ `match_smoke.c` calls it instead of its own copy | 0 |
-| 2 | Reserved prefix + the three skip-list write guards | — |
-| 3 | Account pool: config, boot creation, claim/release | 2 |
+| 2 | ✅ Reserved prefix + the three skip-list write guards | — |
+| 3 | ✅ Account pool: config, boot creation, refuse-not-displace | 2 |
 | 4 | `bot_main.c` + its Makefile target — a bot that joins a named room from the command line | 0, 3 |
 | 5 | `bot_proc.c` — binary lookup, stdio redirect, spawn, deadman pipe, reap | 4 |
 | 6 | `B` / `K` in the waiting room, seat list marks | 5 |
@@ -511,6 +529,6 @@ like a spawn is misconfigured.
 - **Should `easy` be beatable by someone who has never played Tetris?** The
   25% figure is a guess. It wants one evening of play to settle, and it is one
   constant.
-- **Does the pool need to survive a restart?** As written the accounts persist
-  in the store and only the claim state is in memory, so a restart frees every
-  claim — which is correct, since the sessions died with it.
+- **Does the pool need to survive a restart?** The accounts persist in the
+  store, and there is no claim state to survive: the registry is the claim, so
+  a restart frees every one of them by having dropped the connections.

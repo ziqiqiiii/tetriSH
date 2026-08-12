@@ -106,6 +106,27 @@
 # define TETRISD_DEFAULT_INPUT_BURST			120
 # define TETRISD_DEFAULT_INPUT_RATE				60
 # define TETRISD_DEFAULT_HANDSHAKE_WORKERS		4
+/*
+** How many accounts the server keeps for the bots a player fills a room with.
+** They are created at boot if absent and named BOT_01 upward, and a player
+** cannot sign up as one - DB_RESERVED_PREFIX is refused by db_signup.
+**
+** The pool is sized rather than fixed at four because a player holds at most
+** one connection and so does a bot: four names would be four bots for the
+** whole server, and the fifth would displace the first out of a match in
+** progress. Thirty-two is eight full Battle Royale rooms' worth.
+*/
+# define TETRISD_DEFAULT_BOT_ACCOUNTS			32
+/*
+** The pool's shared credentials. Exactly DB_SALT_LEN characters of salt,
+** because the store keeps a salt as a fixed-width blob rather than a string.
+**
+** Not a secret, and not pretending to be one - see bot_pool_hash. The bot
+** binary computes the same hash from the same two constants, which is what
+** lets a bot log in without a route that hands out credentials.
+*/
+# define TETRISD_BOT_SECRET						"tetrish-bot-"
+# define TETRISD_BOT_SALT						"tetrishbotsalttetrishbotsalt0001"
 # define TETRISD_DEFAULT_HANDSHAKE_TIMEOUT_MS	5000
 # define TETRISD_RC_FILENAME					".tetrishrc"
 # define TETRISD_CONFIG_KEY_PREFIX				"TETRISD_"
@@ -118,6 +139,7 @@
 # define TETRISD_INPUT_LIMIT_MIN				1
 # define TETRISD_INPUT_LIMIT_MAX				10000
 # define TETRISD_HANDSHAKE_WORKERS_MAX			64
+# define TETRISD_BOT_ACCOUNTS_MAX				256
 # define TETRISD_HANDSHAKE_TIMEOUT_MIN			100
 # define TETRISD_HANDSHAKE_TIMEOUT_MAX			60000
 
@@ -386,6 +408,7 @@ typedef struct s_config
 	int		input_rate;
 	int		handshake_workers;
 	int		handshake_timeout_ms;
+	int		bot_accounts;
 }	t_config;
 
 /*
@@ -1242,6 +1265,11 @@ int				request_refuse(t_request_context *ctx, const char *reason);
 int				signup_handler(const t_htttp_message *msg, void *context);
 int				login_handler(const t_htttp_message *msg, void *context);
 int				password_hash(const char *password, const char *salt, char *out, size_t cap);
+
+/* BOT_POOL.C — the accounts a player's bots log in as */
+int				bot_pool_open(t_server *srv, int count);
+void			bot_pool_name(int index, char *out, size_t cap);
+int				bot_pool_hash(const char *name, char *out, size_t cap);
 int				salt_generate(char *out, size_t cap);
 
 /* HANDLERS_LOBBY.C */

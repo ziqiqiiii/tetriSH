@@ -91,6 +91,9 @@ int	login_handler(const t_htttp_message *msg, void *context)
 			username);
 		return (401);
 	}
+	if (db_username_is_reserved(player.username)
+		&& registry_find_other(&ctx->srv->reg, player.player_id, ctx->cli))
+		return (409);
 	displace_previous(ctx, player.player_id);
 	bind_identity(ctx, &player);
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "login %s -> player %llu",

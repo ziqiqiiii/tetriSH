@@ -89,6 +89,16 @@ export TETRISD_INPUT_RATE=60
 export TETRISD_HANDSHAKE_WORKERS=4
 export TETRISD_HANDSHAKE_TIMEOUT_MS=5000
 
+# How many accounts the server keeps for the bots a player fills a room with.
+# They are named BOT_01 upward, created at boot if absent, never ranked, and a
+# player cannot sign up as one - the BOT_ prefix is refused.
+#
+# Sized rather than fixed at four because a bot holds one connection like
+# anybody else: four names would be four bots for the whole server, and the
+# fifth would displace the first out of a match in progress. 32 is eight full
+# Battle Royale rooms' worth. Set it to 0 for a server that hands out no bots.
+export TETRISD_BOT_ACCOUNTS=32
+
 ################################################################################
 #                            tetrislogd settings                               #
 ################################################################################
