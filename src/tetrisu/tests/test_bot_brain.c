@@ -127,29 +127,39 @@ static void	test_easy_takes_the_single_it_is_offered(void)
  *   normal building all the way to the top. Without this the bot refuses a
  *   single at row 19 exactly as readily as at row 2, and tops out holding the
  *   row that would have saved it.
+ *
+ * Asked of the search rather than of bot_placement_score, because the answer
+ *   is no longer in a settled board: the evaluator's height sensitivity is the
+ *   landing-height term, which is a fact about a *placement*. Two stacks of
+ *   the same shape and different heights score identically once settled, and
+ *   correctly so.
  */
 static void	test_a_single_is_taken_when_the_stack_is_high(void)
 {
-	t_board	clearing;
-	t_board	holding;
+	t_board	board;
+	t_bot	bot;
 	int		top;
+	int		col;
 
 	top = BOARD_HEIGHT - (BOT_DANGER_HEIGHT + 3);
-	board_init(&clearing);
-	board_init(&holding);
-	rows_fill(&clearing, top, 3);
-	rows_fill(&holding, top, 3);
-	row_fill(&clearing, BOARD_HEIGHT - 1, -1);
-	assert(bot_placement_score(BOT_NORMAL, &clearing)
-		> bot_placement_score(BOT_NORMAL, &holding));
+	board_init(&board);
+	rows_fill(&board, top, 3);
+	board_set(&board, 3, BOARD_HEIGHT - 1, (t_cell){CELL_FILLED, 0});
+	board_set(&board, 3, BOARD_HEIGHT - 2, (t_cell){CELL_FILLED, 0});
+	bot_init(&bot, BOT_NORMAL, 7u);
+	bot_begin_piece(&bot);
+	assert(place(&bot, &board, PIECE_I, -1, &col) > 0);
 	printf("PASS test_a_single_is_taken_when_the_stack_is_high\n");
 }
 
 /**
  * @brief Normal prices four rows by the three they send, easy by the four.
  *
- * Both boards clear to nothing, so the surface terms cancel and what is left
- *   on each side is exactly the price of the clear. Easy pays per row
+ * Both boards clear to nothing, so what is left on each side above an empty
+ *   board's own score is exactly the price of the clear. An empty board does
+ *   not score zero under this evaluator - twenty empty rows are two row
+ *   transitions each - but that offset is on every candidate equally and so
+ *   never decides between two of them. Easy pays per row
  *   cleared; normal pays per row *sent*, and since a single sends nothing the
  *   ratio is not four to one but three to less than nothing.
  *
@@ -161,19 +171,25 @@ static void	test_a_single_is_taken_when_the_stack_is_high(void)
 static void	test_normal_prices_a_tetris_by_what_it_sends(void)
 {
 	t_board	board;
+	int		base;
 
 	board_init(&board);
-	rows_fill(&board, BOARD_HEIGHT - 4, -1);
-	assert(bot_placement_score(BOT_NORMAL, &board) == 3 * BOT_W_GARBAGE);
-	board_init(&board);
-	row_fill(&board, BOARD_HEIGHT - 1, -1);
-	assert(bot_placement_score(BOT_NORMAL, &board) == -BOT_W_WASTED_CLEAR);
+	base = bot_placement_score(BOT_NORMAL, &board);
 	board_init(&board);
 	rows_fill(&board, BOARD_HEIGHT - 4, -1);
-	assert(bot_placement_score(BOT_EASY, &board) == 4 * BOT_W_LINE);
+	assert(bot_placement_score(BOT_NORMAL, &board) - base
+		== 3 * BOT_W_GARBAGE);
 	board_init(&board);
 	row_fill(&board, BOARD_HEIGHT - 1, -1);
-	assert(bot_placement_score(BOT_EASY, &board) == BOT_W_LINE);
+	assert(bot_placement_score(BOT_NORMAL, &board) - base
+		== -BOT_W_WASTED_CLEAR);
+	/* easy is not playing the attack game, so both boards price the same */
+	board_init(&board);
+	rows_fill(&board, BOARD_HEIGHT - 4, -1);
+	assert(bot_placement_score(BOT_EASY, &board) == base);
+	board_init(&board);
+	row_fill(&board, BOARD_HEIGHT - 1, -1);
+	assert(bot_placement_score(BOT_EASY, &board) == base);
 	printf("PASS test_normal_prices_a_tetris_by_what_it_sends\n");
 }
 
@@ -357,17 +373,17 @@ static void	test_a_tier_is_a_tempo_as_well_as_a_price(void)
 	int		high;
 	int		round;
 
-	assert(bot_piece_pace_ms(NULL) == 0);
+	assert(bot_piece_pace_ms(NULL, 1) == 0);
 	bot_init(&bot, BOT_EASY, 20260813u);
 	low = 100000;
 	high = 0;
 	round = 0;
 	while (round < 500)
 	{
-		ms = bot_piece_pace_ms(&bot);
-		/* nobody plays slower than one piece every two seconds, or faster
-		** than four a second - the two ends of what a person can do */
-		assert(ms >= 250 && ms <= 2000);
+		ms = bot_piece_pace_ms(&bot, 1);
+		/* the two ends of what a person does: no slower than a piece every
+		** two and a half seconds, no faster than four a second */
+		assert(ms >= 250 && ms <= 2500);
 		low = (ms < low) * ms + (ms >= low) * low;
 		high = (ms > high) * ms + (ms <= high) * high;
 		round++;
@@ -375,9 +391,20 @@ static void	test_a_tier_is_a_tempo_as_well_as_a_price(void)
 	assert(low < high);
 	assert(high - low > BOT_PACE_EASY_MS / 4);
 	bot_init(&bot, BOT_NORMAL, 20260813u);
-	assert(bot_piece_pace_ms(&bot) < BOT_PACE_EASY_MS);
+	assert(bot_piece_pace_ms(&bot, 1) < BOT_PACE_EASY_MS);
 	bot_init(&bot, BOT_ULTRA, 20260813u);
-	assert(bot_piece_pace_ms(&bot) < BOT_PACE_NORMAL_MS);
+	assert(bot_piece_pace_ms(&bot, 1) < BOT_PACE_NORMAL_MS);
+	/* the level shortens the tempo, and the floor stops it running away */
+	bot_init(&bot, BOT_NORMAL, 20260813u);
+	low = bot_piece_pace_ms(&bot, 1);
+	bot_init(&bot, BOT_NORMAL, 20260813u);
+	high = bot_piece_pace_ms(&bot, 12);
+	assert(high < low);
+	bot_init(&bot, BOT_NORMAL, 20260813u);
+	assert(bot_piece_pace_ms(&bot, 60) >= BOT_PACE_NORMAL_MS
+		* BOT_PACE_FLOOR_PCT / 100 * (100 - BOT_PACE_JITTER_PCT) / 100);
+	bot_init(&bot, BOT_NORMAL, 20260813u);
+	assert(bot_piece_pace_ms(&bot, 0) == low);
 	printf("PASS test_a_tier_is_a_tempo_as_well_as_a_price\n");
 }
 

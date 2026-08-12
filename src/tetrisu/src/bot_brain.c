@@ -24,10 +24,20 @@
 
 static int		column_profile(const t_board *board, int heights[BOARD_WIDTH]);
 static int		tallest_column(const t_board *board);
-static int		clear_value(t_bot_level level, t_board *board);
-static int		surface_value(const t_board *board);
+static int		attack_value(t_bot_level level, int cleared,
+					const t_board *board);
+static int		surface_value(const t_board *board, t_bot_level level);
+static int		row_transitions(const t_board *board);
+static int		column_transitions(const t_board *board);
+static int		well_sums(const t_board *board, bool forgive);
+static int		well_column(const t_board *board, int col);
+static int		landing_height(const t_piece *piece);
+static int		eroded_cells(const t_board *board, const t_piece *piece);
+static int		placement_value(t_bot_level level, const t_board *board,
+					const t_piece *piece);
 static int		best_reply(t_bot_level level, const t_board *board, int type);
 static uint32_t	bot_random(t_bot *bot);
+static int		pace_for_level(int base, int level);
 
 /*
 ** One rotation scan in progress. It is a struct rather than eight arguments
@@ -113,14 +123,20 @@ void	bot_begin_piece(t_bot *bot)
  * a bot on a slow link plays the same tempo as one on a fast one - it simply
  * has less of the budget left to wait out.
  *
+ * The game's level shortens it, because a bot that kept level 1's tempo at
+ * level 15 would be the only thing on the board that had not sped up. The
+ * floor is what keeps the curve from turning back into the bug this file has
+ * already paid for once.
+ *
  * Jittered, because three bots sharing a period attack in one pulse. The
  * spread is drawn from the bot's own generator, so two bots in one process
  * still diverge and a seeded test still replays exactly.
  *
  * @param bot The bot about to place a piece.
+ * @param level The level its game is on; 0 or less is read as the first.
  * @return The budget in milliseconds, 0 for a bot that is not there.
  */
-int	bot_piece_pace_ms(t_bot *bot)
+int	bot_piece_pace_ms(t_bot *bot, int level)
 {
 	int	base;
 	int	spread;
@@ -133,8 +149,30 @@ int	bot_piece_pace_ms(t_bot *bot)
 		base = BOT_PACE_ULTRA_MS;
 	else
 		base = BOT_PACE_NORMAL_MS;
+	base = pace_for_level(base, level);
 	spread = base * BOT_PACE_JITTER_PCT / 100;
 	return (base - spread + (int)(bot_random(bot) % (uint32_t)(2 * spread + 1)));
+}
+
+/**
+ * @brief Shortens a tier's tempo by the level the game has reached.
+ *
+ * @param base The tier's tempo at level 1.
+ * @param level The level; anything under 1 is read as 1.
+ * @return The tempo for that level, never under BOT_PACE_FLOOR_PCT of base.
+ */
+static int	pace_for_level(int base, int level)
+{
+	int	floor;
+	int	scaled;
+
+	if (level < 1)
+		level = 1;
+	floor = base * BOT_PACE_FLOOR_PCT / 100;
+	scaled = base - base * BOT_PACE_LEVEL_PCT * (level - 1) / 100;
+	if (scaled < floor)
+		return (floor);
+	return (scaled);
 }
 
 /**
@@ -225,34 +263,28 @@ static int	column_profile(const t_board *board, int heights[BOARD_WIDTH])
 }
 
 /**
- * @brief Clear whatever this board has completed, and price the clear.
+ * @brief What a clear is worth beyond the rows it erodes.
  *
- * The rows go first because the board the next piece falls on is the board
- * after the clear, not the one that triggered it - so every measurement taken
- * afterwards is of the right board, and a clear is already rewarded by the
- * height it removes before any bonus is added.
+ * ERODED already prices a clear by how much of the placed piece it took away,
+ * which is what makes a Tetris beat four singles without a rule saying so.
+ * This is the attack on top of it: a row that lands on somebody is worth
+ * having, and a row that lands on nobody is worth waiting past.
  *
- * EASY prices a clear by how many rows it was, which is why it takes every
- * single it can reach and sends nothing all game. The other tiers price it by
- * what it *sends*, and pay BOT_W_WASTED_CLEAR to walk away from a single -
- * but only with room to spare, because refusing a single at row 19 is a way of
- * topping out holding the row that would have saved you.
+ * Easy does not play this game at all - it takes whatever it can get, which is
+ * most of what makes it easy.
  *
- * @param level The difficulty deciding what a clear is worth.
- * @param board Board with the candidate stamped in; cleared in place.
- * @return The value of the clear alone, surface not included.
+ * @param level The tier asking.
+ * @param cleared How many rows the placement completed.
+ * @param board The board after the clear, for the danger-height gate.
+ * @return The attack's value, positive or negative.
  */
-static int	clear_value(t_bot_level level, t_board *board)
+static int	attack_value(t_bot_level level, int cleared, const t_board *board)
 {
-	int	lines;
 	int	sent;
 
-	lines = board_clear_lines(board);
-	if (lines <= 0)
+	if (cleared <= 0 || level == BOT_EASY)
 		return (0);
-	if (level == BOT_EASY)
-		return (lines * BOT_W_LINE);
-	sent = garbage_lines_from_clear(lines);
+	sent = garbage_lines_from_clear(cleared);
 	if (sent > 0)
 		return (sent * BOT_W_GARBAGE);
 	if (tallest_column(board) < BOT_DANGER_HEIGHT)
@@ -285,35 +317,279 @@ static int	tallest_column(const t_board *board)
 }
 
 /**
- * @brief Price a settled board on the three features that decide a stack.
+ * @brief Price a settled board on the four features that need no piece.
  *
- * Total height, buried holes and an uneven surface, each worth avoiding. The
- * board is not cleared here: clear_value has already done that.
+ * Row and column transitions, buried holes, and wells. There is deliberately
+ * no bumpiness term: the four-feature scorer this replaced had one, and two
+ * units of it were worth more than the hole that covering a notch buried, so
+ * the bot filled its own board with them. A column transition *is* the
+ * filled-over-empty boundary a hole makes, and it is weighted twice anything
+ * else here.
  *
  * @param board The board to measure.
  * @return Its cost, as a number that is better when larger.
  */
-static int	surface_value(const t_board *board)
+static int	surface_value(const t_board *board, t_bot_level level)
 {
 	int	heights[BOARD_WIDTH];
 	int	holes;
-	int	aggregate;
-	int	bumps;
-	int	col;
 
 	holes = column_profile(board, heights);
-	aggregate = 0;
-	bumps = 0;
+	return (-holes * BOT_W_HOLE
+		- row_transitions(board) * BOT_W_ROW_TRANS
+		- column_transitions(board) * BOT_W_COL_TRANS
+		- well_sums(board, level != BOT_EASY) * BOT_W_WELL);
+}
+
+/**
+ * @brief Counts filled/empty changes scanning across each row.
+ *
+ * Both walls count as filled, so a row with a single cell in the middle of it
+ * scores two transitions and a full row scores none. That is the feature that
+ * prefers rows which are nearly done to rows which are half full.
+ *
+ * @param board The board to measure.
+ * @return The transition count.
+ */
+static int	row_transitions(const t_board *board)
+{
+	int	count;
+	int	row;
+	int	col;
+	int	previous;
+	int	here;
+
+	count = 0;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		previous = 1;
+		col = 0;
+		while (col <= BOARD_WIDTH)
+		{
+			here = 1;
+			if (col < BOARD_WIDTH)
+				here = board_get(board, col, row).type != CELL_EMPTY;
+			count += (here != previous);
+			previous = here;
+			col++;
+		}
+		row++;
+	}
+	return (count);
+}
+
+/**
+ * @brief Counts filled/empty changes scanning down each column.
+ *
+ * The floor counts as filled and everything above the stack as empty, so a
+ * clean column scores one and a column with a hole in it scores three. This is
+ * the largest weight in the set and it is the one that makes burying a hole
+ * cost what it should.
+ *
+ * @param board The board to measure.
+ * @return The transition count.
+ */
+static int	column_transitions(const t_board *board)
+{
+	int	count;
+	int	row;
+	int	col;
+	int	previous;
+	int	here;
+
+	count = 0;
 	col = 0;
 	while (col < BOARD_WIDTH)
 	{
-		aggregate += heights[col];
-		if (col + 1 < BOARD_WIDTH)
-			bumps += abs(heights[col] - heights[col + 1]);
+		previous = 0;
+		row = 0;
+		while (row <= BOARD_HEIGHT)
+		{
+			here = 1;
+			if (row < BOARD_HEIGHT)
+				here = board_get(board, col, row).type != CELL_EMPTY;
+			count += (here != previous);
+			previous = here;
+			row++;
+		}
 		col++;
 	}
-	return (-aggregate * BOT_W_HEIGHT - holes * BOT_W_HOLE
-		- bumps * BOT_W_BUMP);
+	return (count);
+}
+
+/**
+ * @brief Sums the depth of every well, triangularly, forgiving one of them.
+ *
+ * A well is a run of empty cells with filled ones - or a wall - on both sides.
+ * A well two deep is worth 1 + 2 rather than 2, because the second row of it
+ * costs more than the first: only an I reaches the bottom of it.
+ *
+ * `forgive` is the whole of a bot's ability to attack, and without it the two
+ * attacking tiers cannot. Dellacherie's set is a *survival* evaluator: it
+ * prices every well as damage, so a bot under it keeps a flat board, takes
+ * whatever single is in front of it, and sends nothing all game. Measured,
+ * that was 1197 lines and 270 rows of garbage over 3000 pieces with two
+ * Tetrises in it. A Tetris needs a well four deep held open on purpose, so one
+ * well - the deepest, which is the one it is keeping - is charged nothing.
+ *
+ * Only one, and only the deepest. Forgiving all of them is a bot that never
+ * fills anything in.
+ *
+ * @param board The board to measure.
+ * @param forgive Whether the deepest well is free.
+ * @return The summed cost.
+ */
+static int	well_sums(const t_board *board, bool forgive)
+{
+	int	total;
+	int	deepest;
+	int	column;
+	int	col;
+
+	total = 0;
+	deepest = 0;
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		column = well_column(board, col);
+		total += column;
+		if (column > deepest)
+			deepest = column;
+		col++;
+	}
+	if (forgive)
+		return (total - deepest);
+	return (total);
+}
+
+/**
+ * @brief One column's triangular well cost.
+ *
+ * @param board The board to measure.
+ * @param col The column.
+ * @return Its cost.
+ */
+static int	well_column(const t_board *board, int col)
+{
+	int	total;
+	int	row;
+	int	depth;
+
+	total = 0;
+	depth = 0;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		if (board_get(board, col, row).type == CELL_EMPTY
+			&& board_get(board, col - 1, row).type != CELL_EMPTY
+			&& board_get(board, col + 1, row).type != CELL_EMPTY)
+			total += ++depth;
+		else
+			depth = 0;
+		row++;
+	}
+	return (total);
+}
+
+/**
+ * @brief How high the piece came to rest, measured from the floor.
+ *
+ * The middle of the piece rather than its bottom, which is Dellacherie's own
+ * definition and the reason a flat placement beats a standing one at the same
+ * base: standing puts half the piece two rows higher.
+ *
+ * @param piece The placed piece.
+ * @return Its height in rows, 0 when the piece has no cells.
+ */
+static int	landing_height(const t_piece *piece)
+{
+	int	cols[4];
+	int	rows[4];
+	int	top;
+	int	bottom;
+	int	index;
+
+	if (!piece_cells(piece, cols, rows))
+		return (0);
+	top = rows[0];
+	bottom = rows[0];
+	index = 1;
+	while (index < 4)
+	{
+		if (rows[index] < top)
+			top = rows[index];
+		if (rows[index] > bottom)
+			bottom = rows[index];
+		index++;
+	}
+	return (BOARD_HEIGHT - (top + bottom) / 2);
+}
+
+/**
+ * @brief How many of this piece's own cells sit in rows that are now full.
+ *
+ * Measured on the stamped board *before* the clear, because afterwards the
+ * rows and the cells in them are both gone. Multiplied by the number of rows
+ * cleared, it is the ERODED feature: a Tetris erodes four times what the same
+ * piece erodes completing a single, so nothing has to say that a Tetris is
+ * better.
+ *
+ * @param board The board with the piece already stamped, before clearing.
+ * @param piece The piece that was stamped.
+ * @return The count, 0 to 4.
+ */
+static int	eroded_cells(const t_board *board, const t_piece *piece)
+{
+	int	cols[4];
+	int	rows[4];
+	int	count;
+	int	index;
+	int	col;
+
+	if (!piece_cells(piece, cols, rows))
+		return (0);
+	count = 0;
+	index = 0;
+	while (index < 4)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH
+			&& board_get(board, col, rows[index]).type != CELL_EMPTY)
+			col++;
+		count += (col == BOARD_WIDTH);
+		index++;
+	}
+	return (count);
+}
+
+/**
+ * @brief Prices one placement: stamp it, clear what it completes, measure.
+ *
+ * The two piece-dependent features have to be taken here and in this order -
+ * the landing height from the piece, the eroded cells from the board while the
+ * full rows are still on it - which is why this exists rather than a scorer
+ * that takes a settled board alone.
+ *
+ * @param level The tier asking.
+ * @param board The board before the piece lands.
+ * @param piece The piece, already dropped to where it rests.
+ * @return The placement's score, better when larger.
+ */
+static int	placement_value(t_bot_level level, const t_board *board,
+			const t_piece *piece)
+{
+	t_board	work;
+	int		eroded;
+	int		cleared;
+
+	board_copy(&work, board);
+	piece_stamp(&work, piece);
+	eroded = eroded_cells(&work, piece);
+	cleared = board_clear_lines(&work);
+	return (surface_value(&work, level) - landing_height(piece) * BOT_W_LANDING
+		+ cleared * eroded * BOT_W_ERODED
+		+ attack_value(level, cleared, &work));
 }
 
 /**
@@ -325,9 +601,12 @@ static int	surface_value(const t_board *board)
  */
 int	bot_placement_score(t_bot_level level, t_board *board)
 {
+	int	cleared;
+
 	if (board == NULL)
 		return (0);
-	return (clear_value(level, board) + surface_value(board));
+	cleared = board_clear_lines(board);
+	return (surface_value(board, level) + attack_value(level, cleared, board));
 }
 
 /**
@@ -350,11 +629,12 @@ static int	scan_score(const t_bot_scan *scan, const t_piece *piece)
 	t_board	work;
 	int		score;
 
+	score = placement_value(scan->level, scan->board, piece);
+	if (scan->next < 0)
+		return (score);
 	board_copy(&work, scan->board);
 	piece_stamp(&work, piece);
-	score = clear_value(scan->level, &work);
-	if (scan->next < 0)
-		return (score + surface_value(&work));
+	board_clear_lines(&work);
 	return (score + best_reply(scan->level, &work, scan->next));
 }
 
@@ -550,7 +830,7 @@ static int	best_reply(t_bot_level level, const t_board *board, int type)
 		rotation++;
 	}
 	if (!scan.found)
-		return (surface_value(board));
+		return (surface_value(board, level));
 	return (scan.best);
 }
 

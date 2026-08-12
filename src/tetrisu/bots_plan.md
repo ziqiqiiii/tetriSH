@@ -327,6 +327,53 @@ weights, off the same number of cleared lines — it is not clearing more, it is
 clearing in fours and threes instead of ones. That is the tier doing its job,
 and it is the number to watch if the weights are ever retuned.
 
+**The evaluator was burying a hole in every notch it could reach.** The four
+features - lines, aggregate height, holes, bumpiness - have one arithmetic
+property nobody had done the sum on:
+
+| covering a one-cell notch | |
+|---|---|
+| hole buried | −357 |
+| two units of bumpiness removed | **+368** |
+| **net** | **+11 - burying is rewarded** |
+
+`BOT_W_BUMP * 2 > BOT_W_HOLE`, so the scorer paid itself to fill in every
+notch. The boards it left were swiss cheese, one gap per row in a different
+column each time, and it topped out in **49 to 99 pieces**. Not a tuning
+problem: no value of those four weights fixes it while a flat surface is worth
+more than an unbroken one.
+
+Replaced with **Dellacherie's six**: landing height, eroded piece cells, row
+transitions, column transitions, holes, well sums. No bumpiness term at all -
+surface roughness is carried by the transition counts, and column transitions
+is exactly the filled-over-empty boundary a buried hole creates, weighted twice
+anything else in the set.
+
+Two of them need the piece rather than the settled board, which is why
+`placement_value` exists and `bot_placement_score` can no longer answer
+everything a test wants to ask: landing height is where the piece came to rest,
+and eroded cells is how many of its own cells the clear it completed took with
+it. ERODED is what makes a Tetris worth four singles without a rule saying so.
+
+**One well is free, and that is the whole of the attack.** Dellacherie is a
+*survival* evaluator: it prices every well as damage, so a bot under it keeps a
+flat board, takes whatever single is in front of it and sends nothing all game -
+1197 lines and 270 rows of garbage over 3000 pieces, with two Tetrises in it.
+A Tetris needs a well four deep held open on purpose. So the deepest well, and
+only the deepest, is charged nothing for the two attacking tiers.
+
+Measured over 3000 pieces, three seeds:
+
+| | pieces survived | lines | garbage sent | Tetrises |
+|---|---|---|---|---|
+| `normal`, four features | 54–99 | 5–23 | 0–9 | 0 |
+| `normal`, Dellacherie | 3000 | 1196–1198 | 269–276 | 0–2 |
+| `normal`, + one free well | **3000** | 1196–1199 | **350–382** | **19–26** |
+| `easy` | 60–107 | 9–27 | 0–5 | 0 |
+
+Forty times the garbage of what shipped, and `easy` still loses - which is what
+`easy` is for.
+
 **A tier is a tempo as well as a price, and the tempo was the whole bug.**
 Nothing paced a bot at all. It planned, moved and hard dropped as fast as the
 socket and the input rate limit allowed, which measured at **6–13 pieces a

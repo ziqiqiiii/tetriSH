@@ -267,7 +267,8 @@ static int	run_match(t_bot_run *run)
 		if (playable(&run->net))
 		{
 			idle = 0;
-			deadline = monotonic_ms() + bot_piece_pace_ms(&run->brain);
+			deadline = monotonic_ms() + bot_piece_pace_ms(&run->brain,
+					run->net.state_snapshot.level);
 			if (place_piece(run) < 0)
 				return (-1);
 			if (pace_until(run, deadline) < 0)

@@ -22,41 +22,54 @@
 */
 
 /*
-** The weights. The first four are the well-known tuned set for this feature
-** set, scaled to integers: lines are worth having, and total height, buried
-** holes and an uneven surface are each worth avoiding.
+** The evaluator: Dellacherie's six features, scaled to integers.
 **
-** BOT_W_BUMP is the one that cannot be dropped. Without it a scorer that
-** counts only holes and height happily builds a single column to the ceiling
-** rather than accept one hole, which is how the first version of this bot
-** topped out with two lines to its name.
+** These replace a four-feature set - lines, aggregate height, holes,
+** bumpiness - that had one arithmetic property nobody had done the sum on and
+** that cost the bot every game it played:
+**
+**     covering a one-cell notch buried a hole (-357) and removed two units of
+**     bumpiness (+368), for a net gain of 11.
+**
+** So the scorer paid itself to bury a hole in every notch it could reach. The
+** boards it left were swiss cheese - one gap per row, in a different column
+** each time - and it topped out in 49 to 99 pieces. Not a tuning problem: no
+** value of those four weights fixes it while a flat surface is worth more than
+** an unbroken one.
+**
+** Dellacherie's set has no bumpiness term at all. Surface roughness is carried
+** by the two transition counts instead, and COL_TRANS - the largest weight
+** here by a factor of two - is exactly the filled-over-empty boundary that a
+** buried hole creates. Covering a notch now costs 9348 + 7899 and saves
+** nothing, which is the correct answer.
+**
+** LANDING and ERODED are the two that need the piece rather than the settled
+** board: how high it came to rest, and how many of its own cells the clear it
+** completed took away with it. ERODED is what makes a Tetris worth four times
+** a single without any rule saying so.
 */
-# define BOT_W_LINE				760
-# define BOT_W_HEIGHT			510
-# define BOT_W_HOLE				357
-# define BOT_W_BUMP				184
+# define BOT_W_LANDING			4500
+# define BOT_W_ERODED			3418
+# define BOT_W_ROW_TRANS		3217
+# define BOT_W_COL_TRANS		9348
+# define BOT_W_HOLE				7899
+# define BOT_W_WELL				3386
 
 /*
-** What a sent row is worth to a bot that is playing to attack rather than to
-** survive. A Tetris is three rows and so scores 3000 against a double's 1000,
-** which is what makes the difference between the two visible at all: the
-** surface terms already price a clear generously, because placement_score
-** measures the board *after* the clear and four vanished rows take forty
-** cells of height with them.
-*/
-# define BOT_W_GARBAGE			1000
-
-/*
-** The cost of taking a clear that sends nothing - which is exactly a single,
-** since garbage_lines_from_clear is {0, 0, 1, 2, 3}.
+** What a sent row is worth on top of the evaluator, and what a clear that
+** sends nothing costs.
 **
-** It has to be this large. Clearing one row drops every column by one, worth
-** up to BOARD_WIDTH * BOT_W_HEIGHT = 5100 to the surface terms, and it is
-** that windfall rather than BOT_W_LINE that makes the old scorer take every
-** single the instant one is available. A penalty smaller than the windfall
-** changes nothing at all.
+** garbage_lines_from_clear is {0, 0, 1, 2, 3}, so a single sends nothing at
+** all and a Tetris sends three. ERODED already makes a Tetris worth four
+** singles by itself; this is the extra nudge that makes it worth *waiting*
+** for one, and it is deliberately far smaller than the old -6000 was against
+** the old scale. That penalty is what the player saw as a bot which "avoids
+** finishing a line way too much": it outweighed every board consideration
+** there was, so the bot stacked to the danger height in silence rather than
+** take a row.
 */
-# define BOT_W_WASTED_CLEAR		6000
+# define BOT_W_GARBAGE			14000
+# define BOT_W_WASTED_CLEAR		2500
 
 /*
 ** Above this height the wasted-clear penalty stops applying and the bot takes
@@ -122,10 +135,24 @@
 ** answer; spread out, the same rows arrive as a stream a player can dig
 ** through.
 */
-# define BOT_PACE_EASY_MS		1300
-# define BOT_PACE_NORMAL_MS		700
-# define BOT_PACE_ULTRA_MS		400
+# define BOT_PACE_EASY_MS		1700
+# define BOT_PACE_NORMAL_MS		1300
+# define BOT_PACE_ULTRA_MS		950
 # define BOT_PACE_JITTER_PCT	30
+
+/*
+** How the tempo answers the level, as a percentage shaved off the base per
+** level above the first and a floor it never goes under.
+**
+** A bot that played level 1's tempo at level 15 would be the only thing on
+** the board that had not sped up: gravity is five times what it was, the
+** player is placing pieces to keep up with it, and the opponent would be
+** visibly idling. The floor is what stops the curve turning back into the bug
+** this file already paid for - at 45% of base even easy stays inside what a
+** person can do.
+*/
+# define BOT_PACE_LEVEL_PCT		4
+# define BOT_PACE_FLOOR_PCT		45
 
 /*
 ** How many idle poll rounds pass before a bot asks the room whether a select
@@ -236,7 +263,7 @@ int				bot_farm_reap_exited(t_bot_farm *farm);
 /* BOT_BRAIN.C */
 void			bot_init(t_bot *bot, t_bot_level level, uint32_t seed);
 void			bot_begin_piece(t_bot *bot);
-int				bot_piece_pace_ms(t_bot *bot);
+int				bot_piece_pace_ms(t_bot *bot, int level);
 bool			bot_plan(t_bot *bot, const t_body_state *snap, bool may_rotate,
 					int *rotation, int *col);
 bool			bot_level_parse(const char *name, t_bot_level *out);
