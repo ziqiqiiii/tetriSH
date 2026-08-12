@@ -178,6 +178,9 @@ Non-obvious rules that have each already cost a bug.
   `makefile-style` discloses dependency-script rules
 - **A design defect's history** → `docs/bugs/*.md`, one post-mortem each: what
   broke, the fix, the lesson
+- **Why a hardening or migration was done the way it was** →
+  `docs/superpowers/{specs,plans}/`, completed work kept as a record. Each
+  carries a status banner; the component README, not the plan, is current
 - **Gameplay, ability text, or the economy** → `docs/use_cases.md`,
   `docs/themes.md` (source of truth for ability text),
   `docs/game-economics.md`
