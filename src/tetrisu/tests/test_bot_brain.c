@@ -15,6 +15,7 @@ static void	test_a_plan_with_no_rotation_keeps_the_one_it_has(void);
 static void	test_the_piece_known_to_be_next_changes_the_answer(void);
 static void	test_a_seed_replays_exactly(void);
 static void	test_a_full_board_plans_nothing(void);
+static void	test_a_tier_is_a_tempo_as_well_as_a_price(void);
 
 static void	snapshot_init(t_body_state *snap, int type);
 static void	snapshot_board(t_body_state *snap, const t_board *board);
@@ -46,6 +47,7 @@ int	main(void)
 	test_the_piece_known_to_be_next_changes_the_answer();
 	test_a_seed_replays_exactly();
 	test_a_full_board_plans_nothing();
+	test_a_tier_is_a_tempo_as_well_as_a_price();
 	printf("\nAll bot brain tests passed.\n");
 	return (0);
 }
@@ -330,6 +332,53 @@ static void	test_a_full_board_plans_nothing(void)
 	assert(!bot_level_parse("insane", &bot.level));
 	assert(strcmp(bot_level_word(BOT_EASY), "easy") == 0);
 	printf("PASS test_a_full_board_plans_nothing\n");
+}
+
+/**
+ * @brief Every tier plays at a human tempo, and no two bots in lockstep.
+ *
+ * The regression is the whole of why this exists. Nothing paced a bot: it
+ * planned, moved and hard dropped as fast as the socket and the input rate
+ * limit allowed, which measured at six to thirteen pieces a second against a
+ * person's one or two. Three of them buried a Battle Royale player who did
+ * nothing under seventeen rows in twenty-two seconds.
+ *
+ * So what is asserted is a bound in pieces per second rather than the constant
+ * itself: a tier is allowed to be retuned, and is not allowed to leave the
+ * range a person plays in. The jitter is asserted as a spread actually
+ * observed, because a generator that returned the base every time would pass
+ * every bound above and still put three bots' garbage into one pulse.
+ */
+static void	test_a_tier_is_a_tempo_as_well_as_a_price(void)
+{
+	t_bot	bot;
+	int		ms;
+	int		low;
+	int		high;
+	int		round;
+
+	assert(bot_piece_pace_ms(NULL) == 0);
+	bot_init(&bot, BOT_EASY, 20260813u);
+	low = 100000;
+	high = 0;
+	round = 0;
+	while (round < 500)
+	{
+		ms = bot_piece_pace_ms(&bot);
+		/* nobody plays slower than one piece every two seconds, or faster
+		** than four a second - the two ends of what a person can do */
+		assert(ms >= 250 && ms <= 2000);
+		low = (ms < low) * ms + (ms >= low) * low;
+		high = (ms > high) * ms + (ms <= high) * high;
+		round++;
+	}
+	assert(low < high);
+	assert(high - low > BOT_PACE_EASY_MS / 4);
+	bot_init(&bot, BOT_NORMAL, 20260813u);
+	assert(bot_piece_pace_ms(&bot) < BOT_PACE_EASY_MS);
+	bot_init(&bot, BOT_ULTRA, 20260813u);
+	assert(bot_piece_pace_ms(&bot) < BOT_PACE_NORMAL_MS);
+	printf("PASS test_a_tier_is_a_tempo_as_well_as_a_price\n");
 }
 
 /**

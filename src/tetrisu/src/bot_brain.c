@@ -100,6 +100,44 @@ void	bot_begin_piece(t_bot *bot)
 }
 
 /**
+ * @brief How long this bot should spend on the piece it is about to place.
+ *
+ * The tempo, and the whole of a bot's answer to "how fast may I play". A bot
+ * has no hands and no eyes, so nothing about placing a piece takes it any time
+ * at all - left alone it plays at the speed of the socket, which measured at
+ * six to thirteen pieces a second against a person's one or two. It is here
+ * rather than in bot_main.c because it is a decision about difficulty, and
+ * difficulty is what this file holds.
+ *
+ * The answer is a budget for the whole piece and not a pause added to it, so
+ * a bot on a slow link plays the same tempo as one on a fast one - it simply
+ * has less of the budget left to wait out.
+ *
+ * Jittered, because three bots sharing a period attack in one pulse. The
+ * spread is drawn from the bot's own generator, so two bots in one process
+ * still diverge and a seeded test still replays exactly.
+ *
+ * @param bot The bot about to place a piece.
+ * @return The budget in milliseconds, 0 for a bot that is not there.
+ */
+int	bot_piece_pace_ms(t_bot *bot)
+{
+	int	base;
+	int	spread;
+
+	if (bot == NULL)
+		return (0);
+	if (bot->level == BOT_EASY)
+		base = BOT_PACE_EASY_MS;
+	else if (bot->level == BOT_ULTRA)
+		base = BOT_PACE_ULTRA_MS;
+	else
+		base = BOT_PACE_NORMAL_MS;
+	spread = base * BOT_PACE_JITTER_PCT / 100;
+	return (base - spread + (int)(bot_random(bot) % (uint32_t)(2 * spread + 1)));
+}
+
+/**
  * @brief Advance the bot's generator and return the value it produced.
  *
  * xorshift32: cheap, self-contained, and reproducible from a seed, which is

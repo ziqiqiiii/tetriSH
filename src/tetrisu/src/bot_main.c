@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /*
@@ -59,6 +60,8 @@ static int	place_piece(t_bot_run *run);
 static int	act(t_bot_run *run, t_solo_action action);
 static int	settle_after(t_bot_run *run, uint64_t seq, int tries);
 static bool	playable(const t_net_client *net);
+static long	monotonic_ms(void);
+static int	pace_until(t_bot_run *run, long deadline);
 
 /**
  * @brief Entry point - claim an account, join the named room, and play it.
@@ -241,12 +244,20 @@ static int	declare_fighter(t_bot_run *run, const char *path)
  * costs nothing. It does not stop at a result: a room can rematch, and a bot
  * that exited at game over would leave the seat it was added to fill.
  *
+ * A piece gets a budget rather than the whole of the socket's speed, and the
+ * budget is taken here rather than inside place_piece because it has to start
+ * when the bot *notices* the piece: a bot that waited its tempo on top of the
+ * time it spent placing would play a different tempo on every link. What is
+ * left of the budget is spent pumping, so a paced bot is still reading its
+ * board and still watching for a parent that has gone.
+ *
  * @param run The bot.
  * @return 0 when it stopped on purpose, -1 when the session failed.
  */
 static int	run_match(t_bot_run *run)
 {
-	int	idle;
+	long	deadline;
+	int		idle;
 
 	idle = 0;
 	while (!orphaned(run))
@@ -256,7 +267,10 @@ static int	run_match(t_bot_run *run)
 		if (playable(&run->net))
 		{
 			idle = 0;
+			deadline = monotonic_ms() + bot_piece_pace_ms(&run->brain);
 			if (place_piece(run) < 0)
+				return (-1);
+			if (pace_until(run, deadline) < 0)
 				return (-1);
 			continue ;
 		}
@@ -484,4 +498,45 @@ static int	settle_after(t_bot_run *run, uint64_t seq, int tries)
 			return (0);
 	}
 	return (-1);
+}
+
+/**
+ * @brief Monotonic milliseconds, for measuring a piece's budget.
+ *
+ * Monotonic and not wall-clock: a tempo measured against a clock somebody can
+ * set backwards is a bot that stops for an hour.
+ *
+ * @return Milliseconds since an arbitrary fixed point.
+ */
+static long	monotonic_ms(void)
+{
+	struct timespec	now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return (0);
+	return ((long)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+}
+
+/**
+ * @brief Spend what is left of a piece's budget reading the socket.
+ *
+ * Pumping rather than sleeping, for two reasons that are both about not going
+ * deaf for most of a second: the STATE frames that arrive during the wait are
+ * the board the *next* piece is planned from, and the deadman pipe is how a
+ * bot learns its player has closed the game.
+ *
+ * @param run The bot.
+ * @param deadline The monotonic millisecond to wait until.
+ * @return 0 once the budget is spent, -1 on a lost parent or session.
+ */
+static int	pace_until(t_bot_run *run, long deadline)
+{
+	while (monotonic_ms() < deadline)
+	{
+		if (orphaned(run))
+			return (-1);
+		if (pump_once(run) < 0)
+			return (-1);
+	}
+	return (0);
 }

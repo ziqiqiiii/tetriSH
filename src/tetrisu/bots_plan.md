@@ -308,11 +308,11 @@ refusing a `fork` or a `pipe` and they cannot.
 Three tiers, and the split is decided by the two findings above rather than by
 taste.
 
-| Tier | Scorer | Search | Sends |
-|---|---|---|---|
-| `easy` | today's weights | 1 ply, ~25% of pieces placed at random instead | nothing — it clears singles and stacks badly enough to top out |
-| `normal` | garbage-weighted | 1 ply + `next[0]` | Tetrises, because singles now score zero |
-| `ultra` | garbage-weighted | 2 ply + hold as a branch + live `TARGET` | the same per clear, but far more often and aimed |
+| Tier | Scorer | Search | Tempo | Sends |
+|---|---|---|---|---|
+| `easy` | today's weights | 1 ply, ~25% of pieces placed at random instead | ~0.8 pps | nothing — it clears singles and stacks badly enough to top out |
+| `normal` | garbage-weighted | 1 ply + `next[0]` | ~1.4 pps | Tetrises, because singles now score zero |
+| `ultra` | garbage-weighted | 2 ply + hold as a branch + live `TARGET` | ~2.5 pps | the same per clear, but far more often and aimed |
 
 Measured over 3000 pieces on a clean board, three seeds:
 
@@ -326,6 +326,27 @@ Normal sends about **four times** what the same search sends under today's
 weights, off the same number of cleared lines — it is not clearing more, it is
 clearing in fours and threes instead of ones. That is the tier doing its job,
 and it is the number to watch if the weights are ever retuned.
+
+**A tier is a tempo as well as a price, and the tempo was the whole bug.**
+Nothing paced a bot at all. It planned, moved and hard dropped as fast as the
+socket and the input rate limit allowed, which measured at **6–13 pieces a
+second** each against a person's 1–2 — and there were three of them in the
+room. A Battle Royale player who did nothing at all was buried under **17 rows
+in 22 seconds** and topped out the instant their own piece gravity-locked and
+took the queue. Every table above is a claim about what a bot does *per piece*,
+and none of them means anything if the pieces are free.
+
+`bot_piece_pace_ms` is the answer: a budget per piece, per tier, jittered ±30%.
+The budget is measured from the moment the bot *notices* the piece rather than
+added on top of placing it, so tempo is a property of the tier and not of the
+link; `run_match` spends whatever is left of it pumping the socket, because
+those are the frames the next piece is planned from and the deadman pipe is on
+the same poll. The jitter is not decoration — three bots on one fixed period
+attack in a single pulse, and a pulse of three is what a board cannot answer.
+
+The numbers are pieces per second people actually reach: ~0.75 learning, ~1.4
+good, ~2.5 competing. Measured after the fix: 1.39, 1.43 and 1.49 pps for three
+`normal` bots, and the same idle player wore 4 rows in 15 s instead of 20.
 
 **`easy` needs the noise, not just the weak attack.** Today's weights are a
 near-perfect *survival* set — once the vertical I is placeable at all: left

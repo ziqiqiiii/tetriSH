@@ -24,6 +24,7 @@
 static int	check_a_room_of_one_fills_up(t_net_client *net, const char *room);
 static int	check_the_match_deals(t_net_client *net, const char *room);
 static int	check_the_bots_are_playing(t_net_client *net);
+static int	check_a_bot_plays_at_a_human_tempo(t_net_client *net);
 static int	check_letting_go_empties_the_room(t_net_client *net,
 				const char *room);
 
@@ -33,7 +34,15 @@ static int	lock_in(t_net_client *net, const char *room);
 static int	room_members(t_net_client *net, const char *room);
 static int	pump_for(t_net_client *net, int ms);
 static int	alive_arena_cards(const t_body_state *snap);
+static int	rows_taken(const t_body_state *snap);
 static void	report(const char *name, int ok, int *failures);
+
+/*
+** How long the player sits on their hands, and how much garbage they may be
+** wearing by the end of it. See check_a_bot_plays_at_a_human_tempo.
+*/
+#define IDLE_MS		15000
+#define IDLE_ROWS	8
 
 int	main(void)
 {
@@ -61,6 +70,8 @@ int	main(void)
 		check_a_room_of_one_fills_up(&net, room), &failures);
 	report("the match deals", check_the_match_deals(&net, room), &failures);
 	report("the bots are playing", check_the_bots_are_playing(&net), &failures);
+	report("a bot plays at a human tempo",
+		check_a_bot_plays_at_a_human_tempo(&net), &failures);
 	bot_farm_clear(&farm);
 	report("letting go empties the room",
 		check_letting_go_empties_the_room(&net, room), &failures);
@@ -137,6 +148,47 @@ static int	check_the_bots_are_playing(t_net_client *net)
 		tries++;
 	}
 	return (0);
+}
+
+/*
+** A bot has no hands and no eyes, so nothing about placing a piece costs it
+** any time: left unpaced it plays at the speed of the socket. Measured, that
+** was six to thirteen pieces a second each - past the fastest human alive, by
+** every bot in the room at once - and three of them buried a player who did
+** nothing under seventeen rows of garbage in twenty-two seconds. A Battle
+** Royale nobody could survive to play was the whole of the bug.
+**
+** So the player does nothing, deliberately, and what is asserted is what they
+** are wearing at the end of it. Rows landed are counted with rows still queued
+** because garbage lands at the receiver's next piece lock: an idle player's
+** piece falls under gravity and takes the whole queue at once, so a check that
+** read `pending` alone would report 0 for the very board it was watching for.
+**
+** The bound is what a person could dig out of, not what the tempo happens to
+** produce - it left four rows here and eleven before the fix, so it is a real
+** verdict either way rather than a pinned number.
+*/
+static int	check_a_bot_plays_at_a_human_tempo(t_net_client *net)
+{
+	int	spent;
+	int	worst;
+
+	spent = 0;
+	worst = 0;
+	while (spent < IDLE_MS)
+	{
+		if (pump_for(net, 250) < 0)
+			return (0);
+		spent += 250;
+		if (!net->has_state)
+			continue ;
+		if (rows_taken(&net->state_snapshot) > worst)
+			worst = rows_taken(&net->state_snapshot);
+	}
+	if (worst > IDLE_ROWS)
+		printf("  (a player who did nothing wore %d rows in %d ms)\n",
+			worst, IDLE_MS);
+	return (worst <= IDLE_ROWS);
 }
 
 /*
@@ -301,6 +353,36 @@ static int	alive_arena_cards(const t_body_state *snap)
 		index++;
 	}
 	return (count);
+}
+
+/**
+ * @brief How many rows of somebody else's making this board is carrying.
+ *
+ * The stack plus what is still queued against it. A player who never acts adds
+ * nothing to their own stack but one piece per gravity lock, so the height is
+ * garbage to within a row or two, and the queue is the rest of it on its way.
+ *
+ * @param snap The subject's own board.
+ * @return The row count.
+ */
+static int	rows_taken(const t_body_state *snap)
+{
+	int	row;
+	int	col;
+
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			if (snap->cells[row][col].type != 0)
+				return (BODY_BOARD_ROWS - row + snap->pending);
+			col++;
+		}
+		row++;
+	}
+	return (snap->pending);
 }
 
 /**

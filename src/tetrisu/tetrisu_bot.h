@@ -102,6 +102,32 @@
 # define BOT_POLL_MS			5
 
 /*
+** How long a bot spends on one piece, per tier, in milliseconds.
+**
+** This is the difference between an opponent and a machine gun, and it is not
+** a nicety. Nothing else in the loop paces a bot: it plans, moves and hard
+** drops as fast as the socket and the input rate limit allow, which measured
+** at six to thirteen pieces a second - past the fastest human alive, and past
+** it by every bot in the room at once. Three of them put seventeen rows of
+** garbage on a player who did nothing in twenty-two seconds, and a Battle
+** Royale that a person could not survive to play was the result.
+**
+** The numbers are pieces per second a person actually reaches: about 0.75 for
+** somebody learning, 1.4 for somebody good, 2.5 for somebody who competes.
+** They are a tempo and not a handicap - the scoring weights are what make a
+** tier good or bad at Tetris, and these are what make it fast or slow at it.
+**
+** The jitter is not decoration either. Three bots on the same fixed period
+** send their garbage in one pulse, and a pulse of three is what a board cannot
+** answer; spread out, the same rows arrive as a stream a player can dig
+** through.
+*/
+# define BOT_PACE_EASY_MS		1300
+# define BOT_PACE_NORMAL_MS		700
+# define BOT_PACE_ULTRA_MS		400
+# define BOT_PACE_JITTER_PCT	30
+
+/*
 ** How many idle poll rounds pass before a bot asks the room whether a select
 ** window has opened. At BOT_POLL_MS that is about a fifth of a second, which
 ** is fast against TETRISD_MATCH_SELECT_MS and quiet enough that a bot sitting
@@ -210,6 +236,7 @@ int				bot_farm_reap_exited(t_bot_farm *farm);
 /* BOT_BRAIN.C */
 void			bot_init(t_bot *bot, t_bot_level level, uint32_t seed);
 void			bot_begin_piece(t_bot *bot);
+int				bot_piece_pace_ms(t_bot *bot);
 bool			bot_plan(t_bot *bot, const t_body_state *snap, bool may_rotate,
 					int *rotation, int *col);
 bool			bot_level_parse(const char *name, t_bot_level *out);
