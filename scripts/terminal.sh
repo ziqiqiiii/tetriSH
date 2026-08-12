@@ -79,6 +79,28 @@ has_display() {
     [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]
 }
 
+# WSLg publishes a display, but a shell does not always carry the variables that
+# point at it - one started before WSLg came up keeps an environment from before
+# there was anything to point at, and nothing later goes back to fix it. The
+# socket is sitting in /tmp the whole time.
+#
+# Without this, has_display answers "no window to open" on a machine that
+# plainly has one, choose_terminal returns "none", and `make play` prints "no
+# terminal needed; running in place" and draws the cell board - for want of one
+# variable. So the socket is treated as the evidence and DISPLAY is adopted from
+# it, exported because the terminal launched below inherits this environment.
+#
+# Only X11 is adopted. WSLg's Wayland socket lives under its own runtime dir
+# rather than XDG_RUNTIME_DIR, so exporting WAYLAND_DISPLAY without also
+# repointing that would send kitty looking in the wrong place; with DISPLAY
+# alone it simply uses X11, which is what it fell back to here anyway.
+adopt_wslg_display() {
+    is_wsl || return 0
+    [ -n "${DISPLAY:-}" ] && return 0
+    [ -S /tmp/.X11-unix/X0 ] || return 0
+    export DISPLAY=:0
+}
+
 is_ssh() {
     [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ]
 }
@@ -515,6 +537,20 @@ run_in_place() {
         warn "running in this terminal, and ${BOLD}TERM=${TERM:-unset}${RST} does not"
         warn "speak the Kitty graphics protocol, so the board will draw in"
         warn "compatibility mode (cells, not pixel art)."
+        # Name the cause when it is the absent display, because that one is
+        # fixable in a way the reader would otherwise never guess: no window was
+        # opened, and the reason is two unset variables rather than a missing
+        # terminal. Staying silent here is what made this look like "make play
+        # ignores kitty".
+        if ! has_display; then
+            warn "No window was opened because this shell has no display:"
+            warn "${BOLD}DISPLAY${RST} and ${BOLD}WAYLAND_DISPLAY${RST} are both unset."
+            if is_wsl; then
+                warn "On WSL that is usually a shell older than WSLg itself. Start a"
+                warn "new one, or export it here and run again:"
+                warn "    ${BOLD}export DISPLAY=:0${RST}"
+            fi
+        fi
         if is_ssh; then
             warn "For the pixel board over SSH, connect from ${BOLD}WezTerm${RST} or"
             warn "${BOLD}kitty${RST} instead of Windows Terminal — the escape sequences"
@@ -530,6 +566,10 @@ run_in_place() {
 
 action="${1:-check}"
 [ $# -gt 0 ] && shift
+
+# Before anything asks whether there is a display, because on WSL the answer is
+# sometimes "yes, but this shell has not been told".
+adopt_wslg_display
 
 case "$action" in
     check)
