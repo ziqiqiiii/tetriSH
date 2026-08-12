@@ -333,10 +333,6 @@ PLAY_REBUILD_ARG	 = $(if $(REBUILD),--rebuild)
 play-image:
 	@ bash ./scripts/play.sh --container $(PLAY_HOST_ARG) $(PLAY_REBUILD_ARG) $(PLAY_ARGS)
 
-# Kept as the name the docs and muscle memory reach for. `play` starts a local
-# server on Linux and skips it on macOS, so there is no separate local path now.
-play-local: play
-
 ################################################################################
 #                                   CLEANUP                                    #
 ################################################################################
