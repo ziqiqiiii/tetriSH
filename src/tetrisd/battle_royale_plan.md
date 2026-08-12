@@ -658,6 +658,39 @@ credited for burying. The record survives the board, which is exactly what a
 Double bug; `result[]` and `rank[]` follow so there is one place a match's
 outcome is written down.
 
+> **Step 0 is landed** (`t_participant` in `tetrisd.h`, `participant_of` /
+> `participant_open` / `participant_character` / `participant_close` in
+> `room.c`, `test_a_fighter_does_not_move_seats_with_its_owner` in
+> `test_double.c`). Three deviations from what is written above, all
+> deliberate:
+>
+> - **It is called `t_participant`, not `t_br_participant`.** `docs/naming.md`
+>   §1 is "a reader who has never opened the header should be able to say what
+>   a name means", and it fails `rb_drops` for exactly the reason `br_` fails
+>   here. The record also holds Single's and Double's `character` and `result`,
+>   so naming it after the mode that motivated it would be wrong as well as
+>   abbreviated.
+> - **It carries four fields, not nine.** `player_id`, `character`, `result`,
+>   `rank` — the three arrays it replaces, plus the key. `ko`, `alive`,
+>   `target_mode`, `last_attacker_id` and the attacker ring land with the steps
+>   that fill them (7 and 8), because a field nothing writes is a field nothing
+>   can be wrong about. What step 0 buys those steps is the *home*, which is
+>   what makes them additions to a record rather than four more parallel
+>   arrays.
+> - **A record is released when its player leaves, unless a match is running.**
+>   Not specified above, and needed: the array is bounded at `TD_MAX_GAMES`, so
+>   a record left behind by someone who left the room is one the next player to
+>   sit down cannot have, and a room whose seats turn over enough times would
+>   quietly stop recording what anybody declared. The `ROOM_IN_GAME` exception
+>   is what keeps the paragraph above true — a player who quits in 3rd place
+>   still finished 3rd, and once `forfeit_slot` has reset their board the
+>   record is the only thing left holding it.
+>
+> The bug is verified rather than argued: the new test asserts a successor
+> promoted into the departing owner's seat is not wearing the fighter that
+> owner declared, and it fails on the pre-fix tree at exactly that assertion.
+> 22 of 22 `tetrisd` suites pass.
+
 The attacker ring is eight `(player_id, when_ms)` pairs — 128 bytes — rather
 than a `TD_MAX_GAMES`-wide array of timestamps (792 bytes at 99). Eight because
 nobody has been usefully attacked by more than a handful of people inside
@@ -1128,7 +1161,7 @@ Each step leaves the tree building and every existing suite passing.
 
 | # | Step | Why here |
 |---|---|---|
-| 0 | The participant record: fold `character[]`, `result[]` and `rank[]` into one player-id-keyed struct ([D15](#d15--attribution-and-match-state-key-on-player-id-not-on-slot)) | It is a **bug fix in Double**, not Battle Royale work (S15) — an owner leaving during select strands the successor's fighter today. Landing it first means it ships with Double's tests as its evidence, and every field the later steps add has somewhere correct to live |
+| 0 | ✅ **Landed.** The participant record: fold `character[]`, `result[]` and `rank[]` into one player-id-keyed struct ([D15](#d15--attribution-and-match-state-key-on-player-id-not-on-slot)) | It is a **bug fix in Double**, not Battle Royale work (S15) — an owner leaving during select strands the successor's fighter today. Landing it first means it ships with Double's tests as its evidence, and every field the later steps add has somewhere correct to live |
 | 1 | `advance_and_push` encodes per slot ([D2](#d2--the-tick-encodes-per-slot-it-stops-collecting-first)) | **Before** the constant is raised, never after — see below. Correct at 16 games, invisible from outside, every suite green |
 | 2 | Sizing: `TD_MAX_GAMES` 99, `MAX_CLIENTS` 128, `br_slots` range, derived body cap ([D11](#d11--sizing-raise-tdmaxgames-to-99-and-keep-the-games-inline)) | Everything else needs a room that can hold the players, and step 1 has already removed the one thing that scaled badly with it |
 | 3 | `libstatusbody`: arena section, counts, mask codec ([D1](#d1--the-arena-is-a-second-detail-level-not-a-second-body)) | Everything encodes into it, and it lands with Single and Double still the only users |

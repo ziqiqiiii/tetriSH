@@ -565,6 +565,58 @@ typedef struct s_game
 }	t_game;
 
 /*
+** One player's state in the match their room is playing, for as long as that
+** match lasts.
+**
+** It exists because a slot index is not a stable identity. room_release
+** promotes a successor by *moving* them into the seat the departing owner
+** vacated, so a fact filed under a seat number is somebody else's a moment
+** later. Three facts were: the fighter a seat had declared, and the result and
+** the placing the match wrote there. rehome_successor followed the move for
+** the board and for nothing else, so an owner leaving during the
+** character-select window stranded the successor's declared fighter at the
+** seat they had just left - the room read that seat as undecided, waited out
+** the full window instead of dealing early, and gave them whatever their
+** account had equipped. Silently, because falling back to the equipped
+** character is also what a client with no selector asks for.
+**
+** So a fact about a match is filed under the player it is about. `player_id`
+** is the key and 0 means the record is free. Nothing here is reachable by seat,
+** which is what keeps the answer right when the seats move, and it leaves
+** rehome_successor holding the one thing that genuinely belongs to a seat: the
+** board being played in it.
+**
+** The record also outlives the board, which is the second reason it is not a
+** field on t_game. forfeit_slot copies a game out and resets the slot the
+** moment a player disconnects, so anything living on the game goes with them -
+** and a placing is exactly the thing a player who quits still owns.
+*/
+typedef struct s_participant
+{
+	t_player_id		player_id;
+	/*
+	** The character declared for this match, or 0 for "whatever the account
+	** has equipped". It is per match and not per account because a character
+	** is picked for a match: EQUIP is an account-wide change, and making one
+	** in order to play one game is the wrong scope - it would also mean a
+	** purchase made mid-match could change which abilities a player's levels
+	** select from.
+	**
+	** Declared with READY and read once by deal_games, so it is fixed for the
+	** length of the match by construction.
+	*/
+	t_item_id		character;
+	/*
+	** How the match ended for this player, decided once when it ends and read
+	** by the final snapshot they are sent. It cannot be derived from the game:
+	** the winner's board is active with a piece on it, which is what every
+	** board mid-match looks like.
+	*/
+	t_body_result	result;
+	int				rank;
+}	t_participant;
+
+/*
 ** A Room, as tetrisd knows one: the pure t_room the domain library owns, plus
 ** the runtime beside it - the per-slot games, which of them changed, and
 ** whether it is playing. `ticking` is the whole of what a ticker thread used
@@ -604,26 +656,14 @@ typedef struct s_server_room
 	int				select_ms;
 	int				select_second;
 	/*
-	** How the match ended, per slot, decided once when it ends and read by
-	** the final snapshot each player is sent. It cannot be derived from the
-	** game: the winner's board is active with a piece on it, which is what
-	** every board mid-match looks like.
+	** Everyone playing this match, found by player id rather than by seat -
+	** see t_participant for why that distinction is load-bearing rather than
+	** stylistic. The array is the room's runtime, so room_blank clears it for
+	** the same reason it clears `ticking`; record_and_reset clears it too,
+	** because a room outlives the match played in it and the next one must not
+	** open with the last one's verdicts and fighters already written down.
 	*/
-	t_body_result	result[TD_MAX_GAMES];
-	int				rank[TD_MAX_GAMES];
-	/*
-	** The character each seat declared for this match, or 0 for "whatever the
-	** account has equipped". It is per seat and not per account because a
-	** character is picked for a match: EQUIP is an account-wide change, and
-	** making one to play one game is the wrong scope - it would also mean a
-	** purchase made mid-match could change which abilities a player's levels
-	** select from.
-	**
-	** Declared with READY and read once by deal_games, so it is fixed for the
-	** length of the match by construction. It shares a slot's lifetime, which
-	** is why room_blank clears it for the same reason it clears `ticking`.
-	*/
-	t_item_id		character[TD_MAX_GAMES];
+	t_participant	participants[TD_MAX_GAMES];
 	t_server		*srv;
 	int				index;
 	/*

@@ -23,6 +23,15 @@ static void		spread_dirty(t_server_room *server_room);
 static void		settle_garbage(t_server_room *server_room);
 static int		slot_of_player(const t_server_room *server_room,
 					t_player_id pid);
+static const t_participant	*participant_of(const t_server_room *server_room,
+								t_player_id pid);
+static t_participant		*participant_open(t_server_room *server_room,
+								t_player_id pid);
+static t_item_id			participant_character(
+								const t_server_room *server_room,
+								t_player_id pid);
+static void					participant_close(t_server_room *server_room,
+								t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
@@ -313,7 +322,7 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
 bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
 			bool ready, t_item_id character)
 {
-	int	slot;
+	t_participant	*participant;
 
 	if (server_room == NULL || cli == NULL)
 		return (false);
@@ -331,14 +340,19 @@ bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
 	 * the select window and have the room deal the match on the strength of
 	 * it - the opposite of what they asked for. Withdrawing therefore takes
 	 * the fighter back with it, and the seat is unlocked again.
+	 *
+	 * It is written against the player and not against the seat they are in.
+	 * Filed by seat, a declaration made before an owner left was read back
+	 * from the seat the successor was moved out of, which is the whole of the
+	 * bug t_participant exists to close.
 	 */
-	slot = slot_of_player(server_room, cli->player_id);
-	if (slot < 0)
+	participant = participant_open(server_room, cli->player_id);
+	if (participant == NULL)
 		return (true);
 	if (!ready)
-		server_room->character[slot] = 0;
+		participant->character = 0;
 	else if (character != 0)
-		server_room->character[slot] = character;
+		participant->character = character;
 	return (true);
 }
 
@@ -364,6 +378,133 @@ static int	slot_of_player(const t_server_room *server_room, t_player_id pid)
 		slot++;
 	}
 	return (-1);
+}
+
+/**
+ * @brief Finds the match record belonging to a player, if they have one.
+ *
+ * The one lookup every match fact goes through, and the reason nothing in this
+ * file indexes a result, a placing or a fighter by seat.
+ *
+ * A player with no record is not an error and is answered with NULL: records
+ * are opened when a match is set up, so anyone asking before that - a lobby
+ * snapshot of a room nobody has readied in - is asking about a match that does
+ * not exist yet.
+ *
+ * @param server_room Room to search.
+ * @param pid The player to find.
+ * @return Their record, or NULL when this room holds none for them.
+ */
+static const t_participant	*participant_of(const t_server_room *server_room,
+	t_player_id pid)
+{
+	int	index;
+
+	if (server_room == NULL || pid == 0)
+		return (NULL);
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+			return (&server_room->participants[index]);
+		index++;
+	}
+	return (NULL);
+}
+
+/**
+ * @brief Finds a player's match record, opening a blank one if they have none.
+ *
+ * Every writer goes through this rather than through participant_of, so a fact
+ * about a match can be written down the first time there is one to write -
+ * there is no separate moment at which the room has to remember to create the
+ * record first.
+ *
+ * The array is TD_MAX_GAMES wide and a room seats at most that many players, so
+ * the full answer is unreachable while every record belongs to somebody seated.
+ * It is still answered rather than assumed: the caller has a player id and no
+ * room to put it in, and inventing a seat for them would be worse than saying
+ * so.
+ *
+ * @param server_room Room to search.
+ * @param pid The player to find or admit.
+ * @return Their record, or NULL when the room has no free one.
+ */
+static t_participant	*participant_open(t_server_room *server_room,
+	t_player_id pid)
+{
+	int	index;
+	int	free_slot;
+
+	if (server_room == NULL || pid == 0)
+		return (NULL);
+	free_slot = -1;
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+			return (&server_room->participants[index]);
+		if (free_slot < 0 && server_room->participants[index].player_id == 0)
+			free_slot = index;
+		index++;
+	}
+	if (free_slot < 0)
+		return (NULL);
+	memset(&server_room->participants[free_slot], 0, sizeof(t_participant));
+	server_room->participants[free_slot].player_id = pid;
+	return (&server_room->participants[free_slot]);
+}
+
+/**
+ * @brief Reads the fighter a player declared for this match.
+ *
+ * Its own function because the answer for a player who has declared nothing and
+ * the answer for a player with no record at all are the same one - 0, meaning
+ * "whatever the account has equipped" - and every reader wants that collapse.
+ *
+ * @param server_room Room holding the match.
+ * @param pid The player to ask about.
+ * @return The declared character id, or 0 when none was declared.
+ */
+static t_item_id	participant_character(const t_server_room *server_room,
+	t_player_id pid)
+{
+	const t_participant	*participant;
+
+	participant = participant_of(server_room, pid);
+	if (participant == NULL)
+		return (0);
+	return (participant->character);
+}
+
+/**
+ * @brief Releases a player's match record.
+ *
+ * Records are bounded, so one belonging to a player who is no longer in the
+ * room is not merely stale - it is a record the next player to sit down cannot
+ * have. A room whose seats turn over enough times would run out and quietly
+ * stop recording what anybody declared.
+ *
+ * @param server_room Room holding the record.
+ * @param pid The player whose record is released.
+ */
+static void	participant_close(t_server_room *server_room, t_player_id pid)
+{
+	int	index;
+
+	if (server_room == NULL || pid == 0)
+		return ;
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+		{
+			memset(&server_room->participants[index], 0,
+				sizeof(t_participant));
+			return ;
+		}
+		index++;
+	}
 }
 
 /**
@@ -469,17 +610,17 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
  */
 bool	server_room_begin_selection(t_server_room *server_room)
 {
-	int	slot;
+	int	index;
 
 	if (server_room == NULL || server_room->room == NULL)
 		return (false);
 	if (room_begin_selection(server_room->room) != 0)
 		return (false);
-	slot = 0;
-	while (slot < TD_MAX_GAMES)
+	index = 0;
+	while (index < TD_MAX_GAMES)
 	{
-		server_room->character[slot] = 0;
-		slot++;
+		server_room->participants[index].character = 0;
+		index++;
 	}
 	server_room->select_ms = TETRISD_MATCH_SELECT_MS;
 	server_room->select_second = -1;
@@ -518,7 +659,8 @@ bool	server_room_all_locked(const t_server_room *server_room)
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (server_room->room->slots[slot].occupied
-			&& server_room->character[slot] == 0)
+			&& participant_character(server_room,
+				server_room->room->slots[slot].membership.player_id) == 0)
 			return (false);
 		slot++;
 	}
@@ -703,6 +845,16 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	{
 		snprintf(name, sizeof(name), "%s", server_room->room->name);
 		forfeit_slot(server_room, cli->binding.slot_index, &finished);
+		/*
+		 * The match record leaves with the player, unless a match is running -
+		 * then it is theirs until that match ends. forfeit_slot has just reset
+		 * their board, so during a game the record is the only thing left
+		 * holding what they did in it. Outside one there is nothing to hold,
+		 * and it is asked before room_release because that is the last moment
+		 * the room still says what it was doing.
+		 */
+		if (server_room->room->status != ROOM_IN_GAME)
+			participant_close(server_room, cli->player_id);
 		memset(&res, 0, sizeof(res));
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 		rehome_successor(server_room, cli, &res);
@@ -794,7 +946,8 @@ bool	server_room_snapshot(const t_server_room *server_room,
 			out->members[out->member_count].ready
 				= slot->status == SLOT_READY;
 			out->members[out->member_count].character
-				= (uint32_t)server_room->character[index];
+				= (uint32_t)participant_character(server_room,
+					slot->membership.player_id);
 			snprintf(out->members[out->member_count].username,
 				sizeof(out->members[out->member_count].username), "%s",
 				slot->membership.username);
@@ -895,14 +1048,12 @@ static void	room_blank(t_server_room *server_room)
 	server_room->countdown_second = -1;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
+	memset(server_room->participants, 0, sizeof(server_room->participants));
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
-		server_room->result[slot] = BODY_RESULT_NONE;
-		server_room->rank[slot] = 0;
-		server_room->character[slot] = 0;
 		slot++;
 	}
 }
@@ -945,15 +1096,22 @@ static bool	room_probe(void *ctx, t_player_id pid)
 /**
  * @brief Deals every seated player a board.
  *
+ * A match record is opened here as well as a board, and this is what makes
+ * every player in a running match have one: readiness opens a record only for
+ * those who declared, and a Battle Royale is started by its owner over seats
+ * that need never have. settle_results then has somewhere to write a verdict
+ * for each of them without deciding, at the end of a match, who was in it.
+ *
  * @param server_room Room whose game is starting.
  * @return The number of games started.
  */
 static int	deal_games(t_server_room *server_room)
 {
-	t_slot		*slots;
-	uint32_t	seed;
-	int			started;
-	int			i;
+	t_participant	*participant;
+	t_slot			*slots;
+	uint32_t		seed;
+	int				started;
+	int				i;
 
 	slots = server_room->room->slots;
 	started = 0;
@@ -962,11 +1120,14 @@ static int	deal_games(t_server_room *server_room)
 	{
 		if (slots[i].occupied)
 		{
+			participant = participant_open(server_room,
+					slots[i].membership.player_id);
 			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
 					+ slots[i].membership.player_id);
 			game_start(&server_room->games[i], slots[i].membership.player_id,
 				seed);
-			server_room->games[i].character_id = server_room->character[i];
+			if (participant != NULL)
+				server_room->games[i].character_id = participant->character;
 			server_room->dirty[i] = true;
 			started++;
 		}
@@ -1397,6 +1558,11 @@ t_game	*server_room_target_game(t_server_room *server_room,
  * active and unpaused - it is simply not being advanced - so the game has no
  * way to describe itself as held.
  *
+ * The verdict is looked up by the player whose board this is and not by the
+ * seat holding it. The two can disagree - a promoted successor's board follows
+ * them into the seat they were moved to - and of the two it is the player the
+ * result was ever about.
+ *
  * @param server_room Room the snapshot came from.
  * @param slot 0-based slot the snapshot belongs to.
  * @param snap Snapshot to decorate.
@@ -1404,11 +1570,18 @@ t_game	*server_room_target_game(t_server_room *server_room,
 static void	decorate_snapshot(t_server_room *server_room, int slot,
 		t_body_state *snap)
 {
+	const t_participant	*participant;
+
 	snap->countdown_ms = server_room->countdown_ms;
 	if (server_room->countdown_ms > 0)
 		snap->phase = BODY_PHASE_COUNTDOWN;
-	snap->result = server_room->result[slot];
-	snap->rank = server_room->rank[slot];
+	participant = participant_of(server_room,
+			server_room->games[slot].player_id);
+	if (participant != NULL)
+	{
+		snap->result = participant->result;
+		snap->rank = participant->rank;
+	}
 	fill_opponents(server_room, slot, snap);
 }
 
@@ -1505,7 +1678,8 @@ static void	project_opponent(t_server_room *server_room, int slot,
 	out->charge = game->charge.charges;
 	if (out->charge > BODY_CHARGE_MAX)
 		out->charge = BODY_CHARGE_MAX;
-	out->character = (uint32_t)server_room->character[slot];
+	out->character = (uint32_t)participant_character(server_room,
+			game->player_id);
 	snprintf(out->username, sizeof(out->username), "%s",
 		server_room->room->slots[slot].membership.username);
 	row = 0;
@@ -1626,28 +1800,34 @@ static int	count_live_games(const t_server_room *server_room)
  * phase already says so, so the result stays NONE and its snapshot is
  * unchanged.
  *
+ * A seat with no game in it is skipped by the lookup rather than by a test of
+ * its own: it has no player id, and no record can be opened for player 0.
+ *
  * @param server_room Room whose match has just ended.
  */
 static void	settle_results(t_server_room *server_room)
 {
-	int	slot;
+	t_participant	*participant;
+	int				slot;
 
 	if (server_room_is_solo(server_room))
 		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		if (server_room->games[slot].player_id != 0)
+		participant = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (participant != NULL)
 		{
 			if (server_room->games[slot].active)
 			{
-				server_room->result[slot] = BODY_RESULT_WON;
-				server_room->rank[slot] = 1;
+				participant->result = BODY_RESULT_WON;
+				participant->rank = 1;
 			}
 			else
 			{
-				server_room->result[slot] = BODY_RESULT_LOST;
-				server_room->rank[slot] = count_live_games(server_room) + 1;
+				participant->result = BODY_RESULT_LOST;
+				participant->rank = count_live_games(server_room) + 1;
 			}
 			server_room->dirty[slot] = true;
 		}
@@ -1696,23 +1876,19 @@ static void	record_and_reset(t_server_room *server_room)
 		}
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
-		/*
-		 * The verdict has already gone out - advance_and_push sent it a
-		 * moment ago and this is the last thing the match does - so it is
-		 * cleared here rather than left for room_blank, which a room that
-		 * survives its match never reaches. Left standing, the next match
-		 * would open with the last one's WON or LOST in its first snapshot.
-		 */
-		server_room->result[slot] = BODY_RESULT_NONE;
-		server_room->rank[slot] = 0;
-		/*
-		 * The fighter goes with the match it was chosen for. A room that kept
-		 * it would open its next select window with every seat already
-		 * locked, and start again before anybody had looked at the roster.
-		 */
-		server_room->character[slot] = 0;
 		slot++;
 	}
+	/*
+	 * Every match fact goes with the match it was about, and it goes here
+	 * rather than in room_blank, which a room that survives its match never
+	 * reaches. Left standing, the verdicts would open the next match with the
+	 * last one's WON or LOST in its first snapshot - advance_and_push sent
+	 * them a moment ago and this is the last thing the match does - and the
+	 * declared fighters would open the next select window with every seat
+	 * already locked, starting it again before anybody had looked at the
+	 * roster.
+	 */
+	memset(server_room->participants, 0, sizeof(server_room->participants));
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	/*

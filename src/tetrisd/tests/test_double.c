@@ -26,6 +26,7 @@ static void	test_a_top_out_ends_the_match_for_both_players(void);
 static void	test_both_players_are_recorded_once_each(void);
 static void	test_an_unowned_fighter_is_refused(void);
 static void	test_a_declared_fighter_is_the_matchs(void);
+static void	test_a_fighter_does_not_move_seats_with_its_owner(void);
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static t_item_id	starter_character(t_fixture *fx, t_player_id pid);
@@ -61,6 +62,7 @@ int	main(void)
 	test_both_players_are_recorded_once_each();
 	test_an_unowned_fighter_is_refused();
 	test_a_declared_fighter_is_the_matchs();
+	test_a_fighter_does_not_move_seats_with_its_owner();
 	return (0);
 }
 
@@ -800,6 +802,59 @@ static void	test_a_declared_fighter_is_the_matchs(void)
 	hc_close(&blake);
 	fx_stop(&fx);
 	printf("PASS test_a_declared_fighter_is_the_matchs\n");
+}
+
+/*
+** A fighter belongs to the player who chose it, not to the chair they chose it
+** from.
+**
+** Ownership succession does not hand a seat over - it *moves* the successor
+** into the seat the departing owner vacated and clears the one they were in.
+** The declared character used to be filed under a seat index, and only the
+** board was moved to follow the player, so a successor arrived in the owner's
+** chair wearing the fighter the person who left had declared there, and their
+** own choice was left behind at a seat nobody was sitting in any more.
+**
+** Which the room then read as a decision they had made: a seat naming a
+** character is what server_room_all_locked counts as locked in, so a room could
+** deal a match around a choice nobody made, and the player whose choice was
+** stranded was dealt whatever their account had equipped instead. It was
+** invisible because falling back to the equipped fighter is also what a client
+** with no selector asks for.
+*/
+static void	test_a_fighter_does_not_move_seats_with_its_owner(void)
+{
+	t_body_room	snapshot;
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	blake;
+	t_item_id	owned;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+	char		body[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	owned = starter_character(&fx, amber.player_id);
+	assert(owned != 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
+	assert(simple(&amber, "READY", path, body) == 200);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(snapshot.members[0].player_id == amber.player_id);
+	assert(snapshot.members[0].character == (uint32_t)owned);
+	/* the owner leaves, and blake is moved into the seat they vacated */
+	assert(simple(&amber, "LEAVE", path, NULL) == 200);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(snapshot.member_count == 1);
+	assert(snapshot.members[0].player_id == blake.player_id);
+	assert(snapshot.members[0].owner);
+	/* the chair came with the room; the fighter did not come with the chair */
+	assert(snapshot.members[0].character == 0);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_a_fighter_does_not_move_seats_with_its_owner\n");
 }
 
 /**
