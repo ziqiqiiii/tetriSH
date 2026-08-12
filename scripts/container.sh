@@ -238,6 +238,71 @@ resolve_host() {
     printf '%s' "$host"
 }
 
+# Sound, unlike the board, does not leave over the pty. The board is escape
+# sequences the host terminal renders, so the container needs no display; audio
+# is SDL2 opening a device, and a container has none - no /dev/snd, no
+# PulseAudio socket - so Mix_OpenAudio fails and audio_init() takes its silent
+# fallback. The image links SDL2_mixer and SDL2's pulse driver, so the whole gap
+# is a socket: bind mount the host's and name it in PULSE_SERVER.
+#
+# ALSA is deliberately not offered as a fallback. Passing --device /dev/snd
+# hands the container exclusive access to the card on a machine without a sound
+# server, and every machine this runs on has one.
+pulse_socket() {
+    local candidate
+
+    # WSLg publishes its own, outside XDG_RUNTIME_DIR, and it is the one that
+    # works there: the runtime-dir entry is a symlink into /mnt/wslg anyway.
+    for candidate in \
+        /mnt/wslg/PulseServer \
+        "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native" \
+        "/run/user/$(id -u)/pulse/native"
+    do
+        if [ -S "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# A desktop PulseAudio/PipeWire authenticates a native-socket client with a
+# cookie; WSLg's server does not ask for one. Mount it when it exists rather
+# than deciding which server is on the far end.
+pulse_cookie() {
+    local candidate="${PULSE_COOKIE:-${XDG_CONFIG_HOME:-$HOME/.config}/pulse/cookie}"
+
+    if [ -f "$candidate" ]; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+# Emitted as an array of `docker run` flags, empty when the host has no server.
+audio_args() {
+    local socket cookie
+
+    if ! socket="$(pulse_socket)"; then
+        # Not worth saying on macOS, where there is no bridge from colima's VM
+        # to CoreAudio and so nothing the reader could act on.
+        if [ "$UNAME_S" = "Linux" ]; then
+            warn "no PulseAudio socket on this host; the client runs silent."
+        fi
+        return 0
+    fi
+    AUDIO_FLAGS=(
+        -v "$socket:/tetrish/run/pulse"
+        -e PULSE_SERVER=unix:/tetrish/run/pulse
+    )
+    if cookie="$(pulse_cookie)"; then
+        AUDIO_FLAGS+=(
+            -v "$cookie:/tetrish/run/pulse-cookie:ro"
+            -e PULSE_COOKIE=/tetrish/run/pulse-cookie
+        )
+    fi
+}
+
 # The client verifies the server's chain against a CA on the host, and reads
 # its artwork from the host's checkout. Both are bind mounted read-only at the
 # paths the binary already names: certs/ because credentials are never baked
@@ -252,6 +317,9 @@ run_client() {
     ca="${TETRISU_CA_PATH:-$ROOT/certs/demo-ca.crt}"
     net="$(network_args)"
 
+    AUDIO_FLAGS=()
+    audio_args
+
     [ -s "$ca" ] || die "CA file '$ca' is missing or empty"
     [ -d "$ROOT/src/tetrisu/assets" ] \
         || die "src/tetrisu/assets is missing from this checkout"
@@ -261,8 +329,12 @@ run_client() {
     # must see the capabilities of the terminal on the far end of the pty, not
     # a guess about it.
     # shellcheck disable=SC2086 # $net is deliberately word-split into flags
+    # ${a[@]+"${a[@]}"} rather than "${a[@]}": under `set -u` bash 3.2, which is
+    # what macOS ships, an empty array expands as an unset variable and aborts -
+    # and macOS is precisely where it stays empty, having no socket to pass.
     exec "$engine" run --rm -it \
         $net \
+        ${AUDIO_FLAGS[@]+"${AUDIO_FLAGS[@]}"} \
         -e TERM="${TERM:-xterm-kitty}" \
         -e COLORTERM="${COLORTERM:-truecolor}" \
         -e TETRISU_NET=1 \

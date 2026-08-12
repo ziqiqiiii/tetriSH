@@ -345,7 +345,11 @@ ensure_native_client() {
     # deps` with this script's flags stripped - which is how a check-only run
     # ended up trying to install a container engine mid-compile. Its own
     # render/audio deps still run; only the root recursion is suppressed.
-    make -C src/tetrisu DEPS_READY=1 || die "tetrisu did not build"
+    # AUTO_INSTALL_DEPS as a make override, not just the exported value: both
+    # Makefiles set it with `:=`, which beats the environment, so a check-only
+    # run would otherwise install the client's optional audio packages anyway.
+    make -C src/tetrisu DEPS_READY=1 \
+        AUTO_INSTALL_DEPS="$AUTO_INSTALL_DEPS" || die "tetrisu did not build"
     make bin-link >/dev/null 2>&1 || true
     ok "tetrisu is built"
 }
