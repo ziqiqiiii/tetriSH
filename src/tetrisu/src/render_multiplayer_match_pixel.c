@@ -83,6 +83,8 @@ static uint64_t opponent_loadout_signature(const t_mp_match_state *state);
 static uint64_t hud_signature(const t_mp_match_state *state);
 static uint64_t opponents_signature(const t_mp_match_state *state,
 				const int *cards, int count);
+static uint64_t card_signature(uint64_t hash,
+				const struct s_mp_opponent_snapshot *card);
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size);
 static uint32_t *new_canvas(t_render_ctx *ctx, int width, int height);
 static uint32_t *canvas_keep(t_render_ctx *ctx, int width, int height);
@@ -152,6 +154,10 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *rect,
 				const struct s_mp_opponent_snapshot *opponent, int player,
 				bool compact);
+static void draw_card_mark(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, const t_mp_rect *rect,
+				const struct s_mp_opponent_snapshot *opponent);
+static t_color card_edge(const struct s_mp_opponent_snapshot *opponent);
 static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_board *board,
 				const t_piece *active, const t_piece *ghost);
@@ -1575,6 +1581,7 @@ static uint64_t match_signature(const t_mp_match_state *state,
 	hash = hash_bytes(hash, &state->target_mode, sizeof(state->target_mode));
 	hash = hash_bytes(hash, &state->players_total,
 		sizeof(state->players_total) * 5);
+	hash = hash_bytes(hash, &state->local_rank, sizeof(state->local_rank));
 	hash = hash_bytes(hash, &state->local_game.board,
 		sizeof(state->local_game.board));
 	hash = hash_bytes(hash, &state->local_game.active,
@@ -1750,6 +1757,7 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 	hash = hash_bytes(hash, &state->players_alive,
 		sizeof(state->players_alive));
 	hash = hash_bytes(hash, &state->ko_count, sizeof(state->ko_count));
+	hash = hash_bytes(hash, &state->local_rank, sizeof(state->local_rank));
 	hash = hash_bytes(hash, &state->incoming_attackers,
 		sizeof(state->incoming_attackers));
 	/* The standing effect line lives in this region, so it dirties it. */
@@ -1764,6 +1772,11 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 ** moved between the sides changes both signatures, and a seat that emptied
 ** changes the one that held it. Hashing a byte range of the array cannot say
 ** either now that the array is indexed by seat: the range is mostly holes.
+**
+** Field by field, and never the struct's bytes. A struct has padding in it,
+** and padding is not a value: two identical arenas can differ in it, which
+** would redraw a side that had not changed, and the compiler is free to leave
+** it holding whatever was there before.
 */
 static uint64_t opponents_signature(const t_mp_match_state *state,
 	const int *cards, int count)
@@ -1776,11 +1789,33 @@ static uint64_t opponents_signature(const t_mp_match_state *state,
 	while (index < count)
 	{
 		hash = hash_bytes(hash, &cards[index], sizeof(cards[index]));
-		hash = hash_bytes(hash, &state->opponents[cards[index]],
-				sizeof(state->opponents[0]));
+		hash = card_signature(hash, &state->opponents[cards[index]]);
 		index++;
 	}
 	return (hash);
+}
+
+/*
+** One card, in the fields that decide how it is drawn: the board, whether it
+** is alive, whether it is outlined, and the three numbers written on it. The
+** name is hashed as the string it is rather than as the buffer that holds it.
+*/
+static uint64_t card_signature(uint64_t hash,
+	const struct s_mp_opponent_snapshot *card)
+{
+	hash = hash_bytes(hash, &card->board, sizeof(card->board));
+	hash = hash_bytes(hash, &card->present, sizeof(card->present));
+	hash = hash_bytes(hash, &card->alive, sizeof(card->alive));
+	hash = hash_bytes(hash, &card->targeting_local,
+			sizeof(card->targeting_local));
+	hash = hash_bytes(hash, &card->targeted_by_local,
+			sizeof(card->targeted_by_local));
+	hash = hash_bytes(hash, &card->garbage_pending,
+			sizeof(card->garbage_pending));
+	hash = hash_bytes(hash, &card->ko, sizeof(card->ko));
+	hash = hash_bytes(hash, &card->rank, sizeof(card->rank));
+	hash = hash_bytes(hash, &card->lines, sizeof(card->lines));
+	return (hash_bytes(hash, card->name, strlen(card->name)));
 }
 
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size)
@@ -2020,9 +2055,22 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 	{
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "BATTLE ROYALE",
 			&text, 29, g_pink, true);
-		snprintf(line, sizeof(line), "SCORE %010" PRIu64
-			"     ALIVE %d/%d     K.O. %02d", state->local_game.scoring.total,
-			state->players_alive, state->players_total, state->ko_count);
+		/*
+		 * Out of the match and still in the room. The placing is a fact from
+		 * the moment it is taken, so it is drawn then rather than held back
+		 * for the result screen - a dead board with a live score counter on
+		 * it was the screen saying nothing at all.
+		 */
+		if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+			snprintf(line, sizeof(line),
+				"SPECTATING  #%d     ALIVE %d/%d     K.O. %02d",
+				state->local_rank, state->players_alive, state->players_total,
+				state->ko_count);
+		else
+			snprintf(line, sizeof(line), "SCORE %010" PRIu64
+				"     ALIVE %d/%d     K.O. %02d",
+				state->local_game.scoring.total,
+				state->players_alive, state->players_total, state->ko_count);
 		text.y += 48;
 		score_backdrop.width = min_int(text.width, max_int(620, width * 42 / 100));
 		score_backdrop.x = (width - score_backdrop.width) / 2;
@@ -2469,27 +2517,85 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 	frame = (t_mp_rect){rect->x - 3, rect->y - 3,
 		rect->width + 6, rect->height + 6};
 	mp_match_pixel_draw_panel(pixels, width, height, &frame,
-		opponent->targeting_local ? g_red : g_lavender, 235);
+		card_edge(opponent), 235);
 	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
-	if (opponent->alive)
-		draw_board_cells(ctx, pixels, width, height, rect,
-			&opponent->board, NULL, NULL);
+	/*
+	 * A dead board is drawn and then knocked back, rather than not drawn. The
+	 * silhouette is how a player reads the room they are surviving - who was
+	 * buried and how far they got - and a blank square says only that
+	 * somebody used to be there.
+	 */
+	draw_board_cells(ctx, pixels, width, height, rect,
+		&opponent->board, NULL, NULL);
+	if (!opponent->alive)
+		mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 170);
 	if (!compact || rect->width >= 55)
 	{
-		snprintf(label, sizeof(label), opponent->alive ? "#%02d" : "#%02d KO",
-			player);
+		snprintf(label, sizeof(label), "#%02d", player);
 		title = (t_mp_rect){rect->x - 4, rect->y - 22,
 			rect->width + 8, 18};
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &title,
 			10, opponent->alive ? g_green : g_red, true);
 	}
+	draw_card_mark(ctx, pixels, width, height, rect, opponent);
+}
+
+/*
+** The one number a card is worth writing on, and which one it is depends on
+** whether the board is still being played.
+**
+** A live card owes rows and shows them: the pending count is the only thing on
+** a thumbnail that changes what the player does next. A dead one cannot owe
+** anything, so the same place carries its placing - and the placing arrives
+** the moment it is taken rather than at the end of the match, so a card can be
+** drawn dead and numbered in the same push.
+**
+** The badge goes over the board rather than beside it. A thumbnail has no
+** beside, this is the one place in the arena where legibility beats fidelity,
+** and the board underneath has finished changing anyway.
+*/
+static void draw_card_mark(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_mp_rect *rect,
+	const struct s_mp_opponent_snapshot *opponent)
+{
+	t_mp_rect box;
+	char label[APP_TEXT_MAX];
+
 	if (!opponent->alive)
 	{
-		title = (t_mp_rect){rect->x, rect->y + rect->height / 2 - 12,
+		box = (t_mp_rect){rect->x, rect->y + rect->height / 2 - 12,
 			rect->width, 24};
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "KO", &title,
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "K.O.", &box,
 			14, g_red, true);
+		if (opponent->rank <= 0 || rect->width < 40)
+			return ;
+		snprintf(label, sizeof(label), "#%d", opponent->rank);
+		box = (t_mp_rect){rect->x, rect->y + rect->height - 18,
+			rect->width, 16};
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
+			10, g_lavender, true);
+		return ;
 	}
+	if (opponent->garbage_pending <= 0 || rect->width < 40)
+		return ;
+	snprintf(label, sizeof(label), "+%d", opponent->garbage_pending);
+	box = (t_mp_rect){rect->x, rect->y + rect->height - 18, rect->width, 16};
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
+		10, g_red, true);
+}
+
+/*
+** Red for a rival attacking you, gold for one your mode has singled out, and
+** the ordinary lavender for everybody else. The two that are about you are the
+** two the arena is per-recipient for.
+*/
+static t_color card_edge(const struct s_mp_opponent_snapshot *opponent)
+{
+	if (opponent->targeting_local)
+		return (g_red);
+	if (opponent->targeted_by_local)
+		return (g_gold);
+	return (g_lavender);
 }
 
 static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -2931,6 +3037,7 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 	t_target_mode modes[4] = {TARGET_KO, TARGET_RANDOM,
 		TARGET_ATTACKERS, TARGET_BADGES};
 	t_mp_rect box;
+	char label[APP_TEXT_MAX];
 	int box_width;
 	int index;
 
@@ -2950,7 +3057,18 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 			state->target_mode == modes[index] ? 225 : 150);
 		box.x += 6;
 		box.width -= 12;
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height, labels[index], &box,
+		/*
+		 * Only the selected mode carries its count, and Randoms never does:
+		 * its set is everybody, so a number beside it would be the head count
+		 * written twice.
+		 */
+		if (state->target_mode == modes[index]
+			&& modes[index] != TARGET_RANDOM)
+			snprintf(label, sizeof(label), "%s (%d)", labels[index],
+				mp_match_target_candidates(state));
+		else
+			snprintf(label, sizeof(label), "%s", labels[index]);
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
 			13, state->target_mode == modes[index] ? g_gold : g_lavender,
 			true);
 		index++;

@@ -1,6 +1,9 @@
 #include "tetrisu.h"
 
 // Static Functions
+static void	battle_layout(t_mp_match_layout *layout, int rows, int cols);
+static void	sort_by_tier(const t_mp_match_state *state, int *slots, int count);
+static int	card_tier(const t_mp_match_state *state, int slot);
 static int	first_selectable(const t_app_catalogue_view_model *characters);
 static int	step_selectable(const t_app_catalogue_view_model *characters,
 				int current, int direction);
@@ -190,6 +193,103 @@ int	mp_match_collect_cards(const t_mp_match_state *state, int *slots, int cap)
 			slots[count++] = slot;
 		slot++;
 	}
+	sort_by_tier(state, slots, count);
+	return (count);
+}
+
+/**
+ * @brief Sorts gathered cards so the ones that matter get the near columns.
+ *
+ * A ninety-eight card grid is not a list of rivals, it is a crowd, and the
+ * player has no way to search it while a piece is falling. So the order is
+ * what they need in the order they need it: the rivals attacking them, then
+ * the ones their mode has singled out, then everybody still playing, then the
+ * dead - who sink, and take the far columns with them.
+ *
+ * It sorts an index list and never the cards themselves. A card keeps its seat
+ * in the model whatever tier it is drawn in, which is what stops a rival
+ * changing tier from losing the board the client is holding for them.
+ *
+ * The sort is stable on the seat, so a card only moves when its tier moves.
+ * An unstable order would shuffle the arena on every push for nothing.
+ *
+ * @param state Match model holding the cards.
+ * @param slots The gathered seats, reordered in place.
+ * @param count How many there are.
+ */
+static void	sort_by_tier(const t_mp_match_state *state, int *slots, int count)
+{
+	int	index;
+	int	scan;
+	int	held;
+
+	index = 1;
+	while (index < count)
+	{
+		held = slots[index];
+		scan = index - 1;
+		while (scan >= 0 && card_tier(state, slots[scan])
+			> card_tier(state, held))
+		{
+			slots[scan + 1] = slots[scan];
+			scan--;
+		}
+		slots[scan + 1] = held;
+		index++;
+	}
+}
+
+/**
+ * @brief Which band of the arena one card belongs in, lowest drawn first.
+ *
+ * @param state Match model holding the cards.
+ * @param slot The seat to place.
+ * @return The tier: 0 attacking you, 1 singled out by your mode, 2 alive,
+ *         3 knocked out.
+ */
+static int	card_tier(const t_mp_match_state *state, int slot)
+{
+	if (!state->opponents[slot].alive)
+		return (MP_ARENA_TIER_OUT);
+	if (state->opponents[slot].targeting_local)
+		return (MP_ARENA_TIER_ATTACKING);
+	if (state->opponents[slot].targeted_by_local)
+		return (MP_ARENA_TIER_AIMED_AT);
+	return (MP_ARENA_TIER_ALIVE);
+}
+
+/**
+ * @brief How many rivals this player's mode has singled out.
+ *
+ * The number the targeting diamond shows beside the mode, and it is worth
+ * showing because a mode with nobody in it does not fail - it quietly falls
+ * back to drawing from every live rival. Without the count, "S ATTACKERS"
+ * with an empty set and "S ATTACKERS" with three people in it look identical
+ * and behave differently.
+ *
+ * It is counted from the arena rather than tracked, because the arena is
+ * where the server says who the mode reached: the cards it singled out come
+ * back marked.
+ *
+ * @param state Match model holding the cards.
+ * @return How many rivals are in the set, 0 under Randoms.
+ */
+int	mp_match_target_candidates(const t_mp_match_state *state)
+{
+	int	count;
+	int	slot;
+
+	if (state == NULL)
+		return (0);
+	count = 0;
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS)
+	{
+		if (state->opponents[slot].present
+			&& state->opponents[slot].targeted_by_local)
+			count++;
+		slot++;
+	}
 	return (count);
 }
 
@@ -348,8 +448,16 @@ void	mp_match_finish(t_mp_match_state *state, bool won, int rank)
 	state->result = won ? MP_MATCH_RESULT_WON : MP_MATCH_RESULT_LOST;
 	if (won)
 		state->final_rank = 1;
+	else if (rank > 1)
+		state->final_rank = rank;
 	else
-		state->final_rank = rank > 1 ? rank : 2;
+		/*
+		 * Second, and only when nobody said otherwise. Double's loser is
+		 * always second so the floor costs it nothing, and a Battle Royale's
+		 * fortieth place is the server's number - flooring that at 2 was
+		 * taking a placing the room had already decided and throwing it away.
+		 */
+		state->final_rank = 2;
 }
 
 const char	*mp_match_result_text(const t_mp_match_state *state,
@@ -375,7 +483,6 @@ const char	*mp_match_result_text(const t_mp_match_state *state,
 void	mp_match_layout_build(t_app_game_mode mode, int rows, int cols,
 	t_mp_match_layout *layout)
 {
-	int	board_x;
 	int	card_height;
 	int	local_x;
 	int	opponent_x;
@@ -403,18 +510,46 @@ void	mp_match_layout_build(t_app_game_mode mode, int rows, int cols,
 			min_int(24, rows - 8));
 	}
 	else
-	{
-		layout->valid = rows >= 36 && cols >= 132;
-		board_x = max_int(56, (cols + 26 - 22) / 2);
-		layout->local_board = match_rect(board_x, 8, 22, 22);
-		layout->abilities = match_rect(1, 5, 24,
-			min_int(27, rows - 9));
-		layout->left_opponents = match_rect(27, 7, board_x - 29,
-			max_int(24, rows - 12));
-		layout->right_opponents = match_rect(board_x + 23, 7,
-			cols - board_x - 24, layout->left_opponents.height);
-		layout->targeting = match_rect(board_x - 10, 3, 42, 4);
-	}
+		battle_layout(layout, rows, cols);
+}
+
+/**
+ * @brief Lays out a Battle Royale, in whatever room the terminal has.
+ *
+ * 132x36 is the arena's comfortable size and used to be its minimum: a
+ * terminal one row short got a refusal and a blank screen, which is a hard
+ * thing to act on when the screen does not say by how much. So the gate
+ * degrades in three steps instead - both side columns, then one, then the
+ * board and the head count alone - and only a terminal too small for the
+ * board itself is refused, with the size it needs written on it.
+ *
+ * The arena is the part that gives way, and in that order, because it is the
+ * part a player glances at. The board they are steering is the last thing to
+ * go.
+ *
+ * @param layout Layout to fill.
+ * @param rows Terminal rows.
+ * @param cols Terminal columns.
+ */
+static void	battle_layout(t_mp_match_layout *layout, int rows, int cols)
+{
+	int	board_x;
+
+	layout->valid = rows >= 24 && cols >= 80;
+	board_x = min_int(max_int(28, (cols + 26 - 22) / 2), cols - 24);
+	layout->local_board = match_rect(board_x, 8, 22, 22);
+	layout->abilities = match_rect(1, 5, min_int(24, board_x - 2),
+		min_int(27, rows - 9));
+	layout->targeting = match_rect(max_int(0, board_x - 10), 3,
+		min_int(42, cols - board_x + 10), 4);
+	if (rows < 30 || cols < 100)
+		return ;
+	layout->left_opponents = match_rect(27, 7, board_x - 29,
+		max_int(16, rows - 12));
+	if (rows < 36 || cols < 132)
+		return ;
+	layout->right_opponents = match_rect(board_x + 23, 7,
+		cols - board_x - 24, layout->left_opponents.height);
 }
 
 /**

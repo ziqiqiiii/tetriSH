@@ -317,9 +317,23 @@ static void	draw_battle_royale(struct ncplane *plane,
 
 	set_fg(plane, MATCH_PINK_R, MATCH_PINK_G, MATCH_PINK_B);
 	put_centered(plane, 0, 0, layout->cols, ":: BATTLE ROYALE ::", true);
-	snprintf(line, sizeof(line), "SCORE %" PRIu64 "   ALIVE %d/%d   K.O. %02d",
-		state->local_game.scoring.total, state->players_alive,
-		state->players_total, state->ko_count);
+	/*
+	 * A player who has been eliminated is still here, and until now the screen
+	 * said nothing about it: their board stopped and the HUD went on counting
+	 * a score that could not change. The placing arrives the moment it is
+	 * taken, so the line says what they are - out, and where - rather than
+	 * leaving them to work it out from a board that no longer moves.
+	 */
+	if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+		snprintf(line, sizeof(line),
+			"SPECTATING - YOU PLACED #%d   ALIVE %d/%d   K.O. %02d",
+			state->local_rank, state->players_alive, state->players_total,
+			state->ko_count);
+	else
+		snprintf(line, sizeof(line),
+			"SCORE %" PRIu64 "   ALIVE %d/%d   K.O. %02d",
+			state->local_game.scoring.total, state->players_alive,
+			state->players_total, state->ko_count);
 	set_fg(plane, MATCH_GOLD_R, MATCH_GOLD_G, MATCH_GOLD_B);
 	put_centered(plane, 1, 0, layout->cols, line, true);
 	draw_targeting(plane, state, &layout->targeting);
@@ -351,9 +365,18 @@ static void	draw_battle_royale(struct ncplane *plane,
 	put_centered(plane, layout->rows - 3, 0, layout->cols,
 		state->status, false);
 	set_fg(plane, MATCH_LAVENDER_R, MATCH_LAVENDER_G, MATCH_LAVENDER_B);
-	put_centered(plane, layout->rows - 1, 0, layout->cols,
-		"W KOs  A RANDOMS  S ATTACKERS  D BADGES   |   ARROWS/Z/X/SPACE/C PLAY",
-		false);
+	/*
+	 * The controls line has to stop offering what no longer works. A
+	 * spectator has no board to steer and no target to choose; what they
+	 * still have is the arena and the room they are watching it in.
+	 */
+	if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+		put_centered(plane, layout->rows - 1, 0, layout->cols,
+			"YOU ARE OUT - WATCHING THE ROOM UNTIL IT IS DECIDED", false);
+	else
+		put_centered(plane, layout->rows - 1, 0, layout->cols,
+			"W KOs  A RANDOMS  S ATTACKERS  D BADGES   |   "
+			"ARROWS/Z/X/SPACE/C PLAY", false);
 }
 
 static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
@@ -418,6 +441,7 @@ static void	draw_targeting(struct ncplane *plane,
 	const char	*labels[4] = {"W KOs", "A RANDOMS", "S ATTACKERS", "D BADGES"};
 	t_target_mode	modes[4] = {TARGET_KO, TARGET_RANDOM,
 		TARGET_ATTACKERS, TARGET_BADGES};
+	char	label[APP_TEXT_MAX];
 	int	positions[4][2];
 	int	index;
 
@@ -438,8 +462,20 @@ static void	draw_targeting(struct ncplane *plane,
 			? MATCH_GOLD_G : MATCH_LAVENDER_G,
 			state->target_mode == modes[index]
 			? MATCH_GOLD_B : MATCH_LAVENDER_B);
+		/*
+		 * The count rides with the selected mode only. A mode with an empty
+		 * set falls back to Randoms rather than dropping the attack, and
+		 * without the number that fallback is invisible - the player sees a
+		 * mode they chose and garbage that goes somewhere else.
+		 */
+		if (state->target_mode == modes[index]
+			&& modes[index] != TARGET_RANDOM)
+			snprintf(label, sizeof(label), "%s (%d)", labels[index],
+				mp_match_target_candidates(state));
+		else
+			snprintf(label, sizeof(label), "%s", labels[index]);
 		put_clipped(plane, positions[index][0], positions[index][1],
-			12, labels[index]);
+			16, label);
 		index++;
 	}
 }
@@ -489,6 +525,18 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 			set_fg(plane, MATCH_RED_R, MATCH_RED_G, MATCH_RED_B);
 			put_centered(plane, y + cell_height / 2, x,
 				cell.width, "KO", true);
+			/*
+			 * The placing goes under the badge, because a card that only says
+			 * KO tells a player somebody is gone and not how far in they are
+			 * themselves. It is on the wire the moment the elimination is
+			 * taken, so there is nothing to wait for.
+			 */
+			if (opponent->rank > 0 && cell_height >= 5)
+			{
+				snprintf(label, sizeof(label), "#%d", opponent->rank);
+				put_centered(plane, y + cell_height / 2 + 1, x,
+					cell.width, label, false);
+			}
 		}
 		else
 		{

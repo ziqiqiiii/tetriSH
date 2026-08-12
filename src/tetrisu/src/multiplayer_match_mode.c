@@ -28,6 +28,8 @@ static bool	selection_online_update(const t_app_data_provider *provider,
 static void	selection_send_lock(const t_app_data_provider *provider,
 				const char *room_id, const t_mp_match_state *state);
 static void	play_match_events(t_audio_ctx *audio, uint32_t events);
+static bool	announce_knockouts(t_match_authority *authority,
+				t_render_ctx *ctx, t_audio_ctx *audio);
 static bool	announce_effects(t_match_authority *authority,
 				const t_mp_match_state *state, t_render_ctx *ctx,
 				t_audio_ctx *audio);
@@ -210,7 +212,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 						&handling_config, elapsed_ms) || changed;
 			play_match_events(audio, solo_game_take_events(&state.local_game));
 			(void)solo_game_take_events(&state.opponent_game);
-			changed = announce_effects(&authority, &state, ctx, audio)
+			changed = announce_knockouts(&authority, ctx, audio)
+				|| announce_effects(&authority, &state, ctx, audio)
 				|| changed;
 			/*
 			 * A frame the opponent's presentation floor held back is due now,
@@ -848,5 +851,24 @@ static bool	announce_effects(t_match_authority *authority,
 		return (false);
 	render_notification_show_effect(ctx, title, message);
 	audio_play_sfx(audio, AUDIO_SFX_ABILITY_REJECTED);
+	return (true);
+}
+
+/*
+** Every knockout is a line on the room's feed and a brief card on the
+** notification plane the ability announcements already use - not a screen
+** shake, for the reason that plane exists: a bitmap over bitmaps costs a
+** repaint, and a match that shook for every one of ninety-eight eliminations
+** would spend the whole match repainting.
+*/
+static bool	announce_knockouts(t_match_authority *authority,
+		t_render_ctx *ctx, t_audio_ctx *audio)
+{
+	char	message[UI_NOTIFICATION_MESSAGE_MAX + 1];
+
+	if (!match_authority_knockout(authority, message, sizeof(message)))
+		return (false);
+	render_notification_show_effect(ctx, "K.O.", message);
+	audio_play_sfx(audio, AUDIO_SFX_LANDING);
 	return (true);
 }

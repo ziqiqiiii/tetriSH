@@ -111,6 +111,12 @@ bool	net_match_apply(t_net_client *net, t_mp_match_state *state)
 		state->players_total = snap->players;
 		state->players_alive = snap->alive;
 	}
+	/*
+	 * The placing arrives with the result still `none`, which is what makes
+	 * "eliminated, now watching" a state the screen can draw rather than
+	 * something it only learns when the match ends.
+	 */
+	state->local_rank = snap->rank;
 	apply_result(state, snap);
 	net->applied_seq = snap->seq;
 	return (true);

@@ -145,6 +145,48 @@ bool	match_authority_action(t_match_authority *authority,
 }
 
 /**
+ * @brief Takes the next knockout the room has narrated, if there is one.
+ *
+ * The feed is the KO announcement's source rather than a second channel of its
+ * own, because the server already narrates every knockout there - and it does
+ * so on a lane built for exactly this: a room announcing ninety-eight of them
+ * must not be able to fill a response FIFO and close a slow connection.
+ *
+ * One line per call, so a burst of eliminations is announced one card at a
+ * time rather than as a stack of overlapping ones.
+ *
+ * @param authority Authority in charge.
+ * @param out Receives the line's text.
+ * @param size Size of out.
+ * @return true when a knockout was taken, false when the feed has none new.
+ */
+bool	match_authority_knockout(t_match_authority *authority, char *out,
+			size_t size)
+{
+	const t_body_chat	*line;
+	size_t				index;
+
+	if (!authority->online || authority->lost || authority->net == NULL)
+		return (false);
+	index = 0;
+	while (index < net_chat_held(authority->net))
+	{
+		line = net_chat_at(authority->net, index);
+		if (line != NULL && line->seq > authority->feed_seen
+			&& line->system && strstr(line->text, "knocked out") != NULL)
+		{
+			authority->feed_seen = line->seq;
+			snprintf(out, size, "%s", line->text);
+			return (true);
+		}
+		if (line != NULL && line->seq > authority->feed_seen)
+			authority->feed_seen = line->seq;
+		index++;
+	}
+	return (false);
+}
+
+/**
  * @brief Declares a targeting mode to whoever owns the boards.
  *
  * Offline there is nobody to tell and the fixture has no targeting, so the

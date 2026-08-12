@@ -2583,6 +2583,16 @@ typedef struct s_mp_match_state
 	int				ko_count;
 	int				incoming_attackers;
 	/*
+	** This player's placing, as soon as it is a fact rather than at the end
+	** of the match. The server takes it the moment somebody is eliminated and
+	** sends it with the result still `none`, and that pair - a dead board and
+	** no verdict - is the spectating state: out of the match, still watching
+	** it, and able to be told how far they got straight away.
+	**
+	** 0 while they are still playing.
+	*/
+	int				local_rank;
+	/*
 	** Garbage rows queued against this player and not yet landed. They arrive
 	** at the next piece lock, so between being told and being buried there is
 	** a piece to place - which is the whole reason the count is shown. It is
@@ -2691,6 +2701,14 @@ typedef struct s_match_authority
 	bool			online;
 	bool			lost;
 	int				local_slot;
+	/*
+	** The last feed line this match has already announced, by the room's own
+	** sequence number. It is a sequence and not a count because the feed ring
+	** drops its oldest line when it fills, so "how many have I seen" stops
+	** being an answer the moment a room is talkative - which a Battle Royale
+	** narrating its knockouts is by definition.
+	*/
+	uint64_t		feed_seen;
 }	t_match_authority;
 
 typedef struct s_solo_render
@@ -3376,6 +3394,16 @@ void			mp_match_apply_room(t_mp_match_state *state,
 					bool seed_boards);
 int				mp_match_collect_cards(const t_mp_match_state *state,
 					int *slots, int cap);
+int				mp_match_target_candidates(const t_mp_match_state *state);
+/*
+** The bands the arena is drawn in, nearest first. They are an order and not a
+** layout: which column a card lands in is the renderer's, and which seat it
+** lives in never changes (see t_mp_match_state.opponents).
+*/
+# define MP_ARENA_TIER_ATTACKING	0
+# define MP_ARENA_TIER_AIMED_AT		1
+# define MP_ARENA_TIER_ALIVE		2
+# define MP_ARENA_TIER_OUT			3
 
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,
@@ -3605,6 +3633,8 @@ int				match_authority_fd(const t_match_authority *authority);
 bool			match_authority_pending(const t_match_authority *authority);
 bool			match_authority_action(t_match_authority *authority,
 					t_mp_match_state *state, t_solo_action action);
+bool			match_authority_knockout(t_match_authority *authority,
+					char *out, size_t size);
 bool			match_authority_target(t_match_authority *authority,
 					t_mp_match_state *state, t_target_mode mode);
 bool			match_authority_ability(t_match_authority *authority,
