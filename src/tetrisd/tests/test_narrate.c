@@ -29,7 +29,8 @@
 ** test fail exactly the middle seat's copy and nothing else.
 **
 ** ASan replaces malloc itself, so the trap is compiled out under it and the
-** case that needs it skips rather than fights the interceptor.
+** case that needs it skips rather than fights the interceptor. Valgrind does
+** the same thing at run time rather than at build time - see trap_usable.
 */
 # ifndef __SANITIZE_ADDRESS__
 #  define ALLOC_TRAP_AVAILABLE 1
@@ -65,6 +66,7 @@ static void	say(t_server_room *server_room, const char *sender,
 				const char *text, bool *sent);
 static void	arm_trap(size_t size, int ordinal);
 static void	disarm_trap(void);
+static bool	trap_usable(void);
 
 int	main(void)
 {
@@ -127,7 +129,7 @@ static void	test_one_seat_that_cannot_be_copied_does_not_stop_the_rest(void)
 	t_client		cli[3];
 	bool			sent;
 
-	if (!ALLOC_TRAP_AVAILABLE)
+	if (!trap_usable())
 		return ((void)printf("SKIP test_one_seat_that_cannot_be_copied"
 				"_does_not_stop_the_rest (needs the malloc trap)\n"));
 	srv = calloc(1, sizeof(*srv));
@@ -264,4 +266,33 @@ static void	disarm_trap(void)
 	g_trap_ordinal = -1;
 	g_trap_seen = 0;
 # endif
+}
+
+/**
+ * @brief Reports whether the allocation trap can actually refuse anything.
+ *
+ * The trap works by defining malloc for this binary and passing through to
+ * __libc_malloc, and it is armed by exact size - so anything that replaces the
+ * allocator underneath it breaks it the same way: the calibration pass and the
+ * armed pass no longer see the same sizes, the armed size never matches, and
+ * every seat gets its copy.
+ *
+ * ASan is compiled out above, because it is chosen when the binary is built.
+ * Valgrind is chosen when the binary is run, so it has to be asked here, from
+ * the LD_PRELOAD it sets on the process it starts.
+ *
+ * Skipping is the honest answer rather than a convenience. The case would
+ * otherwise fail under valgrind and read as a defect in narrate.c's broadcast
+ * loop, which is the one thing it was written to prove correct - and every
+ * suite in this project is expected to run clean under valgrind, so a case
+ * that cannot has to say so out loud.
+ */
+static bool	trap_usable(void)
+{
+	const char	*preload;
+
+	if (!ALLOC_TRAP_AVAILABLE)
+		return (false);
+	preload = getenv("LD_PRELOAD");
+	return (preload == NULL || strstr(preload, "vgpreload") == NULL);
 }
