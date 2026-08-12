@@ -94,9 +94,15 @@
 # define TETRISD_DEFAULT_LOG_IPC_PATH			"tmp/tetrisd/tetrislogd.sock"
 # define TETRISD_DEFAULT_PID_PATH				"tmp/tetrisd/tetrisd.pid"
 # define TETRISD_DEFAULT_ERR_PATH				"tmp/tetrisd/tetrisd.err"
-# define TETRISD_DEFAULT_MAX_CLIENTS			64
+/*
+** Connections the server accepts at once, and seats a Battle Royale room is
+** created with. The two are related: one full Battle Royale is 99 players, so
+** a ceiling of 64 would have made the mode's own maximum unreachable before
+** anything else in the server refused it.
+*/
+# define TETRISD_DEFAULT_MAX_CLIENTS			128
 # define TETRISD_DEFAULT_TICK_MS				12
-# define TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS	4
+# define TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS	99
 # define TETRISD_DEFAULT_INPUT_BURST			120
 # define TETRISD_DEFAULT_INPUT_RATE				60
 # define TETRISD_DEFAULT_HANDSHAKE_WORKERS		4
@@ -170,11 +176,24 @@
 													+ TETRISSH_MAX_FRAME)
 
 /*
-** Games a single room can run at once. The room domain allows 99 slots, but
-** a game is a whole board: sizing every room for the maximum would cost tens
-** of megabytes for rooms that hold one or four players.
+** Games a single room can run at once, which is every slot the room domain
+** allows. A Battle Royale is one room of up to 99 players, so anything less
+** would be a ceiling on the mode rather than on the memory.
+**
+** It does cost tens of megabytes, and that was the argument for 16: a game is
+** a whole board, so 99 of them is 190 KB per room and 12.2 MB across the
+** lobby's 64. It is paid once, by the single calloc of t_server at boot, and
+** never on a stack - so it is one allocation at start-up rather than a cost
+** that scales with anything happening. If the footprint ever matters the lever
+** is LOBBY_MAX_ROOMS, not this: sixty-four simultaneous rooms is the far more
+** speculative of the two numbers.
+**
+** Sizing rooms for the maximum is also what lets a Battle Royale room be
+** created at full capacity regardless of how many people turn up, which is the
+** point - an empty seat costs the wire nothing, because every projection walks
+** occupied slots only.
 */
-# define TD_MAX_GAMES							16
+# define TD_MAX_GAMES							99
 
 /*
 ** Abilities that can be waiting on one player's lock at once. Four is the

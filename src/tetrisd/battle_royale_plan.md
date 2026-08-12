@@ -393,6 +393,63 @@ write path at every size.
 A frame that carries no arena says so (`arena absent 0`) and the client keeps
 what it has. Single and Double always send `arena absent 0`.
 
+### D3a — the four levers on arena bandwidth, and the one that does not exist
+
+D3 takes the full snapshot and pays for it. This is what the bill is actually
+made of, because the first draft looked in the wrong place: it treated the
+*boards* as the cost, and they are not.
+
+**Capacity is not cost.** Egress scales with how many people are *in* the room,
+not how many seats it has: `fill_arena` writes occupied slots only. A 99-seat
+room holding 24 players costs exactly what a 24-seat room holding 24 costs. So
+the seat count can be set to the maximum the domain allows and the cost question
+answered separately — which is why
+[Open questions](#open-questions) 2 is settled as **capacity 99**.
+
+**The board is the smaller half of a card.** At 116 bytes, the 1-bit mask is 50
+and the metadata is 66 — `pid` and `score` alone are 21 each, because both are
+printed as decimal `uint64`. Squeezing the boards further is optimising the part
+that is already small.
+
+| Lever | Card line | Effect |
+|---|---:|---|
+| Baseline (draft) | 116 | — |
+| Drop `score`; hex-encode `pid` | **91** | −22%, every card, every push |
+| Skip a push when no card changed | 91 | 0 mid-match; frees the countdown, the long tail, a room between matches |
+| Dead cards send their mask every 5th push | 41 / 91 | egress **decays** as the match thins |
+| Spectators get the arena at half cadence | — | the growing dead majority costs half |
+
+**Does egress fall as players are knocked out?** In the draft, **no** — and that
+is worth stating plainly because it is the opposite of what the mode looks like
+it should do. An eliminated player keeps their card in the arena (D3 above) and
+keeps *receiving* the arena, because they are spectating
+([D10](#d10--elimination-is-not-the-end-of-the-screen)). Both sides of the n²
+therefore stay at n for the whole match: 99 players cost the same at 3 survivors
+as at 99.
+
+The last two levers are what make it fall, and both are safe on this lane
+because neither is a delta:
+
+- **A dead board never changes again.** So a dead card carries its mask only on
+  every 5th arena push and omits it otherwise; the client keeps the last mask it
+  holds for that slot. This is *bounded staleness*, not divergence — a client
+  that misses one is correct again within a second, with no acknowledgement and
+  no per-client state, which is exactly the property
+  [S16](#findings-in-tetrisd) demands.
+- **A spectator is watching, not playing.** Half cadence on a thumbnail grid is
+  not perceptible, and the spectating share of the room only grows.
+
+Together, at 99 players and a 300 ms cadence: ~3.0 MB/s at the start of a match,
+~1.5 MB/s once most of the room is out. Against ~5.7 MB/s flat in the draft.
+
+**What is deliberately not done:** sending only the cards that changed. That is
+the delta D3 rejects, and none of the above is one — every arena push remains a
+complete, self-correcting picture of the room.
+
+The `score` removal and the `pid` encoding are wire changes and land in step 3
+with the codec. The other three are behaviour and land in step 5 with the
+cadence, where the stress suite can measure them.
+
 ### D4 — Battle Royale does not spread dirty
 
 `spread_dirty` (`room.c:1248`) exists because a Double frame carries both
@@ -1013,6 +1070,27 @@ renderer already has the branch (`render_multiplayer_match.c:475-490`), it has
 never had the data. A card that is about to top out gets the danger tint the
 local board already uses.
 
+**A knocked-out card.** The arena has to show who is already out, or the player
+cannot read the room they are trying to survive. A dead card keeps its final
+board — dimmed to roughly a third, so the silhouette still reads as a stack but
+never competes with a live one — and takes two marks over it: a **`K.O.`**
+badge, and the **placing** that board finished at (`#37`). Both are already on
+the wire from [D7](#d7--a-placing-is-taken-when-the-player-is-eliminated-once-per-tick):
+the `alive` bit in `flags` and the `rank` field, which is why a card can be
+drawn dead the instant the placing is taken rather than at the end of the match.
+
+The badge is drawn over the board rather than beside it, because a thumbnail has
+no room beside it — this is the one place in the arena where legibility beats
+fidelity, and the board underneath is finished changing anyway. The placing sits
+where a live card shows its pending-garbage count, since a dead board can owe
+nothing.
+
+Two things fall out of getting this right. The arena stops being a grid of
+boards and becomes a **scoreboard**: at a glance, how many are left and how far
+in you are. And the tiering
+([D13](#d13--the-arena-is-drawn-per-card-not-per-side)) gains its sort key for
+free, because dead cards sink and the live ones a player has to care about rise.
+
 **The targeting diamond.** W/A/S/D, already drawn, now backed. The selected mode
 is highlighted and the count of candidates is shown beside it
 (`S ATTACKERS (3)`), because a mode with an empty set silently falls back to
@@ -1237,7 +1315,18 @@ the data.
    honest version is a garbage multiplier of `1 + ko/4` capped at 2, resolved in
    `settle_garbage` where the row count is already computed. It is a game-design
    call, not an engineering one.
-2. **What is the *supported* room size?** The design carries 99, and with the
+2. **Settled: capacity is 99.** The room is created with the full
+   `ROOM_MAX_SLOTS`, because the showcase cannot predict how many people turn
+   up and a seat nobody sits in costs nothing —
+   [D3a](#d3a--the-four-levers-on-arena-bandwidth-and-the-one-that-does-not-exist)
+   establishes that egress follows occupancy, not capacity. The bandwidth
+   question it was really asking is answered there instead, by the four levers,
+   and the stress suite in step 5 gates on *occupancy*: 24 real players in a
+   99-seat room. Original text below.
+
+   <details><summary>Original open question</summary>
+
+   The design carries 99, and with the
    full-snapshot arena ([D3](#d3--the-arena-is-a-full-compact-snapshot-on-its-own-clock))
    a full room costs ~5 MB/s rather than the ~1.8 MB/s a delta scheme would.
    That trade was taken deliberately and it makes this question load-bearing
@@ -1249,6 +1338,8 @@ the data.
    cadence (200 ms → 300 ms) and then the `score` field
    ([Wire changes](#5-the-body-cap-is-derived-not-chosen)), in that order —
    never a delta the mailbox cannot acknowledge.
+
+   </details>
 3. **Should an eliminated player be able to leave?** UC-12 5a says they wait out
    the remainder, and the placing is already taken, so leaving costs them
    nothing and frees a connection. Leaving mid-match currently means forfeiting,
