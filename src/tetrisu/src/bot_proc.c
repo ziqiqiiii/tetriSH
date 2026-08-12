@@ -32,6 +32,8 @@
 # endif
 
 // Static Functions
+static int	note(const char *what, const char *detail);
+static int	log_open(void);
 static int	usable(const char *path);
 static int	beside(const char *anchor, char *out, size_t cap);
 static int	self_path(char *out, size_t cap);
@@ -119,14 +121,83 @@ int	bot_farm_binary(char *out, size_t cap)
 	if (override != NULL && override[0] != '\0')
 	{
 		snprintf(out, cap, "%s", override);
-		return (usable(out));
+		if (usable(out) == 0)
+			return (0);
+		return (note("TETRISU_BOT_BIN names nothing runnable", out));
 	}
-	if (self_path(self, sizeof(self)) == 0 && beside(self, out, cap) == 0)
+	if (self_path(self, sizeof(self)) != 0)
+		snprintf(self, sizeof(self), "%s", "(the kernel gave no answer)");
+	else if (beside(self, out, cap) == 0)
 		return (0);
 	if (strchr(g_invoked_as, '/') != NULL
 		&& beside(g_invoked_as, out, cap) == 0)
 		return (0);
-	return (from_path_env(out, cap));
+	if (from_path_env(out, cap) == 0)
+		return (0);
+	note("no tetrisu-bot beside the running executable", self);
+	return (note("nor beside argv[0], nor on PATH; argv[0] was",
+			g_invoked_as));
+}
+
+/**
+ * @brief Writes one line into the bot log, from the parent.
+ *
+ * The child's own failures reach that file because child_stdio points its
+ * stdio at it. A failure to *start* the child never got that far and was
+ * reported as five words on a status line, which is not enough to tell a
+ * missing build from a wrong layout on a machine one cannot open a shell on.
+ *
+ * Never stdout: this parent's stdout is the screen notcurses is drawing.
+ *
+ * @param what The failure.
+ * @param detail The path or value it concerns.
+ * @return -1 always, so callers can return it directly.
+ */
+static int	note(const char *what, const char *detail)
+{
+	char	line[BOT_PATH_MAX * 2];
+	int		fd;
+	int		len;
+
+	fd = log_open();
+	if (fd < 0)
+		return (-1);
+	len = snprintf(line, sizeof(line), "tetrisu: %s: %s\n", what,
+			detail == NULL || detail[0] == '\0' ? "(unset)" : detail);
+	if (len > 0)
+		(void)!write(fd, line, (size_t)len);
+	close(fd);
+	return (-1);
+}
+
+/**
+ * @brief Opens the bot log for appending, wherever it can be opened.
+ *
+ * TETRISU_BOT_LOG, then a path relative to the working directory, then the
+ * temporary directory. The last is not a nicety: the default is relative, so
+ * a client launched from anywhere but the repository - which is every macOS
+ * checkout that has never run a daemon and so has no tmp/ - would otherwise
+ * have nowhere to write and nothing to say.
+ *
+ * @return An open descriptor, or -1.
+ */
+static int	log_open(void)
+{
+	char		fallback[BOT_PATH_MAX];
+	const char	*path;
+	int			fd;
+
+	path = getenv("TETRISU_BOT_LOG");
+	if (path == NULL || path[0] == '\0')
+		path = BOT_LOG_DEFAULT;
+	fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (fd >= 0)
+		return (fd);
+	path = getenv("TMPDIR");
+	if (path == NULL || path[0] == '\0')
+		path = BOT_LOG_TEMP_DIR;
+	snprintf(fallback, sizeof(fallback), "%s/%s", path, BOT_LOG_NAME);
+	return (open(fallback, O_WRONLY | O_CREAT | O_APPEND, 0644));
 }
 
 /**
@@ -249,11 +320,14 @@ int	bot_farm_add(t_bot_farm *farm, const char *room, t_bot_level level)
 	if (bot_farm_binary(binary, sizeof(binary)) != 0)
 		return (-1);
 	if (pipe(pipes) != 0)
-		return (-1);
+		return (note("no pipe for the deadman", strerror(errno)));
 	farm->bots[farm->count].pid = spawn_bot(binary, room, level, pipes[0]);
 	close(pipes[0]);
 	if (farm->bots[farm->count].pid <= 0)
-		return (close(pipes[1]), -1);
+	{
+		close(pipes[1]);
+		return (note("could not fork a bot", strerror(errno)));
+	}
 	farm->bots[farm->count].deadman = pipes[1];
 	farm->bots[farm->count].level = level;
 	farm->count++;
@@ -327,22 +401,9 @@ static void	child_exec(const char *binary, const char *room,
  */
 static void	child_stdio(void)
 {
-	char		fallback[BOT_PATH_MAX];
-	const char	*path;
-	int			fd;
+	int	fd;
 
-	path = getenv("TETRISU_BOT_LOG");
-	if (path == NULL || path[0] == '\0')
-		path = BOT_LOG_DEFAULT;
-	fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-	if (fd < 0)
-	{
-		path = getenv("TMPDIR");
-		if (path == NULL || path[0] == '\0')
-			path = BOT_LOG_TEMP_DIR;
-		snprintf(fallback, sizeof(fallback), "%s/%s", path, BOT_LOG_NAME);
-		fd = open(fallback, O_WRONLY | O_CREAT | O_APPEND, 0644);
-	}
+	fd = log_open();
 	if (fd < 0)
 		fd = open("/dev/null", O_WRONLY);
 	if (fd < 0)
