@@ -43,6 +43,9 @@ static void	test_a_placing_is_taken_when_a_player_goes_out(void);
 static void	test_players_out_together_share_a_placing(void);
 static void	test_a_top_out_nobody_caused_credits_nobody(void);
 static void	test_a_quitter_keeps_the_placing_they_quit_at(void);
+static void	test_a_targeting_mode_is_declared_and_kept(void);
+static void	test_a_target_outside_a_battle_royale_is_refused(void);
+static void	test_a_mode_marks_the_rivals_it_singles_out(void);
 
 static int	start_match(t_fixture *fx, t_harness *players, int count,
 				char *room, size_t cap, char *path, size_t path_cap);
@@ -59,6 +62,7 @@ static void	close_all(t_harness *players, int count);
 static void	play_path(char *out, size_t cap, const char *room,
 				t_player_id pid);
 static int	bury(t_harness *hc, const char *room);
+static int	drop_pieces(t_harness *hc, const char *room, int pieces);
 static int	stack_high(t_harness *hc, const char *room);
 static int	top_filled_row(const t_body_state *snap);
 static int	wait_rank(t_harness *hc, t_body_state *out, int timeout_ms);
@@ -80,6 +84,9 @@ int	main(void)
 	test_players_out_together_share_a_placing();
 	test_a_top_out_nobody_caused_credits_nobody();
 	test_a_quitter_keeps_the_placing_they_quit_at();
+	test_a_targeting_mode_is_declared_and_kept();
+	test_a_target_outside_a_battle_royale_is_refused();
+	test_a_mode_marks_the_rivals_it_singles_out();
 	return (0);
 }
 
@@ -942,4 +949,153 @@ static int	card_of(const t_body_state *snap, t_player_id pid)
 		index++;
 	}
 	return (-1);
+}
+
+/*
+** A mode is a preference and travels on its own tiny request: a word, and
+** nothing else. There is no seat in it and no player id, because a player
+** cannot pick a person - every mode narrows a set and the room draws from it.
+**
+** The four the client already draws are the four the server takes, and a word
+** that is not one of them is a bad request rather than a silent Randoms.
+*/
+static void	test_a_targeting_mode_is_declared_and_kept(void)
+{
+	t_fixture	fx;
+	t_harness	players[BR_SEATS];
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	assert(simple(&players[0], "TARGET", path, "mode ko\n") == 200);
+	assert(simple(&players[0], "TARGET", path, "mode attackers\n") == 200);
+	assert(simple(&players[0], "TARGET", path, "mode badges\n") == 200);
+	assert(simple(&players[0], "TARGET", path, "mode random\n") == 200);
+	/* a word that is not a mode, and a body that names nothing */
+	assert(simple(&players[0], "TARGET", path, "mode everyone\n") == 400);
+	assert(simple(&players[0], "TARGET", path, "ko\n") == 400);
+	/* and a room this player is not in */
+	assert(simple(&players[0], "TARGET", "/room/BR-99", "mode ko\n") == 404);
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_a_targeting_mode_is_declared_and_kept\n");
+}
+
+/*
+** Double has one opponent, so a mode would be a choice between one thing and
+** itself. Single has none at all. Both refuse rather than accepting a
+** preference that could never be acted on.
+*/
+static void	test_a_target_outside_a_battle_royale_is_refused(void)
+{
+	t_fixture	fx;
+	t_harness	players[2];
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(hc_connect(&players[0], &fx) == 0);
+	assert(hc_signup(&players[0], "duo0", "hunter2") == 201);
+	assert(hc_login(&players[0], "duo0", "hunter2") == 200);
+	assert(hc_connect(&players[1], &fx) == 0);
+	assert(hc_signup(&players[1], "duo1", "hunter2") == 201);
+	assert(hc_login(&players[1], "duo1", "hunter2") == 200);
+	assert(hc_join_new(&players[0], "double", room, sizeof(room)) == 201);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&players[1], "JOIN", path, NULL) == 200);
+	assert(simple(&players[0], "TARGET", path, "mode ko\n") == 409);
+	close_all(players, 2);
+	fx_stop(&fx);
+	printf("PASS test_a_target_outside_a_battle_royale_is_refused\n");
+}
+
+/*
+** What a card can honestly say is "you are aiming at this kind of rival", not
+** "at this one": the Target is drawn per resolution, so a flag naming one
+** player would be a promise the next draw breaks.
+**
+** Badges singles out the players who have knocked somebody out, and at the
+** start of a match nobody has - so the set is empty and no card is marked,
+** which is also what stops an empty set from silently costing the sender
+** their garbage: the draw falls back to every live rival.
+**
+** Randoms marks nothing either, and for the opposite reason. Every live rival
+** is eligible, and outlining all of them says nothing at all.
+*/
+static void	test_a_mode_marks_the_rivals_it_singles_out(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		players[BR_SEATS];
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	size_t			marked;
+	size_t			i;
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	assert(simple(&players[0], "TARGET", path, "mode badges\n") == 200);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	marked = 0;
+	i = 0;
+	while (i < state.arena_count)
+	{
+		if (state.arena[i].flags & BODY_ARENA_TARGETED_BY_YOU)
+			marked++;
+		i++;
+	}
+	assert(marked == 0);
+	/*
+	 * KOs singles out the tallest stack. Every board starts empty and equal,
+	 * so there is no tallest and nothing is marked; one player putting three
+	 * pieces down makes them the whole of the set.
+	 */
+	assert(simple(&players[0], "TARGET", path, "mode ko\n") == 200);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	i = 0;
+	while (i < state.arena_count)
+	{
+		assert((state.arena[i].flags & BODY_ARENA_TARGETED_BY_YOU) == 0);
+		i++;
+	}
+	assert(drop_pieces(&players[1], room, 3) == 0);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	marked = 0;
+	i = 0;
+	while (i < state.arena_count)
+	{
+		if (state.arena[i].flags & BODY_ARENA_TARGETED_BY_YOU)
+		{
+			assert(state.arena[i].player_id == players[1].player_id);
+			marked++;
+		}
+		i++;
+	}
+	assert(marked == 1);
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_a_mode_marks_the_rivals_it_singles_out\n");
+}
+
+/**
+ * @brief Hard drops a fixed number of pieces, so a board has a stack on it.
+ *
+ * @param hc The connection to play.
+ * @param room The room being played in.
+ * @param pieces How many pieces to put down.
+ * @return 0 when every drop was accepted, -1 otherwise.
+ */
+static int	drop_pieces(t_harness *hc, const char *room, int pieces)
+{
+	char	play[96];
+
+	play_path(play, sizeof(play), room, hc->player_id);
+	while (pieces > 0)
+	{
+		if (simple(hc, "DROP", play, "HARD\n") != 200)
+			return (-1);
+		pieces--;
+	}
+	return (0);
 }

@@ -17,6 +17,8 @@ static bool	apply_game_key(t_match_authority *authority,
 static bool	apply_handling_actions(t_match_authority *authority,
 				t_mp_match_state *state, t_solo_handling_state *handling,
 				const t_solo_handling_config *config, int elapsed_ms);
+static void	announce_target(t_match_authority *authority,
+				t_mp_match_state *state, t_audio_ctx *audio);
 static void	select_power(t_match_authority *authority,
 				t_mp_match_state *state, t_audio_ctx *audio, uint32_t key);
 static bool	selection_online_update(const t_app_data_provider *provider,
@@ -547,9 +549,7 @@ static bool	handle_match_key(t_match_authority *authority,
 	}
 	if (mp_match_target_handle_key(state, key))
 	{
-		audio_play_sfx(audio, AUDIO_SFX_MOVE);
-		snprintf(state->status, sizeof(state->status), "TARGETING: %s",
-			mp_match_target_name(state->target_mode));
+		announce_target(authority, state, audio);
 		return (false);
 	}
 	if (key >= '1' && key <= '4')
@@ -717,6 +717,32 @@ static void	selection_send_lock(const t_app_data_provider *provider,
 	memset(&room, 0, sizeof(room));
 	(void)provider->ready_room(provider->userdata, room_id, true,
 		character->item_id, &room);
+}
+
+/*
+** The mode key, now that there is a server to tell. It is the client's own
+** until the server takes it: the key moves the diamond, the declaration goes
+** out, and a refusal puts the diamond back rather than leaving the screen
+** showing a preference the room has never heard of.
+**
+** Nothing waits for the arena to confirm it. The mode changes what a later
+** clear draws from, so there is nothing to redraw and nothing to be wrong
+** about in between.
+*/
+static void	announce_target(t_match_authority *authority,
+		t_mp_match_state *state, t_audio_ctx *audio)
+{
+	if (!match_authority_target(authority, state, state->target_mode))
+	{
+		state->target_mode = TARGET_RANDOM;
+		snprintf(state->status, sizeof(state->status),
+			"TARGETING: %s (the server refused)",
+			mp_match_target_name(state->target_mode));
+		return ;
+	}
+	audio_play_sfx(audio, AUDIO_SFX_MOVE);
+	snprintf(state->status, sizeof(state->status), "TARGETING: %s",
+		mp_match_target_name(state->target_mode));
 }
 
 static void	select_power(t_match_authority *authority,

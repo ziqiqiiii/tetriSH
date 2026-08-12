@@ -236,7 +236,7 @@ static void	test_targeting_uses_wasd_diamond(void)
 	assert(mp_match_target_handle_key(&state, 's'));
 	assert(state.target_mode == TARGET_ATTACKERS);
 	assert(mp_match_target_handle_key(&state, 'd'));
-	assert(state.target_mode == TARGET_TOP_SCORE);
+	assert(state.target_mode == TARGET_BADGES);
 	assert(strcmp(mp_match_target_name(state.target_mode), "Badges") == 0);
 	state.mode = APP_GAME_MODE_DOUBLE;
 	assert(!mp_match_target_handle_key(&state, 'w'));

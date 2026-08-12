@@ -145,6 +145,37 @@ bool	match_authority_action(t_match_authority *authority,
 }
 
 /**
+ * @brief Declares a targeting mode to whoever owns the boards.
+ *
+ * Offline there is nobody to tell and the fixture has no targeting, so the
+ * mode is simply the screen's - which is what it has always been, and is now
+ * the only place it still is.
+ *
+ * Online it is send-and-report: the request is made, and a refusal leaves the
+ * client's own mode where it was rather than pretending. What confirms the
+ * mode took is the next arena, where the rivals it singles out arrive marked.
+ *
+ * @param authority Authority in charge.
+ * @param state Match model holding the mode.
+ * @param mode The mode the player selected.
+ * @return true when the mode stands, false when the server refused it.
+ */
+bool	match_authority_target(t_match_authority *authority,
+		t_mp_match_state *state, t_target_mode mode)
+{
+	t_net_result	result;
+
+	if (authority->lost || !authority->online)
+		return (true);
+	if (net_match_set_target(authority->net, mode, &result) != 0)
+	{
+		fall_offline(authority, state);
+		return (true);
+	}
+	return (result.status == 200);
+}
+
+/**
  * @brief Spends charge on one ability through whoever owns the boards.
  *
  * @param authority Authority in charge.

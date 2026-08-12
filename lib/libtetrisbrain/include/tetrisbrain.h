@@ -232,15 +232,27 @@ bool			effect_controls_inverted(const t_effect_state *state);
 bool			effect_thwack_active(const t_effect_state *state);
 int				effect_fry_rows(const t_effect_state *state);
 
-/* BATTLE ROYALE targeting mode, read by tetrisd to choose which room
- * receives garbage; defined here so tetrisu sends the same value in an
- * HTTTP body without duplicating the definition. */
+/*
+** BATTLE ROYALE targeting mode: which kind of rival a player's garbage goes
+** to. It lives here so that both ends name the same four things - tetrisu
+** draws the diamond and sends the word, tetrisd narrows the candidates and
+** draws from what is left.
+**
+** Every mode chooses the urn and never the ball. The Target is still drawn at
+** random from the room's own source among the players still in the game
+** (docs/CONTEXT.md); a mode says which of them are eligible, so a player can
+** prefer a kind of rival and can never pick a person.
+**
+** The values are on the wire only as words, but the numbers are pinned by
+** test_garbage.c so that a reordering is a test failure rather than a client
+** and a server disagreeing about what 2 means.
+*/
 typedef enum
 {
 	TARGET_RANDOM		= 0,
 	TARGET_ATTACKERS	= 1,
 	TARGET_KO			= 2,
-	TARGET_TOP_SCORE	= 3
+	TARGET_BADGES		= 3
 }	t_target_mode;
 
 /* GARBAGE.C */

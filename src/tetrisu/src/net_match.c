@@ -152,6 +152,59 @@ int	net_match_send_action(t_net_client *net, t_solo_action action)
 }
 
 /**
+ * @brief Tells the server which kind of rival to aim this player's garbage at.
+ *
+ * It is send-and-report rather than send-and-wait: a refused mode leaves the
+ * previous one standing and says so, and what confirms a mode took is the next
+ * arena, where the cards the mode singles out come back marked.
+ *
+ * The mode travels as a word rather than as the enum's number. Both ends share
+ * the enum, but a body that spelled it as an integer would make a reordering
+ * of the four a silent change of meaning on the wire.
+ *
+ * @param net Client with a match running.
+ * @param mode The mode the player selected.
+ * @param out Receives the status and any refusal reason; may be NULL.
+ * @return 0 when the server answered, -1 on a transport failure.
+ */
+int	net_match_set_target(t_net_client *net, t_target_mode mode,
+		t_net_result *out)
+{
+	t_net_result	result;
+	char			path[NET_PATH_MAX];
+	char			body[32];
+
+	if (net == NULL || net->state != NET_IN_GAME || net->room[0] == '\0')
+		return (-1);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, net->room);
+	snprintf(body, sizeof(body), "mode %s\n", net_target_mode_word(mode));
+	memset(&result, 0, sizeof(result));
+	if (net_request(net, "TARGET", path, body, &result) != 0)
+		return (-1);
+	if (out != NULL)
+		*out = result;
+	return (0);
+}
+
+/**
+ * @brief Names one targeting mode the way the wire spells it.
+ *
+ * @param mode The mode.
+ * @return The word for it; "random" for anything unrecognised, which is the
+ *         mode every other one falls back to anyway.
+ */
+const char	*net_target_mode_word(t_target_mode mode)
+{
+	if (mode == TARGET_KO)
+		return ("ko");
+	if (mode == TARGET_ATTACKERS)
+		return ("attackers");
+	if (mode == TARGET_BADGES)
+		return ("badges");
+	return ("random");
+}
+
+/**
  * @brief Spends charge on one Gaiden ability level.
  *
  * @param net Client with a match running.

@@ -148,6 +148,7 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `RESTART` | `/room/<name>/player/<pid>` | No body — deal a fresh game, discarding the one in progress; **Single only** |
 | `ABILITY` | `/room/<name>/player/<pid>` | Body `level <1-4>`, optionally `column <0-9>` to aim Sol |
 | `CHAT` | `/room/<name>` | Body `text <line>`; broadcast to the room including the sender. `429` rate-limited, `404` not seated there, `403` `muted`, `400` `bad-text` |
+| `TARGET` | `/room/<name>` | Body `mode random\|ko\|attackers\|badges`; **Battle Royale only**. Every mode narrows the live opponents and the room still draws from what is left, so a player chooses a kind of rival and never a person. `400` on a word that is not a mode, `404` not seated there, `409` `not-battle-royale` or `not-playing`, `429` rate-limited on the chat bucket — it is a key pressed a few times a match, and spending an input token on it would cost a piece movement |
 | `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick, carrying the room's countdown and, when the match ends, that player's result |
 | `CHAT` | `/room/<name>` | **Server-originated** — one line of the room's feed, pushed to every seat |
 

@@ -3590,6 +3590,9 @@ bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
 int				net_match_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
 int				net_match_send_action(t_net_client *net, t_solo_action action);
+int				net_match_set_target(t_net_client *net, t_target_mode mode,
+					t_net_result *out);
+const char		*net_target_mode_word(t_target_mode mode);
 int				net_match_ability(t_net_client *net, t_solo_ability ability,
 					t_net_result *out);
 
@@ -3602,6 +3605,8 @@ int				match_authority_fd(const t_match_authority *authority);
 bool			match_authority_pending(const t_match_authority *authority);
 bool			match_authority_action(t_match_authority *authority,
 					t_mp_match_state *state, t_solo_action action);
+bool			match_authority_target(t_match_authority *authority,
+					t_mp_match_state *state, t_target_mode mode);
 bool			match_authority_ability(t_match_authority *authority,
 					t_mp_match_state *state, t_solo_ability ability);
 bool			match_authority_update(t_match_authority *authority,

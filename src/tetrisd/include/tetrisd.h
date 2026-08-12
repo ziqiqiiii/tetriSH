@@ -306,6 +306,7 @@ _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 # define TETRISD_BR_ATTACKER_MS					8000
 # define TETRISD_BR_ATTACKER_RING				8
 
+
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
 # define TETRISD_ROUTE_SESSION					"/session"
@@ -763,6 +764,13 @@ typedef struct s_participant
 	*/
 	t_attacker		attackers[TETRISD_BR_ATTACKER_RING];
 	int				attacker_next;
+	/*
+	** Which kind of rival this player's garbage goes to. It is per match and
+	** per player, declared with TARGET and remembered until the match ends,
+	** because it is a preference a person holds rather than a property of a
+	** board - and it has to survive the seat moving under them.
+	*/
+	t_target_mode	target_mode;
 }	t_participant;
 
 /*
@@ -831,6 +839,17 @@ typedef struct s_server_room
 	*/
 	int				alive;
 	uint64_t		match_ms;
+	/*
+	** The room's own randomness, and the only randomness in a match that is
+	** not a game's own bag.
+	**
+	** It is the room's rather than a game's because what it draws is a Target,
+	** which is a fact about the room; it is one number rather than a call into
+	** the C library because a match seeded once has to replay the same way
+	** twice, which is what makes a targeting test able to assert a draw at
+	** all. No randomness enters libtetrisbrain, which is pure by contract.
+	*/
+	uint32_t		rng;
 	/*
 	** The arena's own clock, and the number of arenas this match has pushed.
 	**
@@ -1228,6 +1247,9 @@ int				ready_handler(const t_htttp_message *msg, void *context);
 /* HANDLERS_CHAT.C */
 int				chat_handler(const t_htttp_message *msg, void *context);
 
+/* HANDLERS_TARGET.C */
+int				target_handler(const t_htttp_message *msg, void *context);
+
 /* HANDLERS_LEADERBOARD.C */
 int				leaderboard_handler(const t_htttp_message *msg, void *context);
 
@@ -1305,9 +1327,12 @@ bool			server_room_begin_selection(t_server_room *server_room);
 bool			server_room_all_locked(const t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
+bool			server_room_is_arena(const t_server_room *server_room);
 bool			server_room_starts_on_ready(const t_server_room *server_room);
 int				server_room_target_of(t_server_room *server_room,
 					int from_slot);
+bool			server_room_set_target(t_server_room *server_room,
+					t_client *cli, t_target_mode mode);
 t_game			*server_room_target_game(t_server_room *server_room,
 					const t_client *cli);
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);

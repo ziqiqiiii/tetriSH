@@ -325,7 +325,7 @@ bool	mp_match_target_handle_key(t_mp_match_state *state, uint32_t key)
 	else if (key == 's' || key == 'S')
 		state->target_mode = TARGET_ATTACKERS;
 	else if (key == 'd' || key == 'D')
-		state->target_mode = TARGET_TOP_SCORE;
+		state->target_mode = TARGET_BADGES;
 	return (before != state->target_mode);
 }
 
@@ -335,7 +335,7 @@ const char	*mp_match_target_name(t_target_mode mode)
 		return ("KOs");
 	if (mode == TARGET_ATTACKERS)
 		return ("Attackers");
-	if (mode == TARGET_TOP_SCORE)
+	if (mode == TARGET_BADGES)
 		return ("Badges");
 	return ("Randoms");
 }

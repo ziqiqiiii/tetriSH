@@ -33,6 +33,13 @@ static t_item_id			participant_character(
 static void					participant_close(t_server_room *server_room,
 								t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
+static uint32_t	room_random(t_server_room *server_room);
+static int		candidate_slots(t_server_room *server_room, int from_slot,
+					int *out);
+static bool		wanted_by_mode(t_server_room *server_room, int from_slot,
+					int slot, int tallest);
+static int		stack_height(const t_game *game);
+static int		tallest_in_room(const t_server_room *server_room);
 static void		place_leaver(t_server_room *server_room, t_player_id pid);
 static void		settle_attacks(t_server_room *server_room);
 static void		note_attacker(t_participant *victim, t_player_id from,
@@ -54,13 +61,12 @@ static void		narrate_departure(t_server_room *server_room, const char *who, cons
 static void		rehome_successor(t_server_room *server_room, t_client *leaver, const t_release_result *res);
 static int		slot_holding(const t_server_room *server_room, t_player_id pid);
 static void		settle_selection(t_server_room *server_room);
-static bool		server_room_is_arena(const t_server_room *server_room);
 static bool		arena_tick(t_server_room *server_room, int elapsed_ms);
 static void		note_arena_change(t_server_room *server_room);
 static void		fill_arena(t_server_room *server_room, int subject,
 					t_body_state *snap);
 static void		fill_card(t_server_room *server_room, int slot, int subject,
-					t_body_arena_slot *out);
+					t_body_arena_slot *out, int tallest);
 static void		fill_mask(const t_game *game, t_body_arena_slot *out);
 static void		count_players(const t_server_room *server_room,
 					t_body_state *snap);
@@ -1094,6 +1100,7 @@ static void	room_blank(t_server_room *server_room)
 	server_room->arena_dirty = false;
 	server_room->alive = 0;
 	server_room->match_ms = 0;
+	server_room->rng = 0;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
@@ -1163,6 +1170,14 @@ static int	deal_games(t_server_room *server_room)
 	server_room->arena_push = 0;
 	server_room->arena_dirty = true;
 	server_room->match_ms = 0;
+	/*
+	 * One seed for the room, taken once. Everything drawn during the match
+	 * comes out of it in order, so the same seed replays the same match - which
+	 * is what lets a test assert which rival a draw named rather than only that
+	 * it named one.
+	 */
+	server_room->rng = (uint32_t)(clock_now_ms()
+			^ ((uint64_t)server_room->index << 16));
 	started = 0;
 	i = 0;
 	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
@@ -1193,6 +1208,7 @@ static int	deal_games(t_server_room *server_room)
 				memset(participant->attackers, 0,
 					sizeof(participant->attackers));
 				participant->attacker_next = 0;
+				participant->target_mode = TARGET_RANDOM;
 			}
 			server_room->dirty[i] = true;
 			started++;
@@ -1598,14 +1614,20 @@ static void	settle_garbage(t_server_room *server_room)
 /**
  * @brief Names the player a slot's clears and abilities are aimed at.
  *
- * Double's answer is the whole of it today: the other occupied slot, if
- * somebody is still playing in it. Single answers -1, which is the same answer
- * as an opponent who has already topped out, and both mean "nothing crosses" -
- * so no caller needs to know which of the two it got.
+ * Single answers -1, which is the same answer as a room where nobody else is
+ * still playing, and both mean "nothing crosses" - so no caller needs to know
+ * which of the two it got.
  *
- * Battle Royale is the reason this is a function rather than an expression.
- * Its four targeting modes (docs/CONTEXT.md) all reduce to "which slot", and
- * this is where they will land; nothing above it will have to change.
+ * Double answers the other seat, and reaches it without touching the room's
+ * randomness: there is one candidate, and drawing from a set of one is a
+ * ceremony. Battle Royale narrows the live opponents by the sender's declared
+ * mode and then draws from what is left, which is what makes a mode a
+ * preference rather than an aim - a player chooses a kind of rival and the
+ * room chooses which one.
+ *
+ * A mode whose set is empty - nobody has attacked you yet, nobody has a
+ * knockout - falls back to every live opponent rather than dropping the
+ * attack. Choosing a mode must never cost a player the garbage they earned.
  *
  * @param server_room Room to resolve within.
  * @param from_slot The 0-based slot acting.
@@ -1613,20 +1635,212 @@ static void	settle_garbage(t_server_room *server_room)
  */
 int	server_room_target_of(t_server_room *server_room, int from_slot)
 {
-	int	slot;
+	int	candidates[TD_MAX_GAMES];
+	int	count;
 
 	if (server_room == NULL || server_room->room == NULL
 		|| server_room_is_solo(server_room))
 		return (-1);
+	count = candidate_slots(server_room, from_slot, candidates);
+	if (count <= 0)
+		return (-1);
+	if (count == 1)
+		return (candidates[0]);
+	return (candidates[room_random(server_room) % (uint32_t)count]);
+}
+
+/**
+ * @brief Records which kind of rival this player wants their garbage to go to.
+ *
+ * The mode is remembered on the participant record and not on the seat, for
+ * the reason every match fact is: a promoted successor moves seats mid-match
+ * and would otherwise inherit the preference of whoever sat there before.
+ *
+ * @param server_room Room the player is playing in.
+ * @param cli The client declaring a mode.
+ * @param mode The mode declared.
+ * @return true when it was recorded, false when this client is not playing
+ *         in this room.
+ */
+bool	server_room_set_target(t_server_room *server_room, t_client *cli,
+			t_target_mode mode)
+{
+	t_participant	*participant;
+
+	if (server_room_game_of(server_room, cli) == NULL)
+		return (false);
+	participant = participant_open(server_room, cli->player_id);
+	if (participant == NULL)
+		return (false);
+	participant->target_mode = mode;
+	/*
+	 * The arena draws which card this player is aiming at, and a mode is a
+	 * change to that even though no board moved.
+	 */
+	server_room->arena_dirty = true;
+	return (true);
+}
+
+/**
+ * @brief Gathers the slots this sender's mode is willing to aim at.
+ *
+ * Two passes over the same live opponents: the mode's own set first, and
+ * every live opponent when that came back empty. The fallback is the whole of
+ * what "an empty candidate set falls back to Randoms" means, and writing it
+ * as a second pass rather than as a special case per mode is what keeps each
+ * mode's rule to one line.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the candidate slots.
+ * @return How many candidates there are.
+ */
+static int	candidate_slots(t_server_room *server_room, int from_slot, int *out)
+{
+	int	tallest;
+	int	count;
+	int	slot;
+
+	tallest = tallest_in_room(server_room);
+	count = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (slot != from_slot && server_room->games[slot].player_id != 0
+			&& server_room->games[slot].active
+			&& wanted_by_mode(server_room, from_slot, slot, tallest))
+			out[count++] = slot;
+		slot++;
+	}
+	if (count > 0)
+		return (count);
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (slot != from_slot && server_room->games[slot].player_id != 0
 			&& server_room->games[slot].active)
-			return (slot);
+			out[count++] = slot;
 		slot++;
 	}
-	return (-1);
+	return (count);
+}
+
+/**
+ * @brief Decides whether one live opponent is the kind this sender is after.
+ *
+ * The four modes of the Tetris 99 idiom, and each is one question about the
+ * candidate: are they closest to topping out, are they attacking me, have they
+ * buried anybody. Randoms asks nothing, which is why it is both the default
+ * and the fallback.
+ *
+ * KOs is a comparison rather than a property - "the tallest stack" means
+ * nothing without the rest of the room - so the room's tallest is measured
+ * once by the caller and passed in. A tie puts every one of them in the urn,
+ * which is the same rule the placings use and for the same reason: nothing
+ * observable separates them.
+ *
+ * @param server_room Room being resolved in.
+ * @param from_slot The 0-based slot acting.
+ * @param slot The 0-based candidate.
+ * @param tallest The tallest live stack in the room.
+ * @return true when the candidate belongs in the sender's set.
+ */
+static bool	wanted_by_mode(t_server_room *server_room, int from_slot, int slot,
+		int tallest)
+{
+	const t_participant	*sender;
+	const t_participant	*candidate;
+
+	sender = participant_of(server_room,
+			server_room->games[from_slot].player_id);
+	if (sender == NULL || sender->target_mode == TARGET_RANDOM)
+		return (true);
+	if (sender->target_mode == TARGET_KO)
+		return (stack_height(&server_room->games[slot]) >= tallest
+			&& tallest > 0);
+	if (sender->target_mode == TARGET_ATTACKERS)
+		return (is_attacking(sender, server_room->games[slot].player_id,
+				server_room->match_ms));
+	candidate = participant_of(server_room,
+			server_room->games[slot].player_id);
+	return (candidate != NULL && candidate->ko > 0);
+}
+
+/**
+ * @brief How tall one board's stack is.
+ *
+ * A height and not a row index, so that "taller" and "closer to topping out"
+ * are the same number going the same way.
+ *
+ * @param game The board to measure.
+ * @return The height in rows, 0 for an empty board.
+ */
+static int	stack_height(const t_game *game)
+{
+	int	row;
+	int	col;
+
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (board_get(&game->board, col, row).type != CELL_EMPTY)
+				return (BOARD_HEIGHT - row);
+			col++;
+		}
+		row++;
+	}
+	return (0);
+}
+
+/**
+ * @brief The tallest stack among the boards still being played.
+ *
+ * @param server_room Room to measure.
+ * @return The height in rows, 0 when nobody is playing.
+ */
+static int	tallest_in_room(const t_server_room *server_room)
+{
+	int	best;
+	int	slot;
+
+	best = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].active
+			&& stack_height(&server_room->games[slot]) > best)
+			best = stack_height(&server_room->games[slot]);
+		slot++;
+	}
+	return (best);
+}
+
+/**
+ * @brief Draws the next number from the room's own randomness.
+ *
+ * An xorshift, seeded once when the match is dealt, so a match replays the
+ * same way from the same seed and a targeting test can assert which rival a
+ * draw named. It lives here rather than in libtetrisbrain because the brain
+ * is pure by contract and what this draws is a fact about a room.
+ *
+ * @param server_room Room whose sequence is advanced.
+ * @return The next value.
+ */
+static uint32_t	room_random(t_server_room *server_room)
+{
+	uint32_t	x;
+
+	x = server_room->rng;
+	if (x == 0)
+		x = 0x9e3779b9u;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	server_room->rng = x;
+	return (x);
 }
 
 /**
@@ -2305,6 +2519,7 @@ static void	record_and_reset(t_server_room *server_room)
 	server_room->arena_dirty = false;
 	server_room->alive = 0;
 	server_room->match_ms = 0;
+	server_room->rng = 0;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	/*
@@ -2475,7 +2690,7 @@ static void	rehome_successor(t_server_room *server_room, t_client *leaver,
  * @param server_room Room to ask.
  * @return true when the room's mode is Battle Royale.
  */
-static bool	server_room_is_arena(const t_server_room *server_room)
+bool	server_room_is_arena(const t_server_room *server_room)
 {
 	return (server_room != NULL && server_room->room != NULL
 		&& server_room->room->mode == MODE_BATTLE_ROYALE);
@@ -2574,8 +2789,16 @@ static void	note_arena_change(t_server_room *server_room)
 static void	fill_arena(t_server_room *server_room, int subject,
 		t_body_state *snap)
 {
+	int	tallest;
 	int	slot;
 
+	/*
+	 * Measured once for the whole arena rather than once per card. It is what
+	 * the KOs mode compares against, and asking it per card would make one
+	 * snapshot walk every board as many times as the room has seats - for a
+	 * number that is the same for all of them.
+	 */
+	tallest = tallest_in_room(server_room);
 	snap->arena_present = true;
 	snap->arena_count = 0;
 	slot = 0;
@@ -2585,7 +2808,7 @@ static void	fill_arena(t_server_room *server_room, int subject,
 			&& snap->arena_count < BODY_ARENA_MAX)
 		{
 			fill_card(server_room, slot, subject,
-				&snap->arena[snap->arena_count]);
+				&snap->arena[snap->arena_count], tallest);
 			snap->arena_count++;
 		}
 		slot++;
@@ -2609,9 +2832,10 @@ static void	fill_arena(t_server_room *server_room, int subject,
  * and not "they are aiming at me" - an attack that has been sent and not yet
  * landed is already on the wire as your pending count.
  *
- * Targeted-by-you stays clear: a player does not choose a target yet, and the
- * codec has carried the flag since the section was written so that the room
- * can fill it in without the wire moving.
+ * Targeted-by-you is the other, and it is a set rather than a person: a mode
+ * narrows who this player's garbage can reach and the room draws from what is
+ * left, so what a card can honestly say is "you are aiming at this kind of
+ * rival" and never "at this one".
  *
  * @param server_room Room holding the seat.
  * @param slot The 0-based slot to project.
@@ -2619,7 +2843,7 @@ static void	fill_arena(t_server_room *server_room, int subject,
  * @param out Receives the card.
  */
 static void	fill_card(t_server_room *server_room, int slot, int subject,
-		t_body_arena_slot *out)
+		t_body_arena_slot *out, int tallest)
 {
 	const t_game		*game;
 	const t_participant	*participant;
@@ -2645,6 +2869,18 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
 			server_room->games[subject].player_id);
 	if (is_attacking(watcher, out->player_id, server_room->match_ms))
 		out->flags |= BODY_ARENA_ATTACKING_YOU;
+	/*
+	 * The rivals this player's mode has singled out - not the one their next
+	 * clear will hit, because there is no such person: the Target is drawn
+	 * per resolution and a flag naming one would be a promise the next draw
+	 * breaks. Under Randoms nothing is marked, which is the honest drawing of
+	 * "no preference": every live rival is eligible, and outlining all of
+	 * them says nothing.
+	 */
+	if (game->active && slot != subject && watcher != NULL
+		&& watcher->target_mode != TARGET_RANDOM
+		&& wanted_by_mode(server_room, subject, slot, tallest))
+		out->flags |= BODY_ARENA_TARGETED_BY_YOU;
 	if (game->active
 		|| server_room->arena_push % TETRISD_BR_ARENA_DEAD_EVERY == 0)
 	{

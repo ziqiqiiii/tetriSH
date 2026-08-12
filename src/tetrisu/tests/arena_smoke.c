@@ -37,6 +37,8 @@ static int	check_a_card_is_a_projection_of_a_board(t_net_client *bots,
 				t_mp_match_state *view);
 static int	check_a_dead_card_keeps_its_board(t_net_client *bots,
 				t_mp_match_state *view);
+static int	check_a_targeting_mode_reaches_the_server(t_net_client *bots,
+				t_mp_match_state *view);
 static int	stack_a_board(t_net_client *net, int pieces);
 static int	local_cells(const t_mp_match_state *view);
 static int	local_slot(const t_mp_match_state *view);
@@ -53,6 +55,8 @@ static int	start_room(t_net_client *net, const char *room);
 static int	lock_in(t_net_client *net, const char *room);
 static int	wait_playing(t_net_client *net, int tries);
 static int	pump_arena(t_net_client *net, t_mp_match_state *view, int tries);
+static int	pump_arena_after(t_net_client *net, t_mp_match_state *view,
+				uint64_t seq, int tries);
 static int	pump_frame(t_net_client *net, t_mp_match_state *view, int tries);
 static int	card_cells(const t_mp_match_state *view, int slot);
 static void	report(const char *name, int ok, int *failures);
@@ -94,6 +98,8 @@ int	main(void)
 		check_a_card_is_a_projection_of_a_board(bots, view), &failures);
 	report("a dead card keeps its board between masks",
 		check_a_dead_card_keeps_its_board(bots, view), &failures);
+	report("a targeting mode reaches the server",
+		check_a_targeting_mode_reaches_the_server(bots, view), &failures);
 	index = 0;
 	while (index < ARENA_SEATS)
 		net_disconnect(&bots[index++]);
@@ -449,6 +455,51 @@ static int	stack_a_board(t_net_client *net, int pieces)
 	return (1);
 }
 
+/*
+** W/A/S/D was a mode switch the game did not have: it moved a diamond on the
+** screen, wrote a banner, and told nobody. Now it is a request, and what the
+** server does with it comes back in the arena - the rivals a mode singles out
+** arrive marked, so a mode that took is visible rather than asserted.
+**
+** KOs singles out the tallest stack, and one client has one: the client that
+** stacked a board two checks ago. So exactly its card comes back marked, and
+** the client's own card never does - you are not a rival of yours.
+*/
+static int	check_a_targeting_mode_reaches_the_server(t_net_client *bots,
+		t_mp_match_state *view)
+{
+	t_net_result	result;
+	int				marked;
+	int				slot;
+
+	if (net_match_set_target(&bots[1], TARGET_KO, &result) != 0
+		|| result.status != 200)
+		return (printf("    the mode was answered %d\n", result.status), 0);
+	/*
+	 * Newer than the request, not merely newer than the last frame applied.
+	 * A client files every snapshot it reads while it waits for a reply, so
+	 * by the time the 200 arrives it is already holding a frame that predates
+	 * the mode - and that frame is fresh by every test except this one.
+	 */
+	if (!pump_arena_after(&bots[1], &view[1], bots[1].state_snapshot.seq, 400))
+		return (0);
+	marked = 0;
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS)
+	{
+		if (view[1].opponents[slot].targeted_by_local)
+		{
+			if (view[1].opponents[slot].local)
+				return (printf("    aiming at myself\n"), 0);
+			marked++;
+		}
+		slot++;
+	}
+	if (marked != 1)
+		return (printf("    %d cards marked, expected 1\n", marked), 0);
+	return (1);
+}
+
 /**
  * @brief Finds the seat this client's own card sits in.
  *
@@ -651,6 +702,38 @@ static int	wait_playing(t_net_client *net, int tries)
 			&& net->state_snapshot.phase != BODY_PHASE_COUNTDOWN)
 			return (1);
 		usleep(5000);
+		tries--;
+	}
+	return (0);
+}
+
+/**
+ * @brief Pumps until an arena newer than a given snapshot has been applied.
+ *
+ * @param net The connection.
+ * @param view The match model to write.
+ * @param seq The snapshot number the arena has to be newer than.
+ * @param tries How many polls to spend.
+ * @return 1 when one was applied, 0 otherwise.
+ */
+static int	pump_arena_after(t_net_client *net, t_mp_match_state *view,
+		uint64_t seq, int tries)
+{
+	while (tries > 0)
+	{
+		if (net_pump(net) < 0)
+			return (0);
+		if (net_solo_pending(net))
+		{
+			if (net->state_snapshot.seq > seq
+				&& net->state_snapshot.arena_present)
+			{
+				net_match_apply(net, view);
+				return (1);
+			}
+			net_match_apply(net, view);
+		}
+		usleep(3000);
 		tries--;
 	}
 	return (0);

@@ -417,7 +417,7 @@ static void	draw_targeting(struct ncplane *plane,
 {
 	const char	*labels[4] = {"W KOs", "A RANDOMS", "S ATTACKERS", "D BADGES"};
 	t_target_mode	modes[4] = {TARGET_KO, TARGET_RANDOM,
-		TARGET_ATTACKERS, TARGET_TOP_SCORE};
+		TARGET_ATTACKERS, TARGET_BADGES};
 	int	positions[4][2];
 	int	index;
 

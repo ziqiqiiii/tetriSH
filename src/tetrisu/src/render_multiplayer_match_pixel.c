@@ -2929,7 +2929,7 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 {
 	const char *labels[4] = {"W KOs", "A RANDOMS", "S ATTACKERS", "D BADGES"};
 	t_target_mode modes[4] = {TARGET_KO, TARGET_RANDOM,
-		TARGET_ATTACKERS, TARGET_TOP_SCORE};
+		TARGET_ATTACKERS, TARGET_BADGES};
 	t_mp_rect box;
 	int box_width;
 	int index;
