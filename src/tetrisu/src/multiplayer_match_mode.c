@@ -78,7 +78,8 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 	load_match_identity(provider, &profile, &characters);
 	mp_match_state_init(&state, mode, room_id, &profile, &characters,
 		match_seed());
-	mp_match_apply_room(&state, room, preview_player_count(mode));
+	mp_match_apply_room(&state, room, preview_player_count(mode),
+		net == NULL);
 	match_authority_open(&authority, net, &state);
 	if (match_authority_is_online(&authority))
 	{

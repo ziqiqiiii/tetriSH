@@ -62,7 +62,7 @@ void	mp_match_state_init(t_mp_match_state *state, t_app_game_mode mode,
 	solo_game_init(&state->opponent_game, seed ^ 0x9e3779b9u);
 	seed_preview_stack(&state->opponent_game);
 	mp_match_apply_room(state, NULL,
-		state->mode == APP_GAME_MODE_BATTLE_ROYALE ? 12 : 2);
+		state->mode == APP_GAME_MODE_BATTLE_ROYALE ? 12 : 2, true);
 }
 
 /**
@@ -73,7 +73,7 @@ void	mp_match_state_init(t_mp_match_state *state, t_app_game_mode mode,
  * live rooms always use their authoritative player_count.
  */
 void	mp_match_apply_room(t_mp_match_state *state,
-	const t_app_room_view_model *room, int preview_players)
+	const t_app_room_view_model *room, int preview_players, bool seed_boards)
 {
 	int	player_count;
 	int	room_index;
@@ -125,8 +125,18 @@ void	mp_match_apply_room(t_mp_match_state *state,
 			snprintf(state->opponents[opponent_index].name,
 				sizeof(state->opponents[opponent_index].name), "PLAYER %02d",
 				opponent_index + 2);
-		seed_opponent_board(&state->opponents[opponent_index].board,
-			opponent_index + 2);
+		/*
+		 * A fixture board, and only when nothing real is coming. Online these
+		 * were written and then overwritten by the first arena push, so a
+		 * Battle Royale opened on a screen full of invented stacks that
+		 * flicked over to the true ones a moment later - and any seat the
+		 * server had not yet described kept its invention for the whole
+		 * match. The preview still seeds, because a screen with no server
+		 * behind it is the one thing the fixture is for.
+		 */
+		if (seed_boards)
+			seed_opponent_board(&state->opponents[opponent_index].board,
+				opponent_index + 2);
 		room_index++;
 		opponent_index++;
 	}

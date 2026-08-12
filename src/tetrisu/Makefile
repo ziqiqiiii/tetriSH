@@ -276,6 +276,18 @@ $(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
+# Four clients in one Battle Royale. Separate from match_smoke because what it
+# proves is a different channel: Double's rival rides the opponents section at
+# full fidelity, and ninety-eight rivals cannot ride it at all - they ride an
+# arena of thumbnails on a clock of its own, and the things that have to be
+# true of that are about the roster, the filing and the cadence rather than
+# about one board.
+$(TEST_BIN_DIR)/arena_smoke: $(TESTS_DIR)/arena_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
 # The load generator. Not a test and deliberately not in `integration`: it
 # reports what the server cost rather than whether it was right, and a fleet
 # of fifty is far too slow and far too machine-dependent to sit in `make test`.
@@ -305,7 +317,7 @@ unit: $(UNIT_BINS)
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
 			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
-			 $(TEST_BIN_DIR)/match_smoke
+			 $(TEST_BIN_DIR)/match_smoke $(TEST_BIN_DIR)/arena_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 

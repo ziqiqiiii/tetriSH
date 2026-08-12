@@ -31,6 +31,12 @@ static void	apply_opponent_game(t_solo_game *game,
 				const t_body_opponent *opponent);
 static void	apply_opponent_card(t_mp_match_state *state, int index,
 				const t_body_opponent *opponent);
+static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
+				uint64_t local);
+static void	apply_arena_card(t_mp_match_state *state,
+				const t_body_arena_slot *card, uint64_t local);
+static void	apply_arena_mask(t_board *board,
+				const t_body_arena_slot *card);
 
 /**
  * @brief Remembers which room's game this client is about to render.
@@ -90,6 +96,19 @@ bool	net_match_apply(t_net_client *net, t_mp_match_state *state)
 	state->incoming_garbage = snap->pending;
 	apply_countdown(state, snap);
 	apply_opponents(state, snap);
+	apply_arena(state, snap, net->player_id);
+	/*
+	 * The room's own head count, straight from the frame. It used to be
+	 * derived by counting the opponents the frame carried, which in a Battle
+	 * Royale is at most one - so a forty-player match read ALIVE 2/40. It
+	 * cannot be counted from the arena either, because most frames carry no
+	 * arena at all and the number would drop to zero between pushes.
+	 */
+	if (snap->players > 0)
+	{
+		state->players_total = snap->players;
+		state->players_alive = snap->alive;
+	}
 	apply_result(state, snap);
 	net->applied_seq = snap->seq;
 	return (true);
@@ -227,7 +246,17 @@ static void	apply_opponents(t_mp_match_state *state, const t_body_state *snap)
 {
 	size_t	index;
 
-	memset(state->opponents, 0, sizeof(state->opponents));
+	/*
+	 * Double's cards are cleared and rewritten from every frame, because every
+	 * Double frame carries the rival. A Battle Royale's are not: its cards come
+	 * from the arena, which rides a slower clock, so most frames say nothing
+	 * about them - and clearing on those would blank the whole screen between
+	 * pushes, which is the exact failure the codec's `arena absent` exists to
+	 * avoid. There the clearing belongs to apply_arena, which does it only when
+	 * a push has arrived to replace them.
+	 */
+	if (state->mode != APP_GAME_MODE_BATTLE_ROYALE)
+		memset(state->opponents, 0, sizeof(state->opponents));
 	if (snap->opponent_count == 0)
 	{
 		solo_game_init(&state->opponent_game, 0);
@@ -343,6 +372,117 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
 			cell.type = (t_cell_type)opponent->cells[row][col].type;
 			cell.color = opponent->cells[row][col].color;
 			board_set(&state->opponents[index].board, col, row, cell);
+			col++;
+		}
+		row++;
+	}
+}
+
+/**
+ * @brief Replaces the arena from a push, or leaves it alone when there is none.
+ *
+ * A push is the complete roster, so the cards are cleared and rewritten: a seat
+ * the push does not mention is a seat nobody is in, and that is the only way a
+ * player who left stops being drawn. An eliminated player is still in the push,
+ * with their alive bit clear - absence means "gone from the room", never
+ * "knocked out".
+ *
+ * A frame carrying no arena is not an empty arena. Most frames carry none,
+ * because the arena rides a slower clock than the board does, and clearing on
+ * those would blink the whole screen between pushes. `arena_present` is the
+ * difference and it is why the codec sends `absent` rather than a count of 0.
+ *
+ * @param state Match model to write.
+ * @param snap Snapshot that may carry an arena.
+ * @param local This client's player id, so its own card can be marked.
+ */
+static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
+		uint64_t local)
+{
+	size_t	index;
+
+	if (!snap->arena_present)
+		return ;
+	memset(state->opponents, 0, sizeof(state->opponents));
+	index = 0;
+	while (index < snap->arena_count && index < BODY_ARENA_MAX)
+	{
+		apply_arena_card(state, &snap->arena[index], local);
+		index++;
+	}
+}
+
+/**
+ * @brief Files one card under the seat it belongs to.
+ *
+ * The slot is the index, not the order the card arrived in. Two things depend
+ * on it: a card keeps its place on screen across pushes, so nobody slides
+ * sideways when a player above them is knocked out; and the slot is what every
+ * later feature names - a target, an attacker, a line on the knockout feed.
+ *
+ * @param state Match model holding the cards.
+ * @param card The card to file.
+ * @param local The player id this frame was built for.
+ */
+static void	apply_arena_card(t_mp_match_state *state,
+		const t_body_arena_slot *card, uint64_t local)
+{
+	int	slot;
+
+	slot = card->slot;
+	if (slot < 0 || slot >= APP_ROOM_MAX_PLAYERS)
+		return ;
+	state->opponents[slot].present = true;
+	state->opponents[slot].alive = (card->flags & BODY_ARENA_ALIVE) != 0;
+	state->opponents[slot].targeting_local
+		= (card->flags & BODY_ARENA_ATTACKING_YOU) != 0;
+	state->opponents[slot].targeted_by_local
+		= (card->flags & BODY_ARENA_TARGETED_BY_YOU) != 0;
+	state->opponents[slot].local = (local != 0 && card->player_id == local);
+	state->opponents[slot].garbage_pending = card->pending;
+	state->opponents[slot].ko = card->ko;
+	state->opponents[slot].rank = card->rank;
+	state->opponents[slot].lines = card->lines;
+	snprintf(state->opponents[slot].name,
+		sizeof(state->opponents[slot].name), "P%d", card->slot + 1);
+	/*
+	 * A card without a mask is a dead board that has not changed since the
+	 * last one carrying one, so the board already held is still correct and is
+	 * deliberately left standing.
+	 */
+	if (card->mask_valid)
+		apply_arena_mask(&state->opponents[slot].board, card);
+}
+
+/**
+ * @brief Unpacks a card's occupancy mask onto a board.
+ *
+ * Every filled cell gets the same colour, because that is all the wire carries:
+ * a card is a few terminal cells wide, so the colour and the piece type a full
+ * board spends two nibbles a cell on are information this can neither show nor
+ * afford.
+ *
+ * @param board Board to overwrite.
+ * @param card The card to read.
+ */
+static void	apply_arena_mask(t_board *board, const t_body_arena_slot *card)
+{
+	t_cell	cell;
+	int		row;
+	int		col;
+
+	board_init(board);
+	memset(&cell, 0, sizeof(cell));
+	cell.type = CELL_FILLED;
+	cell.color = MP_ARENA_CARD_COLOR;
+	row = 0;
+	while (row < BOARD_HEIGHT && row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH && col < BODY_BOARD_COLS)
+		{
+			if ((card->mask[row][col / 8] >> (col % 8)) & 1u)
+				board_set(board, col, row, cell);
 			col++;
 		}
 		row++;

@@ -43,7 +43,8 @@ static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
 static void	draw_targeting(struct ncplane *plane,
 				const t_mp_match_state *state, const t_mp_rect *rect);
 static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
-				const t_mp_match_state *state, int first_index, int count);
+				const t_mp_match_state *state, const int *slots, int count);
+static int	collect_cards(const t_mp_match_state *state, int *slots, int cap);
 static void	draw_abilities(struct ncplane *plane, const t_mp_rect *rect,
 				const t_mp_match_state *state, bool compact);
 static void	draw_result(struct ncplane *plane,
@@ -311,6 +312,7 @@ static void	draw_battle_royale(struct ncplane *plane,
 	const t_mp_match_state *state, const t_mp_match_layout *layout)
 {
 	char	line[APP_TEXT_MAX * 2];
+	int		cards[APP_ROOM_MAX_PLAYERS];
 	int		opponents;
 	int		left_count;
 
@@ -323,11 +325,18 @@ static void	draw_battle_royale(struct ncplane *plane,
 	put_centered(plane, 1, 0, layout->cols, line, true);
 	draw_targeting(plane, state, &layout->targeting);
 	draw_board(plane, &layout->local_board, &state->local_game, "YOUR BOARD");
-	opponents = state->players_total - 1;
+	/*
+	 * The cards are filed by seat, so the array is sparse: a seat nobody is in
+	 * is a hole in it, not a card at the end. Walking it by position would
+	 * draw those holes as empty boxes and stop before the last rival in a room
+	 * that has ever had somebody leave, so the occupied seats are gathered
+	 * first and the grid is laid out over that.
+	 */
+	opponents = collect_cards(state, cards, APP_ROOM_MAX_PLAYERS);
 	left_count = (opponents + 1) / 2;
-	draw_mini_arena(plane, &layout->left_opponents, state, 0, left_count);
-	draw_mini_arena(plane, &layout->right_opponents, state, left_count,
-		opponents - left_count);
+	draw_mini_arena(plane, &layout->left_opponents, state, cards, left_count);
+	draw_mini_arena(plane, &layout->right_opponents, state,
+		cards + left_count, opponents - left_count);
 	if (state->incoming_attackers > 0)
 	{
 		set_fg(plane, MATCH_RED_R, MATCH_RED_G, MATCH_RED_B);
@@ -437,7 +446,7 @@ static void	draw_targeting(struct ncplane *plane,
 }
 
 static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
-	const t_mp_match_state *state, int first_index, int count)
+	const t_mp_match_state *state, const int *slots, int count)
 {
 	const struct s_mp_opponent_snapshot	*opponent;
 	t_cell	board_cell;
@@ -464,10 +473,10 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 	if (cell_width < 5 || cell_height < 5)
 		return ;
 	index = 0;
-	while (index < count && first_index + index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < count)
 	{
-		opponent = &state->opponents[first_index + index];
-		player = first_index + index + 2;
+		opponent = &state->opponents[slots[index]];
+		player = slots[index] + 1;
 		x = rect->x + (index % grid_cols) * cell_width;
 		y = rect->y + (index / grid_cols) * cell_height;
 		cell = (t_mp_rect){x, y, cell_width - 1, cell_height - 1};
@@ -913,4 +922,34 @@ static void	effect_line(const t_solo_effects *effects, char *out, size_t size)
 		snprintf(out, size, "PALS (%d)", effects->pals);
 	else if (effects->mirror > 0)
 		snprintf(out, size, "MIRROR READY");
+}
+
+/**
+ * @brief Gathers the seats that actually hold a card, in seat order.
+ *
+ * The arena is indexed by seat so that a card keeps its place on screen when
+ * somebody above it is knocked out. That makes the array sparse, and a grid is
+ * not: it wants n cards to lay out in n cells. This is the one place the two
+ * meet, and doing it here rather than in the model is what lets the model stay
+ * the server's picture of the room.
+ *
+ * @param state Match model holding the cards.
+ * @param slots Receives the occupied seat indices.
+ * @param cap How many it can hold.
+ * @return How many seats were gathered.
+ */
+static int	collect_cards(const t_mp_match_state *state, int *slots, int cap)
+{
+	int	count;
+	int	slot;
+
+	count = 0;
+	slot = 0;
+	while (slot < APP_ROOM_MAX_PLAYERS && count < cap)
+	{
+		if (state->opponents[slot].present && !state->opponents[slot].local)
+			slots[count++] = slot;
+		slot++;
+	}
+	return (count);
 }

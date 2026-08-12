@@ -315,7 +315,7 @@ static void	test_room_roster_controls_opponent_count(void)
 		sizeof(room.players[room.local_slot].username), "%s", profile.username);
 	mp_match_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE, "arena",
 		&profile, &characters, 9u);
-	mp_match_apply_room(&state, &room, 99);
+	mp_match_apply_room(&state, &room, 99, true);
 	assert(state.players_total == 4);
 	present = 0;
 	index = 0;
@@ -327,7 +327,7 @@ static void	test_room_roster_controls_opponent_count(void)
 	assert(present == 3);
 	assert(strcmp(state.opponents[0].name, "roster-0") == 0);
 	assert(strcmp(state.opponents[1].name, "roster-2") == 0);
-	mp_match_apply_room(&state, NULL, 99);
+	mp_match_apply_room(&state, NULL, 99, true);
 	assert(state.players_total == 99);
 	assert(state.opponents[97].present);
 	printf("PASS test_room_roster_controls_opponent_count\n");

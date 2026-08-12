@@ -723,7 +723,13 @@
 # define MP_MATCH_FRAME_MS	16
 # define MP_MATCH_MAX_CATCHUP_MS	1000
 # define MP_MATCH_INPUT_BATCH_MAX	64
-# define MP_BR_OPPONENT_COUNT	98
+/*
+** The one colour every arena card is drawn in. The wire carries a bit per cell
+** and nothing else, so a thumbnail has no per-cell colour to draw - and at the
+** size a card is rendered it could not show one. What a card says is the shape
+** of the stack and how high it has got.
+*/
+# define MP_ARENA_CARD_COLOR	7
 # define MP_MATCH_STATUS_MAX	96
 /* " SELECTED - AWAITING SERVER TARGET AUTHORITY" - the fixed half of the
 ** ability banner, so the name in front of it can be cut to fit */
@@ -2592,15 +2598,43 @@ typedef struct s_mp_match_state
 	*/
 	uint32_t		opponent_character;
 	int				hovered_ability;
+	/*
+	** The arena, indexed by the seat each card sits in rather than by where it
+	** appeared in the frame.
+	**
+	** A push is the whole roster, so the array is cleared and rewritten from
+	** each one - `present` means "somebody is in this seat now", and a seat the
+	** push does not mention is a seat nobody is in. Indexing by slot is what
+	** keeps a card in the same place on screen between pushes: filed by
+	** position in the frame, every rival above a knocked-out player would slide
+	** one square left the moment that player was removed from the roster, and
+	** the whole arena would shuffle every few seconds.
+	**
+	** It is sized for every seat and not for every seat but one, because the
+	** server's arena includes the recipient's own card - `local` is which one
+	** that is. Drawing your own thumbnail among the others is what makes the
+	** arena a picture of the room rather than a picture of everyone else.
+	**
+	** The board holds only what a card can show: the mask on the wire is one
+	** bit per cell, so every filled cell arrives as the same colour. That is
+	** not a loss - a thumbnail a few terminal cells wide could not draw a
+	** tetromino's colour, which is why the wire does not spend sixteen times
+	** the bytes carrying it.
+	*/
 	struct s_mp_opponent_snapshot
 	{
 		t_board		board;
 		bool		present;
 		bool		alive;
+		bool		local;
 		bool		targeting_local;
+		bool		targeted_by_local;
 		int			garbage_pending;
+		int			ko;
+		int			rank;
+		int			lines;
 		char		name[APP_TEXT_MAX];
-	} opponents[APP_ROOM_MAX_PLAYERS - 1];
+	} opponents[APP_ROOM_MAX_PLAYERS];
 	char				opponent_name[APP_TEXT_MAX];
 	char				room_id[APP_TEXT_MAX];
 	char				status[MP_MATCH_STATUS_MAX];
@@ -3336,7 +3370,8 @@ bool			mp_match_movement_event(const t_mp_match_state *state,
 					const t_solo_handling_config *config, uint32_t key,
 					ncintype_e event_type, t_solo_action *action);
 void			mp_match_apply_room(t_mp_match_state *state,
-					const t_app_room_view_model *room, int preview_players);
+					const t_app_room_view_model *room, int preview_players,
+					bool seed_boards);
 
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,
