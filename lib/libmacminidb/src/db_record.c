@@ -29,6 +29,15 @@
  * at the old key, stamps the new score, and re-inserts, so the search key still
  * matches on unlink.
  *
+ * A reserved account skips it, and so keeps a leaderboard_score of 0 for its
+ * whole life. That is not a side effect to be tidied up later: stamping the
+ * score is what skiplist_update does *because* the score is the list's key, so
+ * a bot with a best game recorded and no place on the board would be an
+ * account whose ranking field means nothing. It has no best game, because it
+ * is not ranked. Its wallet, lifetime points, games played and games won are
+ * all kept as any player's, since those answer questions about the account
+ * rather than about the board.
+ *
  * @param db The handle.
  * @param id The player's id.
  * @param game_score This game's final score; the best of them is ranked.
@@ -49,7 +58,8 @@ t_db_result	db_record_game(t_db *db, t_player_id id, int64_t game_score, int64_t
 		r = DB_NOT_FOUND;
 	else
 	{
-		if (game_score > p->leaderboard_score)
+		if (game_score > p->leaderboard_score
+			&& !db_username_is_reserved(p->username))
 			skiplist_update(db->board, p, game_score);
 		if (game_score > 0)
 			p->lifetime_points += game_score;

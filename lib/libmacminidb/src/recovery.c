@@ -107,10 +107,18 @@ static void	replay_cb(const t_player *p, void *ctx)
  * skip list shares those pointers by reference (it never frees them). Called
  * once per live player via hashmap_foreach.
  *
+ * A reserved account is recovered like any other and then left out of the
+ * board, because the log is replayed rather than re-validated: it records what
+ * was written, and what was written for a bot was a player who was never
+ * ranked. Putting it back here would rank it on the first restart after its
+ * first game - which is the sort of bug that only appears in the morning.
+ *
  * @param p The player to index, owned by the hash map.
  * @param ctx The t_skiplist to insert into.
  */
 static void	seed_skiplist(t_player *p, void *ctx)
 {
+	if (db_username_is_reserved(p->username))
+		return ;
 	skiplist_insert((t_skiplist *)ctx, p);
 }
