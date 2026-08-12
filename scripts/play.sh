@@ -4,21 +4,36 @@
 #   bash scripts/play.sh            set everything up, then play
 #   bash scripts/play.sh --help     every flag
 #
-# The whole reason this script exists is that tetriSH cannot be run from one
-# place on macOS. tetrisd's reactor is epoll and timerfd and libcoreipc's
-# message queues are POSIX mqueue, none of which Darwin has, so the server does
-# not compile there at all - while tetrisu wants the host's own terminal,
-# because the board is drawn with Kitty-protocol bitmaps that a container has no
-# way to hand to a Mac. So the two halves live in different places, and this
-# walks the path between them: engine, certificates, image, server, client.
+# Two ways to get a client, and the only difference is where it is built:
 #
-# On Linux both halves are native and there is no container in the picture; the
-# script runs the same five steps against `make stack` instead.
+#   default      on this host - install the dependencies, compile them, run
+#                the binary. `make play`.
+#   --container  in a container - the image carries the toolchain, notcurses
+#                and every library, so the host installs none of them.
+#                `make play-image`.
 #
-# It is deliberately re-runnable. Every step checks before it acts - an image
-# that exists is not rebuilt, a valid certificate is not reissued, a server
-# already listening is left alone - so the second run is fast and the tenth is
+# Both end the same way: a kitty window with tetrisu in it. The container does
+# not draw - tetrisu's board is Kitty-graphics-protocol escape sequences, which
+# are just bytes on the pty `docker run -t` allocates, so the host terminal
+# renders them either way. That is what makes one Linux image serve a Linux,
+# macOS and WSL client alike, and why the container path works on a Mac, which
+# cannot build the server at all: tetrisd's reactor is epoll and timerfd and
+# libcoreipc's message queues are POSIX mqueue, none of which Darwin has.
+#
+# The path it walks: dependencies, terminal, (engine), certificates, server,
+# client, launch. The cheap checks come first on purpose - a missing toolchain,
+# no terminal, or an engine needing a re-login all refuse the run, and none is
+# worth discovering after a long build.
+#
+# It is deliberately re-runnable - every step checks before it acts, so a valid
+# certificate is not reissued, a server already listening is left alone, and an
+# image already built is not rebuilt. The second run is fast and the tenth is
 # the normal way to restart the client.
+#
+# The three pieces have one owner each:
+#   scripts/container.sh  the engine, the image, and how the client is run
+#   scripts/terminal.sh   which terminal draws, and whether one can be opened
+#   this script           the order they happen in
 
 set -uo pipefail
 
@@ -31,23 +46,38 @@ BLU=$(printf '\033[1;34m'); RST=$(printf '\033[0m')
 
 UNAME_S="$(uname -s)"
 
-# The image tag and container name are the Makefile's to choose. It passes them
-# in from the `play` target, so overriding DOCKER_TAG there does not leave this
-# script inspecting an image nobody built; the defaults are for a direct run.
-IMAGE="${DOCKER_REF:-tetrish:dev}"
-SERVER="${DOCKER_SERVER:-tetrish-server}"
+# Declared here and exported so container.sh and terminal.sh inherit the same
+# policy this script was invoked with, rather than each defaulting on its own.
+AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
+export AUTO_INSTALL_DEPS
 
-ASSUME_YES=0
-DO_REBUILD=0
 WANT_SERVER=1
 WANT_CLIENT=1
 DO_STOP=0
+DO_REBUILD=0
+# Built on this host unless asked otherwise. The container is the opt-in,
+# because the machine that has just run `make` already has everything the
+# native path needs and pulling an image would be the slower answer to a
+# question already answered.
+NATIVE=1
+CLIENT_ONLY=0
+WANT_LOCAL=0
 PORT=""
-# Where the server is. Empty means here, which is the only case with a server to
-# start; --host names somebody else's, and then this script has a client to
-# launch and nothing to bring up.
+# Where the server is. Empty means "not asked for", and that now resolves to the
+# shared server rather than to this machine: playing together is the common
+# case, and a bare `make play` that quietly served itself was a game nobody else
+# could see. --host names a different one, --local brings it back here.
 HOST=""
 LOCAL_HOST="127.0.0.1"
+
+# The shared tetriSH server, and the CA question rides on it: it is signed by
+# the committed certs/demo-ca.crt, which is exactly what REMOTE=1 selects below.
+#
+# The address rather than tetrish.dev, because this is the one string in the
+# path that cannot fall back - an unresolvable name fails inside the client's
+# connect as a timeout, several screens away from anything naming DNS. Override
+# either way with TETRISH_HOST=tetrish.dev or `make play HOST=...`.
+DEFAULT_HOST="${TETRISH_HOST:-159.65.11.120}"
 
 say()  { printf '%b\n' "${BLU}==>${RST} ${BOLD}$*${RST}"; }
 ok()   { printf '%b\n' "    ${GRN}$*${RST}"; }
@@ -58,19 +88,32 @@ usage() {
     cat <<'EOF'
 Usage: bash scripts/play.sh [options]
 
-  --host ADDR     play on somebody else's server (e.g. --host 10.27.229.33);
+  --host ADDR     play on a different server (e.g. --host 10.27.229.33);
                   nothing is started locally and the demo CA is used
+  --local         play on a server on this machine, starting one if needed,
+                  verified against this machine's own certs/ca.crt
   --port N        port to serve and connect on (default: TETRISD_PORT in .tetrishrc)
-  --server-only   bring the server up and stop, without launching a client
-  --client-only   launch a client against a server that is already up
-  --rebuild       rebuild the container image even if one exists
+  --server-only   bring a local server up and stop, without launching a client
+  --client-only   launch a client against a local server that is already up
+  --container     build and run the client in a container instead of on this
+                  host; the image carries the toolchain, so nothing is
+                  installed here (this is what `make play-image` runs)
+  --native        build and run the client on this host (the default)
+  --rebuild       rebuild the client image first; --container only
   --stop          stop the server and exit
-  -y, --yes       install anything missing without asking
   -h, --help      this text
 
-With no --host a server is started here and the client connects to it; the
-server is left running when the client exits, so the next run starts a client
-immediately. `bash scripts/play.sh --stop` takes it down.
+With neither --host nor --local the client plays on the shared tetriSH server
+and nothing is started here. --local is the old behaviour: a server is started
+on this machine and left running when the client exits, so the next run starts a
+client immediately; `bash scripts/play.sh --stop` takes it down.
+
+Environment:
+  TETRISH_HOST      the shared server used when no --host is given
+  TETRISU_TERMINAL  force the terminal: kitty, wezterm, or none (run in place)
+  TETRISU_IMAGE     client image tag (default tetrish/tetrisu)
+  TETRISU_RENDERER  pin the renderer tier: cell, stationary, pixel
+  AUTO_INSTALL_DEPS 0 to check for missing dependencies without installing
 EOF
 }
 
@@ -78,13 +121,16 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --host)        HOST="${2:-}"; shift 2 || die "--host needs an address" ;;
         --host=*)      HOST="${1#*=}"; shift ;;
+        --local)       WANT_LOCAL=1; shift ;;
         --port)        PORT="${2:-}"; shift 2 || die "--port needs a number" ;;
         --port=*)      PORT="${1#*=}"; shift ;;
         --server-only) WANT_CLIENT=0; shift ;;
-        --client-only) WANT_SERVER=0; shift ;;
+        --client-only) WANT_SERVER=0; CLIENT_ONLY=1; shift ;;
         --rebuild)     DO_REBUILD=1; shift ;;
+        --native)      NATIVE=1; shift ;;
+        --container)   NATIVE=0; shift ;;
+        --image)       NATIVE=0; shift ;;
         --stop)        DO_STOP=1; shift ;;
-        -y|--yes)      ASSUME_YES=1; shift ;;
         -h|--help)     usage; exit 0 ;;
         *)             usage >&2; die "unknown option: $1" ;;
     esac
@@ -94,41 +140,53 @@ if [ "$WANT_SERVER" = "0" ] && [ "$WANT_CLIENT" = "0" ]; then
     die "--server-only and --client-only ask for opposite halves; pick one"
 fi
 
-# A named host is somebody else's machine, so there is nothing here to start,
-# stop or build an image for. Rather than quietly ignoring the flags that say
-# otherwise, refuse them: --server-only with a remote host asks this script to
-# start a server it has no reach into, and would otherwise appear to succeed.
+# Three ways to name the server and only one of them has anything to start here.
+#
+# A named host is another machine, so there is nothing local to start or stop.
+# Rather than quietly ignoring the flags that say otherwise, refuse them:
+# --server-only with a remote host asks this script to start a server it has no
+# reach into, and would otherwise appear to succeed.
+#
+# The three flags that are *about* a server on this machine - start one, stop
+# one, connect to one already up - name it by saying so, so they select local
+# rather than colliding with a default that points away from here. That keeps
+# `--stop` meaning what it always meant after the default moved off this host.
 if [ -n "$HOST" ]; then
+    [ "$WANT_LOCAL" = "1" ] \
+        && die "--host and --local name different servers; pick one"
     [ "$WANT_CLIENT" = "0" ] \
         && die "--host names a server elsewhere; --server-only cannot start one there"
     [ "$DO_STOP" = "1" ] \
         && die "--host names a server elsewhere; --stop only reaches the local one"
-    [ "$DO_REBUILD" = "1" ] \
-        && die "--host needs no image; --rebuild only applies to a server started here"
     WANT_SERVER=0
     REMOTE=1
-else
+elif [ "$WANT_LOCAL" = "1" ] || [ "$DO_STOP" = "1" ] \
+     || [ "$WANT_CLIENT" = "0" ] || [ "$CLIENT_ONLY" = "1" ]; then
     HOST="$LOCAL_HOST"
     REMOTE=0
+else
+    HOST="$DEFAULT_HOST"
+    WANT_SERVER=0
+    REMOTE=1
 fi
 
-# Asks, unless --yes was given or nothing is attached to answer. A script that
-# assumed consent when it could not ask would install a virtual machine inside
-# somebody's CI run.
-confirm() {
-    [ "$ASSUME_YES" = "1" ] && return 0
-    if [ ! -t 0 ]; then
-        warn "not a terminal, so nothing will be installed; re-run with --yes"
-        return 1
+# macOS cannot run the server at all, so there is never a local one to start
+# there. The client half is unaffected - it runs in the container like anywhere
+# else - so this drops the server steps rather than refusing the command, which
+# is what makes a bare `make play` work on a Mac.
+if [ "$UNAME_S" = "Darwin" ] && [ "$WANT_SERVER" = "1" ]; then
+    if [ "$WANT_CLIENT" = "0" ]; then
+        die "tetrisd cannot be built or run on macOS (needs epoll, timerfd, POSIX mqueue)"
     fi
-    printf '%b' "    ${BOLD}$1${RST} [y/N] "
-    read -r reply
-    case "$reply" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
-}
+    warn "macOS cannot run tetrisd, so no server is started here."
+    warn "Type the server's address into ${BOLD}SERVER ID${RST} on the sign-in screen,"
+    warn "or pass ${BOLD}--host ADDR${RST} to check it first."
+    WANT_SERVER=0
+fi
 
-# The port is one number shared by four places - the server's listener, the
-# published container port, the client's dial and .tetrishrc - so it is read
-# from .tetrishrc once and passed everywhere from here.
+# The port is one number shared by three places - the server's listener, the
+# client's dial and .tetrishrc - so it is read from .tetrishrc once and passed
+# everywhere from here.
 resolve_port() {
     [ -n "$PORT" ] && return 0
     PORT=$(sed -n \
@@ -139,9 +197,9 @@ resolve_port() {
 }
 
 # Is anything accepting connections there? nc where it exists, and bash's own
-# /dev/tcp otherwise; this is the same check for a container-published port, a
-# native daemon and a server across the room, which is the point - it tests the
-# path the client will take, not whether a process exists.
+# /dev/tcp otherwise; this is the same check for a native daemon and a server
+# across the room, which is the point - it tests the path the client will
+# take, not whether a process exists.
 #
 # nc needs an explicit connect timeout, and which flag supplies one is not the
 # same everywhere. macOS spells it -G (its -w bounds idle reads and was measured
@@ -186,87 +244,12 @@ wait_for_port() {
 }
 
 ################################################################################
-#                            step 1 - the engine                               #
-################################################################################
-
-docker_ready() { docker info >/dev/null 2>&1; }
-
-wait_for_docker() {
-    local waited=0
-    while [ "$waited" -lt 90 ]; do
-        docker_ready && return 0
-        sleep 2
-        waited=$((waited + 2))
-    done
-    return 1
-}
-
-install_docker() {
-    command -v brew >/dev/null 2>&1 \
-        || die "Homebrew is needed to install Docker: https://brew.sh"
-    # colima rather than Docker Desktop: it installs without a GUI installer or
-    # an admin password, and `colima start` is scriptable in a way that clicking
-    # through Docker.app's first-run screens is not.
-    warn "no container engine found"
-    confirm "install colima + the docker CLI with Homebrew?" \
-        || die "nothing to run the server in; install Docker Desktop or colima"
-    say "installing colima and the docker CLI..."
-    brew install colima docker || die "the Homebrew install failed"
-}
-
-start_engine() {
-    if docker_ready; then
-        ok "container engine is running"
-        return 0
-    fi
-    if [ -d /Applications/Docker.app ]; then
-        say "starting Docker Desktop..."
-        open -a Docker || die "could not start Docker Desktop"
-    elif command -v colima >/dev/null 2>&1; then
-        say "starting colima..."
-        colima start || die "colima could not start"
-    else
-        install_docker
-        say "starting colima..."
-        colima start || die "colima could not start"
-    fi
-    say "waiting for the engine..."
-    wait_for_docker || die "the container engine did not come up"
-    ok "container engine is running"
-}
-
-################################################################################
-#                       steps 2-4 - certificates, image, server                 #
+#                       steps 1-2 - certificates, server                       #
 ################################################################################
 
 ensure_certs() {
     say "checking the development certificates..."
     make certs || die "could not mint certificates (is openssl installed?)"
-}
-
-ensure_image() {
-    if [ "$DO_REBUILD" = "0" ] \
-            && docker image inspect "$IMAGE" >/dev/null 2>&1; then
-        ok "image $IMAGE is present (--rebuild to build it again)"
-        return 0
-    fi
-    say "building the image - first time takes a while, notcurses is built from source"
-    make docker-build DOCKER_PORT="$PORT" || die "the image build failed"
-}
-
-start_server_docker() {
-    if port_open; then
-        ok "something is already serving port $PORT; leaving it alone"
-        return 0
-    fi
-    make docker-server DOCKER_PORT="$PORT" || die "the server container did not start"
-    say "waiting for tetrisd to listen on $PORT..."
-    if ! wait_for_port; then
-        warn "tetrisd never answered on $PORT. Its own log says why:"
-        docker logs --tail 40 "$SERVER" 2>&1 | sed 's/^/    /' >&2
-        die "the server did not come up"
-    fi
-    ok "tetrisd is listening on $HOST:$PORT"
 }
 
 start_server_native() {
@@ -281,88 +264,184 @@ start_server_native() {
 }
 
 stop_server() {
-    if [ "$UNAME_S" = "Darwin" ]; then
-        docker_ready || die "the container engine is not running; nothing to stop"
-        make docker-stop && ok "server stopped"
-    else
-        [ -x ./bin/tetrisctl ] \
-            || die "./bin/tetrisctl is not built; nothing was started from here"
-        PATH="$ROOT/bin:$PATH" TETRISHRC="$ROOT/.tetrishrc" \
-            ./bin/tetrisctl stop && ok "daemons stopped"
-    fi
+    [ -x ./bin/tetrisctl ] \
+        || die "./bin/tetrisctl is not built; nothing was started from here"
+    PATH="$ROOT/bin:$PATH" TETRISHRC="$ROOT/.tetrishrc" \
+        ./bin/tetrisctl stop && ok "daemons stopped"
 }
 
 ################################################################################
-#                             step 5 - the client                              #
+#                        step 3 - the client environment                       #
 ################################################################################
 
-ensure_client() {
-    if [ -x bin/tetrisu ] || [ -x src/tetrisu/bin/tetrisu ]; then
-        ok "tetrisu is built"
+# The host toolchain, and only when this run will actually use it.
+#
+# The container path compiles nothing here - the image carries the compiler,
+# notcurses and every library - so a client-only machine, which is every Mac, is
+# not made to install GCC and OpenSSL just to play. The paths that do compile on
+# this host ask for them: a local server, and --native. Both would pull `make
+# deps` in on their own through `make stack` and src/tetrisu's
+# check-dependencies, but doing it here means a missing toolchain is reported at
+# the start rather than surfacing halfway through a build.
+# AUTO_INSTALL_DEPS is passed as a make *override* rather than exported: the
+# Makefile assigns it with `:=`, and a makefile assignment beats the
+# environment, so exporting it would be silently ignored and a check-only run
+# would install things anyway.
+ensure_deps() {
+    if [ "$WANT_SERVER" != "1" ] && [ "$NATIVE" != "1" ]; then
         return 0
     fi
-    say "building tetrisu (this installs notcurses if it is missing)..."
-    make -C src/tetrisu || die "tetrisu did not build"
-    make bin-link >/dev/null 2>&1 || true
+    say "checking the build dependencies..."
+    # WANT_ENGINE is answered here rather than left to default, because the
+    # engine is a root dependency now: without this a native run would install
+    # a container runtime, and ask for the docker group, on its way to a client
+    # that never opens a container.
+    #
+    # WANT_TERMINAL is answered for the opposite reason: the terminal step would
+    # do the right thing, but ensure_terminal runs a few lines below with the
+    # messaging this script's own failure paths need, so letting `make deps`
+    # check first only means checking twice and explaining it twice.
+    WANT_ENGINE=$([ "$NATIVE" = "1" ] && echo 0 || echo 1) \
+    WANT_TERMINAL=0 \
+    make deps AUTO_INSTALL_DEPS="$AUTO_INSTALL_DEPS" \
+        || die "dependencies are missing; see the output above"
 }
 
-# notcurses is asked what the terminal can do at start-up and the board is drawn
-# to match. A terminal with no bitmap protocol is not a dead end: only
-# NCPIXEL_NONE loses bitmaps outright, and Solo composites a true-colour cell
-# board instead (render_compatibility_mode in render_solo.c), so Terminal.app
-# plays - it just plays in cells rather than pixel art. This used to claim the
-# game could not draw at all, which was wrong, and wrong in the direction that
-# talks somebody out of a client that would have worked.
-check_terminal() {
-    case "${TERM:-}" in
-        ""|dumb) die "no usable TERM; run this from a real terminal" ;;
-    esac
-    if [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ]; then
-        warn "Terminal.app has no bitmap protocol, so the board draws in"
-        warn "compatibility mode - playable, but cells instead of pixel art."
-        warn "For the pixel board: brew install --cask kitty   (or: ghostty)"
+# Done before the image, not with it: installing a terminal is quick and can
+# fail in a way the user has to act on (WezTerm has to be installed on the
+# Windows side by hand), and finding that out after a ten-minute first image
+# build is finding it out too late.
+ensure_terminal() {
+    say "checking the terminal..."
+    bash scripts/terminal.sh install || \
+        warn "continuing without a terminal to launch; the client will run here."
+}
+
+# Split from the image build for the same reason: this is a cheap check that
+# can demand an action from the user (a re-login for the docker group), and it
+# has to fail before the expensive step rather than after it.
+ensure_engine() {
+    say "checking the container engine..."
+    bash scripts/container.sh install || die "no usable container engine"
+}
+
+ensure_client_image() {
+    if [ "$DO_REBUILD" = "1" ]; then
+        bash scripts/container.sh build --rebuild || die "the image did not build"
+    else
+        bash scripts/container.sh build || die "the image did not build"
     fi
 }
+
+# Compiled every run rather than skipped when a binary is already there: make
+# settles in a moment when nothing changed, and skipping on the binary's mere
+# existence is how an edited source file gets played around instead of played.
+# This builds the four CoreStack archives tetrisu links as well as the client -
+# they are its dependencies, and src/tetrisu/Makefile recurses into them.
+ensure_native_client() {
+    say "compiling tetrisu and the libraries it links..."
+    # DEPS_READY=1 because ensure_deps already ran the root dependency step.
+    # Without it src/tetrisu's check-dependencies recurses back into `make
+    # deps` with this script's flags stripped - which is how a check-only run
+    # ended up trying to install a container engine mid-compile. Its own
+    # render/audio deps still run; only the root recursion is suppressed.
+    # AUTO_INSTALL_DEPS as a make override, not just the exported value: both
+    # Makefiles set it with `:=`, which beats the environment, so a check-only
+    # run would otherwise install the client's optional audio packages anyway.
+    make -C src/tetrisu DEPS_READY=1 \
+        AUTO_INSTALL_DEPS="$AUTO_INSTALL_DEPS" || die "tetrisu did not build"
+    make bin-link >/dev/null 2>&1 || true
+    ok "tetrisu is built"
+}
+
+################################################################################
+#                             step 4 - the client                              #
+################################################################################
 
 # Which CA proves the server is the server. A remote host is the demo server, so
 # it is the committed demo-ca.crt; a local one was just signed by this machine's
 # own scratch CA. They are deliberately different files - see .gitignore - and
 # picking the wrong one fails the handshake rather than degrading, because
 # libtetrissh verifies the chain and refuses the session on any doubt.
+#
+# "Local" is decided by the file being there rather than by which flags were
+# passed, because there is a third case: a Mac, which starts no server and so
+# mints no CA, but is also not talking to a named --host. It has only the
+# committed demo CA, and asking it for certs/ca.crt would fail a fresh clone
+# before the sign-in screen it was about to type an address into.
 client_ca() {
-    if [ "$REMOTE" = "1" ]; then
-        printf '%s' "$ROOT/certs/demo-ca.crt"
-    else
+    if [ "$REMOTE" != "1" ] && [ -s "$ROOT/certs/ca.crt" ]; then
         printf '%s' "$ROOT/certs/ca.crt"
+    else
+        printf '%s' "$ROOT/certs/demo-ca.crt"
     fi
 }
 
+# The client is launched *through* the terminal script rather than beside it:
+# terminal.sh opens a window and runs the command in it, or - when there is no
+# display to open one on - runs it right here. Either way the process it ends up
+# running is the container, and the escape sequences that come back out reach
+# whatever terminal is on the far end.
 launch_client() {
-    local client="bin/tetrisu"
     local ca
-    [ -x "$client" ] || client="src/tetrisu/bin/tetrisu"
     ca=$(client_ca)
     # The client verifies the server's certificate chain against this CA and
     # refuses the session without it. --client-only skips the step that mints the
     # local one, so this is the one path where it can be absent.
+    #
+    # The advice is keyed off which file was actually chosen rather than off
+    # REMOTE, because they disagree on a Mac: no --host, but the demo CA all the
+    # same, and "run make certs" would be the wrong instruction there - it mints
+    # a CA for a server that machine cannot run.
     if [ ! -s "$ca" ]; then
-        [ "$REMOTE" = "1" ] \
-            && die "certs/demo-ca.crt is missing - it is committed, so restore it with 'git checkout certs/demo-ca.crt'"
-        die "certs/ca.crt is missing - run 'make certs' (the server needs the same CA)"
+        case "$ca" in
+            *demo-ca.crt)
+                die "certs/demo-ca.crt is missing - it is committed, so restore it with 'git checkout certs/demo-ca.crt'" ;;
+            *)
+                die "certs/ca.crt is missing - run 'make certs' (the server needs the same CA)" ;;
+        esac
     fi
     say "launching tetrisu against $HOST:$PORT"
     printf '%b\n' "    ${BOLD}CHECK SERVER${RST} on the sign-in screen must report" \
         "    ${BOLD}SERVER ONLINE${RST} - without it Solo silently plays the local" \
         "    rules instead, and looks identical."
-    if [ "$REMOTE" = "1" ]; then
-        printf '%b\n' "    verifying that server against ${BOLD}certs/demo-ca.crt${RST}"
+    # Which CA is in play is worth saying out loud, because the client can
+    # trust exactly one and the sign-in screen invites you to change the
+    # server it applies to. lib/libtetrissh's load_cert_file reads a single
+    # certificate (PEM_read_X509, in the frozen common.c), so a bundle holding
+    # both CAs is not an option - the second one would be ignored.
+    printf '%b\n' "    verifying against ${BOLD}${ca#$ROOT/}${RST}"
+    if [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ]; then
+        printf '%b\n' "    play again: ${BOLD}make play${RST}" \
+            "    on this machine instead: ${BOLD}bash scripts/play.sh --local${RST}"
+    elif [ "$REMOTE" = "1" ]; then
+        printf '%b\n' "    play again: ${BOLD}make play HOST=$HOST${RST}"
+    else
+        printf '%b\n' \
+            "    ${YEL}typing a different SERVER ID than $HOST will fail${RST}" \
+            "    ${YEL}verification - that server is signed by another CA.${RST}" \
+            "    for one elsewhere: ${BOLD}make play HOST=<address>${RST}"
+        printf '%b\n' "    stop server: ${BOLD}bash scripts/play.sh --stop${RST}"
     fi
     echo
-    TETRISU_NET=1 \
-    TETRISU_HOST="$HOST" \
-    TETRISU_PORT="$PORT" \
-    TETRISU_CA_PATH="$ca" \
-        "$client"
+
+    export TETRISU_HOST="$HOST"
+    export TETRISU_PORT="$PORT"
+    export TETRISU_CA_PATH="$ca"
+
+    if [ "$NATIVE" = "1" ]; then
+        local client="bin/tetrisu"
+        [ -x "$client" ] || client="src/tetrisu/bin/tetrisu"
+        # Only the native path sets this: container.sh passes it into the image
+        # itself. Without it the client builds its fixture provider instead of a
+        # session, and CHECK SERVER reports offline without opening a socket -
+        # the same screen a wrong address gives, for a reason no address fixes.
+        export TETRISU_NET=1
+        exec bash scripts/terminal.sh launch -- "$ROOT/$client"
+    fi
+
+    exec bash scripts/terminal.sh launch -- \
+        bash "$ROOT/scripts/container.sh" run --
 }
 
 ################################################################################
@@ -376,15 +455,16 @@ if [ "$DO_STOP" = "1" ]; then
     exit 0
 fi
 
+# Everything cheap that can refuse this run happens first: a missing toolchain,
+# no terminal, an engine that needs a re-login. None of them is worth
+# discovering after `make stack` has built the tree or an image build has run
+# for ten minutes.
+ensure_deps
+ensure_terminal
+[ "$NATIVE" = "1" ] || ensure_engine
+
 case "$UNAME_S" in
-    Darwin)
-        if [ "$WANT_SERVER" = "1" ]; then
-            start_engine
-            ensure_certs
-            ensure_image
-            start_server_docker
-        fi
-        ;;
+    Darwin) ;;
     Linux)
         if [ "$WANT_SERVER" = "1" ]; then
             ensure_certs
@@ -407,28 +487,34 @@ fi
 # reach the server does not say so plainly: Solo falls back to the local rules
 # and plays identically. The advice differs by whose server it is - a local one
 # this script can start, a remote one it can only report on.
-if [ "$WANT_SERVER" = "0" ] && ! port_open; then
-    if [ "$REMOTE" = "1" ]; then
-        warn "nothing answered $HOST:$PORT within 5s. On that machine, check that:"
-        warn "    tetrisd is up            ./bin/tetrisctl status"
-        warn "    it listens on all interfaces, not just loopback"
-        warn "    its firewall allows $PORT  (Arch: sudo ss -lntp | grep $PORT)"
-        warn "    the address is current   ip -4 addr show   (the number before /24)"
-        die "no server at $HOST:$PORT"
-    fi
+#
+# Only these two cases name a server that is supposed to be up already. A Mac
+# with no --host names nothing yet: the address is about to be typed into
+# SERVER ID, so there is no address here to probe and nothing to warn about.
+if [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ] && ! port_open; then
+    warn "nothing answered the shared server $HOST:$PORT within 5s."
+    warn "It is not this machine, so nothing here can bring it up. Either:"
+    warn "    play on this machine     ${BOLD}bash scripts/play.sh --local${RST}"
+    warn "    name another server      ${BOLD}make play HOST=<address>${RST}"
+    warn "    or wait for it to return"
+    die "no server at $HOST:$PORT"
+elif [ "$REMOTE" = "1" ] && ! port_open; then
+    warn "nothing answered $HOST:$PORT within 5s. On that machine, check that:"
+    warn "    tetrisd is up            ./bin/tetrisctl status"
+    warn "    it listens on all interfaces, not just loopback"
+    warn "    its firewall allows $PORT  (Arch: sudo ss -lntp | grep $PORT)"
+    warn "    the address is current   ip -4 addr show   (the number before /24)"
+    die "no server at $HOST:$PORT"
+elif [ "$CLIENT_ONLY" = "1" ] && ! port_open; then
     die "nothing is serving $HOST:$PORT - drop --client-only to start one"
 fi
 
-check_terminal
-ensure_client
-launch_client
-
-echo
-if [ "$REMOTE" = "1" ]; then
-    ok "client closed; $HOST:$PORT is not ours to stop"
-    printf '%b\n' "    play again: ${BOLD}bash scripts/play.sh --host $HOST${RST}"
+if [ "$NATIVE" = "1" ]; then
+    ensure_native_client
 else
-    ok "client closed; the server is still running on $HOST:$PORT"
-    printf '%b\n' "    play again: ${BOLD}bash scripts/play.sh${RST}" \
-        "    stop it:    ${BOLD}bash scripts/play.sh --stop${RST}"
+    ensure_client_image
 fi
+
+# Replaces this process, so nothing runs after it - the "play again" hints are
+# printed by announce() before the client starts rather than after it exits.
+launch_client

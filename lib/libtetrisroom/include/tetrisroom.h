@@ -35,10 +35,17 @@ typedef enum e_game_mode
 	MODE_BATTLE_ROYALE
 }	t_game_mode;
 
+/*
+** SELECTING sits between READY and IN_GAME: everybody has declared, nobody is
+** playing yet, and the room is holding a window open for them to choose a
+** fighter in. tetrisd casts this enum to libstatusbody's t_body_room_status,
+** so the two must keep the same values in the same order.
+*/
 typedef enum e_room_status
 {
 	ROOM_WAITING,
 	ROOM_READY,
+	ROOM_SELECTING,
 	ROOM_IN_GAME,
 	ROOM_FINISHED
 }	t_room_status;
@@ -156,6 +163,7 @@ t_join_verdict	room_can_accept(const t_room *r);
 int				room_seat(t_room *r, t_player_id pid, const char *username, bool (*probe)(void *ctx, t_player_id pid), void *probe_ctx);
 void			room_recompute_status(t_room *r);
 t_membership	*room_find_member(t_room *r, t_player_id pid);
+int				room_set_ready(t_room *r, t_player_id pid, bool ready);
 
 /* RELEASE.C */
 int				room_release(t_room *r, t_player_id pid, bool (*probe)(void *ctx, t_player_id pid), void *probe_ctx, t_release_result *out);
@@ -166,6 +174,9 @@ t_start_verdict	room_can_start(const t_room *r, t_player_id requester);
 t_start_verdict	room_start(t_room *r, t_player_id requester);
 void			room_abort_start(t_room *r);
 void			room_finish(t_room *r);
+void			room_rematch(t_room *r);
+int				room_begin_selection(t_room *r);
+void			room_abort_selection(t_room *r);
 const char		*room_state_message(const t_room *r);
 
 /* LOBBY.C */

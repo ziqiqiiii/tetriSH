@@ -24,6 +24,8 @@
 // Static Functions
 static bool	online_update(t_solo_authority *authority, t_solo_game *game,
 				int elapsed_ms);
+static bool	restart_in_new_room(t_solo_authority *authority,
+				t_solo_game *game, uint32_t seed);
 static void	fall_offline(t_solo_authority *authority, t_solo_game *game);
 static void	countdown_hold_begin(t_solo_authority *authority);
 static bool	countdown_hold_release(t_solo_authority *authority,
@@ -98,6 +100,24 @@ int	solo_authority_fd(const t_solo_authority *authority)
 }
 
 /**
+ * @brief Reports whether a snapshot has already arrived and is unread.
+ *
+ * A request and the snapshot it causes travel the same socket, so the reply to
+ * a move is often read with the next STATE already behind it - and net_request
+ * puts that snapshot aside rather than dropping it. The loop has to know, or it
+ * waits out a poll interval holding the very frame the player is waiting for.
+ *
+ * @param authority Authority to ask.
+ * @return true when the next update has a snapshot to apply.
+ */
+bool	solo_authority_pending(const t_solo_authority *authority)
+{
+	if (authority == NULL || !authority->online)
+		return (false);
+	return (net_solo_pending(authority->net));
+}
+
+/**
  * @brief Applies one player action through whoever owns the board.
  *
  * Online, the action is a request and the board changes when the snapshot
@@ -113,13 +133,11 @@ int	solo_authority_fd(const t_solo_authority *authority)
 bool	solo_authority_action(t_solo_authority *authority, t_solo_game *game,
 		t_solo_action action)
 {
-	t_net_result	result;
-
 	if (!authority->online)
 		return (solo_game_apply_action(game, action));
 	if (authority->countdown_hold)
 		return (false);
-	if (net_solo_action(authority->net, action, &result) != 0)
+	if (net_solo_send_action(authority->net, action) != 0)
 	{
 		fall_offline(authority, game);
 		return (true);
@@ -140,6 +158,8 @@ bool	solo_authority_ability(t_solo_authority *authority, t_solo_game *game,
 {
 	t_net_result	result;
 
+	if (!solo_abilities_enabled())
+		return (false);
 	if (!authority->online)
 		return (solo_game_activate_ability(game, ability)
 			!= SOLO_ABILITY_RESULT_INVALID);
@@ -185,9 +205,16 @@ bool	solo_authority_pause(t_solo_authority *authority, t_solo_game *game)
  * kept in a file here, not in the server's store, because it is a fact about
  * this machine's player and not about an account.
  *
+ * Online, RESTART is only ever accepted mid-game, and the R this screen offers
+ * is pressed after a top-out - by which time the room has been destroyed, so
+ * the request is refused and the answer had to start being read. Assuming it
+ * worked left the client running a countdown over a board nobody would send
+ * another frame of: no gravity, no input, and no way out but killing it.
+ *
  * @param authority Authority in charge.
  * @param game View model, or the game itself when offline.
- * @param seed Seed for the offline seven-bag.
+ * @param seed Seed for the offline seven-bag, and for the board a new room is
+ *        shown with until its first snapshot lands.
  * @return true when something the renderer shows may have changed.
  */
 bool	solo_authority_restart(t_solo_authority *authority, t_solo_game *game,
@@ -204,7 +231,9 @@ bool	solo_authority_restart(t_solo_authority *authority, t_solo_game *game,
 		solo_game_start_countdown(game);
 		return (true);
 	}
-	if (net_solo_restart(authority->net, &result) != 0)
+	if ((net_solo_restart(authority->net, &result) != 0
+			|| result.status != 200)
+		&& !restart_in_new_room(authority, game, seed))
 	{
 		fall_offline(authority, game);
 		return (true);
@@ -267,6 +296,34 @@ static bool	online_update(t_solo_authority *authority, t_solo_game *game,
 	if (!net_solo_pending(authority->net))
 		return (changed);
 	return (net_solo_apply(authority->net, game) || changed);
+}
+
+/**
+ * @brief Takes another room when the one just played has already been torn down.
+ *
+ * A Single room does not outlive its game. Ending it clears every slot, which
+ * empties the room, and tetrisd destroys an empty room in the same tick - so by
+ * the time the player reads "TOP OUT" there is no room left to re-deal in and
+ * nothing RESTART could act on. The honest recovery is the one this mode
+ * already performs on the way in: give the dead room back and ask for another.
+ *
+ * The board is reinitialised so the countdown counts over an empty well rather
+ * than over the stack that just topped out. It is presentation only - the first
+ * snapshot from the new room replaces it.
+ *
+ * @param authority Authority whose room has gone.
+ * @param game View model to hand a clean board.
+ * @param seed Seed for the board shown until the first snapshot lands.
+ * @return true when a new game is running on the server.
+ */
+static bool	restart_in_new_room(t_solo_authority *authority,
+			t_solo_game *game, uint32_t seed)
+{
+	net_solo_leave(authority->net);
+	if (net_solo_start(authority->net, NULL) != 0)
+		return (false);
+	solo_game_init(game, seed);
+	return (true);
 }
 
 /**

@@ -3,6 +3,16 @@
 # pkg-config, for the host's package manager. Root deps (compiler, OpenSSL, ...)
 # are the umbrella Makefile's job; this script owns only the client-only packages.
 #
+#   bash ./scripts/install_deps.sh          renderer and audio
+#   bash ./scripts/install_deps.sh audio    audio only
+#
+# The audio-only mode exists because SDL2 is an *optional* dependency and
+# notcurses is not: a machine whose renderer is already satisfied must be able
+# to gain audio without re-entering the notcurses branch, which on a distro
+# with no usable package builds from source and would overwrite a newer
+# hand-built install with $NOTCURSES_VERSION. deps.sh calls it for exactly that
+# case.
+#
 # Environment:
 #   AUTO_INSTALL_DEPS              (unused here; gating lives in deps.sh)
 #   INSTALL_NOTCURSES_FROM_SOURCE  1 to build notcurses from source when no
@@ -34,13 +44,51 @@ resolve_sudo() {
     fi
 }
 
+# Both entry points refresh the APT index, and the audio-only one may run right
+# after the full one; refreshing twice in a row is only a slow no-op.
+APT_UPDATED=0
+
+apt_update_once() {
+    if [ "$APT_UPDATED" != "1" ]; then
+        $SUDO apt-get update
+        APT_UPDATED=1
+    fi
+}
+
+# The one place SDL2's package names are written down, so the audio-only mode
+# and the full install cannot name different packages.
+install_audio_linux() {
+    if command -v apt-get >/dev/null 2>&1; then
+        apt_update_once
+        $SUDO apt-get install -y libsdl2-dev libsdl2-mixer-dev
+    elif command -v dnf >/dev/null 2>&1; then
+        $SUDO dnf install -y SDL2-devel SDL2_mixer-devel
+    elif command -v yum >/dev/null 2>&1; then
+        $SUDO yum install -y SDL2-devel SDL2_mixer-devel
+    elif command -v pacman >/dev/null 2>&1; then
+        # sdl2-compat (common on Arch, pulled in by ffmpeg/wine/etc.) provides
+        # sdl2 and conflicts with the real sdl2 package; don't force sdl2
+        # explicitly, let whichever provider is already installed satisfy it.
+        $SUDO pacman -S --needed --noconfirm sdl2_mixer
+    elif command -v zypper >/dev/null 2>&1; then
+        $SUDO zypper --non-interactive install libSDL2-devel libSDL2_mixer-devel
+    elif command -v apk >/dev/null 2>&1; then
+        $SUDO apk add sdl2-dev sdl2_mixer-dev
+    else
+        echo "Unsupported Linux package manager." >&2
+        echo "Install SDL2 and SDL2_mixer development headers." >&2
+        return 1
+    fi
+}
+
 install_linux() {
     echo "Installing tetrisu render/audio dependencies for Linux..."
     resolve_sudo
 
     if command -v apt-get >/dev/null 2>&1; then
-        $SUDO apt-get update
-        $SUDO apt-get install -y pkg-config libsdl2-dev libsdl2-mixer-dev
+        apt_update_once
+        $SUDO apt-get install -y pkg-config
+        install_audio_linux
 
         NOTCURSES_PKG=""
         for pkg in libnotcurses-dev notcurses-dev; do
@@ -94,30 +142,29 @@ install_linux() {
             exit 1
         fi
     elif command -v dnf >/dev/null 2>&1; then
-        $SUDO dnf install -y pkgconf-pkg-config notcurses-devel \
-            SDL2-devel SDL2_mixer-devel || {
-            echo "Enable Fedora/EPEL/CRB repos or install tetrisu render/audio packages manually." >&2
+        $SUDO dnf install -y pkgconf-pkg-config notcurses-devel || {
+            echo "Enable Fedora/EPEL/CRB repos or install tetrisu render packages manually." >&2
             exit 1
         }
+        install_audio_linux
     elif command -v yum >/dev/null 2>&1; then
-        $SUDO yum install -y pkgconfig notcurses-devel \
-            SDL2-devel SDL2_mixer-devel || {
-            echo "Enable EPEL/CRB repos or install tetrisu render/audio packages manually." >&2
+        $SUDO yum install -y pkgconfig notcurses-devel || {
+            echo "Enable EPEL/CRB repos or install tetrisu render packages manually." >&2
             exit 1
         }
+        install_audio_linux
     elif command -v pacman >/dev/null 2>&1; then
-        # sdl2-compat (common on Arch, pulled in by ffmpeg/wine/etc.) provides
-        # sdl2 and conflicts with the real sdl2 package; don't force sdl2
-        # explicitly, let whichever provider is already installed satisfy it.
-        $SUDO pacman -S --needed --noconfirm pkgconf notcurses sdl2_mixer
+        $SUDO pacman -S --needed --noconfirm pkgconf notcurses
+        install_audio_linux
     elif command -v zypper >/dev/null 2>&1; then
-        $SUDO zypper --non-interactive install pkg-config \
-            notcurses-devel libSDL2-devel libSDL2_mixer-devel || {
-            echo "Enable needed openSUSE repos or install tetrisu render/audio packages manually." >&2
+        $SUDO zypper --non-interactive install pkg-config notcurses-devel || {
+            echo "Enable needed openSUSE repos or install tetrisu render packages manually." >&2
             exit 1
         }
+        install_audio_linux
     elif command -v apk >/dev/null 2>&1; then
-        $SUDO apk add pkgconf notcurses-dev sdl2-dev sdl2_mixer-dev
+        $SUDO apk add pkgconf notcurses-dev
+        install_audio_linux
     else
         echo "Unsupported Linux package manager." >&2
         echo "Install pkg-config, notcurses, SDL2, and SDL2_mixer development headers." >&2
@@ -125,8 +172,7 @@ install_linux() {
     fi
 }
 
-install_darwin() {
-    echo "Installing tetrisu render/audio dependencies for macOS..."
+require_brew() {
     if ! xcrun --find cc >/dev/null 2>&1; then
         echo "Starting the Xcode Command Line Tools installer..."
         xcode-select --install
@@ -138,14 +184,45 @@ install_darwin() {
         echo "Install it, then run make again." >&2
         exit 1
     fi
+}
+
+install_audio_darwin() {
+    require_brew
+    brew install sdl2 sdl2_mixer
+}
+
+install_darwin() {
+    echo "Installing tetrisu render/audio dependencies for macOS..."
+    require_brew
     brew install pkgconf notcurses sdl2 sdl2_mixer
 }
 
-case "$UNAME_S" in
-    Linux)  install_linux ;;
-    Darwin) install_darwin ;;
+MODE="${1:-all}"
+
+case "$MODE" in
+    all)
+        case "$UNAME_S" in
+            Linux)  install_linux ;;
+            Darwin) install_darwin ;;
+            *)
+                echo "Unsupported operating system: $UNAME_S" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    audio)
+        echo "Installing tetrisu audio dependencies (SDL2, SDL2_mixer)..."
+        case "$UNAME_S" in
+            Linux)  resolve_sudo; install_audio_linux ;;
+            Darwin) install_audio_darwin ;;
+            *)
+                echo "Unsupported operating system: $UNAME_S" >&2
+                exit 1
+                ;;
+        esac
+        ;;
     *)
-        echo "Unsupported operating system: $UNAME_S" >&2
+        echo "usage: install_deps.sh [all|audio]" >&2
         exit 1
         ;;
 esac

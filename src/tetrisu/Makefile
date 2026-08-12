@@ -7,12 +7,8 @@
 #                                    CONFIG                                    #
 ################################################################################
 
-# Self-contained binary (same self-contained pattern as the libraries under
-# lib/, applied to a binary instead of an archive). Until the umbrella
-# Makefile lands, build/test this directly:
-#     make -C src/tetrisu
-#     make -C src/tetrisu test
-#     make -C src/tetrisu run
+# Self-contained binary — the lib/ pattern applied to a binary, so
+# `make -C src/tetrisu [test|run]` works without the umbrella.
 
 NAME		:= tetrisu
 CC			:= gcc
@@ -62,10 +58,8 @@ HEADER		:= tetrisu.h
 NET_HEADER	:= tetrisu_net.h
 ASSET_DIR	:= $(CURDIR)/assets
 
-# One archive per CoreStack library, each with the include path that goes with
-# it. libtetrisbrain is the local prediction and the shared piece/board types;
-# the other three are the session tetrisu speaks to tetrisd over — the
-# handshake and framing, the HTTTP messages, and the bodies inside them.
+# libtetrisbrain is local prediction and the shared piece/board types; the
+# other three are the session tetrisu speaks to tetrisd over.
 LIB_ROOT	:= ../../lib
 LIB_NAMES	:= libtetrisbrain libtetrissh libhtttp libstatusbody
 LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
@@ -77,10 +71,9 @@ BRAIN_LIB	:= $(BRAIN_DIR)/libtetrisbrain.a
 BRAIN_INC	:= -I$(BRAIN_DIR)/include
 BRAIN_HEADER	:= $(BRAIN_DIR)/include/tetrisbrain.h
 
-# notcurses (render) is required; SDL2 + SDL2_mixer (audio) are optional and
-# compiled out when absent. These are lazily expanded (=) so the recipes see
-# post-install pkg-config metadata: a direct `make -C src/tetrisu` may install
-# the packages before compiling the first object.
+# notcurses (render) is required; SDL2 + SDL2_mixer (audio) compile out when
+# absent. Lazily expanded (=) because deps may be installed mid-build, after
+# this file is parsed but before the first object.
 PKG_CONFIG		:= pkg-config
 AUDIO_DEPS		:= sdl2 SDL2_mixer
 NOTCURSES_CFLAGS	 = $(shell $(PKG_CONFIG) --cflags notcurses 2>/dev/null)
@@ -89,10 +82,8 @@ AUDIO_CFLAGS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; th
 AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then $(PKG_CONFIG) --libs $(AUDIO_DEPS); fi)
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
-# Header search path + generated defines shared by every target.
-# DEPFLAGS makes each object record the headers it actually included, so a
-# CoreStack header that changes the shape of a struct rebuilds every object
-# holding one instead of leaving stale ones to be linked against fresh code.
+# DEPFLAGS records each object's real includes, so a CoreStack header changing
+# a struct rebuilds every object holding one instead of leaving stale ones.
 INC			:= -I. $(LIB_INC)
 DEPFLAGS	:= -MMD -MP
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
@@ -107,9 +98,14 @@ SRC			:= $(wildcard $(SRC_DIR)/*.c)
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 DEP			:= $(OBJ:.o=.d)
 
+# Audio is a compile-time define, and make compares timestamps, not flags: SDL2
+# appearing later would leave audio compiled out until an fclean nobody knew to
+# run. The stamp puts the flag in the dependency graph, rewritten only when its
+# value changes, so it forces exactly one rebuild.
+AUDIO_STAMP	:= $(OBJ_DIR)/.audio-config
+
 # Logic  : pure app-state, no notcurses/SDL -> logic.a (linked into unit tests).
-# main.c, solo_mode.c, and render/audio sources pull in notcurses/SDL, so the
-# unit-test archive keeps only state and gameplay logic.
+# The filtered-out sources pull in notcurses/SDL, which no unit test can link.
 LOGIC_SRC	:= $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/solo_mode.c \
 				   $(SRC_DIR)/multiplayer_match_mode.c \
 				   $(SRC_DIR)/render_%.c $(SRC_DIR)/audio.c, $(SRC))
@@ -122,16 +118,26 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 
 all: check-dependencies libs $(NAME_PATH)
 
-# A standalone tetrisu build can ask root for shared deps, then this Makefile
-# owns render/audio deps. Root passes DEPS_READY=1 to avoid recursion.
+# A standalone build asks root for shared deps, then handles render/audio here.
+# Root passes DEPS_READY=1 to avoid recursion.
 check-dependencies:
 	@ if [ "$(DEPS_READY)" != "1" ]; then \
 		$(MAKE) --no-print-directory -s -C ../.. deps; \
 	fi
 	@ $(MAKE) --no-print-directory -s deps
 
+# --- audio configuration stamp ----------------------------------------------
+# Order-only on check-dependencies so the value recorded is the one that holds
+# after whatever that step installed.
+$(AUDIO_STAMP): FORCE | check-dependencies
+	@ mkdir -p $(dir $@)
+	@ printf '%s' "$(AUDIO_DEFINE)" | cmp -s - $@ 2>/dev/null \
+		|| printf '%s' "$(AUDIO_DEFINE)" > $@
+
+FORCE:
+
 # --- object rule (header stays at the tetrisu root, reached via -I.) ---------
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | check-dependencies libs
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(AUDIO_STAMP) | check-dependencies libs
 	@ mkdir -p $(dir $@)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $(DEPFLAGS) -c $< -o $@
@@ -153,15 +159,16 @@ run: $(NAME_PATH)
 #                                DEPENDENCIES                                  #
 ################################################################################
 
-# Component-only render/audio dependency orchestration lives in scripts/ so
-# this Makefile remains declarative and each shell failure has one owner.
+# Render/audio dependency orchestration lives in scripts/ so this Makefile
+# stays declarative and each shell failure has one owner.
 deps:
 	@ UNAME_S=$(UNAME) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		INSTALL_NOTCURSES_FROM_SOURCE=$(INSTALL_NOTCURSES_FROM_SOURCE) \
 		NOTCURSES_VERSION=$(NOTCURSES_VERSION) \
 		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) CC=$(CC) \
-		PKG_CONFIG=$(PKG_CONFIG) GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
+		PKG_CONFIG=$(PKG_CONFIG) AUDIO_DEPS='$(AUDIO_DEPS)' \
+		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
 
 install-deps:
@@ -176,9 +183,8 @@ install-notcurses-from-source:
 		NOTCURSES_PREFIX=$(NOTCURSES_PREFIX) \
 		bash ./scripts/install_notcurses.sh
 
-# Every CoreStack archive tetrisu links, built in place by its own Makefile.
-# Cleanup never recurses into lib/ — the archives are shared with the daemons
-# and owned by their own directories.
+# Each archive is built in place by its own Makefile. Cleanup never recurses
+# into lib/ — the archives are shared with the daemons.
 libs:
 	@ for d in $(LIB_DIRS); do $(MAKE) --no-print-directory -s -C $$d; done
 
@@ -187,8 +193,8 @@ $(LIB_ARCS): libs
 
 brain: libs
 
-# Compile/link probing is a shell responsibility; the script checks the actual
-# headers and libraries rather than trusting package-manager state.
+# The script compiles and links against the actual headers and libraries
+# rather than trusting package-manager state.
 check-tetrisu-deps:
 	@ CC=$(CC) PKG_CONFIG=$(PKG_CONFIG) AUDIO_DEPS='$(AUDIO_DEPS)' \
 		NOTCURSES_MIN_VERSION=$(NOTCURSES_MIN_VERSION) \
@@ -217,63 +223,74 @@ $(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER)
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# --- network smoke binary ---------------------------------------------------
-# Not a unit test: it needs a tetrisd, so the integration script starts one and
-# runs this against it. It links the whole app archive because the network
-# layer writes into the same Solo view model the renderer reads.
+# --- integration binaries ---------------------------------------------------
+# Not unit tests: each needs a live tetrisd, started by its integration script.
+# All link the whole app archive, since the network layer writes into the same
+# view models the renderer reads.
+
+# The session: connect, auth, join, play, STATE decoded into the Solo model.
 $(TEST_BIN_DIR)/net_smoke: $(TESTS_DIR)/net_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The network app data provider driven against a live tetrisd: the acceptance
-# test for the net-mode wiring (CHECK SERVER, SIGN UP, LOGIN, profile, lobby,
-# create/join room). Same link line as net_smoke - it uses the provider vtable
-# which lives in the app archive alongside the network layer.
+# The provider vtable: CHECK SERVER, SIGN UP, LOGIN, profile, lobby, room.
 $(TEST_BIN_DIR)/net_provider_smoke: $(TESTS_DIR)/net_provider_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The Marketplace and Settings against a live tetrisd: prices, wallet,
-# ownership and the loadout, all of which moved out of the client's view model
-# and into the account. Same link line - the store calls live in the app
-# archive beside the rest of the network layer.
+# Marketplace and Settings: prices, wallet, ownership and the loadout, all of
+# which live in the account rather than the client's view model.
 $(TEST_BIN_DIR)/store_smoke: $(TESTS_DIR)/store_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The layer solo_mode.c calls, driven against a live tetrisd: who owns the
-# board, and the countdown hold that reconciles the client's 3-2-1 with the
-# server's gravity. Same link line - solo_authority.c is in the app archive.
+# The layer solo_mode.c calls: who owns the board, and the countdown hold that
+# reconciles the client's 3-2-1 with the server's gravity.
 $(TEST_BIN_DIR)/solo_authority_smoke: $(TESTS_DIR)/solo_authority_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The room feed against a live tetrisd: narration the server wrote, chat a
-# player sent, and the fact that both reach the ring whether they arrive on
-# their own or across a reply. Same link line - net_chat.c is in the app
-# archive beside the rest of the network layer.
+# The room feed: server narration and player chat both reach the ring, whether
+# they arrive on their own or across a reply.
 $(TEST_BIN_DIR)/chat_smoke: $(TESTS_DIR)/chat_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The renderer has no automated test: notcurses queries the terminal for
-# capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
-# indefinitely waiting for replies. A real terminal answers these instantly;
-# a scripted pty (forkpty) does not, and there is no notcurses option to
-# skip the probe. Manual check via `make run` is the verification path.
-#
-# The network layer is a different matter, and is covered: it needs no
-# terminal, so tests/integration/ drives it against a real tetrisd.
+# Two clients in one process, on two sockets — the only way one program can
+# assert on both halves of the same instant. Two processes could agree only by
+# talking to each other, which is the thing under test.
+$(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The load generator, deliberately outside `integration`: it reports what the
+# server cost rather than whether it was right, and a fleet of fifty is too
+# slow and too machine-dependent for `make test`. ../../scripts/stress.sh
+# starts a server and drives this against it.
+$(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.h $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+stress: $(TEST_BIN_DIR)/stress_client
+
+# The renderer has no automated test: notcurses probes the terminal for
+# capabilities and blocks indefinitely for replies a scripted pty never sends,
+# with no option to skip the probe. `make run` is its verification path. The
+# network layer needs no terminal, so tests/integration/ covers it.
 test: unit integration
 
 unit: $(UNIT_BINS)
@@ -282,7 +299,8 @@ unit: $(UNIT_BINS)
 
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
-			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke
+			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
+			 $(TEST_BIN_DIR)/match_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
@@ -306,6 +324,6 @@ re: fclean all
 
 .PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
 			check-dependencies check-tetrisu-deps test unit integration \
-			clean fclean re
+			stress clean fclean re FORCE
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

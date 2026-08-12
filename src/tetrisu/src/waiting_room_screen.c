@@ -9,6 +9,8 @@ static bool	append_compose(t_waiting_room_state *state, uint32_t key);
 static bool	is_confirm_key(uint32_t key);
 static bool	valid_slot(const t_app_room_view_model *room, int index);
 static bool	valid_room_snapshot(const t_app_room_view_model *room);
+static void	append_fighter(const t_waiting_room_state *state, char *out,
+				size_t size);
 static void	move_roster(t_waiting_room_state *state,
 					const t_app_room_view_model *room, int delta);
 
@@ -231,6 +233,12 @@ bool	waiting_room_auto_start_allowed(const t_app_room_view_model *room)
  * Server-backed rooms will arrive already reconciled. The fixture provider is
  * mutable in-process, so ready toggles use this same transition rule locally.
  *
+ * Only the two statuses this rule can express are its to move. SELECTING is
+ * the third, and it was being recomputed away: a room the server had already
+ * committed came back as READY, which is what the launch check reads as "not
+ * under way" - so the screen stayed put and an S pressed in that window asked
+ * a selecting room to start and was refused.
+ *
  * @return true when WAITING/READY changed; false for stable or terminal rooms.
  */
 bool	waiting_room_sync_state(t_app_room_view_model *room)
@@ -239,6 +247,7 @@ bool	waiting_room_sync_state(t_app_room_view_model *room)
 	int					minimum;
 
 	if (!valid_room_snapshot(room) || room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_SELECTING
 		|| room->state == APP_ROOM_STATE_FINISHED)
 		return (false);
 	minimum = room->mode == APP_GAME_MODE_DOUBLE
@@ -509,7 +518,34 @@ const char	*waiting_room_status_text(const t_app_room_view_model *room,
 			waiting_room_ready_count(room), waiting_room_required_ready(room));
 	else
 		snprintf(out, size, "Ready to start");
+	append_fighter(state, out, size);
 	return (out);
+}
+
+/**
+ * @brief Appends the chosen fighter to a status line, when one is chosen.
+ *
+ * It lives on the status line rather than in a panel of its own because it is
+ * a thing about this player's next match, exactly like the readiness the line
+ * already reports - and because both renderers are handed this text, so saying
+ * it here says it in both without either learning what a roster is.
+ *
+ * @param state Waiting-room state holding the name, possibly NULL.
+ * @param out Status line to append to.
+ * @param size Capacity of out.
+ */
+static void	append_fighter(const t_waiting_room_state *state, char *out,
+	size_t size)
+{
+	size_t	used;
+
+	if (state == NULL || state->character_name[0] == '\0')
+		return ;
+	used = strlen(out);
+	if (used + 16 >= size)
+		return ;
+	snprintf(out + used, size - used, "  -  fighter %s",
+		state->character_name);
 }
 
 /**
@@ -613,6 +649,25 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
  * @param room Room snapshot to read.
  * @return APP_NAV_START_DOUBLE or APP_NAV_START_BATTLE_ROYALE.
  */
+/**
+ * @brief Answers whether the room has already committed to its next match.
+ *
+ * Two states mean it has: the boards are dealt, or the select window that
+ * precedes them is open. Both are the server's doing and neither wants a
+ * START from a client - which is the whole reason this is one question rather
+ * than two comparisons repeated at every call site.
+ *
+ * @param room The room to ask.
+ * @return true when the match is already being set up or played.
+ */
+bool	waiting_room_is_under_way(const t_app_room_view_model *room)
+{
+	if (room == NULL)
+		return (false);
+	return (room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_SELECTING);
+}
+
 t_app_nav_action	waiting_room_launch_action(
 	const t_app_room_view_model *room)
 {
@@ -637,6 +692,16 @@ static t_room_action	handle_room_key(t_waiting_room_state *state,
 		return (ROOM_ACTION_VOLUME_DOWN);
 	if (key == 'r' || key == 'R')
 		return (ROOM_ACTION_TOGGLE_READY);
+	/*
+	 * The fighter is chosen here because the match screen is too late: the
+	 * room deals the boards as soon as every seat has declared, so by the
+	 * time that screen opens the character it would ask about is already the
+	 * one the server is resolving abilities against.
+	 */
+	if (key == NCKEY_LEFT)
+		return (ROOM_ACTION_CHARACTER_PREV);
+	if (key == NCKEY_RIGHT)
+		return (ROOM_ACTION_CHARACTER_NEXT);
 	if (key == 's' || key == 'S')
 		return (ROOM_ACTION_START);
 	if (key == NCKEY_UP)

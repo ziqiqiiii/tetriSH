@@ -134,6 +134,15 @@ int	solo_mode_run(t_render_ctx *ctx, t_audio_ctx *audio, t_net_client *net)
 			if (render_wait_ms < wait_ms)
 				wait_ms = render_wait_ms;
 		}
+		/*
+		 * A snapshot already in hand is not something to sleep on. The reply to
+		 * a move and the snapshot it caused arrive together often enough that
+		 * the request read both, and the socket then has nothing left to make
+		 * the poll return - so the frame the player is waiting for sat here for
+		 * a whole poll interval before anything looked at it.
+		 */
+		if (solo_authority_pending(&authority))
+			wait_ms = 0;
 		if (input_backlog)
 		{
 			errno = 0;
@@ -432,16 +441,23 @@ static bool	handle_solo_key(t_solo_authority *authority, t_solo_game *game,
 		*resize_pending = true;
 		return (false);
 	}
+	/*
+	 * The card is a bitmap over the board's bitmap, and notcurses wipes the
+	 * sprixel underneath rather than overlapping it - so the frame it covered
+	 * has to be drawn again, which nothing else here would ask for.
+	 */
 	if (key == '+' || key == '=')
 	{
 		audio_volume_up(audio);
 		render_notification_show_volume(ctx, audio->music_volume);
+		*state_changed = true;
 		return (false);
 	}
 	if (key == '-' || key == '_')
 	{
 		audio_volume_down(audio);
 		render_notification_show_volume(ctx, audio->music_volume);
+		*state_changed = true;
 		return (false);
 	}
 	if ((key == 'r' || key == 'R') && game->phase == SOLO_GAME_OVER)
@@ -493,7 +509,7 @@ static bool	handle_solo_mouse(t_solo_authority *authority, t_render_ctx *ctx,
 	int				canvas_y;
 
 	ability = SOLO_ABILITY_NONE;
-	if (display_ready && !resize_pending
+	if (solo_abilities_enabled() && display_ready && !resize_pending
 		&& solo_mouse_canvas_position(ctx, solo, input, &canvas_x, &canvas_y))
 		ability = solo_ability_at_canvas(canvas_x, canvas_y);
 	if (solo_popover_set_hover(solo, ability))

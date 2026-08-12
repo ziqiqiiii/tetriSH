@@ -1,5 +1,13 @@
 # libtetrissh Hardening Implementation Plan
 
+> **Completed — this plan is a historical record, not work to pick up.** All
+> five tasks shipped; the checkboxes below were never ticked as the work landed.
+> The deliverables are in the tree: `SESSIONIO_MAX_CERT_LEN` and the
+> RSA-derived bounds in `lib/libtetrissh/src/handshake.c`, `MSG_NOSIGNAL` /
+> `SO_NOSIGPIPE` in `src/io.c`, `tests/test_session_security.c` and
+> `tests/test_handshake_failures.c`, and `lib/libtetrissh/README.md`.
+> Verified 2026-08-13.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove confirmed denial-of-service and process-termination bugs from `libtetrissh`, add adversarial regression coverage, and document library integration and security contracts.

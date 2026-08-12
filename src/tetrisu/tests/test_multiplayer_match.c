@@ -119,6 +119,21 @@ static void	test_pixel_ability_targets_follow_layout(void)
 		< layout.ability_bar.width * 2);
 	assert(layout.local_board.x + layout.local_board.width
 		< layout.opponent_board.x);
+	/*
+	 * The rival's column mirrors the local one past their board, and the
+	 * arena has to have made room for it: a layout that sized the tiles from
+	 * one pair of chrome columns and then drew two put the far one off the
+	 * right edge of the screen.
+	 */
+	assert(layout.opponent_board.x + layout.opponent_board.width
+		< layout.opponent_ability_bar.x);
+	assert(layout.opponent_ability_bar.x + layout.opponent_ability_bar.width
+		< layout.opponent_loadout.x);
+	assert(layout.opponent_loadout.x + layout.opponent_loadout.width
+		<= layout.width);
+	assert(layout.opponent_ability_center_x
+		> layout.opponent_ability_bar.x);
+	assert(layout.opponent_loadout.width == layout.loadout.width);
 	index = 0;
 	while (index < APP_CHARACTER_ABILITY_COUNT)
 	{
@@ -140,6 +155,9 @@ static void	test_pixel_ability_targets_follow_layout(void)
 		< layout.ability_bar.x);
 	assert(layout.local_board.x + layout.local_board.width
 		< layout.right_opponents.x);
+	/* Battle Royale has no single rival, so it is given no column. */
+	assert(layout.opponent_loadout.width == 0);
+	assert(layout.opponent_ability_bar.width == 0);
 	printf("PASS test_pixel_ability_targets_follow_layout\n");
 }
 

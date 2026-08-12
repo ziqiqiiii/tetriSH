@@ -18,6 +18,7 @@
 // Static Functions
 static int	check_a_snapshot_is_the_whole_board(t_net_client *net);
 static int	check_an_action_moves_the_server_piece(t_net_client *net);
+static int	check_a_sent_action_needs_no_reply(t_net_client *net);
 static int	check_hold_round_trips(t_net_client *net);
 static int	check_pause_stops_the_server_clock(t_net_client *net);
 static int	check_a_refusal_says_why(t_net_client *net);
@@ -56,6 +57,8 @@ int	main(void)
 		check_a_snapshot_is_the_whole_board(&net), &failures);
 	report("an action moves the server's piece",
 		check_an_action_moves_the_server_piece(&net), &failures);
+	report("a sent action needs no reply",
+		check_a_sent_action_needs_no_reply(&net), &failures);
 	report("hold round trips", check_hold_round_trips(&net), &failures);
 	report("pause stops the server clock",
 		check_pause_stops_the_server_clock(&net), &failures);
@@ -109,6 +112,45 @@ static int	check_an_action_moves_the_server_piece(t_net_client *net)
 		return (0);
 	after = net->state_snapshot.piece.col;
 	return (after == before - 1);
+}
+
+/*
+** The path a held key uses: several moves go out back to back, nobody waits
+** for a verdict, and the board still ends up where the requests said. This is
+** the whole of the latency work - the wire is unchanged and only the waiting
+** is gone - so what it has to prove is that the server sees the same requests
+** and the client still learns the outcome from the snapshot.
+**
+** Three actions rather than one, because one would pass even if net_send had
+** quietly kept the round trip. Soft drop is the axis that made this urgent -
+** it is the repeat that outran the server's input budget - and it is also the
+** one with no wall to clamp against three rows from the top.
+**
+** The piece may also have fallen under gravity while this ran, so the
+** assertion is that it moved at least as far as was asked, not exactly.
+*/
+static int	check_a_sent_action_needs_no_reply(t_net_client *net)
+{
+	int	before;
+	int	sent;
+
+	drain(net);
+	if (net->state_snapshot.phase != BODY_PHASE_ACTIVE)
+		return (0);
+	before = net->state_snapshot.piece.row;
+	sent = 0;
+	while (sent < 3)
+	{
+		if (net_solo_send_action(net, SOLO_SOFT_DROP) != 0)
+			return (0);
+		sent++;
+	}
+	if (settle(net, 800) != 0)
+		return (0);
+	if (net->state_snapshot.piece.row < before + 3)
+		return (0);
+	/* The three replies are still on the socket; draining must not choke. */
+	return (net_pump(net) >= 0 && net->state == NET_IN_GAME);
 }
 
 /*

@@ -178,8 +178,7 @@ static void	draw_dialog_text(t_render_ctx *ctx, uint32_t *canvas, int width,
 		height / 8, glyph, g_confirm_title);
 	draw_centered(ctx, canvas, width, height, confirmation_body(dialog->kind),
 		height * 34 / 100, glyph * 3 / 4, g_confirm_body);
-	draw_centered(ctx, canvas, width, height,
-		"ESC/N CANCEL   LEFT/RIGHT SELECT   ENTER CONFIRM",
+	draw_centered(ctx, canvas, width, height, confirmation_hint(dialog->kind),
 		height * 82 / 100, glyph / 2, g_confirm_hint);
 }
 
@@ -190,17 +189,31 @@ static void	draw_buttons(t_render_ctx *ctx, uint32_t *canvas, int width,
 	int height, const t_confirmation_dialog *dialog)
 {
 	t_confirm_box	box;
+	size_t			longest;
 	int				gap;
 
-	box.width = width / 4;
-	box.height = height / 6;
+	/*
+	 * A word answer needs the room a word takes. YES and NO fit a quarter of
+	 * the dialog with space to spare; PLAY OFFLINE at the same width is
+	 * shrunk by fit_glyph until it is the small unreadable text this whole
+	 * bitmap tier exists to avoid.
+	 */
+	longest = strlen(confirmation_no_label(dialog->kind));
+	if (strlen(confirmation_yes_label(dialog->kind)) > longest)
+		longest = strlen(confirmation_yes_label(dialog->kind));
 	gap = width / 10;
+	box.width = width / 4;
+	if (longest > 4)
+		box.width = (width - gap) / 2 - gap / 2;
+	box.height = height / 6;
 	box.y = height * 55 / 100;
 	box.x = width / 2 - box.width - gap / 2;
-	draw_button(ctx, canvas, width, height, &box, "NO",
+	draw_button(ctx, canvas, width, height, &box,
+		confirmation_no_label(dialog->kind),
 		dialog->focus == CONFIRM_FOCUS_NO);
 	box.x = width / 2 + gap / 2;
-	draw_button(ctx, canvas, width, height, &box, "YES",
+	draw_button(ctx, canvas, width, height, &box,
+		confirmation_yes_label(dialog->kind),
 		dialog->focus == CONFIRM_FOCUS_YES);
 }
 

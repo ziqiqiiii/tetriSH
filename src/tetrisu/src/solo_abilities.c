@@ -15,6 +15,23 @@ static const t_solo_ability_definition	g_abilities[SOLO_ABILITY_COUNT] = {
 };
 
 static bool	ability_is_valid(t_solo_ability ability);
+/**
+ * @brief Answers whether Solo lets a player spend crystals at all.
+ *
+ * Solo is one player against the rules, so an ability there is a gift with
+ * nobody to take it from: clearing four rows and then deleting the bottom four
+ * turns a losing board into a fresh one for two crystals and no risk. The
+ * catalogue stays whole - the same four abilities are what a match is played
+ * with - and this is the one switch that decides whether Solo offers them, so
+ * the key, the click, the meter and the popover cannot disagree about it.
+ *
+ * @return true when Solo abilities are offered.
+ */
+bool	solo_abilities_enabled(void)
+{
+	return (false);
+}
+
 static t_solo_ability_result	remember_ability_result(t_solo_game *game,
 									t_solo_ability ability,
 									t_solo_ability_result result);

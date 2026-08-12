@@ -152,6 +152,76 @@ void	test_abort_start_only_undoes_a_start(void)
 	printf("PASS test_abort_start_only_undoes_a_start\n");
 }
 
+void	test_rematch_keeps_the_seats_and_withdraws_readiness(void)
+{
+	t_room	r;
+
+	make_ready_double(&r);
+	assert(room_set_ready(&r, 17, true) == 0);
+	assert(room_set_ready(&r, 22, true) == 0);
+	assert(room_start(&r, 17) == START_ACCEPTED);
+	room_rematch(&r);
+	assert(r.status == ROOM_READY);
+	assert(r.number_of_players == 2);
+	assert(r.slots[0].occupied == true);
+	assert(r.slots[1].occupied == true);
+	assert(r.slots[0].status == SLOT_WAITING);
+	assert(r.slots[1].status == SLOT_WAITING);
+	assert(membership_is_owner(room_find_member(&r, 17)) == true);
+	assert(room_can_start(&r, 17) == START_ACCEPTED);
+	printf("PASS test_rematch_keeps_the_seats_and_withdraws_readiness\n");
+}
+
+void	test_rematch_only_ends_a_match(void)
+{
+	t_room	r;
+
+	make_ready_double(&r);
+	room_rematch(&r);
+	assert(r.status == ROOM_READY);
+	room_finish(&r);
+	room_rematch(&r);
+	assert(r.status == ROOM_WAITING); // finished and emptied stays emptied
+	assert(r.number_of_players == 0);
+	printf("PASS test_rematch_only_ends_a_match\n");
+}
+
+void	test_selection_holds_a_ready_room_open_without_starting_it(void)
+{
+	t_room	r;
+
+	make_ready_double(&r);
+	assert(r.status == ROOM_READY);
+	assert(room_begin_selection(&r) == 0);
+	assert(r.status == ROOM_SELECTING);
+	/* committed but not playing: still startable, closed to newcomers */
+	assert(room_can_start(&r, 17) == START_ACCEPTED);
+	assert(room_can_accept(&r) == JOIN_IN_GAME);
+	assert(room_set_ready(&r, 22, true) == 0);
+	assert(strcmp(room_state_message(&r), "CHOOSING FIGHTERS") == 0);
+	assert(room_begin_selection(&r) == -1); // not twice
+	assert(room_start(&r, 17) == START_ACCEPTED);
+	assert(r.status == ROOM_IN_GAME);
+	printf("PASS test_selection_holds_a_ready_room_open_without_starting_it\n");
+}
+
+void	test_aborting_selection_returns_the_room_to_its_seated_status(void)
+{
+	t_room				r;
+	t_release_result	res;
+
+	make_ready_double(&r);
+	assert(room_begin_selection(&r) == 0);
+	memset(&res, 0, sizeof(res));
+	room_release(&r, 22, NULL, NULL, &res);
+	room_abort_selection(&r);
+	assert(r.status == ROOM_WAITING); // one player left, below the minimum
+	assert(room_can_accept(&r) == JOIN_ACCEPTED);
+	room_abort_selection(&r);
+	assert(r.status == ROOM_WAITING); // idempotent, and only undoes SELECTING
+	printf("PASS test_aborting_selection_returns_the_room_to_its_seated_status\n");
+}
+
 int	main(void)
 {
 	test_can_start_owner_with_min_players_accepted();
@@ -164,5 +234,9 @@ int	main(void)
 	test_find_member_returns_seated_identity_or_null();
 	test_abort_start_returns_the_room_to_its_seated_status();
 	test_abort_start_only_undoes_a_start();
+	test_rematch_keeps_the_seats_and_withdraws_readiness();
+	test_rematch_only_ends_a_match();
+	test_selection_holds_a_ready_room_open_without_starting_it();
+	test_aborting_selection_returns_the_room_to_its_seated_status();
 	return (0);
 }

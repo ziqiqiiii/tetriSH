@@ -162,6 +162,31 @@ void	render_notification_queue_volume(t_render_ctx *ctx, int volume)
 /**
  * @brief Queues the fixed Marketplace guidance shown for a locked item.
  */
+/**
+ * @brief Shows one incoming-ability card, right now.
+ *
+ * Shown rather than queued: this is the only warning a player gets that
+ * something has been done to them, and it arrives while they are placing a
+ * piece. A card held back until the next stationary repaint would arrive after
+ * the effect it describes had already cost them something.
+ *
+ * @param ctx Render context.
+ * @param title What landed.
+ * @param message What it does.
+ */
+void	render_notification_show_effect(t_render_ctx *ctx, const char *title,
+		const char *message)
+{
+	uint64_t	now_ms;
+
+	if (ctx == NULL || ctx->nc == NULL)
+		return ;
+	now_ms = ui_notification_now_ms();
+	(void)ui_notification_show_effect(&ctx->notifications, title, message,
+		now_ms);
+	refresh_notifications(ctx, now_ms);
+}
+
 void	render_notification_queue_ownership(t_render_ctx *ctx)
 {
 	uint64_t	now_ms;
@@ -285,6 +310,45 @@ void	render_notification_destroy(t_render_ctx *ctx)
 	ui_notification_stack_init(&ctx->notifications);
 }
 
+/**
+ * @brief Reports whether a screen owes a repaint because of a notification.
+ *
+ * @param ctx Active render context.
+ * @return true when notification planes have appeared or gone since the last
+ *         screen repaint.
+ */
+bool	render_notification_repaint_pending(const t_render_ctx *ctx)
+{
+	return (ctx != NULL && ctx->notification_repaint);
+}
+
+/**
+ * @brief Takes the pending repaint, so the screen about to draw owns it.
+ *
+ * @param ctx Active render context.
+ * @return What was pending; the flag is cleared.
+ */
+bool	render_notification_take_repaint(t_render_ctx *ctx)
+{
+	bool	pending;
+
+	if (ctx == NULL)
+		return (false);
+	pending = ctx->notification_repaint;
+	ctx->notification_repaint = false;
+	return (pending);
+}
+
+/*
+** Every appearance and disappearance of a card passes through here, which is
+** why the repaint is flagged here and nowhere else.
+**
+** A card is a bitmap and so is most of what it covers. Notcurses cannot
+** overlap two sprixels, so it wipes the cells of the one underneath - and the
+** screens cache their panels by signature, so once the card expires nothing
+** considers those panels stale and they never come back. Changing the volume
+** left a room with a background, a title, a footer and no panels.
+*/
 static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 {
 	int		index;
@@ -294,6 +358,7 @@ static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 	int		x;
 	bool	content_embedded;
 
+	ctx->notification_repaint = true;
 	destroy_notification_planes(ctx);
 	cols = art_columns(ctx);
 	index = 0;

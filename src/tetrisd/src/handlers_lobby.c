@@ -122,6 +122,12 @@ static int	list_room(t_request_context *ctx)
  * repair belongs to the request that wants it rather than to whichever
  * predicate happened to notice.
  *
+ * Being in a room refuses this request; being in *this* room does not. A room
+ * now outlives the match played in it, so the client coming back from a
+ * results screen names the room it is still sitting in, and answering that
+ * with already-in-room sent both players to the lobby to find each other
+ * again. Naming any other room is still the mistake it always was.
+ *
  * @param msg The request (unused).
  * @param context The request context.
  * @return 201 on create, 200 on join, 4xx with the verdict otherwise.
@@ -131,25 +137,31 @@ int	join_handler(const t_htttp_message *msg, void *context)
 	t_request_context	*ctx;
 	t_game_mode	mode;
 	const char	*name;
+	bool		creating;
 
 	(void)msg;
 	ctx = context;
 	if (!request_is_authorised(ctx))
 		return (401);
-	if (server_room_resolve(ctx->srv, ctx->cli, NULL) != NULL)
+	creating = strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) == 0;
+	name = NULL;
+	if (!creating)
+		name = request_room_name(ctx);
+	if (server_room_resolve(ctx->srv, ctx->cli, NULL) != NULL
+		&& (name == NULL
+			|| strcmp(name, ctx->cli->binding.room_name) != 0))
 	{
 		request_body_printf(ctx, "reason already-in-room\nroom %s\n",
 			ctx->cli->binding.room_name);
 		return (409);
 	}
 	server_room_unbind(ctx->cli);
-	if (strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) == 0)
+	if (creating)
 	{
 		if (read_mode(ctx, &mode) != 0)
 			return (400);
 		return (create_room(ctx, mode));
 	}
-	name = request_room_name(ctx);
 	if (name == NULL)
 		return (404);
 	return (join_room(ctx, name));
@@ -187,6 +199,12 @@ int	leave_handler(const t_htttp_message *msg, void *context)
  * The room decides the verdict; this handler only turns it into a status and,
  * when accepted, deals every seated player a board and marks the room playing.
  *
+ * What "accepted" leaves behind depends on the mode, so the answer names the
+ * status rather than asserting one: a Single room is playing by the time this
+ * returns, and any room with an opponent in it is choosing its fighters. A
+ * client that read `in-game` from here would draw a match a second before
+ * there was one.
+ *
  * @param msg The request (unused).
  * @param context The request context.
  * @return 200 when the game started, 403 for a non-owner, 409 otherwise.
@@ -209,7 +227,8 @@ int	start_handler(const t_htttp_message *msg, void *context)
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
 	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
-	request_body_printf(ctx, "room %s\nstatus in-game\n", name);
+	request_body_printf(ctx, "room %s\nstatus %s\n", name,
+		server_room_is_solo(server_room) ? "in-game" : "selecting");
 	return (200);
 }
 

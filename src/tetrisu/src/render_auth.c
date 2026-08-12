@@ -192,13 +192,36 @@ bool	render_auth_hit_test(const t_render_ctx *ctx, const t_auth_form *form,
 }
 
 /**
- * @brief Removes the auth overlay without touching the next screen.
+ * @brief Removes the auth screen, artwork included.
+ *
+ * The backdrop goes with it, and that is the whole point rather than tidiness.
+ * On a bitmap terminal the auth artwork is a sprixel - render_auth_font.c blits
+ * it with NCBLIT_PIXEL - while every screen that follows draws its backdrop
+ * through preferred_blitter(), which is deliberately a cell blitter. A cell
+ * plane cannot occlude a sprixel however high it sits (render_background.c),
+ * so leaving the artwork for the next screen to "replace" only worked where
+ * replacing it happened to destroy it.
+ *
+ * It did not always. render_background_replace() parks an outgoing plane
+ * instead of destroying it whenever the backdrop cache is holding it, and
+ * parking is a move - which erases the terminal-side image only on a terminal
+ * that genuinely implements sprixel movement. Where it does not, the sign-in
+ * artwork stayed on the glass and the home screen's cell backdrop was drawn
+ * underneath it: signing in appeared to change nothing, and so did every
+ * later visit to home.
+ *
+ * So the artwork is destroyed here, at the one site that knows the screen is
+ * being left. render_background_destroy() empties the retained cache with it,
+ * so nothing can restack the sign-in art later either. The next screen pays
+ * for one backdrop it was already going to build - reflow_home() replaces the
+ * background on this path regardless.
  */
 void	render_auth_destroy(t_render_ctx *ctx)
 {
 	render_auth_pixel_overlay_destroy(ctx);
 	render_screen_destroy(ctx);
 	render_auth_pixel_background_reset(ctx);
+	render_background_destroy(ctx);
 	render_compatibility_badge_hide(ctx);
 }
 

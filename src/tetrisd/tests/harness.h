@@ -46,5 +46,6 @@ int		hc_wait_chat(t_harness *hc, t_body_chat *out, int timeout_ms);
 int		hc_signup(t_harness *hc, const char *username, const char *password);
 int		hc_login(t_harness *hc, const char *username, const char *password);
 int		hc_join_new(t_harness *hc, const char *mode, char *room_out, size_t cap);
+int		hc_lock_in(t_harness *hc, t_fixture *fx, const char *path);
 
 # endif

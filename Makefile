@@ -7,9 +7,8 @@
 #                                    CONFIG                                    #
 ################################################################################
 
-# tetriSH umbrella Makefile. Recurses into the self-contained libraries and the
-# vendored shell, then provides a shell-driven `run` entry point. Daemons are
-# launched by tetrisctl from inside the shell (see .tetrishrc), not from here.
+# tetriSH umbrella: recurses into the libraries, the shell and the components.
+# Daemons are launched by tetrisctl from inside the shell (.tetrishrc), not here.
 #
 #   make / make all   install missing dependencies, then build everything
 #   make deps         check/install dependencies for this OS
@@ -22,17 +21,8 @@
 #   make fclean       recurse `fclean` and drop ./bin
 #   make re           fclean + all
 #
-#   make play         set up everything and launch a client against a server
-#
-#   make docker-build build the image (installs every dependency itself)
-#   make docker-run   run the shell + daemons in a container, publishing 4242
-#   make docker-server run the daemons alone, detached, for a client on the host
-#   make docker-logs  follow the detached server's daemon logs
-#   make docker-test  run every test suite inside a container
-#   make docker-shell open a bash prompt inside a container
-#   make docker-stop  stop the running containers, freeing the port
-#   make docker-clean remove the image
-#   make docker-reset stop the containers and drop the state volume
+#   make play         install + compile on this host, then play in kitty
+#   make play-image   the same, built in a container instead of on this host
 
 MAKE_FLAGS	:= --no-print-directory -s
 RM			:= rm -rf
@@ -40,6 +30,7 @@ RM			:= rm -rf
 AUTO_INSTALL_DEPS	:= 1
 REQUIRE_VALGRIND	:= 0
 REQUIRE_DOCKER		:= 0
+REQUIRE_KITTY		:= 0
 
 CLR_RMV		:= \033[0m
 RED			:= \033[1;31m
@@ -54,13 +45,12 @@ CYAN		:= \033[1;36m
 
 UNAME_S		:= $(shell uname -s)
 
-# Source-built dependencies usually install pkg-config metadata under
-# /usr/local; keep that visible before falling back to distro/Homebrew paths.
+# Source-built deps put their pkg-config metadata under /usr/local: keep it
+# ahead of the distro/Homebrew paths.
 export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
 
-# Homebrew keeps these libraries keg-only on some macOS releases. Export their
-# pkg-config metadata so this Makefile and every recursive component build use
-# the same headers and libraries on both Intel and Apple Silicon Macs.
+# Homebrew keeps these keg-only on some macOS releases; exporting their metadata
+# keeps every recursive build on the same headers and libraries.
 ifeq ($(UNAME_S), Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
@@ -77,9 +67,8 @@ SHELL_BIN	:= $(SHELL_DIR)/macmini_shell
 BIN			:= bin
 CERT_DIR	:= certs
 
-# Build only the components that exist yet — the project is in early dev, so
-# the daemon directories are filled in over time. Match Makefiles rather than
-# directories so ignored build artefacts cannot be mistaken for components.
+# Build only the components that exist yet. Matching Makefiles rather than
+# directories keeps ignored build artefacts from being taken for components.
 LIB_MAKEFILES		:= $(wildcard lib/lib*/Makefile)
 LIB_DIRS			:= $(patsubst %/,%,$(dir $(LIB_MAKEFILES)))
 
@@ -111,13 +100,10 @@ daemons: libs | deps
 		$(MAKE) $(MAKE_FLAGS) -C $$d DEPS_READY=1 || exit 1; \
 	done
 
-# Collect every built binary into a single ./bin. The shell prepends $PWD/bin
-# to PATH, and tetrisctl resolves each daemon through PATH exactly as execvp
-# does, so a daemon missing from ./bin cannot be launched by name at all. Each
-# component's binary is named after its directory; unbuilt ones are skipped.
-# Both layouts are searched, because the daemons build their binary beside
-# their Makefile and tetrisu builds its own into bin/ - looking only for the
-# first is what left ./bin/tetrisu missing after a successful build.
+# One ./bin for every binary: the shell prepends it to PATH and tetrisctl
+# resolves daemons through PATH, so one missing here cannot be launched at all.
+# Each is named after its directory, in one of two layouts - daemons build
+# beside their Makefile, tetrisu into bin/ - so both are searched.
 bin-link: shell daemons
 	@ mkdir -p $(BIN)
 	@ ln -sf $(CURDIR)/$(SHELL_DIR)/bin/* $(BIN)/ 2>/dev/null || true
@@ -128,25 +114,19 @@ bin-link: shell daemons
 		done; \
 	done
 
-# Idiomatic launch: the shell sources .tetrishrc, whose last line is
-# `tetrisctl start` - so the daemons come up before the first prompt.
-#
-# certs is a prerequisite for the same reason it is one of `stack`: that
-# `tetrisctl start` boots tetrisd, and tetrisd treats missing certificates as
-# a fatal boot error. certs/ is git-ignored, so on a fresh clone this is the
-# difference between a shell with a game server behind it and one without.
+# .tetrishrc ends in `tetrisctl start`, so the daemons come up before the first
+# prompt - which boots tetrisd, for which missing certificates are fatal. certs/
+# is git-ignored, so on a fresh clone `certs` decides whether there is a server.
 run: all bin-link certs
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
-# Development credentials for the secure session. tetrisd refuses to boot
-# without them, so `run` and `stack` depend on this; the directory is
-# git-ignored and the script is a no-op while the certificate is still valid.
+# Development credentials for the secure session, which tetrisd refuses to boot
+# without. A no-op while the certificate is still valid.
 certs:
 	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
 
-# Headless stack for integration tests (no interactive shell). tetrisctl reads
-# the roster and its order from .tetrishrc, and each daemon detaches itself, so
-# this returns only once they are actually up - and non-zero if one is not.
+# Headless stack for integration tests; roster and order come from .tetrishrc.
+# Each daemon detaches, so this returns only once they are up - non-zero if not.
 stack: all bin-link certs
 	@ PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
 		$(BIN)/tetrisctl start
@@ -159,181 +139,79 @@ test: all
 		$(MAKE) $(MAKE_FLAGS) -C $$d test DEPS_READY=1 || exit 1; \
 	done
 
+# --- load ------------------------------------------------------------------
+# Outside `test`: it reports what the server cost, not whether it was right, and
+# runs as long as it is told to. STRESS_ARGS= shapes the fleet, HOST= drives a
+# server already running:
+#   make stress STRESS_ARGS="--players 50 --seconds 30"
+#   make stress HOST=10.27.229.33
+STRESS_HOST_ENV	 = $(if $(HOST),HOST=$(HOST))
+
+stress:
+	@ $(STRESS_HOST_ENV) bash ./scripts/stress.sh $(STRESS_ARGS)
+
 ################################################################################
 #                                DEPENDENCIES                                  #
 ################################################################################
 
-# `make` installs only when the compile/link probe fails. Set
-# AUTO_INSTALL_DEPS=0 in CI or managed environments to make this check-only.
-# Outsourced to scripts/; it delegates to check_deps.sh / install_deps.sh.
+# Installs only when the compile/link probe fails; AUTO_INSTALL_DEPS=0 makes it
+# check-only (CI). The work is in scripts/check_deps.sh + install_deps.sh.
 deps:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		GREEN='$(GREEN)' CLR_RMV='$(CLR_RMV)' \
 		bash ./scripts/deps.sh
 
-# Root deps are shared by multiple components: compiler toolchain, pkg-config,
-# OpenSSL, Readline, and ncurses. Install is outsourced to scripts/; component
-# render/audio packages belong in that component's own Makefile.
+# Root deps are the ones several components share: toolchain, pkg-config,
+# OpenSSL, readline, ncurses. A component's own packages belong in its Makefile.
 install-deps:
 	@ bash ./scripts/install_deps.sh
 
-# Verify dependencies without changing the system. Outsourced to scripts/; the
-# script compiles/links a probe rather than trusting the package database.
+# Verify without changing the system: the script compiles and links a probe
+# rather than trusting the package database.
 check-deps:
 	@ UNAME_S=$(UNAME_S) REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		bash ./scripts/check_deps.sh
 
-# Read-only summary of the dependency situation. Outsourced to scripts/.
+# Read-only summary of the dependency situation.
 deps-info:
 	@ UNAME_S=$(UNAME_S) AUTO_INSTALL_DEPS=$(AUTO_INSTALL_DEPS) \
 		REQUIRE_VALGRIND=$(REQUIRE_VALGRIND) \
-		REQUIRE_DOCKER=$(REQUIRE_DOCKER) \
+		REQUIRE_DOCKER=$(REQUIRE_DOCKER) REQUIRE_KITTY=$(REQUIRE_KITTY) \
 		bash ./scripts/deps_info.sh
 
 ################################################################################
-#                                    DOCKER                                    #
+#                                    PLAY                                      #
 ################################################################################
 
-# Containerised build of the whole stack. Every dependency - the toolchain,
-# OpenSSL, ncurses, SDL2 and the source-built notcurses - is installed by the
-# Dockerfile, so there is no separate download step to run here.
-
-DOCKER			:= docker
-DOCKER_IMAGE	:= tetrish
-DOCKER_TAG		:= dev
-DOCKER_REF		:= $(DOCKER_IMAGE):$(DOCKER_TAG)
-DOCKER_NAME		:= tetrish
-DOCKER_SERVER	:= tetrish-server
-DOCKER_PORT		:= 4242
-
-# Named volume for the daemons' runtime state, mounted where .tetrishrc points
-# TETRISD_DATA_DIR and the logger's sink: tmp/. Without it the player store's
-# append-only log is inside the container's writable layer, so every player,
-# wallet and leaderboard row is lost the moment the container is replaced -
-# which `docker run --rm` does on every single run.
-DOCKER_STATE	:= tetrish-state
-
-# -it only when there is a terminal to attach. make's own stdin says nothing
-# about that, so the test opens /dev/tty on fd 3 - and stderr is dropped for the
-# whole probe rather than for the test alone, because it is the *redirection*
-# that fails where there is no controlling terminal, and that message escapes an
-# inner 2>/dev/null. It surfaced as "/bin/sh: /dev/tty: Device not configured"
-# on every docker target run from a script.
-DOCKER_TTY		 = $(shell exec 2>/dev/null; { [ -t 3 ] \
-					&& printf -- '-it' || printf -- '-i'; } 3</dev/tty \
-					|| printf -- '-i')
-
-# TETRISD_PORT travels with the published port. tetrisd lets the environment win
-# over .tetrishrc, and without this line `DOCKER_PORT=5252` published 5252 to a
-# server still listening on 4242 - a container that starts, reports itself up,
-# and answers nothing.
-DOCKER_ENV		 = -e TETRISD_PORT=$(DOCKER_PORT) -e TETRISU_PORT=$(DOCKER_PORT)
-
-# --init, because both daemons double-fork: the intermediate parent exits and
-# the detached daemon is reparented onto pid 1, which is a shell that never
-# waited for it and so cannot reap it. tini can, and forwards TERM to the
-# script's trap unchanged.
-DOCKER_INIT		 = --init
-
-# The host's TERM, forwarded when there is one. The image pins
-# TERM=xterm-256color, which has no bitmap graphics protocol, so an in-container
-# tetrisu could not draw a board no matter what terminal was actually attached;
-# kitty-terminfo is installed for the same reason. Not passed to docker-server,
-# which draws nothing.
-DOCKER_TERM		 = $(if $(TERM),-e TERM=$(TERM))
-
-docker-build:
-	@ echo "\n$(CYAN)==> Building image$(CLR_RMV) $(BLUE)$(DOCKER_REF)$(CLR_RMV)..."
-	@ $(DOCKER) build -t $(DOCKER_REF) .
-	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_REF)$(CLR_RMV) built ✔️"
-
-
-docker-run: docker-stop
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) $(DOCKER_INIT) \
-		--name $(DOCKER_NAME) $(DOCKER_ENV) \
-		-p $(DOCKER_PORT):$(DOCKER_PORT) \
-		-v $(DOCKER_STATE):/tetrish/tmp $(DOCKER_REF)
-
-# The server on its own, detached, for a client running on the host - the only
-# way to play on macOS, where tetrisd cannot be built at all (epoll, timerfd,
-# POSIX mqueue). certs/ is mounted rather than baked: the host's tetrisu has to
-# verify the server against the same CA, and the image's own certificates are
-# minted inside a filesystem the host cannot read. Read-only, because the host
-# is what mints them - `certs` is a prerequisite here for exactly that reason.
-docker-server: certs docker-stop
-	@ echo "\n$(CYAN)==> Starting$(CLR_RMV) $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) on port $(DOCKER_PORT)..."
-	@ $(DOCKER) run -d $(DOCKER_INIT) --name $(DOCKER_SERVER) \
-		$(DOCKER_ENV) -p $(DOCKER_PORT):$(DOCKER_PORT) \
-		-v $(CURDIR)/$(CERT_DIR):/tetrish/certs:ro \
-		-v $(DOCKER_STATE):/tetrish/tmp \
-		$(DOCKER_REF) bash scripts/docker_server.sh >/dev/null
-	@ echo "$(GREEN)[Success] $(BLUE)$(DOCKER_SERVER)$(CLR_RMV) started ✔️"
-
-docker-logs:
-	@ $(DOCKER) logs -f $(DOCKER_SERVER)
-
-docker-test:
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_REF) make test
-
-docker-shell:
-	@ $(DOCKER) run --rm $(DOCKER_TTY) $(DOCKER_TERM) $(DOCKER_REF) bash
-
-# Both names, because either can be holding the published port.
-docker-stop:
-	@ $(DOCKER) rm -f $(DOCKER_NAME) $(DOCKER_SERVER) >/dev/null 2>&1 || true
-
-docker-clean:
-	@ $(DOCKER) image rm -f $(DOCKER_REF) >/dev/null 2>&1 || true
-	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_REF)$(CLR_RMV) ✔️"
-
-# Drops the players, wallets and leaderboard with the volume; the image stays.
-docker-reset: docker-stop
-	@ $(DOCKER) volume rm -f $(DOCKER_STATE) >/dev/null 2>&1 || true
-	@ echo "$(RED)Deleted $(BLUE)$(DOCKER_STATE)$(CLR_RMV) ✔️"
-
-# Build the client and play. This is the target for the machine that is only ever
-# a client, which on macOS is every machine: `make` cannot run here at all -
-# libcoreipc's mqueue module fails to compile on Darwin before the recursion ever
-# reaches tetrisu - so this recurses straight into src/tetrisu and touches
-# nothing else. It deliberately does not depend on bin-link, which builds the
-# shell and every daemon to populate ./bin and would fail for the same reason.
+# Two routes from a fresh clone to a playable client, differing only in where it
+# is built - `play` on this host, `play-image` in a container carrying the
+# toolchain and notcurses. Both install, compile and open kitty on the game;
+# play.sh checks before every step, so re-running either restarts the client.
 #
-# Deliberately no TETRISU_HOST. The server's address changes - a hotspot hands
-# out a new one - and a value baked in here would be a second place to remember
-# to edit. The sign-in screen's SERVER ID field is the one place it is typed, and
-# it wins over the environment anyway.
+# The container never draws: the board is Kitty-graphics escape sequences, bytes
+# on the pty the host terminal renders either way. That is what lets one Linux
+# image serve macOS, where `make` cannot run at all - libcoreipc's mqueue module
+# does not compile on Darwin, and the recursion stops long before tetrisu.
 #
-# TETRISU_CA_PATH is left alone too, because its default is already right:
-# certs/demo-ca.crt is committed, so a fresh clone verifies the demo server with
-# nothing configured. Only a server on this machine needs the override, and
-# `make play-local` passes it.
+# Both play on the shared server by default, at DEFAULT_HOST in scripts/play.sh
+# - named there and not here, because the script has to pair it with the
+# matching CA. Neither target starts a server; `play.sh --local` is the one that
+# does.
 #
-# TETRISU_NET is the one thing that must be set. Without it the client builds its
-# fixture provider instead of a session, and CHECK SERVER reports offline without
-# opening a socket - the same screen a wrong address gives, for a reason no
-# address can fix.
-play:
-	@ $(MAKE) $(MAKE_FLAGS) -C src/tetrisu
-	@ echo "\n$(CYAN)==> Launching $(BLUE)tetrisu$(CLR_RMV) - type the server's address in $(YELLOW)SERVER ID$(CLR_RMV)"
-	@ TETRISU_NET=1 ./src/tetrisu/bin/tetrisu
-
-# The other half: bring a server up on this machine and play against it.
-# scripts/play.sh installs what is missing, starts the container engine (macOS
-# has no native tetrisd), waits for the port and launches the client against it -
-# spanning host and container, which is why it is a script and not a recipe.
-#
-# HOST= plays on somebody else's server instead of starting one here, checking it
-# is reachable first and verifying it against the committed demo CA:
-#   make play-local HOST=10.27.229.33
-# PLAY_ARGS= passes anything else through: make play-local PLAY_ARGS=--rebuild
+# HOST= plays on another server:           make play HOST=tetrish.dev
+# PLAY_ARGS= passes anything else through: make play-image PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 
-play-local:
-	@ DOCKER_REF=$(DOCKER_REF) DOCKER_SERVER=$(DOCKER_SERVER) \
-		bash ./scripts/play.sh $(PLAY_HOST_ARG) $(PLAY_ARGS)
+play:
+	@ bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
+
+PLAY_REBUILD_ARG	 = $(if $(REBUILD),--rebuild)
+
+play-image:
+	@ bash ./scripts/play.sh --container $(PLAY_HOST_ARG) $(PLAY_REBUILD_ARG) $(PLAY_ARGS)
 
 ################################################################################
 #                                   CLEANUP                                    #
@@ -352,16 +230,13 @@ fclean:
 	@ $(RM) $(BIN)
 	@ echo "$(RED)Deleted $(BLUE)component binaries$(CLR_RMV) ✔️"
 
-# Like fclean but also wipes daemon runtime state: stops whatever is still
-# running, delegates to the shell's own `reset` (drops its tmp/ and archive/),
-# and clears the repo-level bin/tmp.
+# fclean plus daemon runtime state: stops what is running, delegates to the
+# shell's own `reset` (its tmp/ and archive/), then clears bin/ and tmp/.
 #
-# The daemons are stopped first, and stopping them is what this target owes
-# them: tetrisctl blocks until each has finished tearing down, so the wipe
-# cannot delete tmp/ out from under a logger that is still writing into it.
-# Reversing these lines is the self-inflicted wound tetrislogd's sink reclaim
-# was written to survive - reclaim stays, because a log file can still be
-# rotated or removed by hand, but it stops being a patch for this.
+# Stopping comes first because tetrisctl blocks until each daemon has torn down,
+# so the wipe cannot delete tmp/ under a logger still writing into it. Reversing
+# these lines is the wound tetrislogd's sink reclaim was written to survive -
+# reclaim stays for hand-rotated logs, but is not a patch for this.
 reset:
 	@ if [ -x $(BIN)/tetrisctl ]; then \
 		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
@@ -382,7 +257,5 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run certs stack test docker-build docker-run \
-			docker-server docker-logs docker-test docker-shell \
-			docker-stop docker-clean docker-reset play play-local \
+			bin-link run certs stack test play play-local play-image \
 			clean fclean reset re

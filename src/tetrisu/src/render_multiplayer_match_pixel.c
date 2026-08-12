@@ -51,7 +51,20 @@ static int regions_battle(t_match_regions *pass);
 static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
 				int first, int count, struct ncplane **slot);
 static int regions_loadout(t_match_regions *pass);
+static int regions_opponent_loadout(t_match_regions *pass);
 static int regions_hud(t_match_regions *pass);
+static void popover_place(const t_mp_match_pixel_layout *layout, int ability,
+				t_mp_rect *out);
+static void popover_draw(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, const t_mp_rect *card,
+				const t_app_catalogue_item_view_model *character, int ability);
+static int popover_wrap(const char *text, int width, int line, char *out,
+				size_t cap);
+static void snap_layout_to_cells(const t_render_ctx *ctx,
+				t_mp_match_pixel_layout *layout);
+static void snap_rect_to_cells(t_mp_rect *rect, int cell_x, int cell_y);
+static void shift_ability_centres(t_mp_match_pixel_layout *layout,
+				const t_mp_rect *before, const t_render_ctx *ctx);
 static int refresh_regions(t_match_regions *pass);
 static void compose_match(t_match_regions *pass);
 static void store_signatures(t_match_regions *pass, uint64_t signature);
@@ -66,6 +79,7 @@ static int clear_flash_step(const t_solo_game *game);
 static uint64_t local_board_signature(const t_solo_game *game,
 				bool include_score);
 static uint64_t loadout_signature(const t_mp_match_state *state);
+static uint64_t opponent_loadout_signature(const t_mp_match_state *state);
 static uint64_t hud_signature(const t_mp_match_state *state);
 static uint64_t opponents_signature(const t_mp_match_state *state,
 				int first, int count);
@@ -83,14 +97,21 @@ static int repaint_changed_cells(t_match_regions *pass, int slot,
 				bool with_piece);
 static bool board_region_sync(t_match_regions *pass, int slot,
 				const t_mp_rect *board, const t_solo_game *game);
-static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region);
-static uint64_t band_signature(const t_render_ctx *ctx, int first, int last);
+static bool blit_board_bands(t_match_regions *pass, const t_mp_rect *region,
+				int slot, struct ncplane **planes, uint64_t *signatures);
+static bool regions_opponent_caption(t_match_regions *pass,
+				const t_mp_rect *board);
+static uint64_t band_signature(const t_render_ctx *ctx, int slot, int first,
+				int last);
 static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
 				int band, t_mp_rect *out);
 static bool caption_stale(t_match_regions *pass);
+static int opponent_pending(const t_mp_match_state *state);
 static bool regions_caption(t_match_regions *pass, const t_mp_rect *board);
 static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
 				const t_piece *piece, int layer);
+static void blackout_grid(const t_solo_game *game,
+				int grid[BOARD_HEIGHT][BOARD_WIDTH]);
 static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha);
 static void put_pixel(uint32_t *pixels, int width, int height, int x, int y,
 				 t_color tint, unsigned alpha);
@@ -103,17 +124,21 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_match_pixel_layout *layout,
 				const t_mp_match_state *state);
+static void effect_line(const t_solo_effects *effects, char *out,
+				size_t size);
 static void draw_double_caption(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *board,
-				const char *name, uint64_t points, int charge, bool local);
+				const char *name, uint64_t points, int charge, int pending,
+				bool local);
 static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect,
 				const t_mp_match_state *state, bool portrait);
 static void draw_ability_bar(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_match_pixel_layout *layout,
 				const t_mp_match_state *state);
-static void draw_ability_popover(t_render_ctx *ctx, uint32_t *pixels,
-				int width, int height, const t_mp_rect *rect,
+static void draw_opponent_column(t_render_ctx *ctx, uint32_t *pixels,
+				int width, int height,
+				const t_mp_match_pixel_layout *layout,
 				const t_mp_match_state *state);
 static void draw_hold_next(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_solo_game *game);
@@ -202,6 +227,7 @@ bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 	mp_match_pixel_layout_build(state->mode, width, height, &layout);
 	if (!layout.valid)
 		return (false);
+	snap_layout_to_cells(ctx, &layout);
 	signature = match_signature(state, width, height);
 	if (state->phase != MP_MATCH_PLAYING && !rebuild_background
 		&& ctx->screen_plane != NULL && ctx->mp_match_signature == signature)
@@ -310,6 +336,50 @@ static void board_cell_grid(const t_solo_game *game,
 	ghost = solo_game_ghost(game);
 	stamp_piece_cells(grid, &ghost, 2000);
 	stamp_piece_cells(grid, &game->active, 3000);
+	blackout_grid(game, grid);
+}
+
+/**
+ * @brief Halloween L2 (Dark): hides everything but a window under the piece.
+ *
+ * The only effect in the catalogue a server cannot carry out. Every other one
+ * is a rule about what a player may do, which tetrisd enforces by refusing the
+ * input; this one is a rule about what they may *see*, and only the thing
+ * drawing the board can enforce that.
+ *
+ * It is applied to the cell grid rather than to the board, so the hidden rows
+ * are still there and still collide - the player is blinded, not helped. The
+ * window travels with the falling piece and covers the rows just below it,
+ * which is what makes Dark survivable: you can place the piece in your hand
+ * and nothing else.
+ *
+ * @param game Game being drawn.
+ * @param grid Cell grid to blank outside the window.
+ */
+static void	blackout_grid(const t_solo_game *game,
+	int grid[BOARD_HEIGHT][BOARD_WIDTH])
+{
+	int	first;
+	int	last;
+	int	row;
+	int	col;
+
+	if (game->effects.dark <= 0)
+		return ;
+	first = game->active.row;
+	last = first + MP_MATCH_DARK_WINDOW_ROWS;
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if ((row < first || row > last) && grid[row][col] < 3000)
+				grid[row][col] = 0;
+			col++;
+		}
+		row++;
+	}
 }
 
 static void stamp_piece_cells(int grid[BOARD_HEIGHT][BOARD_WIDTH],
@@ -405,9 +475,14 @@ static int repaint_changed_cells(t_match_regions *pass, int slot,
 /**
  * @brief Brings one board region up to date, by cell diff where it can.
  *
- * Both boards go through here. The falling piece is only ever the local
- * player's, so the opponent's cache holds landed blocks alone and survives
- * every tick of a game nobody is steering.
+ * Both boards go through here, and both draw their falling piece. The
+ * opponent's used to be left off, which was right while the opponent was a
+ * fixture nobody was steering: there was no piece worth showing and the cache
+ * survived every tick. Now the server sends it, and a board that only changed
+ * when something locked read as a rival sitting motionless and then jumping.
+ *
+ * It costs nothing to keep: the cell diff below is built from the same grid,
+ * so a moving piece repaints the cells it moved through rather than the board.
  */
 static bool board_region_sync(t_match_regions *pass, int slot,
 	const t_mp_rect *board, const t_solo_game *game)
@@ -417,7 +492,7 @@ static bool board_region_sync(t_match_regions *pass, int slot,
 	bool with_piece;
 
 	cache = &pass->ctx->mp_match_boards[slot];
-	with_piece = slot == 0;
+	with_piece = true;
 	if (pass->force)
 		return (true);
 	if (repaint_changed_cells(pass, slot, board, game, with_piece))
@@ -462,11 +537,13 @@ static void band_bounds(const t_render_ctx *ctx, const t_mp_rect *region,
 /**
  * @brief Hashes the board rows a band covers, plus the band's own geometry.
  *
- * Only the local cache is hashed because only the local board is banded; the
- * rows outside any band's board area contribute nothing, so a band holding
- * only margin settles to a constant and stops being re-blitted.
+ * The cell cache is hashed rather than the game, so this reads whichever board
+ * the caller is banding; the rows outside any band's board area contribute
+ * nothing, so a band holding only margin settles to a constant and stops being
+ * re-blitted.
  */
-static uint64_t band_signature(const t_render_ctx *ctx, int first, int last)
+static uint64_t band_signature(const t_render_ctx *ctx, int slot, int first,
+	int last)
 {
 	uint64_t	hash;
 	int			row;
@@ -477,19 +554,28 @@ static uint64_t band_signature(const t_render_ctx *ctx, int first, int last)
 	row = max_int(0, first);
 	while (row < min_int(last, BOARD_HEIGHT))
 	{
-		hash = hash_bytes(hash, ctx->mp_match_boards[0].cells[row],
-				sizeof(ctx->mp_match_boards[0].cells[row]));
+		hash = hash_bytes(hash, ctx->mp_match_boards[slot].cells[row],
+				sizeof(ctx->mp_match_boards[slot].cells[row]));
 		row++;
 	}
 	return (hash);
 }
 
 /**
- * @brief Re-blits only the bands of the local board whose rows changed.
+ * @brief Re-blits only the bands of one board whose rows changed.
  *
- * A forced pass re-blits every band, because the canvas underneath it is new.
+ * Both boards come through here. A forced pass re-blits every band, because
+ * the canvas underneath it is new.
+ *
+ * @param pass The frame in progress.
+ * @param region The board's rectangle including its margin.
+ * @param slot Which board: 0 local, 1 opponent.
+ * @param planes The band planes to reuse, and their stored signatures.
+ * @param signatures What each band last held.
+ * @return true unless a plane could not be created.
  */
-static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region)
+static bool blit_board_bands(t_match_regions *pass, const t_mp_rect *region,
+	int slot, struct ncplane **planes, uint64_t *signatures)
 {
 	t_render_ctx	*ctx;
 	t_mp_rect		strip;
@@ -504,16 +590,17 @@ static bool blit_local_bands(t_match_regions *pass, const t_mp_rect *region)
 	while (band < MP_MATCH_BOARD_BANDS)
 	{
 		band_bounds(ctx, region, band, &strip);
-		signature = band_signature(ctx, (strip.y - region->y - 8) / tile_size,
+		signature = band_signature(ctx, slot,
+				(strip.y - region->y - 8) / tile_size,
 				(strip.y + strip.height - region->y - 8 + tile_size - 1)
 				/ tile_size);
 		if (strip.height > 0 && (pass->force
-				|| ctx->mp_match_band_signatures[band] != signature))
+				|| signatures[band] != signature))
 		{
 			if (!create_region_plane(ctx, pass->pixels, pass->width,
-					pass->height, &strip, &ctx->mp_match_local_bands[band]))
+					pass->height, &strip, &planes[band]))
 				return (false);
-			ctx->mp_match_band_signatures[band] = signature;
+			signatures[band] = signature;
 		}
 		band++;
 	}
@@ -540,10 +627,30 @@ static bool caption_stale(t_match_regions *pass)
 			sizeof(pass->state->local_game.scoring.total));
 	signature = hash_bytes(signature, &pass->state->local_game.crystal_charge,
 			sizeof(pass->state->local_game.crystal_charge));
+	signature = hash_bytes(signature, &pass->state->incoming_garbage,
+			sizeof(pass->state->incoming_garbage));
 	if (signature == pass->ctx->mp_match_caption_signature)
 		return (false);
 	pass->ctx->mp_match_caption_signature = signature;
 	return (true);
+}
+
+/**
+ * @brief Garbage queued against the opponent, as their caption reports it.
+ *
+ * Double reads it from the one opponent slot the snapshot fills. It is a
+ * different number from state->incoming_garbage and drawing one where the
+ * other belongs would warn the wrong player, which is the mistake this exists
+ * to make hard.
+ *
+ * @param state Match model to read.
+ * @return Rows owed to the opponent, or 0 when there is no opponent.
+ */
+static int opponent_pending(const t_mp_match_state *state)
+{
+	if (state == NULL || !state->opponents[0].present)
+		return (0);
+	return (state->opponents[0].garbage_pending);
 }
 
 /**
@@ -567,7 +674,8 @@ static bool regions_caption(t_match_regions *pass, const t_mp_rect *board)
 			draw_double_caption(pass->ctx, pass->pixels, pass->width,
 				pass->height, board, pass->state->profile.username,
 				pass->state->local_game.scoring.total,
-				pass->state->local_game.crystal_charge, true);
+				pass->state->local_game.crystal_charge,
+				pass->state->incoming_garbage, true);
 		}
 		return (create_region_plane(pass->ctx, pass->pixels, pass->width,
 				pass->height, &strip,
@@ -616,18 +724,136 @@ static void store_signatures(t_match_regions *pass, uint64_t signature)
 	ctx->mp_match_left_signature = 0;
 	ctx->mp_match_right_signature = 0;
 	ctx->mp_match_loadout_signature = 0;
+	ctx->mp_match_opponent_loadout_signature = 0;
 	ctx->mp_match_hud_signature = 0;
+}
+
+/**
+ * @brief Pulls every region inside its own whole cells.
+ *
+ * A bitmap plane can only start and end on a cell boundary, so a region whose
+ * edge falls mid-cell is given the whole cell - and the region on the other
+ * side of that edge is given it too. The two then share a cell while sharing
+ * no pixels, and on a protocol whose bitmaps do not compose that shared cell
+ * is expensive: the terminal has no way to redraw half of it, so touching
+ * either region retransmits both.
+ *
+ * The Double arena has two such seams and they were the whole of the cost. The
+ * HUD ends exactly where the boards begin, on a pixel row four fifths of the
+ * way down a cell, so every falling piece retransmitted the full-width HUD -
+ * 78 KB of Sixel per frame for a panel that had not changed. The rival's meter
+ * begins exactly where their board ends, so it went out again with every frame
+ * of theirs. On foot, which is Sixel, that is what the flicker was.
+ *
+ * Snapping inwards rather than outwards is what makes neighbours disjoint
+ * without having to know about each other: a region that is never given a cell
+ * it does not fully cover cannot be given one its neighbour covers either. The
+ * cost is at most one cell off each edge - a few pixels of a board tile - and
+ * the artwork is composed into the snapped rectangle, so nothing is clipped.
+ *
+ * @param ctx Render context carrying the terminal's cell size.
+ * @param layout Layout to align in place.
+ */
+static void snap_layout_to_cells(const t_render_ctx *ctx,
+	t_mp_match_pixel_layout *layout)
+{
+	t_mp_rect	*rects[5];
+	t_mp_rect	before[2];
+	int			index;
+
+	if (ctx == NULL || layout == NULL || ctx->cell_px_x <= 0
+		|| ctx->cell_px_y <= 0)
+		return ;
+	before[0] = layout->ability_bar;
+	before[1] = layout->opponent_ability_bar;
+	rects[0] = &layout->loadout;
+	rects[1] = &layout->ability_bar;
+	rects[2] = &layout->opponent_ability_bar;
+	rects[3] = &layout->opponent_loadout;
+	rects[4] = &layout->hud;
+	index = 0;
+	while (index < 5)
+	{
+		snap_rect_to_cells(rects[index], ctx->cell_px_x, ctx->cell_px_y);
+		index++;
+	}
+	/*
+	 * The meters carry the circles' own coordinates, which the hit test reads
+	 * and the drawing reads, so they travel with the rectangle they belong to
+	 * rather than being left where an unsnapped bar used to be.
+	 */
+	shift_ability_centres(layout, before, ctx);
+}
+
+/**
+ * @brief Moves the ability circles by however far their meter moved.
+ *
+ * @param layout Layout whose meters have already been snapped.
+ * @param before The two meters as they were before snapping.
+ * @param ctx Render context, for the cell size the snap used.
+ */
+static void shift_ability_centres(t_mp_match_pixel_layout *layout,
+	const t_mp_rect *before, const t_render_ctx *ctx)
+{
+	int	index;
+
+	(void)ctx;
+	layout->ability_center_x += layout->ability_bar.x - before[0].x;
+	layout->opponent_ability_center_x += layout->opponent_ability_bar.x
+		- before[1].x;
+	index = 0;
+	while (index < APP_CHARACTER_ABILITY_COUNT)
+	{
+		layout->ability_center_y[index] += layout->ability_bar.y
+			- before[0].y;
+		layout->opponent_ability_center_y[index]
+			+= layout->opponent_ability_bar.y - before[1].y;
+		index++;
+	}
+}
+
+/**
+ * @brief Shrinks one rectangle to the whole cells it entirely covers.
+ *
+ * A rectangle too small to contain a whole cell is left alone: it has no
+ * plane of its own to be charged for, and rounding it to nothing would only
+ * make the artwork drawn into it disappear.
+ *
+ * @param rect Rectangle to align in place.
+ * @param cell_x Cell width in pixels.
+ * @param cell_y Cell height in pixels.
+ */
+static void snap_rect_to_cells(t_mp_rect *rect, int cell_x, int cell_y)
+{
+	int	left;
+	int	top;
+	int	right;
+	int	bottom;
+
+	if (rect->width <= 0 || rect->height <= 0)
+		return ;
+	left = (rect->x + cell_x - 1) / cell_x * cell_x;
+	top = (rect->y + cell_y - 1) / cell_y * cell_y;
+	right = (rect->x + rect->width) / cell_x * cell_x;
+	bottom = (rect->y + rect->height) / cell_y * cell_y;
+	if (right - left <= 0 || bottom - top <= 0)
+		return ;
+	rect->x = left;
+	rect->y = top;
+	rect->width = right - left;
+	rect->height = bottom - top;
 }
 
 static int refresh_regions(t_match_regions *pass)
 {
-	static int (*const steps[5])(t_match_regions *) = {regions_local,
-		regions_opponent, regions_battle, regions_loadout, regions_hud};
+	static int (*const steps[6])(t_match_regions *) = {regions_local,
+		regions_opponent, regions_battle, regions_loadout,
+		regions_opponent_loadout, regions_hud};
 	int index;
 	int result;
 
 	index = 0;
-	while (index < 5)
+	while (index < 6)
 	{
 		result = steps[index](pass);
 		if (result < 0)
@@ -672,7 +898,8 @@ static int regions_local(t_match_regions *pass)
 		board->height + 16};
 	if (!board_region_sync(pass, 0, board, &state->local_game))
 		return (-1);
-	if (!blit_local_bands(pass, &region))
+	if (!blit_board_bands(pass, &region, 0, pass->ctx->mp_match_local_bands,
+			pass->ctx->mp_match_band_signatures))
 		return (-1);
 	if (doubles && !regions_caption(pass, board))
 		return (-1);
@@ -680,12 +907,25 @@ static int regions_local(t_match_regions *pass)
 	return (1);
 }
 
+/**
+ * @brief Brings the opponent's board and caption up to date, at their own rate.
+ *
+ * Two things separate this from regions_local. The board is banded the same way
+ * but under its own signatures, and the caption strip beneath it keeps a plane
+ * of its own so a score changing does not re-blit board rows.
+ *
+ * The other is the presentation floor. A rebuild that is merely due is deferred
+ * to MP_MATCH_OPPONENT_PRESENT_MS rather than skipped: the stored signature is
+ * left alone, so the next frame past the floor draws whatever the board has
+ * become by then, and nothing arrives late except the picture of it. A forced
+ * pass ignores the floor, because the canvas underneath it is new and a region
+ * left undrawn on a fresh canvas is a hole.
+ */
 static int regions_opponent(t_match_regions *pass)
 {
 	const t_mp_match_state *state;
 	const t_mp_rect *board;
 	t_mp_rect region;
-	t_mp_rect strip;
 	uint64_t signature;
 
 	state = pass->state;
@@ -695,26 +935,85 @@ static int regions_opponent(t_match_regions *pass)
 	signature = game_signature(&state->opponent_game);
 	if (!pass->force && pass->ctx->mp_match_opponent_signature == signature)
 		return (0);
+	if (!pass->force
+		&& ui_notification_now_ms() < pass->ctx->mp_match_opponent_due_ms)
+	{
+		pass->ctx->mp_match_opponent_deferred = true;
+		return (0);
+	}
 	if (!regions_prepare(pass))
 		return (-1);
 	if (!board_region_sync(pass, 1, board, &state->opponent_game))
 		return (-1);
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	if (!blit_board_bands(pass, &region, 1,
+			pass->ctx->mp_match_opponent_bands,
+			pass->ctx->mp_match_opponent_band_signatures))
+		return (-1);
+	if (!regions_opponent_caption(pass, board))
+		return (-1);
+	pass->ctx->mp_match_opponent_signature = signature;
+	pass->ctx->mp_match_opponent_due_ms = ui_notification_now_ms()
+		+ MP_MATCH_OPPONENT_PRESENT_MS;
+	pass->ctx->mp_match_opponent_deferred = false;
+	return (1);
+}
+
+/**
+ * @brief How long until a held-back opponent frame may be drawn.
+ *
+ * The loop only renders when something changed, so a frame the floor deferred
+ * would sit undrawn until the next thing that did change - which during a lull
+ * is a gravity step away, and at the end of a match is forever. Reporting the
+ * wait puts it back on the loop's timetable: it sleeps until the floor lifts
+ * and draws then.
+ *
+ * @param ctx Render context to ask.
+ * @return Milliseconds until the deferred frame is due, 0 when it is due now,
+ *         or -1 when nothing is being held back.
+ */
+int	render_multiplayer_match_deferred_ms(const t_render_ctx *ctx)
+{
+	uint64_t	now;
+
+	if (ctx == NULL || !ctx->mp_match_opponent_deferred)
+		return (-1);
+	now = ui_notification_now_ms();
+	if (now >= ctx->mp_match_opponent_due_ms)
+		return (0);
+	return ((int)(ctx->mp_match_opponent_due_ms - now));
+}
+
+/**
+ * @brief Redraws the name-and-score strip under the opponent's board.
+ *
+ * A forced pass has already had it composed onto the canvas by compose_match
+ * and only needs the plane, which is why the drawing is conditional and the
+ * plane is not.
+ *
+ * @param pass The frame in progress.
+ * @param board The opponent's board rectangle.
+ * @return true unless the plane could not be created.
+ */
+static bool regions_opponent_caption(t_match_regions *pass,
+	const t_mp_rect *board)
+{
+	const t_mp_match_state	*state;
+	t_mp_rect				strip;
+
+	state = pass->state;
+	strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
+		board->width + 16, 66};
 	if (!pass->force)
 	{
-		strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
-			board->width + 16, 66};
 		clear_rect(pass->pixels, pass->width, pass->height, &strip);
 		draw_double_caption(pass->ctx, pass->pixels, pass->width, pass->height,
 			board, state->opponent_name, state->opponent_game.scoring.total,
-			state->opponent_charge, false);
+			state->opponent_charge, opponent_pending(state), false);
 	}
-	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
-		board->height + 82};
-	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
-			pass->height, &region, &pass->ctx->mp_match_opponent_plane))
-		return (-1);
-	pass->ctx->mp_match_opponent_signature = signature;
-	return (1);
+	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &strip, &pass->ctx->mp_match_opponent_plane));
 }
 
 static int regions_battle(t_match_regions *pass)
@@ -769,7 +1068,10 @@ static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
 
 static int regions_loadout(t_match_regions *pass)
 {
-	uint64_t signature;
+	const t_app_catalogue_item_view_model	*character;
+	t_mp_rect								card;
+	uint64_t								signature;
+	int										hovered;
 
 	signature = loadout_signature(pass->state);
 	if (!pass->force && pass->ctx->mp_match_loadout_signature == signature)
@@ -786,6 +1088,23 @@ static int regions_loadout(t_match_regions *pass)
 			&pass->layout->loadout, pass->state, true);
 		draw_ability_bar(pass->ctx, pass->pixels, pass->width, pass->height,
 			pass->layout, pass->state);
+		/*
+		 * The card is drawn into this region rather than given one of its
+		 * own, and that is the whole reason it is visible. Two bitmap planes
+		 * do not compose - anything drawn over one invalidates it - so a card
+		 * on its own plane over the board was covered by the next frame of
+		 * the board. Inside the loadout it is the same bitmap as the column
+		 * it sits on, and nothing can arrive on top of it.
+		 */
+		character = mp_match_selected_character(pass->state);
+		hovered = pass->state->hovered_ability;
+		if (character != NULL && hovered >= 1
+			&& hovered <= APP_CHARACTER_ABILITY_COUNT)
+		{
+			popover_place(pass->layout, hovered, &card);
+			popover_draw(pass->ctx, pass->pixels, pass->width, pass->height,
+				&card, character, hovered);
+		}
 	}
 	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
 			pass->height, &pass->layout->loadout,
@@ -797,6 +1116,201 @@ static int regions_loadout(t_match_regions *pass)
 		return (-1);
 	pass->ctx->mp_match_loadout_signature = signature;
 	return (1);
+}
+
+static int regions_opponent_loadout(t_match_regions *pass)
+{
+	uint64_t signature;
+
+	if (pass->state->mode != APP_GAME_MODE_DOUBLE
+		|| pass->layout->opponent_loadout.width <= 0)
+		return (0);
+	signature = opponent_loadout_signature(pass->state);
+	if (!pass->force
+		&& pass->ctx->mp_match_opponent_loadout_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	if (!pass->force)
+	{
+		clear_rect(pass->pixels, pass->width, pass->height,
+			&pass->layout->opponent_loadout);
+		clear_rect(pass->pixels, pass->width, pass->height,
+			&pass->layout->opponent_ability_bar);
+		draw_opponent_column(pass->ctx, pass->pixels, pass->width,
+			pass->height, pass->layout, pass->state);
+	}
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &pass->layout->opponent_loadout,
+			&pass->ctx->mp_match_opponent_loadout_plane))
+		return (-1);
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &pass->layout->opponent_ability_bar,
+			&pass->ctx->mp_match_opponent_ability_plane))
+		return (-1);
+	pass->ctx->mp_match_opponent_loadout_signature = signature;
+	return (1);
+}
+
+/**
+ * @brief Puts the hovered ability's card beside the meter, or takes it away.
+ *
+ * The card is the one surface here that is not part of the composed bitmap.
+ * It used to be, and it was unreadable: the description is a sentence from the
+ * catalogue, the slot it borrowed was the narrow HOLD/NEXT column, and the
+ * bitmap text drawer shrinks a line until it fits - so eighty characters in a
+ * hundred-pixel column bottomed out at a four-pixel glyph and overflowed the
+ * panel anyway. A terminal plane wraps instead of shrinking and is legible at
+ * whatever size the terminal's font is.
+ *
+ * It also sits where the thing it describes is. The bitmap card lived one
+ * column left of the meter; this one tracks the circle being hovered.
+ *
+ * @param pass The frame being refreshed.
+ * @return 1 when the card appeared, moved or changed, 0 when nothing did,
+ *         -1 when a plane could not be made.
+ */
+/**
+ * @brief Places the card beside the meter, vertically on the circle it names.
+ *
+ * Over the board rather than beside it, because there is no beside: the
+ * chrome column is the width of a portrait and a card that fitted in it would
+ * be the unreadable one this replaced. Solo overlays its card for the same
+ * reason. A player reading an ability is working the meter with the mouse,
+ * not placing a piece.
+ *
+ * @param layout Geometry carrying the meter, its circles and the board.
+ * @param ability 1-based ability being hovered.
+ * @param out Receives the card's rectangle.
+ */
+static void	popover_place(const t_mp_match_pixel_layout *layout, int ability,
+	t_mp_rect *out)
+{
+	int	height;
+
+	/*
+	 * Tall enough for a title, a cost line and the wrapped description, and
+	 * no taller: a card sized to the column left a panel of empty space
+	 * under two lines of text.
+	 */
+	height = clamp_int(layout->loadout.height / 2, 190, 330);
+	out->width = layout->loadout.width - 12;
+	out->height = height;
+	out->x = layout->loadout.x + 6;
+	out->y = layout->ability_center_y[ability - 1] - height / 2;
+	out->y = clamp_int(out->y, layout->loadout.y + 6,
+			layout->loadout.y + layout->loadout.height - height - 6);
+}
+
+/**
+ * @brief Draws the card: a frame, the name and slot, the cost, the effect.
+ *
+ * The same four things Solo's card says, in the same order, so an ability
+ * learnt in one mode reads identically in the other. The description is
+ * word-wrapped over three lines at a fixed size rather than shrunk to fit on
+ * one - shrinking is what made the old card bottom out at a four-pixel glyph
+ * and overflow its panel anyway.
+ *
+ * @param ctx Render context, for the glyph sheet.
+ * @param pixels Canvas being composed.
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param card The card's rectangle.
+ * @param character The fighter whose ability is hovered.
+ * @param ability 1-based ability being hovered.
+ */
+static void	popover_draw(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_mp_rect *card,
+	const t_app_catalogue_item_view_model *character, int ability)
+{
+	char		line[APP_TEXT_MAX];
+	t_mp_rect	box;
+	int			body;
+	int			row;
+
+	mp_match_pixel_fill_rect(pixels, width, height, card, g_dark, 244);
+	mp_match_pixel_outline_rect(pixels, width, height, card, 3, g_pink, 255);
+	body = clamp_int(card->height / 18, 10, 14);
+	box = (t_mp_rect){card->x + 14, card->y + 12, card->width - 28,
+		body * 3 / 2};
+	snprintf(line, sizeof(line), "%.*s",
+		(int)sizeof(line) - 2, character->abilities[ability - 1].name);
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box,
+		body * 3 / 2, g_cream, true);
+	box.y += body * 3 / 2 + 8;
+	box.height = body;
+	snprintf(line, sizeof(line), "[%d]  COST %d", ability,
+		solo_ability_cost((t_solo_ability)ability));
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box,
+		body, g_gold, true);
+	row = 0;
+	while (row < MP_MATCH_POPOVER_TEXT_ROWS)
+	{
+		box.y += body + 6;
+		/*
+		 * The wrap width is in characters, so it is the glyph's advance -
+		 * its size plus the fifth of it the drawer uses for spacing - that
+		 * decides how many fit. Guessing low here is what made a long line
+		 * shrink to fit while a short one beside it did not, and the card
+		 * read as two different sizes of the same sentence.
+		 */
+		if (popover_wrap(character->abilities[ability - 1].description,
+				(card->width - 28) / max_int(1, body * 6 / 5), row, line,
+				sizeof(line)) > 0)
+			mp_match_pixel_draw_text_box(ctx, pixels, width, height, line,
+				&box, body, g_lavender, false);
+		row++;
+	}
+}
+
+/**
+ * @brief Copies out one word-wrapped line of a description.
+ *
+ * Wrapping rather than shrinking is the whole point of this card. Words are
+ * kept whole unless one is longer than the line, in which case it is cut -
+ * a word that cannot fit anywhere has to break somewhere.
+ *
+ * @param text The full description.
+ * @param width Usable columns per line.
+ * @param line Which wrapped line is wanted, 0-based.
+ * @param out Receives the line, NUL-terminated.
+ * @param cap Size of out.
+ * @return The number of characters written.
+ */
+static int	popover_wrap(const char *text, int width, int line, char *out,
+	size_t cap)
+{
+	int	start;
+	int	end;
+	int	cut;
+
+	out[0] = '\0';
+	if (text == NULL || width <= 0 || (size_t)width >= cap)
+		return (0);
+	start = 0;
+	while (line >= 0 && text[start] != '\0')
+	{
+		while (text[start] == ' ')
+			start++;
+		end = start;
+		cut = 0;
+		while (text[end] != '\0' && end - start < width)
+		{
+			if (text[end] == ' ')
+				cut = end;
+			end++;
+		}
+		if (text[end] != '\0' && cut > start)
+			end = cut;
+		if (line == 0)
+		{
+			snprintf(out, cap, "%.*s", end - start, text + start);
+			return (end - start);
+		}
+		start = end;
+		line--;
+	}
+	return (0);
 }
 
 static int regions_hud(t_match_regions *pass)
@@ -825,36 +1339,42 @@ static int regions_hud(t_match_regions *pass)
 
 void render_multiplayer_match_pixel_destroy(t_render_ctx *ctx)
 {
+	int	slot;
+
 	if (ctx == NULL)
 		return ;
 	if (ctx->mp_match_tile_visual != NULL)
 		ncvisual_destroy(ctx->mp_match_tile_visual);
-	if (ctx->mp_match_portrait_visual != NULL)
-		ncvisual_destroy(ctx->mp_match_portrait_visual);
 	free(ctx->mp_match_tile_atlas);
 	ctx->mp_match_tile_atlas = NULL;
 	free(ctx->mp_match_tile_scaled);
 	ctx->mp_match_tile_scaled = NULL;
 	ctx->mp_match_tile_scaled_size = 0;
-	free(ctx->mp_match_portrait_pixels);
-	ctx->mp_match_portrait_pixels = NULL;
-	ctx->mp_match_portrait_px_width = 0;
-	ctx->mp_match_portrait_px_height = 0;
-	if (ctx->mp_match_popover_visual != NULL)
-		ncvisual_destroy(ctx->mp_match_popover_visual);
-	ctx->mp_match_popover_visual = NULL;
-	free(ctx->mp_match_popover_pixels);
-	ctx->mp_match_popover_pixels = NULL;
-	ctx->mp_match_popover_px_width = 0;
-	ctx->mp_match_popover_px_height = 0;
+	slot = 0;
+	while (slot < MP_MATCH_PORTRAITS)
+	{
+		if (ctx->mp_match_portrait_visual[slot] != NULL)
+			ncvisual_destroy(ctx->mp_match_portrait_visual[slot]);
+		/*
+		 * Cleared, not merely freed. This runs again on the next rebuild,
+		 * and a pointer left behind is one ncvisual_destroy takes for a live
+		 * decoder the second time - which is a bus error inside libavcodec,
+		 * a long way from the line that caused it.
+		 */
+		ctx->mp_match_portrait_visual[slot] = NULL;
+		free(ctx->mp_match_portrait_pixels[slot]);
+		ctx->mp_match_portrait_pixels[slot] = NULL;
+		ctx->mp_match_portrait_px_width[slot] = 0;
+		ctx->mp_match_portrait_px_height[slot] = 0;
+		ctx->mp_match_portrait_source[slot][0] = '\0';
+		slot++;
+	}
 	free(ctx->mp_match_canvas);
 	ctx->mp_match_canvas = NULL;
 	ctx->mp_match_canvas_width = 0;
 	ctx->mp_match_canvas_height = 0;
 	memset(ctx->mp_match_boards, 0, sizeof(ctx->mp_match_boards));
 	ctx->mp_match_tile_visual = NULL;
-	ctx->mp_match_portrait_visual = NULL;
-	ctx->mp_match_portrait_source[0] = '\0';
 	destroy_region_planes(ctx);
 	ctx->mp_match_signature = 0;
 	ctx->mp_match_static_signature = 0;
@@ -863,6 +1383,7 @@ void render_multiplayer_match_pixel_destroy(t_render_ctx *ctx)
 	ctx->mp_match_left_signature = 0;
 	ctx->mp_match_right_signature = 0;
 	ctx->mp_match_loadout_signature = 0;
+	ctx->mp_match_opponent_loadout_signature = 0;
 	ctx->mp_match_hud_signature = 0;
 }
 
@@ -986,7 +1507,7 @@ static bool create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
 
 static void destroy_region_planes(t_render_ctx *ctx)
 {
-	struct ncplane **planes[7];
+	struct ncplane **planes[9];
 	int index;
 
 	if (ctx == NULL)
@@ -998,8 +1519,10 @@ static void destroy_region_planes(t_render_ctx *ctx)
 	planes[4] = &ctx->mp_match_hud_plane;
 	planes[5] = &ctx->mp_match_ability_plane;
 	planes[6] = &ctx->mp_match_caption_plane;
+	planes[7] = &ctx->mp_match_opponent_loadout_plane;
+	planes[8] = &ctx->mp_match_opponent_ability_plane;
 	index = 0;
-	while (index < 7)
+	while (index < 9)
 	{
 		if (*planes[index] != NULL)
 			ncplane_destroy(*planes[index]);
@@ -1013,8 +1536,13 @@ static void destroy_region_planes(t_render_ctx *ctx)
 			ncplane_destroy(ctx->mp_match_local_bands[index]);
 		ctx->mp_match_local_bands[index] = NULL;
 		ctx->mp_match_band_signatures[index] = 0;
+		if (ctx->mp_match_opponent_bands[index] != NULL)
+			ncplane_destroy(ctx->mp_match_opponent_bands[index]);
+		ctx->mp_match_opponent_bands[index] = NULL;
+		ctx->mp_match_opponent_band_signatures[index] = 0;
 		index++;
 	}
+	ctx->mp_match_opponent_due_ms = 0;
 }
 
 static uint64_t match_signature(const t_mp_match_state *state,
@@ -1098,6 +1626,18 @@ static int clear_flash_step(const t_solo_game *game)
 	return (1);
 }
 
+/**
+ * @brief Hashes everything drawn for a rival's board, the active piece
+ *        included.
+ *
+ * The piece has to be in here because board_region_sync draws it for both
+ * boards. Gravity moves nothing else - not the board, which only changes at
+ * lock, and not the score, which only changes on a drop or a clear - so a
+ * signature over the settled cells alone reported "unchanged" for the whole
+ * fall. The rival's piece hung motionless and then teleported at lock, and it
+ * appeared to work only when they soft or hard dropped, because those two add
+ * drop score and the score was hashed.
+ */
 static uint64_t game_signature(const t_solo_game *game)
 {
 	uint64_t hash;
@@ -1105,6 +1645,7 @@ static uint64_t game_signature(const t_solo_game *game)
 
 	hash = 1469598103934665603ULL;
 	hash = hash_bytes(hash, &game->board, sizeof(game->board));
+	hash = hash_bytes(hash, &game->active, sizeof(game->active));
 	hash = hash_bytes(hash, &game->phase, sizeof(game->phase));
 	hash = hash_bytes(hash, &game->scoring, sizeof(game->scoring));
 	flash = clear_flash_step(game);
@@ -1133,6 +1674,13 @@ static uint64_t local_board_signature(const t_solo_game *game,
 	hash = hash_bytes(hash, &flash, sizeof(flash));
 	danger = danger_step(game);
 	hash = hash_bytes(hash, &danger, sizeof(danger));
+	/*
+	 * Dark changes what is drawn without changing the board, so a signature
+	 * that ignored it would keep showing a blacked-out field for as long as
+	 * the piece happened to sit still - and would keep showing it after the
+	 * effect had expired.
+	 */
+	hash = hash_bytes(hash, &game->effects, sizeof(game->effects));
 	if (include_score)
 		hash = hash_bytes(hash, &game->scoring, sizeof(game->scoring));
 	return (hash);
@@ -1159,6 +1707,26 @@ static uint64_t loadout_signature(const t_mp_match_state *state)
 			sizeof(state->hovered_ability)));
 }
 
+/**
+ * @brief Hashes the rival's column: their meter and who they are playing as.
+ *
+ * Deliberately not their board. The column redraws when the charge moves or
+ * the fighter is settled, which is a handful of times a match, rather than on
+ * every gravity tick the board next to it takes.
+ */
+static uint64_t opponent_loadout_signature(const t_mp_match_state *state)
+{
+	uint64_t hash;
+
+	hash = 1469598103934665603ULL;
+	hash = hash_bytes(hash, &state->opponent_charge,
+			sizeof(state->opponent_charge));
+	hash = hash_bytes(hash, &state->opponent_character,
+			sizeof(state->opponent_character));
+	return (hash_bytes(hash, state->opponent_name,
+			strlen(state->opponent_name)));
+}
+
 static uint64_t hud_signature(const t_mp_match_state *state)
 {
 	uint64_t hash;
@@ -1170,6 +1738,9 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 	hash = hash_bytes(hash, &state->ko_count, sizeof(state->ko_count));
 	hash = hash_bytes(hash, &state->incoming_attackers,
 		sizeof(state->incoming_attackers));
+	/* The standing effect line lives in this region, so it dirties it. */
+	hash = hash_bytes(hash, &state->local_game.effects,
+		sizeof(state->local_game.effects));
 	return (hash_bytes(hash, &state->local_game.scoring.total,
 			sizeof(state->local_game.scoring.total)));
 }
@@ -1317,11 +1888,11 @@ static void compose_selection(t_render_ctx *ctx, uint32_t *pixels,
 	portrait.y = stage.y + 35;
 	mp_match_pixel_draw_panel(pixels, width, height, &portrait, g_lavender, 205);
 	character = mp_match_selected_character(state);
-	if (character != NULL && mp_match_pixel_load_portrait(ctx, character->portrait_asset))
+	if (character != NULL && mp_match_pixel_load_portrait(ctx, 0, character->portrait_asset))
 	{
 		t_mp_rect image = {portrait.x + 12, portrait.y + 12,
 			portrait.width - 24, portrait.height - 24};
-		mp_match_pixel_draw_portrait(ctx, pixels, width, height, &image);
+		mp_match_pixel_draw_portrait(ctx, 0, pixels, width, height, &image);
 	}
 	text = (t_mp_rect){stage.x + stage.width * 50 / 100, stage.y + 34,
 		stage.width * 45 / 100, 72};
@@ -1376,12 +1947,13 @@ static void compose_double(t_render_ctx *ctx, uint32_t *pixels,
 		&state->local_game, "YOUR BOARD", true);
 	draw_game_board(ctx, pixels, width, height, &layout.opponent_board,
 		&state->opponent_game, state->opponent_name, false);
+	draw_opponent_column(ctx, pixels, width, height, &layout, state);
 	draw_double_caption(ctx, pixels, width, height, &layout.local_board,
 		state->profile.username, state->local_game.scoring.total,
-		state->local_game.crystal_charge, true);
+		state->local_game.crystal_charge, state->incoming_garbage, true);
 	draw_double_caption(ctx, pixels, width, height, &layout.opponent_board,
 		state->opponent_name, state->opponent_game.scoring.total,
-		state->opponent_charge, false);
+		state->opponent_charge, opponent_pending(state), false);
 }
 
 static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
@@ -1438,6 +2010,29 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 			g_gold, true);
 		draw_targeting(ctx, pixels, width, height, &layout->targeting, state);
 	}
+	/*
+	 * A standing line, because the card that announced the effect fades and
+	 * the effect does not: Paralysis outlives its own notification by two
+	 * pieces, and a player who looked away in between is back to guessing why
+	 * their piece will not turn.
+	 *
+	 * It goes *inside* layout->hud rather than beside the controls at the foot
+	 * of the screen. The controls are drawn here but live outside that
+	 * rectangle, which makes them part of the composition that is painted once
+	 * on a rebuild - a line put there would be right on the frame it appeared
+	 * and then frozen, because only the hud region is re-blitted when the hud
+	 * signature moves.
+	 */
+	effect_line(&state->local_game.effects, line, sizeof(line));
+	if (line[0] != '\0')
+	{
+		text = (t_mp_rect){margin, layout->hud.y
+			+ (state->mode == APP_GAME_MODE_DOUBLE ? 50 : 84),
+			width - margin * 2, 28};
+		if (text.y + text.height <= layout->hud.y + layout->hud.height)
+			mp_match_pixel_draw_text_box(ctx, pixels, width, height, line,
+				&text, 16, g_red, true);
+	}
 	text = layout->controls;
 	if (state->mode == APP_GAME_MODE_BATTLE_ROYALE)
 		draw_hud_backdrop(pixels, width, height, &layout->controls);
@@ -1451,21 +2046,44 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 
 static void draw_double_caption(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_rect *board, const char *name,
-	uint64_t points, int charge, bool local)
+	uint64_t points, int charge, int pending, bool local)
 {
 	t_mp_rect text;
 	char line[APP_ABILITY_TEXT_MAX];
+	char warning[32];
 
-	if (local)
-		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d",
-			name != NULL && name[0] != '\0' ? name : "YOU", points, charge);
-	else
-		snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS   POWER %d",
-			name != NULL && name[0] != '\0' ? name : "OPPONENT", points, charge);
-	text = (t_mp_rect){board->x - 24, board->y + board->height + 20,
-		board->width + 48, 42};
+	warning[0] = '\0';
+	/*
+	 * Garbage is announced when it is queued and lands at the next lock, so
+	 * this is the window in which saying so is worth anything: there is still
+	 * a piece to place before the rows arrive.
+	 */
+	if (pending > 0)
+		snprintf(warning, sizeof(warning), "   +%d INCOMING", pending);
+	/*
+	 * Exactly the board's width, and two lines inside it.
+	 *
+	 * It used to be the board's width plus 24 either side, which is wider
+	 * than the gap between the two boards - so the two captions overlapped in
+	 * the middle and each painted over the other's end. What reached the
+	 * screen was one player's score running into the other's name.
+	 *
+	 * Everything then had to fit on one line of a shared box, which put a
+	 * name, a ten-digit score, a charge and a garbage warning into 360 pixels
+	 * and shrank the lot to six. Splitting the line is what buys the size
+	 * back: half as many characters per row at twice the height.
+	 */
+	snprintf(line, sizeof(line), "%s   %010" PRIu64 " PTS",
+		name != NULL && name[0] != '\0' ? name : (local ? "YOU" : "OPPONENT"),
+		points);
+	text = (t_mp_rect){board->x, board->y + board->height + 14,
+		board->width, 22};
 	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 17,
 		local ? g_gold : g_lavender, true);
+	snprintf(line, sizeof(line), "POWER %d%s", charge, warning);
+	text.y += 24;
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 17,
+		pending > 0 ? g_red : g_lavender, true);
 }
 
 static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -1484,8 +2102,8 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 	mp_match_pixel_draw_text_box(ctx, pixels, width, height, "FIGHTER",
 		&box, 19, g_gold, true);
 	if (portrait && character != NULL
-		&& mp_match_pixel_load_portrait(ctx, character->portrait_asset))
-		mp_match_pixel_draw_portrait(ctx, pixels, width, height,
+		&& mp_match_pixel_load_portrait(ctx, 0, character->portrait_asset))
+		mp_match_pixel_draw_portrait(ctx, 0, pixels, width, height,
 			&layout.portrait);
 	if (character != NULL)
 	{
@@ -1495,85 +2113,14 @@ static void draw_loadout(t_render_ctx *ctx, uint32_t *pixels, int width,
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, character->name,
 			&box, 19, g_pink, true);
 	}
-	if (state->hovered_ability == 0)
-		draw_hold_next(ctx, pixels, width, height,
-			&layout.ability_popover, &state->local_game);
-	if (character != NULL && state->hovered_ability >= 1
-		&& state->hovered_ability <= APP_CHARACTER_ABILITY_COUNT)
-		draw_ability_popover(ctx, pixels, width, height,
-			&layout.ability_popover, state);
-}
-
-/**
- * @brief Draws the hovered ability in the shape Solo's popover uses.
- *
- * Same authored frame, same four lines in the same order - name with its slot,
- * what it costs, what it does, how to fire it - so an ability learnt in Solo
- * reads identically in a match. The text is the equipped character's own, which
- * is why it comes from the catalogue rather than from solo_ability_name().
- */
-static void draw_ability_popover(t_render_ctx *ctx, uint32_t *pixels,
-	int width, int height, const t_mp_rect *rect,
-	const t_mp_match_state *state)
-{
-	const t_app_catalogue_item_view_model	*character;
-	t_mp_rect								frame;
-	t_mp_rect								box;
-	char									line[APP_TEXT_MAX];
-	int										index;
-
-	character = mp_match_selected_character(state);
-	index = state->hovered_ability - 1;
-	if (character == NULL)
-		return ;
 	/*
-	 * Solo's popover is a compact box, not a portrait. The slot it borrows here
-	 * is the tall HOLD/NEXT column, so the frame is sized to the four lines it
-	 * has to hold rather than stretched down the whole column - stretched, the
-	 * authored border became a full-height illustration with the text stranded
-	 * at the top of it.
+	 * HOLD and NEXT keep this slot for the whole match now. The hovered
+	 * ability used to evict them for a card drawn here in bitmap text, which
+	 * was both unreadable and a column away from the meter it described;
+	 * regions_popover draws it as a terminal plane beside the circle instead.
 	 */
-	frame = *rect;
-	if (frame.height > MP_MATCH_POPOVER_HEIGHT)
-		frame.height = MP_MATCH_POPOVER_HEIGHT;
-	/*
-	 * The slot is taller than the popover, and whatever HOLD/NEXT last drew in
-	 * it is still on the retained canvas, so the unused remainder has to be
-	 * cleared rather than left showing stale previews under the box.
-	 */
-	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
-	if (mp_match_pixel_load_popover(ctx, ABILITY_POPOVER_PATH))
-		mp_match_pixel_draw_popover_art(ctx, pixels, width, height, &frame);
-	else
-		mp_match_pixel_draw_panel(pixels, width, height, &frame, g_pink, 248);
-	/*
-	 * Solo sets the popover's text on an opaque base and keeps the artwork in
-	 * its own column beside it. This slot is too narrow for two columns, so the
-	 * artwork stays as the frame and the text gets its own readable panel
-	 * inside it - text straight over the illustration was unreadable.
-	 */
-	box = (t_mp_rect){frame.x + 6, frame.y + 6, frame.width - 12,
-		frame.height - 12};
-	mp_match_pixel_fill_rect(pixels, width, height, &box, g_panel, 232);
-	box = (t_mp_rect){rect->x + 14, rect->y + 12, rect->width - 28, 26};
-	snprintf(line, sizeof(line), "%.*s  [%d]",
-		MP_MATCH_POWER_NAME_MAX, character->abilities[index].name, index + 1);
-	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 14,
-		g_cream, true);
-	box.y += 28;
-	snprintf(line, sizeof(line), "COST %d CRYSTALS",
-		solo_ability_cost((t_solo_ability)(index + 1)));
-	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 11,
-		g_gold, true);
-	box.y += 26;
-	box.height = 48;
-	mp_match_pixel_draw_text_box(ctx, pixels, width, height,
-		character->abilities[index].description, &box, 11, g_cream, false);
-	box.y += 52;
-	box.height = 24;
-	snprintf(line, sizeof(line), "CLICK OR PRESS %d", index + 1);
-	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box, 10,
-		g_lavender, true);
+	draw_hold_next(ctx, pixels, width, height,
+		&layout.ability_popover, &state->local_game);
 }
 
 static void draw_hold_next(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -1714,6 +2261,114 @@ static void draw_ability_bar(t_render_ctx *ctx, uint32_t *pixels, int width,
 	}
 }
 
+/**
+ * @brief Draws the rival's fighter and meter, mirroring the local pair.
+ *
+ * The same two panels the player has, on the far side of their opponent's
+ * board: who they are fighting, and how close that fighter is to being able to
+ * do something about it. A meter filling opposite you is the only warning an
+ * ability gives, and before this there was none - the rival's side of the
+ * screen was a board with nobody behind it.
+ *
+ * It is deliberately not interactive. There are no hover states and no
+ * popover, because these are not buttons: nothing the player can press lives
+ * on this side of the screen.
+ *
+ * @param ctx Render context holding the fonts and the portrait cache.
+ * @param pixels Destination canvas.
+ * @param width Canvas width in pixels.
+ * @param height Canvas height in pixels.
+ * @param layout Geometry carrying the two opponent rectangles.
+ * @param state Match model holding the rival's charge and fighter.
+ */
+static void draw_opponent_column(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_match_pixel_layout *layout,
+	const t_mp_match_state *state)
+{
+	const t_app_catalogue_item_view_model	*character;
+	t_mp_rect	box;
+	char		line[24];
+	int			segment;
+	int			segment_height;
+	int			marker_radius;
+	int			index;
+
+	if (layout->opponent_loadout.width <= 0)
+		return ;
+	character = mp_match_opponent_character(state);
+	mp_match_pixel_draw_panel(pixels, width, height,
+		&layout->opponent_loadout, g_lavender, 238);
+	box = (t_mp_rect){layout->opponent_loadout.x + 18,
+		layout->opponent_loadout.y + 16,
+		layout->opponent_loadout.width - 36, 38};
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, "RIVAL",
+		&box, 19, g_lavender, true);
+	/*
+	 * Slot 1 is the rival's half of the portrait cache. Sharing slot 0 with
+	 * the local fighter would decode both PNGs on every frame that drew them
+	 * both, which is every frame of the match.
+	 */
+	if (character != NULL
+		&& mp_match_pixel_load_portrait(ctx, 1, character->portrait_asset))
+		mp_match_pixel_draw_portrait(ctx, 1, pixels, width, height,
+			&layout->opponent_portrait);
+	if (character != NULL)
+	{
+		box = (t_mp_rect){layout->opponent_loadout.x + 10,
+			layout->opponent_portrait.y + layout->opponent_portrait.height
+			+ 16, layout->opponent_loadout.width - 20, 38};
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height,
+			character->name, &box, 19, g_pink, true);
+	}
+	box = (t_mp_rect){layout->opponent_loadout.x + 10,
+		layout->opponent_portrait.y + layout->opponent_portrait.height + 58,
+		layout->opponent_loadout.width - 20, 30};
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height,
+		state->opponent_name, &box, 15, g_cream, true);
+	mp_match_pixel_draw_panel(pixels, width, height,
+		&layout->opponent_ability_bar, g_lavender, 242);
+	segment_height = max_int(4,
+			(layout->opponent_ability_bar.height - 24) / 10 - 3);
+	segment = 0;
+	while (segment < 10)
+	{
+		box = (t_mp_rect){layout->opponent_ability_bar.x + 12,
+			layout->opponent_ability_bar.y
+			+ layout->opponent_ability_bar.height - 12
+			- (segment + 1) * (layout->opponent_ability_bar.height - 24) / 10
+			+ 2, layout->opponent_ability_bar.width - 24, segment_height};
+		mp_match_pixel_fill_rect(pixels, width, height, &box,
+			segment < state->opponent_charge ? g_gold : g_panel_light,
+			segment < state->opponent_charge ? 255 : 210);
+		segment++;
+	}
+	marker_radius = min_int(layout->ability_hit_radius - 3,
+			layout->opponent_ability_bar.width / 2 - 5);
+	/*
+	 * The circles are the rival's charge, not their roster entry: which of
+	 * the four they can afford is answered by the meter beside them and by
+	 * nothing else. Gating them on knowing the character left the whole
+	 * meter blank for a rival who had not named one - which is every offline
+	 * preview, and any frame that arrives before their pick does.
+	 */
+	index = 0;
+	while (index < APP_CHARACTER_ABILITY_COUNT)
+	{
+		mp_match_pixel_draw_circle(pixels, width, height,
+			layout->opponent_ability_center_x,
+			layout->opponent_ability_center_y[index], marker_radius,
+			state->opponent_charge >= (index + 1) * 2 ? g_gold : g_lavender,
+			255);
+		snprintf(line, sizeof(line), "%d", index + 1);
+		box = (t_mp_rect){layout->opponent_ability_center_x - marker_radius,
+			layout->opponent_ability_center_y[index] - marker_radius,
+			marker_radius * 2, marker_radius * 2};
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &box,
+			15, g_dark, true);
+		index++;
+	}
+}
+
 static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 	int height, const t_mp_rect *rect, const t_solo_game *game,
 	const char *label, bool local)
@@ -1737,13 +2392,12 @@ static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 	/*
 	 * The whole-board redraw and the per-cell diff read the same grid, so the
 	 * two paths cannot disagree about what a cell shows - which is what makes
-	 * the clear flash survive a fallback redraw. Only the player's own falling
-	 * piece is in it: an opponent board that tracked a falling piece changed on
-	 * every gravity tick of a game nobody is steering, and each change is a
-	 * full board recomposition; landed blocks carry the same threat
-	 * information and redraw only on a lock.
+	 * the clear flash survive a fallback redraw. Both boards carry their
+	 * falling piece, the rival's included: the incremental path draws theirs,
+	 * so a rebuild that left it out made the rival's piece vanish until the
+	 * next cell that happened to differ brought it back.
 	 */
-	board_cell_grid(game, grid, local);
+	board_cell_grid(game, grid, true);
 	/*
 	 * board_cell_grid fills the grid and draw_grid_cells only reads it, so
 	 * the cast is the qualifier the call adds, not one it drops. Before C23
@@ -1758,10 +2412,18 @@ static void draw_game_board(t_render_ctx *ctx, uint32_t *pixels, int width,
 			snprintf(countdown, sizeof(countdown), "GO");
 		else
 			snprintf(countdown, sizeof(countdown), "%d", countdown_value);
-		title = (t_mp_rect){rect->x + rect->width / 4,
-			rect->y + rect->height / 2 - 54, rect->width / 2, 108};
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height, countdown, &title,
-			76, g_gold, true);
+		/*
+		 * Across the whole board and behind a scrim, rather than a small
+		 * number floating over the stack. This is the one moment in a match
+		 * where nothing else on the board matters, and it is the moment the
+		 * player is deciding whether the game has started - a digit they had
+		 * to look for read as the screen being stuck.
+		 */
+		title = (t_mp_rect){rect->x, rect->y + rect->height / 2
+			- rect->height / 6, rect->width, rect->height / 3};
+		mp_match_pixel_fill_rect(pixels, width, height, &title, g_dark, 190);
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, countdown,
+			&title, rect->height / 4, g_gold, true);
 	}
 	if (label != NULL && label[0] != '\0')
 	{
@@ -2392,4 +3054,36 @@ static void blend_pixel(uint32_t *pixel, t_color tint, unsigned alpha)
 		* (255u - alpha) / 255u) / out_alpha;
 	*pixel = ncpixel(red, green, blue);
 	ncpixel_set_a(pixel, out_alpha);
+}
+
+/**
+ * @brief Names the effect currently riding on the player, or nothing.
+ *
+ * One at a time, worst first. Two effects at once is possible and rare, and a
+ * line long enough to hold both would be a line nobody reads mid-piece.
+ *
+ * @param effects The counts the server sent.
+ * @param out Destination buffer, emptied when nothing is active.
+ * @param size Capacity of out.
+ */
+static void effect_line(const t_solo_effects *effects, char *out, size_t size)
+{
+	out[0] = '\0';
+	if (effects->paralysis > 0)
+		snprintf(out, size, "NO ROTATION  -  %d PIECES", effects->paralysis);
+	else if (effects->inversion > 0)
+		snprintf(out, size, "CONTROLS INVERTED  -  %d PIECES",
+			effects->inversion);
+	else if (effects->nue > 0)
+		snprintf(out, size, "NO FAST DROP  -  %d PIECES", effects->nue);
+	else if (effects->dark > 0)
+		snprintf(out, size, "BLACKOUT  -  %d PIECES", effects->dark);
+	else if (effects->fry > 0)
+		snprintf(out, size, "%d ROWS BURN AT THE NEXT LOCK", effects->fry);
+	else if (effects->thwack > 0)
+		snprintf(out, size, "THWACK  -  %d PIECES", effects->thwack);
+	else if (effects->pals > 0)
+		snprintf(out, size, "PALS  -  GARBAGE LOWERS YOUR STACK");
+	else if (effects->mirror > 0)
+		snprintf(out, size, "MIRROR  -  THE NEXT ABILITY REBOUNDS");
 }

@@ -217,6 +217,36 @@ const t_app_catalogue_item_view_model	*mp_match_selected_character(
 }
 
 /**
+ * @brief Finds the fighter the opponent is playing as, if it is known.
+ *
+ * The wire carries a catalogue id, and ids carry gaps, so this is a search
+ * rather than an index. A zero id means the server has nothing to say about
+ * who they chose - a fixture match, or a rival who never picked - and that is
+ * a NULL here rather than the first name on the roster.
+ *
+ * @param state Match model holding the roster and the reported id.
+ * @return The roster entry, or NULL when the id is unknown or unset.
+ */
+const t_app_catalogue_item_view_model	*mp_match_opponent_character(
+	const t_mp_match_state *state)
+{
+	int	index;
+
+	if (state == NULL || state->opponent_character == 0)
+		return (NULL);
+	index = 0;
+	while (index < state->characters.count
+		&& index < APP_CATALOGUE_MAX_ITEMS)
+	{
+		if (state->characters.items[index].item_id
+			== state->opponent_character)
+			return (&state->characters.items[index]);
+		index++;
+	}
+	return (NULL);
+}
+
+/**
  * @brief Applies the Tetris 99 diamond mapping requested for WASD.
  *
  * W is KOs, A Randoms, S Attackers, and D Badges/top score, matching the
@@ -364,12 +394,20 @@ void	mp_match_pixel_layout_build(t_app_game_mode mode, int width, int height,
 		footer = max_int(90, min_int(150, height / 11));
 		info_width = max_int(150, min_int(250, width * 10 / 100));
 		meter_width = max_int(54, min_int(84, width / 30));
+		/*
+		 * Two columns of chrome, not one. The rival's loadout and meter cost
+		 * the arena exactly what the local pair does, so both are taken out
+		 * of the width the tiles are sized from - otherwise the boards claim
+		 * the whole row and the opponent's column is drawn off the screen.
+		 */
+		info_width = min_int(info_width, max_int(120,
+					(width - margin * 2) / 8));
 		tile = min_int((height - top - footer) / BOARD_HEIGHT,
-			(width - margin * 2 - info_width - meter_width - gap * 4)
+			(width - margin * 2 - (info_width + meter_width) * 2 - gap * 5)
 			/ (BOARD_WIDTH * 2));
 		tile = max_int(8, tile);
-		arena_left = max_int(margin, (width - (info_width + meter_width
-				+ gap * 3 + tile * BOARD_WIDTH * 2)) / 2);
+		arena_left = max_int(margin, (width - ((info_width + meter_width) * 2
+					+ gap * 5 + tile * BOARD_WIDTH * 2)) / 2);
 		layout->loadout = match_rect(arena_left, top, info_width,
 			tile * BOARD_HEIGHT);
 		layout->portrait = match_rect(layout->loadout.x + 12,
@@ -384,6 +422,17 @@ void	mp_match_pixel_layout_build(t_app_game_mode mode, int width, int height,
 		layout->opponent_board = match_rect(layout->local_board.x
 			+ layout->local_board.width + gap, top,
 			layout->local_board.width, layout->local_board.height);
+		layout->opponent_ability_bar = match_rect(layout->opponent_board.x
+			+ layout->opponent_board.width + max_int(10, gap / 3), top,
+			meter_width, tile * BOARD_HEIGHT);
+		layout->opponent_loadout = match_rect(layout->opponent_ability_bar.x
+			+ layout->opponent_ability_bar.width + gap, top, info_width,
+			tile * BOARD_HEIGHT);
+		layout->opponent_portrait = match_rect(
+				layout->opponent_loadout.x + 12,
+				layout->opponent_loadout.y + 52,
+				layout->opponent_loadout.width - 24,
+				min_int(layout->opponent_loadout.height / 3, 230));
 	}
 	else
 	{
@@ -445,12 +494,18 @@ void	mp_match_pixel_layout_build(t_app_game_mode mode, int width, int height,
 		+ layout->ability_bar.width / 2;
 	layout->ability_hit_radius = max_int(18, min_int(32,
 		layout->ability_bar.width / 2 - 3));
+	layout->opponent_ability_center_x = layout->opponent_ability_bar.x
+		+ layout->opponent_ability_bar.width / 2;
 	index = 0;
 	while (index < APP_CHARACTER_ABILITY_COUNT)
 	{
 		layout->ability_center_y[index] = layout->ability_bar.y
 			+ layout->ability_bar.height
 			- (index + 1) * layout->ability_bar.height / 5;
+		layout->opponent_ability_center_y[index]
+			= layout->opponent_ability_bar.y
+			+ layout->opponent_ability_bar.height
+			- (index + 1) * layout->opponent_ability_bar.height / 5;
 		index++;
 	}
 	layout->valid = layout->local_board.width >= BOARD_WIDTH

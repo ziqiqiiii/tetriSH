@@ -10,7 +10,7 @@ static const t_color g_dark = {7, 13, 23};
 static const t_color g_panel = {20, 9, 34};
 static const t_color g_panel_light = {39, 20, 58};
 
-static void	cache_portrait_pixels(t_render_ctx *ctx);
+static void	cache_portrait_pixels(t_render_ctx *ctx, int slot);
 static void	draw_text(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const char *text, int x, int y, int glyph_size,
 				int spacing, t_color tint);
@@ -24,24 +24,26 @@ static int	min_int(int left, int right);
 static int	max_int(int left, int right);
 static int	clamp_int(int value, int minimum, int maximum);
 
-bool mp_match_pixel_load_portrait(t_render_ctx *ctx, const char *path)
+bool mp_match_pixel_load_portrait(t_render_ctx *ctx, int slot, const char *path)
 {
+	if (slot < 0 || slot >= MP_MATCH_PORTRAITS)
+		return (false);
 	if (path == NULL || path[0] == '\0')
 		return (false);
-	if (ctx->mp_match_portrait_visual != NULL
-		&& strcmp(ctx->mp_match_portrait_source, path) == 0)
+	if (ctx->mp_match_portrait_visual[slot] != NULL
+		&& strcmp(ctx->mp_match_portrait_source[slot], path) == 0)
 		return (true);
-	if (ctx->mp_match_portrait_visual != NULL)
-		ncvisual_destroy(ctx->mp_match_portrait_visual);
-	ctx->mp_match_portrait_visual = ncvisual_from_file(path);
-	if (ctx->mp_match_portrait_visual == NULL)
+	if (ctx->mp_match_portrait_visual[slot] != NULL)
+		ncvisual_destroy(ctx->mp_match_portrait_visual[slot]);
+	ctx->mp_match_portrait_visual[slot] = ncvisual_from_file(path);
+	if (ctx->mp_match_portrait_visual[slot] == NULL)
 	{
-		ctx->mp_match_portrait_source[0] = '\0';
+		ctx->mp_match_portrait_source[slot][0] = '\0';
 		return (false);
 	}
-	snprintf(ctx->mp_match_portrait_source,
-		sizeof(ctx->mp_match_portrait_source), "%s", path);
-	cache_portrait_pixels(ctx);
+	snprintf(ctx->mp_match_portrait_source[slot],
+		sizeof(ctx->mp_match_portrait_source[slot]), "%s", path);
+	cache_portrait_pixels(ctx, slot);
 	return (true);
 }
 
@@ -52,23 +54,23 @@ bool mp_match_pixel_load_portrait(t_render_ctx *ctx, const char *path)
  * than a library call per output pixel. A failed read leaves the cache empty
  * and the drawing path falls back to sampling the visual.
  */
-static void	cache_portrait_pixels(t_render_ctx *ctx)
+static void	cache_portrait_pixels(t_render_ctx *ctx, int slot)
 {
 	ncvgeom	geometry;
 	int		x;
 	int		y;
 
-	free(ctx->mp_match_portrait_pixels);
-	ctx->mp_match_portrait_pixels = NULL;
-	ctx->mp_match_portrait_px_width = 0;
-	ctx->mp_match_portrait_px_height = 0;
+	free(ctx->mp_match_portrait_pixels[slot]);
+	ctx->mp_match_portrait_pixels[slot] = NULL;
+	ctx->mp_match_portrait_px_width[slot] = 0;
+	ctx->mp_match_portrait_px_height[slot] = 0;
 	memset(&geometry, 0, sizeof(geometry));
-	if (ncvisual_geom(NULL, ctx->mp_match_portrait_visual, NULL,
+	if (ncvisual_geom(NULL, ctx->mp_match_portrait_visual[slot], NULL,
 			&geometry) != 0 || geometry.pixx == 0 || geometry.pixy == 0)
 		return ;
-	ctx->mp_match_portrait_pixels = malloc((size_t)geometry.pixx
-			* geometry.pixy * sizeof(*ctx->mp_match_portrait_pixels));
-	if (ctx->mp_match_portrait_pixels == NULL)
+	ctx->mp_match_portrait_pixels[slot] = malloc((size_t)geometry.pixx
+			* geometry.pixy * sizeof(*ctx->mp_match_portrait_pixels[slot]));
+	if (ctx->mp_match_portrait_pixels[slot] == NULL)
 		return ;
 	y = 0;
 	while (y < (int)geometry.pixy)
@@ -76,105 +78,24 @@ static void	cache_portrait_pixels(t_render_ctx *ctx)
 		x = 0;
 		while (x < (int)geometry.pixx)
 		{
-			if (ncvisual_at_yx(ctx->mp_match_portrait_visual, (unsigned)y,
-					(unsigned)x, &ctx->mp_match_portrait_pixels[(size_t)y
+			if (ncvisual_at_yx(ctx->mp_match_portrait_visual[slot], (unsigned)y,
+					(unsigned)x, &ctx->mp_match_portrait_pixels[slot][(size_t)y
 					* geometry.pixx + x]) < 0)
-				ctx->mp_match_portrait_pixels[(size_t)y * geometry.pixx + x]
-					= 0;
+				ctx->mp_match_portrait_pixels[slot][(size_t)y * geometry.pixx
+					+ x] = 0;
 			x++;
 		}
 		y++;
 	}
-	ctx->mp_match_portrait_px_width = (int)geometry.pixx;
-	ctx->mp_match_portrait_px_height = (int)geometry.pixy;
-}
-
-/**
- * @brief Loads the authored ability-popover frame once and reads it out.
- */
-bool	mp_match_pixel_load_popover(t_render_ctx *ctx, const char *path)
-{
-	ncvgeom	geometry;
-	int		x;
-	int		y;
-
-	if (path == NULL || path[0] == '\0')
-		return (false);
-	if (ctx->mp_match_popover_pixels != NULL)
-		return (true);
-	if (ctx->mp_match_popover_visual == NULL)
-		ctx->mp_match_popover_visual = ncvisual_from_file(path);
-	if (ctx->mp_match_popover_visual == NULL)
-		return (false);
-	memset(&geometry, 0, sizeof(geometry));
-	if (ncvisual_geom(NULL, ctx->mp_match_popover_visual, NULL, &geometry) != 0
-		|| geometry.pixx == 0 || geometry.pixy == 0)
-		return (false);
-	ctx->mp_match_popover_pixels = malloc((size_t)geometry.pixx * geometry.pixy
-			* sizeof(*ctx->mp_match_popover_pixels));
-	if (ctx->mp_match_popover_pixels == NULL)
-		return (false);
-	y = 0;
-	while (y < (int)geometry.pixy)
-	{
-		x = 0;
-		while (x < (int)geometry.pixx)
-		{
-			if (ncvisual_at_yx(ctx->mp_match_popover_visual, (unsigned)y,
-					(unsigned)x, &ctx->mp_match_popover_pixels[(size_t)y
-					* geometry.pixx + x]) < 0)
-				ctx->mp_match_popover_pixels[(size_t)y * geometry.pixx + x] = 0;
-			x++;
-		}
-		y++;
-	}
-	ctx->mp_match_popover_px_width = (int)geometry.pixx;
-	ctx->mp_match_popover_px_height = (int)geometry.pixy;
-	return (true);
-}
-
-/**
- * @brief Stretches the popover frame over the rectangle it decorates.
- *
- * Stretched rather than fitted: the frame is a border, so it has to reach the
- * edges of the box whose contents it is framing.
- */
-void	mp_match_pixel_draw_popover_art(t_render_ctx *ctx, uint32_t *pixels,
-	int width, int height, const t_mp_rect *rect)
-{
-	uint32_t	source;
-	int			x;
-	int			y;
-
-	if (ctx->mp_match_popover_pixels == NULL
-		|| ctx->mp_match_popover_px_width <= 0
-		|| ctx->mp_match_popover_px_height <= 0
-		|| rect->width <= 0 || rect->height <= 0)
-		return ;
-	y = 0;
-	while (y < rect->height)
-	{
-		x = 0;
-		while (x < rect->width)
-		{
-			source = ctx->mp_match_popover_pixels[(size_t)((int64_t)y
-					* ctx->mp_match_popover_px_height / rect->height)
-				* ctx->mp_match_popover_px_width + (int64_t)x
-				* ctx->mp_match_popover_px_width / rect->width];
-			put_pixel(pixels, width, height, rect->x + x, rect->y + y,
-				(t_color){ncpixel_r(source), ncpixel_g(source),
-				ncpixel_b(source)}, ncpixel_a(source));
-			x++;
-		}
-		y++;
-	}
+	ctx->mp_match_portrait_px_width[slot] = (int)geometry.pixx;
+	ctx->mp_match_portrait_px_height[slot] = (int)geometry.pixy;
 }
 
 /**
  * @brief Draws the equipped portrait, scaled to fit and keeping its ratio.
  */
-void	mp_match_pixel_draw_portrait(t_render_ctx *ctx, uint32_t *pixels,
-	int width, int height, const t_mp_rect *rect)
+void	mp_match_pixel_draw_portrait(t_render_ctx *ctx, int slot,
+	uint32_t *pixels, int width, int height, const t_mp_rect *rect)
 {
 	t_mp_rect	destination;
 	uint32_t	source;
@@ -183,13 +104,15 @@ void	mp_match_pixel_draw_portrait(t_render_ctx *ctx, uint32_t *pixels,
 	int			x;
 	int			y;
 
-	source_width = ctx->mp_match_portrait_px_width;
-	source_height = ctx->mp_match_portrait_px_height;
-	if (ctx->mp_match_portrait_pixels == NULL || source_width <= 0
+	if (slot < 0 || slot >= MP_MATCH_PORTRAITS)
+		return ;
+	source_width = ctx->mp_match_portrait_px_width[slot];
+	source_height = ctx->mp_match_portrait_px_height[slot];
+	if (ctx->mp_match_portrait_pixels[slot] == NULL || source_width <= 0
 		|| source_height <= 0)
 	{
 		mp_match_pixel_draw_visual(pixels, width, height,
-			ctx->mp_match_portrait_visual, rect);
+			ctx->mp_match_portrait_visual[slot], rect);
 		return ;
 	}
 	destination = *rect;
@@ -212,7 +135,7 @@ void	mp_match_pixel_draw_portrait(t_render_ctx *ctx, uint32_t *pixels,
 		x = 0;
 		while (x < destination.width)
 		{
-			source = ctx->mp_match_portrait_pixels[(size_t)((int64_t)y
+			source = ctx->mp_match_portrait_pixels[slot][(size_t)((int64_t)y
 					* source_height / destination.height) * source_width
 				+ (int64_t)x * source_width / destination.width];
 			put_pixel(pixels, width, height, destination.x + x,

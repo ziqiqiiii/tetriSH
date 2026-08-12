@@ -50,6 +50,8 @@ const char	*confirmation_title(t_confirmation_kind kind)
 		return ("LEAVE ROOM?");
 	if (kind == CONFIRM_LEAVE_MATCH)
 		return ("LEAVE MATCH?");
+	if (kind == CONFIRM_CONNECTION_LOST)
+		return ("CONNECTION LOST");
 	return ("QUIT TETRISH?");
 }
 
@@ -59,5 +61,51 @@ const char	*confirmation_body(t_confirmation_kind kind)
 		return ("Do you really want to leave this room?");
 	if (kind == CONFIRM_LEAVE_MATCH)
 		return ("Do you really want to leave this game?");
+	if (kind == CONFIRM_CONNECTION_LOST)
+		return ("The server stopped answering.");
 	return ("Do you really want to quit the game?");
+}
+
+/**
+ * @brief The safe answer's label - the one Escape gives and focus starts on.
+ *
+ * @param kind Which question is being asked.
+ * @return A label to draw in the left-hand button.
+ */
+const char	*confirmation_no_label(t_confirmation_kind kind)
+{
+	if (kind == CONFIRM_CONNECTION_LOST)
+		return ("PLAY OFFLINE");
+	return ("NO");
+}
+
+/**
+ * @brief The other answer's label.
+ *
+ * @param kind Which question is being asked.
+ * @return A label to draw in the right-hand button.
+ */
+const char	*confirmation_yes_label(t_confirmation_kind kind)
+{
+	if (kind == CONFIRM_CONNECTION_LOST)
+		return ("SIGN IN AGAIN");
+	return ("YES");
+}
+
+/**
+ * @brief The line of controls under the answers.
+ *
+ * A dropped connection has no cancel: there is no state to go back to, and
+ * offering one would be offering to carry on talking to a server that is not
+ * there. Escape still picks the safe answer, which is why it is named as
+ * that answer rather than as a way out of the question.
+ *
+ * @param kind Which question is being asked.
+ * @return The hint line for that question.
+ */
+const char	*confirmation_hint(t_confirmation_kind kind)
+{
+	if (kind == CONFIRM_CONNECTION_LOST)
+		return ("ESC PLAY OFFLINE   LEFT/RIGHT SELECT   ENTER CONFIRM");
+	return ("ESC/N CANCEL   LEFT/RIGHT SELECT   ENTER CONFIRM");
 }

@@ -74,6 +74,16 @@ bool	render_auth_pixel_background_refresh(t_render_ctx *ctx,
 		&& (ctx->pixels != TETRISU_PIXELS_STATIONARY
 			|| ctx->auth_background_visual != NULL))
 		return (true);
+	/*
+	 * The sprites go before the artwork does, not after. A sprite plane holds
+	 * a bitmap the terminal is already showing, and the stationary tier cannot
+	 * move one: repositioning the status row for the other form left its old
+	 * image where the previous form had put it, and the fresh full-screen
+	 * artwork below could not cover it because it is emitted first. Dropping
+	 * them here means the artwork is the last thing drawn over that region and
+	 * every sprite is rebuilt against the form actually on screen.
+	 */
+	render_auth_pixel_overlay_destroy(ctx);
 	if (form->mode == AUTH_FORM_SIGN_UP)
 		path = AUTH_SIGNUP_BACKGROUND_PATH;
 	else

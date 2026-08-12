@@ -1,0 +1,305 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*   test_garbage.c - a clear on one board becomes rows on another            */
+/*                                                                            */
+/*   The rule under test is a game rule and not a scheduling convenience:     */
+/*   garbage lands at the Target's next piece lock, never on arrival.         */
+/*   Injecting rows raises the stack under whatever is falling, which can     */
+/*   produce a board piece_is_valid would reject - and there is no correct    */
+/*   thing to do with a piece already in the air on a board that is no        */
+/*   longer legal. CLAUDE.md states it; this is what it has to mean.          */
+/*                                                                            */
+/*   These drive t_game in-process, for the reason test_clearing.c does:      */
+/*   clearing ten columns through MOVE and DROP would take dozens of pieces   */
+/*   and depend on what the bag deals, and the question here is about when    */
+/*   rows arrive rather than about how they were earned.                      */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "harness.h"
+
+#include <assert.h>
+
+// Static Functions
+static void	test_queued_garbage_does_not_touch_the_board(void);
+static void	test_garbage_lands_at_the_next_lock(void);
+static void	test_garbage_waits_out_a_held_clear(void);
+static void	test_the_hole_walks_between_rows(void);
+static void	test_a_finished_game_takes_nothing(void);
+static void	test_the_pending_count_reaches_the_wire(void);
+static void	test_cleared_lines_are_taken_once(void);
+static void	test_the_target_is_the_other_live_seat(void);
+
+static void	seat_a_pair(t_server_room *server_room, t_room *room);
+static void	fill_bottom_row(t_game *g);
+static int	row_filled_cells(const t_game *g, int row);
+static int	row_hole(const t_game *g, int row);
+
+int	main(void)
+{
+	test_queued_garbage_does_not_touch_the_board();
+	test_garbage_lands_at_the_next_lock();
+	test_garbage_waits_out_a_held_clear();
+	test_the_hole_walks_between_rows();
+	test_a_finished_game_takes_nothing();
+	test_the_pending_count_reaches_the_wire();
+	test_cleared_lines_are_taken_once();
+	test_the_target_is_the_other_live_seat();
+	return (0);
+}
+
+/*
+** Who a clear is aimed at. Three answers and they are deliberately the same
+** shape: Double names the other seat, Single names nobody, and an opponent
+** who has already topped out names nobody either - so no caller has to tell
+** "no opponent" apart from "no opponent left", because nothing crosses in
+** either case.
+**
+** This is where Battle Royale's four targeting modes will land, which is why
+** it is a function and not an expression.
+*/
+static void	test_the_target_is_the_other_live_seat(void)
+{
+	t_server_room	server_room;
+	t_room			room;
+
+	seat_a_pair(&server_room, &room);
+	assert(server_room_target_of(&server_room, 0) == 1);
+	assert(server_room_target_of(&server_room, 1) == 0);
+	server_room.games[1].active = false;
+	assert(server_room_target_of(&server_room, 0) == -1);
+	seat_a_pair(&server_room, &room);
+	assert(room_init(&room, MODE_SINGLE, 1, 0) == 0);
+	assert(server_room_target_of(&server_room, 0) == -1);
+	printf("PASS test_the_target_is_the_other_live_seat\n");
+}
+
+/*
+** The whole of the rule's first half: queueing changes the count and nothing
+** else. A player who was mid-piece keeps the board they were playing on.
+*/
+static void	test_queued_garbage_does_not_touch_the_board(void)
+{
+	t_game	g;
+	t_piece	held;
+
+	game_start(&g, 1, 20260811u);
+	held = g.piece;
+	game_queue_garbage(&g, 2);
+	assert(g.pending_garbage == 2);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == 0);
+	assert(g.piece.row == held.row && g.piece.col == held.col);
+	assert(game_move(&g, -1) || game_move(&g, 1));
+	printf("PASS test_queued_garbage_does_not_touch_the_board\n");
+}
+
+/*
+** And its second half. The rows appear at the lock, all of them, and the
+** queue is empty afterwards - a row left owed would land twice.
+*/
+static void	test_garbage_lands_at_the_next_lock(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260811u);
+	game_queue_garbage(&g, 3);
+	assert(game_drop(&g, true));
+	assert(g.pending_garbage == 0);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == BOARD_WIDTH - 1);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 2) == BOARD_WIDTH - 1);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 3) == BOARD_WIDTH - 1);
+	printf("PASS test_garbage_lands_at_the_next_lock\n");
+}
+
+/*
+** A lock that completes a row does not deal with garbage at the lock, it
+** deals with it when the clear finishes. Otherwise a player would take rows
+** in the middle of watching their own go, and worse: rows injected before
+** board_clear_lines ran would shift the very rows it was about to take.
+*/
+static void	test_garbage_waits_out_a_held_clear(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260809u);
+	fill_bottom_row(&g);
+	game_queue_garbage(&g, 1);
+	assert(game_drop(&g, true));
+	assert(g.clearing_count > 0);
+	assert(g.pending_garbage == 1);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == BOARD_WIDTH);
+	assert(game_gravity(&g, clear_duration_ms(g.level)));
+	assert(g.clearing_count == 0);
+	assert(g.lines == 1);
+	assert(g.pending_garbage == 0);
+	assert(row_filled_cells(&g, BOARD_HEIGHT - 1) == BOARD_WIDTH - 1);
+	printf("PASS test_garbage_waits_out_a_held_clear\n");
+}
+
+/*
+** Successive rows leave the hole in different columns. A run of rows sharing
+** one hole is a wall rather than a handicap: nothing but an I piece on end
+** could ever answer it, and the receiver would be dead on arrival.
+**
+** The column walks from a counter rather than being drawn, because
+** libtetrisbrain is pure by contract and a random number generator inside it
+** would make a board unreproducible.
+*/
+static void	test_the_hole_walks_between_rows(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260811u);
+	game_queue_garbage(&g, 2);
+	assert(game_drop(&g, true));
+	assert(row_hole(&g, BOARD_HEIGHT - 1) >= 0);
+	assert(row_hole(&g, BOARD_HEIGHT - 2) >= 0);
+	assert(row_hole(&g, BOARD_HEIGHT - 1) != row_hole(&g, BOARD_HEIGHT - 2));
+	printf("PASS test_the_hole_walks_between_rows\n");
+}
+
+/*
+** Burying a board nobody is playing on would change a result that is already
+** settled - and in a match the sender's last clear resolves on the same tick
+** the receiver tops out.
+*/
+static void	test_a_finished_game_takes_nothing(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260811u);
+	g.topped_out = true;
+	g.active = false;
+	game_queue_garbage(&g, 4);
+	assert(g.pending_garbage == 0);
+	printf("PASS test_a_finished_game_takes_nothing\n");
+}
+
+/*
+** The count is the receiver's warning, so it has to survive the codec. A
+** client told nothing between the queueing and the landing would see four
+** rows appear from nowhere.
+*/
+static void	test_the_pending_count_reaches_the_wire(void)
+{
+	t_game			g;
+	t_body_state	sent;
+	t_body_state	received;
+	char			body[TETRISD_BODY_MAX_BYTES];
+	int				len;
+
+	game_start(&g, 1, 20260811u);
+	game_queue_garbage(&g, 4);
+	game_snapshot(&g, &sent);
+	assert(sent.pending == 4);
+	len = body_state_encode(&sent, body, sizeof(body));
+	assert(len > 0);
+	memset(&received, 0, sizeof(received));
+	assert(body_state_decode(body, (size_t)len, &received) == 0);
+	assert(received.pending == 4);
+	printf("PASS test_the_pending_count_reaches_the_wire\n");
+}
+
+/*
+** room.c charges a clear to the Target by taking it, so taking it twice would
+** send the rows twice. The count accumulates until somebody asks, because a
+** tick that ran two clear completions owes both.
+*/
+static void	test_cleared_lines_are_taken_once(void)
+{
+	t_game	g;
+
+	game_start(&g, 1, 20260809u);
+	fill_bottom_row(&g);
+	assert(game_drop(&g, true));
+	assert(game_gravity(&g, clear_duration_ms(g.level)));
+	assert(g.lines == 1);
+	assert(game_take_cleared(&g) == 1);
+	assert(game_take_cleared(&g) == 0);
+	printf("PASS test_cleared_lines_are_taken_once\n");
+}
+
+/**
+ * @brief Builds a two-seat Double room with a live game in each seat.
+ *
+ * Assembled by hand rather than driven through a running server, because the
+ * reactor owns every game it holds and reaching into one from a test thread
+ * would be exactly the shared mutable state tetrisd does not have.
+ *
+ * @param server_room Receives the room runtime.
+ * @param room Receives the domain room it points at.
+ */
+static void	seat_a_pair(t_server_room *server_room, t_room *room)
+{
+	memset(server_room, 0, sizeof(*server_room));
+	assert(room_init(room, MODE_DOUBLE, 1, 0) == 0);
+	server_room->room = room;
+	game_start(&server_room->games[0], 11, 1u);
+	game_start(&server_room->games[1], 22, 2u);
+}
+
+/**
+ * @brief Fills the bottom row so the next lock completes it.
+ *
+ * @param g Game whose board is being set up.
+ */
+static void	fill_bottom_row(t_game *g)
+{
+	t_cell	cell;
+	int		col;
+
+	cell.type = CELL_FILLED;
+	cell.color = 1;
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		board_set(&g->board, col, BOARD_HEIGHT - 1, cell);
+		col++;
+	}
+}
+
+/**
+ * @brief Counts the occupied cells in one row.
+ *
+ * @param g Game to read.
+ * @param row The row to count.
+ * @return How many cells are not empty.
+ */
+static int	row_filled_cells(const t_game *g, int row)
+{
+	int	filled;
+	int	col;
+
+	filled = 0;
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		if (board_get(&g->board, col, row).type != CELL_EMPTY)
+			filled++;
+		col++;
+	}
+	return (filled);
+}
+
+/**
+ * @brief Finds the one empty column in a garbage row.
+ *
+ * @param g Game to read.
+ * @param row The row to search.
+ * @return The empty column, or -1 when the row is not a garbage row.
+ */
+static int	row_hole(const t_game *g, int row)
+{
+	int	col;
+
+	if (row_filled_cells(g, row) != BOARD_WIDTH - 1)
+		return (-1);
+	col = 0;
+	while (col < BOARD_WIDTH)
+	{
+		if (board_get(&g->board, col, row).type == CELL_EMPTY)
+			return (col);
+		col++;
+	}
+	return (-1);
+}

@@ -177,11 +177,57 @@
 # define TD_MAX_GAMES							16
 
 /*
+** Abilities that can be waiting on one player's lock at once. Four is the
+** whole of a rival's meter spent without a single piece landing, which is the
+** worst a Double match can do; past that the oldest is dropped rather than the
+** newest refused, because the newest is the one the sender just paid for.
+*/
+# define TD_MAX_PENDING							8
+
+/*
+** Rows Pentaris sends (docs/use_cases.md). It is written here rather than in
+** libtetrisbrain because it is a property of one character's level 3, not of
+** what a garbage row is.
+*/
+# define TETRISD_PENTARIS_ROWS					5
+
+/*
+** Cells Bomb destroys on the Target's field. Enough to matter and few enough
+** that the board is still the one the player was building.
+*/
+# define TETRISD_BOMB_CELLS						12
+
+/*
+** How many of the Target's pieces Dark and Pals last. Four matches Nue and
+** Thwack, the two piece-counted effects libtetrisbrain does time itself, so
+** "a limited time" means the same length whoever is counting it.
+*/
+# define TETRISD_DARK_PIECES						4
+# define TETRISD_PALS_PIECES						4
+
+/*
 ** Game points that buy one wallet point (docs/game-economics.md). It is the
 ** whole of the economy's exchange rate, and it is charged against a player's
 ** running total rather than each game on its own - see room.c's award_game.
 */
 # define TETRISD_POINTS_PER_WALLET_POINT			100
+
+/*
+** How long a dealt match is held still before it begins.
+**
+** Two players have to start on the same tick, and neither client can arrange
+** that for itself: each reaches its match screen at a different moment, and
+** PAUSE - which is how Solo freezes the board for its own 3-2-1 - is refused
+** in a room with anybody else in it precisely because one player stopping
+** their own clock is an advantage. So the hold belongs to the room, and the
+** client draws its countdown from the number this produces rather than from a
+** timer of its own.
+**
+** Single does not take one: its client already runs a 3-2-1 of its own and
+** moving it would change a mode this step is not touching.
+*/
+# define TETRISD_MATCH_COUNTDOWN_MS				3000
+# define TETRISD_MATCH_SELECT_MS				15000
 
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
@@ -333,6 +379,28 @@ typedef struct s_outbox
 ** One player's game: the aggregate libtetrisbrain deliberately does not own.
 ** The reactor is its only writer, which is now the whole of the rule.
 */
+/*
+** What one queued ability is, waiting on a Target's lock.
+**
+** `kind` names the transform rather than the ability, because several
+** abilities reduce to the same thing done to a board - and because the
+** ability that queued it belongs to the sender, whose character the receiver
+** has no business knowing.
+*/
+typedef enum e_pending_kind
+{
+	PENDING_NONE = 0,
+	PENDING_EFFECT,
+	PENDING_BOMB,
+	PENDING_SIRTET
+}	t_pending_kind;
+
+typedef struct s_pending_ability
+{
+	t_pending_kind	kind;
+	int				argument;
+}	t_pending_ability;
+
 typedef struct s_game
 {
 	t_board				board;
@@ -408,6 +476,92 @@ typedef struct s_game
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
+	/*
+	** Garbage rows owed to this player, and not yet on their board.
+	**
+	** They land at the next piece lock and never on arrival. That is a rule
+	** of the game rather than a scheduling convenience: injecting rows under
+	** an active piece raises the stack beneath it and can produce a board
+	** piece_is_valid would reject, so there is no correct thing to do with
+	** the piece already in the air. Waiting for the lock means the rows are
+	** always part of the board the *next* piece is validated against, and a
+	** spawn that then fails is a top-out, which is the right outcome of being
+	** buried.
+	**
+	** It is also the receiver's warning: the count is on the wire from the
+	** moment it is queued, so a player can see what is coming and clear
+	** underneath it.
+	*/
+	int					pending_garbage;
+	/*
+	** Garbage an ability sent, kept apart from the ordinary kind because Pals
+	** treats the two differently: "incoming ordinary garbage lowers the
+	** Player's stack instead of raising it; garbage created by abilities is
+	** excluded" (docs/use_cases.md). One counter could not tell them apart, so
+	** Pals would either absorb Pentaris - which the text forbids - or absorb
+	** nothing.
+	*/
+	int					pending_ability_garbage;
+	/*
+	** Rows Fry burned off this player's own floor and has not yet passed on.
+	** Fry is two halves and only the first was built: the rows go in, and at
+	** the next lock they clear *and are sent to the Target*. The burn is
+	** consumed by effect_on_piece_lock, so the count is taken before that runs
+	** and handed to room.c, which is the only module that knows who the Target
+	** is.
+	*/
+	int					fry_owed;
+	/*
+	** How many more of this player's pieces Dark and Pals last.
+	**
+	** libtetrisbrain deliberately leaves both open-ended - its comment says
+	** "Dark/Pals/Mirror stay on until effect_clear, the server decides when
+	** they end" - so this is the server deciding. Without it "for a limited
+	** time" would be forever, and a single Dark would end the game.
+	*/
+	int					dark_pieces;
+	int					pals_pieces;
+	/*
+	** Which column the next garbage row leaves open. Derived from a counter
+	** rather than drawn, so the hole walks instead of stacking - the same
+	** fairness trick apply_fry uses, and for the same reason: no randomness
+	** enters libtetrisbrain, and a run of rows with the hole in one place
+	** would be a wall rather than a handicap.
+	*/
+	uint32_t			garbage_seq;
+	/*
+	** Lines this game has cleared that have not yet been charged to anybody.
+	**
+	** room.c takes it after each tick and turns it into garbage against the
+	** Target, because who the Target is depends on the room and a game does
+	** not know it is in one. It accumulates rather than being overwritten: a
+	** tick that ran two clear completions owes both.
+	*/
+	int					cleared_owed;
+	/*
+	** The character this game is being played with, or 0 when the player did
+	** not declare one and the account's equipped character stands. It decides
+	** which four abilities each level selects from, and it is copied in once
+	** at deal time so an EQUIP made mid-match cannot change it.
+	*/
+	t_item_id			character_id;
+	/*
+	** Abilities aimed at this player, waiting for their next piece lock.
+	**
+	** They wait for the same reason garbage does, and the reason is stronger
+	** here: a board transform landing under an active piece can leave that
+	** piece inside the stack, and a status effect landing mid-piece would
+	** take hold of a piece already in the air - so the count of pieces it is
+	** meant to last would be short by one before it started. At the lock
+	** there is no piece, which is what makes the lock the safe point.
+	**
+	** Only effects that land on somebody *else* queue. An ability that lands
+	** on the player who used it - Mirror, Pals, Copy, Vampire - is applied at
+	** once, exactly like the self-affecting four, because there is no second
+	** board to be surprised.
+	*/
+	t_pending_ability	pending[TD_MAX_PENDING];
+	int					pending_count;
 }	t_game;
 
 /*
@@ -432,6 +586,44 @@ typedef struct s_server_room
 	t_game			games[TD_MAX_GAMES];
 	bool			dirty[TD_MAX_GAMES];
 	bool			ticking;
+	/*
+	** The hold before a match begins, and the second of it last sent. The
+	** countdown is pushed when the displayed second changes rather than on
+	** every tick: three seconds at the tick rate would be a couple of hundred
+	** frames of a number the client can interpolate between four of.
+	*/
+	int				countdown_ms;
+	int				countdown_second;
+	/*
+	** The character-select window, and the second of it last narrated. It runs
+	** before the countdown does and on the same principle: the room owns the
+	** clock, so both players see the same number and the match is dealt for
+	** them at the same instant. It closes early the moment every seat has
+	** named a fighter, which is what makes locking in worth doing.
+	*/
+	int				select_ms;
+	int				select_second;
+	/*
+	** How the match ended, per slot, decided once when it ends and read by
+	** the final snapshot each player is sent. It cannot be derived from the
+	** game: the winner's board is active with a piece on it, which is what
+	** every board mid-match looks like.
+	*/
+	t_body_result	result[TD_MAX_GAMES];
+	int				rank[TD_MAX_GAMES];
+	/*
+	** The character each seat declared for this match, or 0 for "whatever the
+	** account has equipped". It is per seat and not per account because a
+	** character is picked for a match: EQUIP is an account-wide change, and
+	** making one to play one game is the wrong scope - it would also mean a
+	** purchase made mid-match could change which abilities a player's levels
+	** select from.
+	**
+	** Declared with READY and read once by deal_games, so it is fixed for the
+	** length of the match by construction. It shares a slot's lifetime, which
+	** is why room_blank clears it for the same reason it clears `ticking`.
+	*/
+	t_item_id		character[TD_MAX_GAMES];
 	t_server		*srv;
 	int				index;
 	/*
@@ -805,6 +997,9 @@ int				leave_handler(const t_htttp_message *msg, void *context);
 int				start_handler(const t_htttp_message *msg, void *context);
 bool			request_is_authorised(t_request_context *ctx);
 
+/* HANDLERS_READY.C */
+int				ready_handler(const t_htttp_message *msg, void *context);
+
 /* HANDLERS_CHAT.C */
 int				chat_handler(const t_htttp_message *msg, void *context);
 
@@ -852,12 +1047,18 @@ bool			game_hold(t_game *g);
 bool			game_pause(t_game *g, bool paused);
 bool			game_restart(t_game *g);
 void			game_snapshot(const t_game *g, t_body_state *out);
+void			game_queue_garbage(t_game *g, int lines);
+void			game_queue_ability_garbage(t_game *g, int lines);
+int				game_take_fry(t_game *g);
+void			game_queue_ability(t_game *g, t_pending_kind kind,
+					int argument);
+int				game_take_cleared(t_game *g);
 
 /* ABILITY_CTRL.C */
 const t_ability_def	*ability_lookup(t_item_id character_id, int level);
 bool			ability_is_playable_solo(const t_ability_def *def);
-t_ability_verdict	game_ability(t_game *g, const t_ability_def *def,
-					int argument);
+t_ability_verdict	game_ability(t_game *g, t_game *target,
+					const t_ability_def *def, int argument);
 const char		*ability_verdict_reason(t_ability_verdict verdict);
 
 /* ROOM.C */
@@ -870,8 +1071,17 @@ void			server_room_unbind(t_client *cli);
 int				server_room_open(t_server *srv, t_client *cli, t_game_mode mode);
 t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli, int *slot);
 t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli);
+bool			server_room_set_ready(t_server_room *server_room, t_client *cli, bool ready, t_item_id character);
+bool			server_room_all_ready(const t_server_room *server_room);
+bool			server_room_autostart(t_server_room *server_room);
+bool			server_room_begin_selection(t_server_room *server_room);
+bool			server_room_all_locked(const t_server_room *server_room);
 bool			server_room_input(t_server_room *server_room, t_client *cli, t_input_action action, int argument);
 bool			server_room_is_solo(const t_server_room *server_room);
+int				server_room_target_of(t_server_room *server_room,
+					int from_slot);
+t_game			*server_room_target_game(t_server_room *server_room,
+					const t_client *cli);
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);

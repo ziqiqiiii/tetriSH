@@ -91,8 +91,8 @@ All bodies are plaintext `key value` lines. Single public header,
 
 | Function | Description |
 |---|---|
-| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15 and cell type/color nibbles before writing |
-| `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars, and no trailing bytes |
+| `body_state_encode(in, out, cap)` | Serialise one gameplay snapshot; validates `phase`, `charge` 0–10, `clearing_count` 0–4, `hold` −1–15, opponent count and usernames, and cell type/color nibbles before writing |
+| `body_state_decode(buf, len, out)` | Parse a snapshot back; strict on key order, requires every key, exactly 20 board rows of 20 hex chars per board, and no trailing bytes |
 
 Fixed key order, exactly as encoded:
 
@@ -111,9 +111,17 @@ charge 7
 ability 2 1
 clear tetris
 clearing 2 350 18 19
+countdown 0
+pending 0
+effects 0 0 0 0 0 0 0 0
+result none 0
 board
 00000000000000000000
 ...                     (exactly 20 rows)
+opponents 1
+opp 2 7 1 clearing 4200 9 3 4 2 6 3 8 3 rival
+00000000000000000000
+...                     (exactly 20 rows, per opponent)
 ```
 
 | Key | Form |
@@ -124,7 +132,59 @@ board
 | `ability` | `<level> <0\|1>` — last activation; level `0` = none |
 | `clear` | `none\|single\|double\|triple\|tetris\|tspin\|tspin_mini\|perfect` |
 | `clearing` | `<count> <ms> [<rows>...]`, `count` 0–4 |
+| `countdown` | `<ms>` remaining before a dealt match begins; `0` when none is running |
+| `pending` | `<rows>` of garbage queued against **this** player and not yet landed; `0` in Single |
+| `effects` | `<paralysis> <inversion> <nue> <thwack> <fry> <dark> <pals> <mirror>` — the status effects riding on this player. The first four are how many of this player's pieces are left under them; the rest are `1` or `0` |
+| `result` | `<none\|won\|lost> <rank>` — how the match ended for this player; `none 0` while it is still being played |
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
+| `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
+| `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <ptype> <protation> <pcol> <prow> <charge> <character> <username>` — `charge` is the same 0–10 meter the frame's own subject carries, and `character` the catalogue id of the fighter they took into this match (`0` when they named none). Both are here so a client can draw the rival's column beside their board rather than guessing at it; `username` stays last because it runs to end of line |
+
+`phase` reads `active`, `clearing`, `paused`, `topout`, or `countdown`.
+`countdown` is a dealt board being held still before a match starts — it is
+every player's clock stopped, which is what makes it a different thing from
+`paused`, one player's own.
+
+`countdown`, `pending`, `effects`, `result` and `opponents` are always
+written, carrying `0` or `none` when there is nothing to say, the way `clearing` has always been written
+with a count of `0`. No line's presence depends on another line's value, so a
+decoder never looks ahead; a Single snapshot is the frame it always was plus
+those five empty lines.
+
+`result` is not a phase, because the winner's board is doing nothing a phase
+could describe — it is simply still active with a piece on it, exactly like a
+board mid-game. Without a field of its own the winner would never be told they
+had won. `rank` rides alongside it because a Battle Royale defeat is a placing
+rather than a bare loss.
+
+An opponent's board rides inside the recipient's snapshot rather than arriving
+as a snapshot of its own, because `tetrisd` holds one `STATE` mailbox slot per
+client and a second push would destroy the first — and carrying both in one
+message makes them the same instant by construction.
+
+`pending` appears twice and means the same thing about two different players:
+the top-level line is garbage owed to the recipient, the `opp` field is garbage
+owed to that opponent. Both land at their subject's next piece lock rather than
+on arrival, so both are visible before they are real — which is the point of
+sending a count at all.
+
+`effects` exists because an effect nobody can see is indistinguishable from a
+bug. Every one of them is enforced by `tetrisd` and always was — but Paralysis
+looked exactly like a rotate key that had stopped responding, Inversion like
+the terminal had swapped the arrows, and Nue like a stuck spacebar, because the
+server refused the input and the client was never told why. Dark could not be
+carried out at all: blacking out a field is the one thing in the catalogue only
+a renderer can do.
+
+The client reads these as counts to display, never as rules to apply. It
+compares them against the ones it was last sent, and anything that went up is
+something that just landed — a comparison rather than an event, because a
+snapshot states what is true now and the `STATE` lane is a latest-wins mailbox
+that may drop one.
+
+`username` is last on its line and may not contain a space: every field before
+it is positional, so one space shifts all of them. The encoder refuses such a
+name rather than writing a line its own decoder would misread.
 
 ### Rooms — `LIST /rooms` rows (`rooms.c`)
 
@@ -140,7 +200,7 @@ One line per room:
 ```
 
 - `mode`  ∈ `SINGLE | DOUBLE | BATTLE_ROYALE` 
-- `status` ∈ `WAITING | READY | IN_GAME | FINISHED`
+- `status` ∈ `WAITING | READY | SELECTING | IN_GAME | FINISHED`. `SELECTING` is the character-select window: the room is committed and nobody is playing yet
 - Rooms travel by **name** (`S-01`, `BR-10`), never by id. The ids run per mode, so only the prefixed name is unique. `mode` rides as its own field so clients never parse the prefix.
 
 ### Room — `LIST /room/<name>` snapshot (`room.c`)
@@ -150,10 +210,19 @@ One line per room:
 | `body_room_encode(in, out, cap)` | Serialise one authoritative waiting-room snapshot |
 | `body_room_decode(buf, len, out)` | Parse the fixed room header and its ordered occupied-seat rows |
 
-The header carries the room name, mode, status, minimum players, capacity, and
-occupied-seat count. Each following row carries the server slot, player id,
-owner/player role, ready/waiting state, and username. Rows must be in strictly
-increasing server-slot order; refreshes therefore preserve a stable roster.
+The header carries the room name, mode, status, the milliseconds left in the
+character-select window, minimum players, capacity, and occupied-seat count.
+Each following row carries the server slot, player id, owner/player role,
+ready/waiting state, the character that seat has declared for this match, and
+username. Rows must be in strictly increasing server-slot order; refreshes
+therefore preserve a stable roster.
+
+`select` is `0` when no window is running. It is the room's clock and not each
+client's, so two players browsing the same roster are shown the same number and
+are dealt in at the same instant. A seat is locked in exactly when its
+`character` is non-zero — there is no second flag that could disagree with it,
+and opening a window clears every seat's character so the fact belongs to this
+match rather than the last one.
 
 ### Chat — `application/tetris-chat` (`chat.c`)
 
