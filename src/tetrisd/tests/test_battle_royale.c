@@ -23,7 +23,15 @@ static void	test_a_non_owner_cannot_start_a_battle_royale(void);
 static void	test_a_departure_does_not_cancel_a_crowded_window(void);
 static void	test_a_departure_below_the_minimum_closes_the_window(void);
 static void	test_the_last_undecided_player_leaving_deals_the_match(void);
+static void	test_a_match_sends_an_arena_of_every_seat(void);
+static void	test_the_arena_is_slower_than_the_board(void);
+static void	test_counts_ride_every_frame(void);
 
+static int	start_match(t_fixture *fx, t_harness *players, int count,
+				char *room, size_t cap, char *path, size_t path_cap);
+static int	wait_arena(t_harness *hc, t_body_state *out, int timeout_ms);
+static int	wait_phase(t_harness *hc, t_body_state *out, t_body_phase phase,
+				int window_ms);
 static int	seat_many(t_fixture *fx, t_harness *players, int count,
 				char *room, size_t cap);
 static int	simple(t_harness *hc, const char *method, const char *path,
@@ -40,6 +48,9 @@ int	main(void)
 	test_a_departure_does_not_cancel_a_crowded_window();
 	test_a_departure_below_the_minimum_closes_the_window();
 	test_the_last_undecided_player_leaving_deals_the_match();
+	test_a_match_sends_an_arena_of_every_seat();
+	test_the_arena_is_slower_than_the_board();
+	test_counts_ride_every_frame();
 	return (0);
 }
 
@@ -349,4 +360,230 @@ static int	list_room(t_harness *hc, const char *path, t_body_room *out)
 		body_room_decode((const char *)resp.body, resp.body_len, out);
 	htttp_message_free(&resp);
 	return (status);
+}
+
+/*
+** The arena is the mode. Ninety-eight rivals cannot ride the opponents section
+** - one full board is 496 bytes and BODY_OPPONENTS_MAX is 1 on purpose - so
+** they ride a second detail level, one card per occupied seat, each carrying
+** the silhouette of a stack rather than a board.
+**
+** Every seat appears, including the local player's own: the card list is the
+** roster, so a client replaces its whole arena from a push and a seat that
+** does not appear is a seat nobody is in.
+*/
+static void	test_a_match_sends_an_arena_of_every_seat(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		players[BR_SEATS];
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	size_t			i;
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	assert(state.arena_count == (size_t)BR_SEATS);
+	/* the opponents section stays Double's, and stays empty here */
+	assert(state.opponent_count == 0);
+	i = 0;
+	while (i < state.arena_count)
+	{
+		assert(state.arena[i].player_id != 0);
+		assert(state.arena[i].flags & BODY_ARENA_ALIVE);
+		/* a live card always carries its board */
+		assert(state.arena[i].flags & BODY_ARENA_MASK_PRESENT);
+		assert(state.arena[i].mask_valid);
+		assert(state.arena[i].rank == 0);
+		i++;
+	}
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_a_match_sends_an_arena_of_every_seat\n");
+}
+
+/*
+** The arena has a clock of its own, and that is the whole reason the mode is
+** affordable: every client is sent every card, so the cost grows with the
+** square of the room, and the cadence is the one lever that divides all of it.
+**
+** So frames outnumber arenas. A player's own board is pushed the instant it
+** changes - that is the thing they are steering - while the thumbnails they
+** glance at arrive at TETRISD_BR_ARENA_MS. A frame carrying no arena says
+** `absent` and the client keeps what it has, which is not the same as an
+** arena of zero cards and must not be read as one.
+*/
+static void	test_the_arena_is_slower_than_the_board(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		players[BR_SEATS];
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	int				frames;
+	int				arenas;
+	int				waited;
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	frames = 0;
+	arenas = 0;
+	waited = 0;
+	while (waited < 4000 && frames < 60)
+	{
+		if (hc_wait_state(&players[0], &state, 250) != 0)
+		{
+			waited += 250;
+			continue ;
+		}
+		if (state.arena_present)
+		{
+			arenas++;
+			assert(state.arena_count == (size_t)BR_SEATS);
+		}
+		else
+			assert(state.arena_count == 0);
+		frames++;
+	}
+	assert(arenas > 0);
+	/* a board pushed on change outruns an arena pushed on a clock */
+	assert(arenas < frames);
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_the_arena_is_slower_than_the_board (%d arenas in %d "
+		"frames)\n", arenas, frames);
+}
+
+/*
+** The head count cannot be recovered from the arena, because most frames do
+** not carry one - a client counting cards would read ALIVE 0/0 between pushes
+** and the number the whole mode is played against would flicker. So both
+** numbers ride every frame, arena or not.
+*/
+static void	test_counts_ride_every_frame(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		players[BR_SEATS];
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	int				frames;
+	int				waited;
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	frames = 0;
+	waited = 0;
+	while (waited < 3000 && frames < 12)
+	{
+		if (hc_wait_state(&players[0], &state, 250) != 0)
+		{
+			waited += 250;
+			continue ;
+		}
+		assert(state.players == BR_SEATS);
+		assert(state.alive == BR_SEATS);
+		frames++;
+	}
+	assert(frames > 0);
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_counts_ride_every_frame\n");
+}
+
+/**
+ * @brief Seats everyone, starts the room, and plays the countdown out.
+ *
+ * @param fx Receives the started fixture.
+ * @param players Receives the connections.
+ * @param count How many to seat.
+ * @param room Receives the room name.
+ * @param cap Size of room.
+ * @param path Receives the room path.
+ * @param path_cap Size of path.
+ * @return 0 when the match is running, -1 otherwise.
+ */
+static int	start_match(t_fixture *fx, t_harness *players, int count,
+		char *room, size_t cap, char *path, size_t path_cap)
+{
+	t_body_state	state;
+	int				i;
+
+	if (fx_start(fx) != 0
+		|| seat_many(fx, players, count, room, cap) != 0)
+		return (-1);
+	snprintf(path, path_cap, "/room/%s", room);
+	ready_all(players, count, path);
+	if (simple(&players[0], "START", path, NULL) != 200)
+		return (-1);
+	i = 0;
+	while (i < count)
+	{
+		if (hc_lock_in(&players[i], fx, path) != 200)
+			return (-1);
+		i++;
+	}
+	/* the room holds every board still for its 3-2-1 before anything moves */
+	if (wait_phase(&players[0], &state, BODY_PHASE_ACTIVE,
+			TETRISD_MATCH_COUNTDOWN_MS + HC_TIMEOUT_MS) != 0)
+		return (-1);
+	return (0);
+}
+
+/**
+ * @brief Waits for a frame that actually carries an arena.
+ *
+ * @param hc The connection.
+ * @param out Receives the frame.
+ * @param timeout_ms How long to wait in total.
+ * @return 0 when one arrived, -1 on timeout.
+ */
+static int	wait_arena(t_harness *hc, t_body_state *out, int timeout_ms)
+{
+	int	waited;
+
+	waited = 0;
+	while (waited < timeout_ms)
+	{
+		if (hc_wait_state(hc, out, 200) != 0)
+		{
+			waited += 200;
+			continue ;
+		}
+		if (out->arena_present)
+			return (0);
+		waited += 20;
+	}
+	return (-1);
+}
+
+/**
+ * @brief Waits for a frame in a given phase.
+ *
+ * @param hc The connection.
+ * @param out Receives the frame.
+ * @param phase The phase being waited for.
+ * @param window_ms How long to wait in total.
+ * @return 0 when one arrived, -1 on timeout.
+ */
+static int	wait_phase(t_harness *hc, t_body_state *out, t_body_phase phase,
+		int window_ms)
+{
+	int	waited;
+
+	waited = 0;
+	while (waited < window_ms)
+	{
+		if (hc_wait_state(hc, out, 200) != 0)
+		{
+			waited += 200;
+			continue ;
+		}
+		if (out->phase == phase)
+			return (0);
+		waited += 20;
+	}
+	return (-1);
 }

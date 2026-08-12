@@ -57,11 +57,19 @@ export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err
 
 # Simultaneous connections, and the period of the server's one gravity timer
 # in milliseconds. Every playing room advances on the same tick.
-export TETRISD_MAX_CLIENTS=64
+#
+# One full Battle Royale is 99 players, so a cap below that would make the
+# mode's own maximum unreachable before anything else refused it.
+export TETRISD_MAX_CLIENTS=128
 export TETRISD_TICK_MS=12
 
 # Slots in a Battle Royale room (Single and Double are fixed at 1 and 2).
-export TETRISD_BR_SLOTS=4
+#
+# The full 99, because a seat nobody sits in costs nothing: every projection
+# walks occupied slots only, so what the room is sent scales with how many
+# people are in it and not with how big it is. Sizing this to an expected
+# turnout would only cap a room that filled.
+export TETRISD_BR_SLOTS=99
 
 # Per-connection input budget for MOVE, ROTATE and DROP: a bucket of BURST
 # tokens refilling at RATE per second, one token per input. Sized well above

@@ -264,6 +264,31 @@ _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 */
 # define TETRISD_MATCH_COUNTDOWN_MS				3000
 # define TETRISD_MATCH_SELECT_MS				15000
+/*
+** How often a Battle Royale's arena is pushed, and how much of it is spent on
+** players who are out.
+**
+** The arena has a clock of its own because it is not the player's board. Their
+** own board is pushed the instant it changes and always will be - that is the
+** thing they are steering. Ninety-eight thumbnails are glanced at, and pushing
+** those at the tick rate would spend the whole connection re-sending boards
+** nobody is looking at closely enough to notice the difference.
+**
+** 300 ms is 3.3 Hz. It is chosen against bandwidth rather than against
+** perception: every client is sent every card, so cost grows with the square
+** of the room and the cadence is the one lever that divides all of it.
+**
+** ARENA_DEAD_EVERY is the other half. A board that has topped out never
+** changes again, so its card carries a mask only on every fifth push and the
+** client keeps the one it holds in between. That is bounded staleness and not
+** a delta: a client that misses a push is correct again inside two seconds
+** with nothing acknowledged and nothing tracked per connection. It is also
+** what makes the cost of a match fall as players are knocked out, which it
+** otherwise would not - an eliminated player keeps their card on everyone's
+** screen and keeps watching everyone else's.
+*/
+# define TETRISD_BR_ARENA_MS					300
+# define TETRISD_BR_ARENA_DEAD_EVERY			5
 
 /* content types and the routes M1 serves */
 # define TETRISD_ROUTE_ACCOUNT					"/account"
@@ -700,6 +725,24 @@ typedef struct s_server_room
 	** open with the last one's verdicts and fighters already written down.
 	*/
 	t_participant	participants[TD_MAX_GAMES];
+	/*
+	** The arena's own clock, and the number of arenas this match has pushed.
+	**
+	** `arena_ms` counts down to the next push. `arena_push` only ever goes up,
+	** and its only reader is the every-fifth-push rule that decides whether a
+	** dead player's card carries its mask - so it is a phase, not a sequence
+	** number, and nothing on the wire depends on its value.
+	**
+	** `arena_dirty` is what stops the room pushing an arena nobody needs. A
+	** push is skipped outright when no card has changed since the last one,
+	** which is almost never true mid-match and is true for the whole of a
+	** countdown, a long tail of two survivors, and a room between matches.
+	** Skipping is safe here in a way that sending only the changed cards would
+	** not be: every arena that does go out is still the complete roster.
+	*/
+	int				arena_ms;
+	unsigned		arena_push;
+	bool			arena_dirty;
 	t_server		*srv;
 	int				index;
 	/*

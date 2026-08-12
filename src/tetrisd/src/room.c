@@ -42,6 +42,16 @@ static void		narrate_departure(t_server_room *server_room, const char *who, cons
 static void		rehome_successor(t_server_room *server_room, t_client *leaver, const t_release_result *res);
 static int		slot_holding(const t_server_room *server_room, t_player_id pid);
 static void		settle_selection(t_server_room *server_room);
+static bool		server_room_is_arena(const t_server_room *server_room);
+static bool		arena_tick(t_server_room *server_room, int elapsed_ms);
+static void		note_arena_change(t_server_room *server_room);
+static void		fill_arena(t_server_room *server_room, int subject,
+					t_body_state *snap);
+static void		fill_card(t_server_room *server_room, int slot, int subject,
+					t_body_arena_slot *out);
+static void		fill_mask(const t_game *game, t_body_arena_slot *out);
+static void		count_players(const t_server_room *server_room,
+					t_body_state *snap);
 static int		game_holding(const t_server_room *server_room, t_player_id pid);
 
 /*
@@ -1066,6 +1076,9 @@ static void	room_blank(t_server_room *server_room)
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	memset(server_room->participants, 0, sizeof(server_room->participants));
+	server_room->arena_ms = 0;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = false;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
@@ -1131,6 +1144,9 @@ static int	deal_games(t_server_room *server_room)
 	int				i;
 
 	slots = server_room->room->slots;
+	server_room->arena_ms = TETRISD_BR_ARENA_MS;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = true;
 	started = 0;
 	i = 0;
 	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
@@ -1310,11 +1326,14 @@ static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
 {
 	t_body_state	snap;
 	char			name[ROOM_NAME_MAX];
+	bool			arena;
 	int				slot;
 
 	advance_games(server_room, elapsed_ms);
 	settle_garbage(server_room);
 	spread_dirty(server_room);
+	note_arena_change(server_room);
+	arena = arena_tick(server_room, elapsed_ms);
 	snprintf(name, sizeof(name), "%s", server_room->room->name);
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
@@ -1323,6 +1342,8 @@ static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
 			&& server_room->dirty[slot])
 		{
 			build_snapshot(server_room, slot, &snap);
+			if (arena)
+				fill_arena(server_room, slot, &snap);
 			push_state(server_room, name,
 				server_room->games[slot].player_id, &snap);
 			server_room->dirty[slot] = false;
@@ -1436,6 +1457,19 @@ static void	spread_dirty(t_server_room *server_room)
 	int	slot;
 
 	if (server_room_is_solo(server_room))
+		return ;
+	/*
+	 * Double only. It exists because a Double frame carries the other board
+	 * inside it, so anybody's move stales everybody's frame. A Battle Royale
+	 * carries the other boards in the arena, which has its own clock - so a
+	 * player's frame is stale when their own board changes and at no other
+	 * time, and the rest is the arena's business.
+	 *
+	 * Left in place it is the whole cost of the mode: ninety-nine boards
+	 * encoded, sealed and written on every tick, for frames whose only change
+	 * is somebody else's piece falling one row.
+	 */
+	if (server_room_is_arena(server_room))
 		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
@@ -1607,6 +1641,7 @@ static void	decorate_snapshot(t_server_room *server_room, int slot,
 		snap->result = participant->result;
 		snap->rank = participant->rank;
 	}
+	count_players(server_room, snap);
 	fill_opponents(server_room, slot, snap);
 }
 
@@ -1634,6 +1669,14 @@ static void	fill_opponents(t_server_room *server_room, int subject,
 	int	slot;
 
 	snap->opponent_count = 0;
+	/*
+	 * Double's section, and Double's only. A Battle Royale's rivals ride the
+	 * arena, so filling this as well would send one of ninety-eight rivals a
+	 * second time at full fidelity - 470 bytes of board, chosen by whichever
+	 * seat came first, drawn by nothing.
+	 */
+	if (server_room_is_arena(server_room))
+		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -1914,6 +1957,9 @@ static void	record_and_reset(t_server_room *server_room)
 	 * roster.
 	 */
 	memset(server_room->participants, 0, sizeof(server_room->participants));
+	server_room->arena_ms = 0;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = false;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	/*
@@ -2072,6 +2118,247 @@ static void	rehome_successor(t_server_room *server_room, t_client *leaver,
 	server_room->dirty[to] = server_room->dirty[from];
 	game_reset(&server_room->games[from]);
 	server_room->dirty[from] = false;
+}
+
+/**
+ * @brief Reports whether this room draws its rivals as an arena.
+ *
+ * Battle Royale, and the question is asked rather than the mode compared,
+ * because everything that turns on it turns on the same fact: the other boards
+ * ride the arena section on their own clock instead of riding every frame.
+ *
+ * @param server_room Room to ask.
+ * @return true when the room's mode is Battle Royale.
+ */
+static bool	server_room_is_arena(const t_server_room *server_room)
+{
+	return (server_room != NULL && server_room->room != NULL
+		&& server_room->room->mode == MODE_BATTLE_ROYALE);
+}
+
+/**
+ * @brief Spends the arena's clock, and says whether one is owed now.
+ *
+ * The arena is not pushed on its own - there is no second message to push it
+ * in, because a client holds one STATE mailbox slot and a second push would
+ * free the first. So this only decides whether the *next* snapshot each player
+ * is built carries an arena, and marking every game dirty is how the snapshots
+ * get built at all on a tick where nobody's own board moved.
+ *
+ * A push is skipped when no card has changed since the last one. That is
+ * almost never true while a match is being played and is true for the whole of
+ * a countdown, for a room whose last two players are stalling, and for the
+ * moments after a match ends - and it costs one flag to notice. It is only
+ * safe because every arena that does go out is the complete roster: skipping a
+ * push that would have said nothing leaves the client correct, where skipping
+ * a *card* would leave it permanently wrong.
+ *
+ * @param server_room Room whose clock is being spent.
+ * @param elapsed_ms Milliseconds this tick is worth.
+ * @return true when this tick's snapshots should carry an arena.
+ */
+static bool	arena_tick(t_server_room *server_room, int elapsed_ms)
+{
+	if (!server_room_is_arena(server_room))
+		return (false);
+	server_room->arena_ms -= elapsed_ms;
+	if (server_room->arena_ms > 0)
+		return (false);
+	server_room->arena_ms = TETRISD_BR_ARENA_MS;
+	if (!server_room->arena_dirty)
+		return (false);
+	server_room->arena_dirty = false;
+	server_room->arena_push++;
+	mark_all_dirty(server_room);
+	return (true);
+}
+
+/**
+ * @brief Notices that some card in the arena is no longer what was last sent.
+ *
+ * Asked before the clock is spent and never after, because arena_tick marks
+ * every game dirty in order to build the snapshots that carry the arena - so
+ * reading the flags afterwards would find the dirt it had just created and the
+ * room would never skip a push at all.
+ *
+ * Any board changing counts. Nothing finer is worth the bookkeeping: a mask
+ * carries the settled stack and not the falling piece, so most ticks do not
+ * actually change a card, but telling those apart would mean asking the game
+ * whether the change was a lock - and the answer only saves pushes in a room
+ * where somebody is playing, which is the room that can least afford the
+ * question.
+ *
+ * @param server_room Room to inspect.
+ */
+static void	note_arena_change(t_server_room *server_room)
+{
+	int	slot;
+
+	if (!server_room_is_arena(server_room) || server_room->arena_dirty)
+		return ;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->dirty[slot])
+		{
+			server_room->arena_dirty = true;
+			return ;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Writes every occupied seat's card into one player's snapshot.
+ *
+ * The whole roster every time, which is what makes the card list also the
+ * roster: a client replaces its arena from the push, so a seat that does not
+ * appear is a seat nobody is in. An eliminated player's card is still written,
+ * with the alive bit clear - absence has to mean "not in this room" and never
+ * "knocked out", or a knockout would look like a disconnection.
+ *
+ * It is built per recipient rather than once and shared, because two of the
+ * flags are about the person being sent it rather than about the player on the
+ * card. That is the whole of the per-subject cost, and it is why the subject is
+ * a parameter.
+ *
+ * @param server_room Room being projected.
+ * @param subject The 0-based slot the snapshot belongs to.
+ * @param snap Snapshot receiving the arena.
+ */
+static void	fill_arena(t_server_room *server_room, int subject,
+		t_body_state *snap)
+{
+	int	slot;
+
+	snap->arena_present = true;
+	snap->arena_count = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& snap->arena_count < BODY_ARENA_MAX)
+		{
+			fill_card(server_room, slot, subject,
+				&snap->arena[snap->arena_count]);
+			snap->arena_count++;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Projects one seat onto one card of the arena.
+ *
+ * The mask is the expensive part and is the part that can be left out. A live
+ * board carries one on every push because it is what the card is for. A dead
+ * board carries one every fifth push, because it will never change again and
+ * the client keeps what it has in between - so a match gets cheaper as it
+ * thins out rather than staying at its opening cost until the last player.
+ *
+ * The attacking-you and targeted-by-you flags are the two facts that are about
+ * the recipient. Neither can be filled yet: knowing who attacked you needs the
+ * attacker record, and knowing who you are aiming at needs the targeting mode,
+ * and both are later steps. They are deliberately left clear rather than
+ * guessed at - the codec has carried them since the section was written, the
+ * room will write them when it can, and an arena without them is still legible.
+ *
+ * @param server_room Room holding the seat.
+ * @param slot The 0-based slot to project.
+ * @param subject The 0-based slot this snapshot is being built for.
+ * @param out Receives the card.
+ */
+static void	fill_card(t_server_room *server_room, int slot, int subject,
+		t_body_arena_slot *out)
+{
+	const t_game		*game;
+	const t_participant	*participant;
+
+	(void)subject;
+	game = &server_room->games[slot];
+	memset(out, 0, sizeof(*out));
+	out->slot = server_room->room->slots[slot].index;
+	out->player_id = server_room->room->slots[slot].membership.player_id;
+	out->lines = game->lines;
+	out->pending = game->pending_garbage + game->pending_ability_garbage;
+	if (game->active)
+		out->flags |= BODY_ARENA_ALIVE;
+	if (game_phase(game) == BODY_PHASE_CLEARING)
+		out->flags |= BODY_ARENA_CLEARING;
+	participant = participant_of(server_room, out->player_id);
+	if (participant != NULL)
+		out->rank = participant->rank;
+	if (game->active
+		|| server_room->arena_push % TETRISD_BR_ARENA_DEAD_EVERY == 0)
+	{
+		out->flags |= BODY_ARENA_MASK_PRESENT;
+		fill_mask(game, out);
+	}
+}
+
+/**
+ * @brief Packs one board into the card's occupancy mask.
+ *
+ * Only whether a cell is filled. A card is a handful of terminal cells, so the
+ * colour and the piece type a full projection carries are information the
+ * screen could not show and the wire would pay sixteen times over for.
+ *
+ * The falling piece is deliberately not stamped in. It is one tetromino out of
+ * a stack twenty rows deep, it moves every tick, and stamping it would make
+ * every live card differ from the last push whether or not anything settled -
+ * which is exactly the comparison the skip-when-unchanged rule depends on.
+ *
+ * @param game The board to read.
+ * @param out Receives the mask.
+ */
+static void	fill_mask(const t_game *game, t_body_arena_slot *out)
+{
+	int	row;
+	int	col;
+
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			if (board_get(&game->board, col, row).type != CELL_EMPTY)
+				out->mask[row][col / 8]
+					|= (unsigned char)(1u << (col % 8));
+			col++;
+		}
+		row++;
+	}
+}
+
+/**
+ * @brief Writes the room's own head count onto a snapshot.
+ *
+ * Both numbers go out on every frame, arena or not, and neither is recoverable
+ * from the cards: most frames carry no arena at all, so a client counting them
+ * would read ALIVE 0/0 between pushes and the number a Battle Royale is played
+ * against would flicker.
+ *
+ * @param server_room Room being counted.
+ * @param snap Snapshot receiving the counts.
+ */
+static void	count_players(const t_server_room *server_room, t_body_state *snap)
+{
+	int	slot;
+
+	snap->players = 0;
+	snap->alive = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].player_id != 0)
+		{
+			snap->players++;
+			if (server_room->games[slot].active)
+				snap->alive++;
+		}
+		slot++;
+	}
 }
 
 /**
