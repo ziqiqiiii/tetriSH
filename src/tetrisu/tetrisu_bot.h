@@ -161,7 +161,9 @@ typedef struct s_bot
 # define BOT_FARM_MAX			4
 # define BOT_PATH_MAX			4096
 # define BOT_BINARY_NAME		"tetrisu-bot"
-# define BOT_LOG_DEFAULT		"tmp/tetrisu-bot.log"
+# define BOT_LOG_NAME			"tetrisu-bot.log"
+# define BOT_LOG_DEFAULT		"tmp/" BOT_LOG_NAME
+# define BOT_LOG_TEMP_DIR		"/tmp"
 
 /*
 ** One spawned bot, from the parent's side.
@@ -187,6 +189,7 @@ typedef struct s_bot_farm
 
 /* BOT_PROC.C — spawning, holding and letting go of bots */
 void			bot_farm_init(t_bot_farm *farm);
+void			bot_farm_remember_self(const char *argv0);
 int				bot_farm_binary(char *out, size_t cap);
 int				bot_farm_add(t_bot_farm *farm, const char *room,
 					t_bot_level level);

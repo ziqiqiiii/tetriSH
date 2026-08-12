@@ -161,7 +161,7 @@ static void	apply_domain_to_config(t_net_config *cfg, const char *domain);
 /**
  * @brief Entry point for the screen-navigation and rendering loop.
  */
-int	main(void)
+int	main(int argc, char **argv)
 {
 	t_app_navigation	navigation;
 	t_app_data_provider	provider;
@@ -180,6 +180,12 @@ int	main(void)
 	bool				direct_match_preview;
 	bool				direct_screen;
 
+	(void)argc;
+	/*
+	 * Before anything opens a screen, because it is the last of the three
+	 * answers to "where is tetrisu-bot" and the only one main is holding.
+	 */
+	bot_farm_remember_self(argv[0]);
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
 	memset(&mp_session, 0, sizeof(mp_session));
@@ -2085,9 +2091,16 @@ static bool	toggle_ready(const t_app_data_provider *provider,
  */
 static void	add_bot(t_mp_session *session)
 {
+	char	binary[BOT_PATH_MAX];
+
 	if (session->bots.count >= BOT_FARM_MAX)
 	{
 		session->room_state.feedback = ROOM_FEEDBACK_BOT_LIMIT;
+		return ;
+	}
+	if (bot_farm_binary(binary, sizeof(binary)) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_MISSING;
 		return ;
 	}
 	if (bot_farm_add(&session->bots, session->room_id,

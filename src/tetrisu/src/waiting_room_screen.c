@@ -738,6 +738,8 @@ static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size)
 		snprintf(out, size, "NO MORE ROOM FOR BOTS");
 	else if (feedback == ROOM_FEEDBACK_BOT_NONE)
 		snprintf(out, size, "NO BOT TO KICK");
+	else if (feedback == ROOM_FEEDBACK_BOT_MISSING)
+		snprintf(out, size, "NO tetrisu-bot FOUND - REBUILD TETRISU");
 	else if (feedback == ROOM_FEEDBACK_BOT_UNAVAILABLE)
 		snprintf(out, size, "NO BOT COULD BE STARTED");
 }

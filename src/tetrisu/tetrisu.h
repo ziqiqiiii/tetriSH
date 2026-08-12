@@ -1505,6 +1505,13 @@ typedef enum e_room_feedback
 	ROOM_FEEDBACK_BOT_KICKED,
 	ROOM_FEEDBACK_BOT_LIMIT,
 	ROOM_FEEDBACK_BOT_NONE,
+	/*
+	 * Two ways for B to fail, kept apart because they are fixed differently.
+	 * _MISSING is a build or a layout - tetrisu-bot is not where tetrisu is -
+	 * and the player can do something about it. _UNAVAILABLE is the machine
+	 * refusing a fork or a pipe, and they cannot.
+	 */
+	ROOM_FEEDBACK_BOT_MISSING,
 	ROOM_FEEDBACK_BOT_UNAVAILABLE
 }	t_room_feedback;
 

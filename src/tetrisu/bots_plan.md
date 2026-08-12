@@ -273,10 +273,33 @@ the fallback when the log cannot be opened, never the first choice.
 
 The same seam answers the second half of spawning a child: **where the bot
 binary is.** No hard-coded paths anywhere is a project rule, so `bot_proc.c`
-resolves it from the directory of the running `tetrisu` (`/proc/self/exe`, or
-`argv[0]` as a fallback), overridable by `TETRISU_BOT_BIN` for a build tree
-whose layout differs from an installed one. A path that cannot be resolved is
-the same refusal as an empty pool: say so, add nobody.
+resolves it from the directory of the running `tetrisu`, overridable by
+`TETRISU_BOT_BIN` for a build tree whose layout differs from an installed one.
+A path that cannot be resolved is the same refusal as an empty pool: say so,
+add nobody.
+
+The plan said "`/proc/self/exe`, or `argv[0]` as a fallback" and the first
+version shipped only the first half of that sentence. **Darwin has no
+`/proc`**, so `readlink` failed, the function returned −1 before it looked
+anywhere else, and every `B` on a Mac answered *no bot could be started* —
+on the one platform this project explicitly supports as a client, being the
+platform that cannot run the *server*. Three answers now, in order:
+
+| # | Answer | Covers |
+|---|---|---|
+| 1 | `TETRISU_BOT_BIN` | a layout where the two are not siblings; every integration suite |
+| 2 | the running executable — `/proc/self/exe`, `_NSGetExecutablePath` on Darwin | `bin/tetrisu`, `make play`, `scripts/play.sh` |
+| 3 | `argv[0]` — as a path when it holds a slash, through `PATH` when it does not | a client started by bare name, which is how `tetrish` starts it |
+
+The lesson is not "remember macOS". It is that **every test set
+`TETRISU_BOT_BIN`**, because a test binary does not live where the client
+does — so the only resolution path under test was the one no player takes.
+`tests/test_bot_proc.c` exists to test the other two.
+
+The failure is also two messages now rather than one, because they are fixed
+differently: `NO tetrisu-bot FOUND — REBUILD TETRISU` is a build or a layout
+and the player can act on it, while `NO BOT COULD BE STARTED` is the machine
+refusing a `fork` or a `pipe` and they cannot.
 
 ---
 

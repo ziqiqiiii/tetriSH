@@ -27,13 +27,29 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+# ifdef __APPLE__
+#  include <mach-o/dyld.h>
+# endif
+
 // Static Functions
+static int	usable(const char *path);
+static int	beside(const char *anchor, char *out, size_t cap);
+static int	self_path(char *out, size_t cap);
+static int	from_path_env(char *out, size_t cap);
 static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
 				int deadman);
 static void	child_exec(const char *binary, const char *room,
 				t_bot_level level, int deadman);
 static void	child_stdio(void);
 static int	reap(pid_t pid, int deadman);
+
+/*
+** How this process was invoked, for the last of the three ways the bot binary
+** is looked for. Static because argv is main's and this is asked for from a
+** key handler four screens away from it, and because there is exactly one
+** running program to remember.
+*/
+static char	g_invoked_as[BOT_PATH_MAX];
 
 /**
  * @brief Start an empty farm.
@@ -48,12 +64,40 @@ void	bot_farm_init(t_bot_farm *farm)
 }
 
 /**
+ * @brief Remembers argv[0], which is the fallback the kernel cannot supply.
+ *
+ * Called from main before anything else. It is only ever read when the two
+ * better answers have failed, so a client that never calls this loses nothing
+ * on the platforms where self_path works.
+ *
+ * @param argv0 The path this process was invoked as, or NULL.
+ */
+void	bot_farm_remember_self(const char *argv0)
+{
+	if (argv0 == NULL)
+		return ;
+	snprintf(g_invoked_as, sizeof(g_invoked_as), "%s", argv0);
+}
+
+/**
  * @brief Where the bot binary is, without writing a path down anywhere.
  *
  * No hard-coded paths is a project rule, so it is resolved from the directory
  * of the running tetrisu - the two are built into the same bin/ and installed
  * together, so wherever one is the other is beside it. TETRISU_BOT_BIN
  * overrides that, for a layout where they are not.
+ *
+ * Three answers rather than one, because the first two can each be absent:
+ *
+ *   1. TETRISU_BOT_BIN, for a layout where the two are not siblings.
+ *   2. The running executable, asked of the kernel - which is /proc/self/exe
+ *      on Linux and _NSGetExecutablePath on macOS. Asking only the first is
+ *      what made every B press on a Mac answer "no bot could be started":
+ *      Darwin has no /proc at all, and macOS is a supported client here - it
+ *      is the platform that cannot run the *server*.
+ *   3. argv[0], resolved as the shell resolved it: as a path when it carries a
+ *      slash, and through PATH when it does not, which is how the client is
+ *      launched from tetrish (.tetrishrc puts ./bin on PATH).
  *
  * A path that cannot be resolved is refused rather than guessed at, and the
  * refusal reaches the player the same way an empty pool does: no bot is added
@@ -67,25 +111,124 @@ int	bot_farm_binary(char *out, size_t cap)
 {
 	const char	*override;
 	char		self[BOT_PATH_MAX];
-	ssize_t		len;
-	char		*slash;
 
+	if (out == NULL || cap == 0)
+		return (-1);
+	out[0] = '\0';
 	override = getenv("TETRISU_BOT_BIN");
 	if (override != NULL && override[0] != '\0')
 	{
 		snprintf(out, cap, "%s", override);
-		return (access(out, X_OK));
+		return (usable(out));
 	}
-	len = readlink("/proc/self/exe", self, sizeof(self) - 1);
-	if (len <= 0)
+	if (self_path(self, sizeof(self)) == 0 && beside(self, out, cap) == 0)
+		return (0);
+	if (strchr(g_invoked_as, '/') != NULL
+		&& beside(g_invoked_as, out, cap) == 0)
+		return (0);
+	return (from_path_env(out, cap));
+}
+
+/**
+ * @brief Whether this path names something this process may execute.
+ *
+ * @param path The candidate.
+ * @return 0 when it is runnable, -1 otherwise.
+ */
+static int	usable(const char *path)
+{
+	if (path == NULL || path[0] == '\0')
 		return (-1);
-	self[len] = '\0';
-	slash = strrchr(self, '/');
+	if (access(path, X_OK) != 0)
+		return (-1);
+	return (0);
+}
+
+/**
+ * @brief Looks for the bot in the directory holding some other executable.
+ *
+ * @param anchor A path to an executable, whose last component is dropped.
+ * @param out Buffer receiving the candidate path.
+ * @param cap Size of out.
+ * @return 0 when the candidate is runnable, -1 otherwise.
+ */
+static int	beside(const char *anchor, char *out, size_t cap)
+{
+	char	dir[BOT_PATH_MAX];
+	char	*slash;
+
+	snprintf(dir, sizeof(dir), "%s", anchor);
+	slash = strrchr(dir, '/');
 	if (slash == NULL)
 		return (-1);
 	*slash = '\0';
-	snprintf(out, cap, "%s/%s", self, BOT_BINARY_NAME);
-	return (access(out, X_OK));
+	snprintf(out, cap, "%s/%s", dir, BOT_BINARY_NAME);
+	return (usable(out));
+}
+
+/**
+ * @brief Asks the kernel which file this process is running.
+ *
+ * The one platform-specific call in tetrisu, and it is here rather than behind
+ * a header because it is one line on each side of the #ifdef.
+ *
+ * @param out Buffer receiving the path.
+ * @param cap Size of out.
+ * @return 0 on success, -1 when the kernel has no answer.
+ */
+static int	self_path(char *out, size_t cap)
+{
+# ifdef __APPLE__
+	uint32_t	size;
+
+	size = (uint32_t)cap;
+	if (_NSGetExecutablePath(out, &size) != 0)
+		return (-1);
+	return (0);
+# else
+	ssize_t	len;
+
+	len = readlink("/proc/self/exe", out, cap - 1);
+	if (len <= 0)
+		return (-1);
+	out[len] = '\0';
+	return (0);
+# endif
+}
+
+/**
+ * @brief Walks PATH for the bot binary, the way execvp would.
+ *
+ * The last resort, and the one that answers a client started by bare name.
+ *
+ * @param out Buffer receiving the path.
+ * @param cap Size of out.
+ * @return 0 when one was found, -1 otherwise.
+ */
+static int	from_path_env(char *out, size_t cap)
+{
+	const char	*entry;
+	const char	*end;
+
+	entry = getenv("PATH");
+	while (entry != NULL && *entry != '\0')
+	{
+		end = strchr(entry, ':');
+		if (end == NULL)
+			end = entry + strlen(entry);
+		if (end != entry)
+		{
+			snprintf(out, cap, "%.*s/%s", (int)(end - entry), entry,
+				BOT_BINARY_NAME);
+			if (usable(out) == 0)
+				return (0);
+		}
+		entry = end;
+		if (*entry == ':')
+			entry++;
+	}
+	out[0] = '\0';
+	return (-1);
 }
 
 /**
@@ -176,9 +319,15 @@ static void	child_exec(const char *binary, const char *room,
  * that a child exited, never why, and cannot report the reason for it.
  * /dev/null is the fallback when the log cannot be opened, never the first
  * choice.
+ *
+ * The default is relative, so a client launched from anywhere but the
+ * repository writes it into a directory that may not exist. That is where the
+ * temporary directory comes in: it is not a nicety, it is the difference
+ * between a failing bot that says why and one that vanishes silently.
  */
 static void	child_stdio(void)
 {
+	char		fallback[BOT_PATH_MAX];
 	const char	*path;
 	int			fd;
 
@@ -186,6 +335,14 @@ static void	child_stdio(void)
 	if (path == NULL || path[0] == '\0')
 		path = BOT_LOG_DEFAULT;
 	fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (fd < 0)
+	{
+		path = getenv("TMPDIR");
+		if (path == NULL || path[0] == '\0')
+			path = BOT_LOG_TEMP_DIR;
+		snprintf(fallback, sizeof(fallback), "%s/%s", path, BOT_LOG_NAME);
+		fd = open(fallback, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	}
 	if (fd < 0)
 		fd = open("/dev/null", O_WRONLY);
 	if (fd < 0)
