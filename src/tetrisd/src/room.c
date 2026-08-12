@@ -324,9 +324,20 @@ bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
 	 * moment it can be chosen: deal_games reads it, and after that the match
 	 * is running. A body that omits it leaves whatever was declared before,
 	 * which is what makes re-declaring readiness not also a way to lose it.
+	 *
+	 * It rides with a *declaration*, though, and not with a withdrawal. A
+	 * seat naming a character is what server_room_all_locked reads as locked
+	 * in, so recording one alongside `ready 0` let a player withdraw during
+	 * the select window and have the room deal the match on the strength of
+	 * it - the opposite of what they asked for. Withdrawing therefore takes
+	 * the fighter back with it, and the seat is unlocked again.
 	 */
 	slot = slot_of_player(server_room, cli->player_id);
-	if (slot >= 0 && character != 0)
+	if (slot < 0)
+		return (true);
+	if (!ready)
+		server_room->character[slot] = 0;
+	else if (character != 0)
 		server_room->character[slot] = character;
 	return (true);
 }
@@ -1471,7 +1482,14 @@ static void	project_opponent(t_server_room *server_room, int slot,
 	out->phase = game_phase(game);
 	out->score = game->score.total;
 	out->lines = game->lines;
-	out->pending = game->pending_garbage;
+	/*
+	 * Both queues, exactly as game_snapshot reports them to the player who
+	 * owes them. Counting only the ordinary kind left every row an ability
+	 * sent - Fry's three, Pentaris's - off the opponent's panel, so the one
+	 * garbage a player cannot see coming was also the one they were not told
+	 * about.
+	 */
+	out->pending = game->pending_garbage + game->pending_ability_garbage;
 	out->piece.type = (int)game->piece.type;
 	out->piece.rotation = game->piece.rotation;
 	out->piece.col = game->piece.col;

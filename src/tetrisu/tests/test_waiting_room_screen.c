@@ -132,6 +132,16 @@ static void	test_room_status_and_auto_start_policy(void)
 	room.state = APP_ROOM_STATE_FINISHED;
 	assert(!waiting_room_can_start(&room));
 	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_UNAVAILABLE);
+	/*
+	 * SELECTING is the server's alone. Recomputing it away answered "is this
+	 * room under way" with no, so the screen sat still while the room it was
+	 * showing was already committing to a match.
+	 */
+	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 2);
+	room.state = APP_ROOM_STATE_SELECTING;
+	assert(!waiting_room_sync_state(&room));
+	assert(room.state == APP_ROOM_STATE_SELECTING);
+	assert(waiting_room_is_under_way(&room));
 	printf("PASS test_room_status_and_auto_start_policy\n");
 }
 

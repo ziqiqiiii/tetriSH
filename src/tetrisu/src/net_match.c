@@ -213,6 +213,13 @@ static void	apply_result(t_mp_match_state *state, const t_body_state *snap)
  * card. Doing both costs one board copy and means neither renderer had to
  * change.
  *
+ * The cards are cleared first, because a snapshot says who is in the room now
+ * and writing only the seats it names cannot unsay the ones it does not. A
+ * player who disconnects mid-match is forfeited by the server and their game
+ * goes with them, so the very next frame carries one fewer opponent - and the
+ * card left standing showed them still sitting there alive until the verdict
+ * arrived behind it.
+ *
  * @param state Match model to write.
  * @param snap Snapshot carrying the opponents.
  */
@@ -220,6 +227,14 @@ static void	apply_opponents(t_mp_match_state *state, const t_body_state *snap)
 {
 	size_t	index;
 
+	memset(state->opponents, 0, sizeof(state->opponents));
+	if (snap->opponent_count == 0)
+	{
+		solo_game_init(&state->opponent_game, 0);
+		state->opponent_name[0] = '\0';
+		state->opponent_charge = 0;
+		state->opponent_character = 0;
+	}
 	index = 0;
 	while (index < snap->opponent_count
 		&& index < (size_t)(APP_ROOM_MAX_PLAYERS - 1))

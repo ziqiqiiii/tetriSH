@@ -17,6 +17,7 @@
 // Static Functions
 static void	test_readiness_is_the_rooms_and_survives_a_refresh(void);
 static void	test_both_declaring_ready_opens_the_select_window(void);
+static void	test_withdrawing_in_the_window_does_not_deal_the_match(void);
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
 static void	test_each_snapshot_carries_the_other_board(void);
@@ -51,6 +52,7 @@ int	main(void)
 {
 	test_readiness_is_the_rooms_and_survives_a_refresh();
 	test_both_declaring_ready_opens_the_select_window();
+	test_withdrawing_in_the_window_does_not_deal_the_match();
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
 	test_each_snapshot_carries_the_other_board();
@@ -153,6 +155,53 @@ static void	test_both_declaring_ready_opens_the_select_window(void)
 	hc_close(&blake);
 	fx_stop(&fx);
 	printf("PASS test_both_declaring_ready_opens_the_select_window\n");
+}
+
+/*
+** Withdrawing during the window is a withdrawal, not a lock. The character
+** rides on the same request as the readiness, and it used to be recorded
+** whichever way that readiness pointed - so `ready 0` with a fighter named
+** filled the last empty seat in the room's locked-in count and the match was
+** dealt on the strength of the request that asked for the opposite. A seat
+** that withdraws gives its fighter back with it.
+*/
+static void	test_withdrawing_in_the_window_does_not_deal_the_match(void)
+{
+	t_body_state	state;
+	t_body_room		snapshot;
+	t_fixture		fx;
+	t_harness		amber;
+	t_harness		blake;
+	t_item_id		pick;
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	char			body[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(simple(&amber, "READY", path, "ready 1") == 200);
+	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.status == BODY_ROOM_SELECTING);
+	pick = starter_character(&fx, amber.player_id);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)pick);
+	assert(simple(&amber, "READY", path, body) == 200);
+	/* the other seat withdraws, naming a fighter as it goes */
+	pick = starter_character(&fx, blake.player_id);
+	snprintf(body, sizeof(body), "ready 0\ncharacter %u\n", (unsigned)pick);
+	assert(simple(&blake, "READY", path, body) == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[1].character == 0);
+	assert(!snapshot.members[1].ready);
+	/* no board was dealt: the room is still holding its clock */
+	assert(hc_wait_state(&amber, &state, 300) != 0);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.status == BODY_ROOM_SELECTING);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_withdrawing_in_the_window_does_not_deal_the_match\n");
 }
 
 /*

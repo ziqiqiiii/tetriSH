@@ -130,6 +130,8 @@ bool	match_authority_pending(const t_match_authority *authority)
 bool	match_authority_action(t_match_authority *authority,
 		t_mp_match_state *state, t_solo_action action)
 {
+	if (authority->lost)
+		return (false);
 	if (!authority->online)
 		return (solo_game_apply_action(&state->local_game, action));
 	if (state->local_game.countdown_active)
@@ -155,6 +157,8 @@ bool	match_authority_ability(t_match_authority *authority,
 {
 	t_net_result	result;
 
+	if (authority->lost)
+		return (false);
 	if (!authority->online)
 		return (solo_game_activate_ability(&state->local_game, ability)
 			!= SOLO_ABILITY_RESULT_INVALID);
@@ -189,6 +193,8 @@ bool	match_authority_update(t_match_authority *authority,
 	bool	changed;
 	int		fresh;
 
+	if (authority->lost)
+		return (false);
 	if (!authority->online)
 	{
 		changed = solo_game_update(&state->local_game, elapsed_ms);
@@ -216,6 +222,13 @@ bool	match_authority_update(t_match_authority *authority,
  * quietly taken their place would be a worse answer than saying so. The
  * boards are left exactly as the last snapshot had them and the screen says
  * what happened.
+ *
+ * `lost` is what makes that true rather than merely intended. Clearing
+ * `online` alone put every entry point back on its offline branch - gravity
+ * resumed under the local rules, the keys started driving the board again,
+ * and the fixture rival this screen had blanked on the way in stood up and
+ * played on. So the flag is read by all three: a lost match does nothing at
+ * all until the player leaves it.
  *
  * @param authority Authority losing its session.
  * @param state Match model to leave standing.

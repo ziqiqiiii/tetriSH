@@ -233,6 +233,12 @@ bool	waiting_room_auto_start_allowed(const t_app_room_view_model *room)
  * Server-backed rooms will arrive already reconciled. The fixture provider is
  * mutable in-process, so ready toggles use this same transition rule locally.
  *
+ * Only the two statuses this rule can express are its to move. SELECTING is
+ * the third, and it was being recomputed away: a room the server had already
+ * committed came back as READY, which is what the launch check reads as "not
+ * under way" - so the screen stayed put and an S pressed in that window asked
+ * a selecting room to start and was refused.
+ *
  * @return true when WAITING/READY changed; false for stable or terminal rooms.
  */
 bool	waiting_room_sync_state(t_app_room_view_model *room)
@@ -241,6 +247,7 @@ bool	waiting_room_sync_state(t_app_room_view_model *room)
 	int					minimum;
 
 	if (!valid_room_snapshot(room) || room->state == APP_ROOM_STATE_IN_GAME
+		|| room->state == APP_ROOM_STATE_SELECTING
 		|| room->state == APP_ROOM_STATE_FINISHED)
 		return (false);
 	minimum = room->mode == APP_GAME_MODE_DOUBLE

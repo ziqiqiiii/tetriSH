@@ -222,7 +222,7 @@ int	multiplayer_match_mode_run(t_render_ctx *ctx, t_audio_ctx *audio,
 			 * may be about to do the same, and in Battle Royale the placing is
 			 * not known until they do.
 			 */
-			if (!match_authority_is_online(&authority)
+			if (!match_authority_is_online(&authority) && !authority.lost
 				&& state.local_game.phase == SOLO_GAME_OVER)
 			{
 				mp_match_finish(&state, false,
