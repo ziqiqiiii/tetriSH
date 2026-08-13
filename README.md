@@ -2,19 +2,65 @@
 
 > A terminal-based Battle Royale Tetris system written in C. Combining a custom Unix shell, concurrent daemon processes, authenticated encrypted networking, and a bespoke application-layer protocol (HTTTP).
 
-Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of Technology and Design.
+Part of the [ CoreStack Challenge 50.003 × 50.005 ](https://natalieagus.github.io/50005/pa/tetrish) , Singapore University of Technology and Design.
 
 ---
 
 ## Table of Contents
 
+- [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Modes](#modes)
+- [Controls](#controls)
 - [Run the Server Yourself](#run-the-server-yourself)
 - [Make Targets](#make-targets)
+- [Project Structure](#project-structure)
 - [Testing](#testing)
 - [Documentation](#documentation)
+
+---
+
+## Features
+
+### Solo
+- Guideline gravity, lock delay, 7-bag randomiser, hold, and a held line-clear phase
+- Server-authoritative — the same rules run locally with `--offline`
+- Scores rank on your best single game, not your lifetime total
+
+### Double
+- Two players, one room; garbage crosses between them on every clear
+- A character-select window opens before the boards are dealt
+- Rematch returns both players to the seats they never left
+
+### Battle Royale
+- 4–99 players in one room, with a live arena of every rival's board
+- Four targeting modes — Attackers, KOs, Randoms, Badges — and the mode decides how many rivals an attack reaches
+- Knockout credit, shared placings, and spectating after elimination
+
+### Abilities
+- Sixteen abilities across the character roster, charged by clearing lines
+- Offensive effects queue against a Target and land at that player's next piece lock
+- `docs/themes.md` is the source of truth for what each one does
+
+### Marketplace & Profile
+- Characters and themes priced by the server; the wallet is earned by playing
+- Buy and equip, with the updated profile returned in the same response
+- Halloween is granted to every account; Mirurun is free
+
+### Leaderboard
+- Global ranking on best single game, read live from the server
+
+### Room Chat
+- One feed with two authors — what players type, and the server's own narration of joins, departures, ownership, and knockouts
+- No history: a late joiner has missed what was said
+
+### Shell
+- A full REPL with builtins, pipelines, redirection, and `.tetrishrc` start-up
+- System programs build into `src/tetrish/bin/` and are symlinked into `./bin`
+- `tetrisctl` starts and stops the daemons from inside it
+
+Full use-case detail is in [`docs/use_cases.md`](docs/use_cases.md); ability text lives in [`docs/themes.md`](docs/themes.md).
 
 ---
 
@@ -25,9 +71,6 @@ Part of the **CoreStack Challenge** (50.003 × 50.005), Singapore University of 
 | Linux | native or container | yes |
 | WSL | native or container | yes |
 | macOS | container only — `make play-image` | no — Darwin ships no `epoll`, `timerfd` or POSIX `mqueue` |
-
-Everything the native path needs is installed for you by the build; a
-containerised client needs only a container engine.
 
 | Dependency | Needed for | Missing means |
 |---|---|---|
@@ -44,15 +87,13 @@ make check-deps          # check only; never modifies the system
 make deps-info           # show detected OS/WSL and dependency policy
 ```
 
-Install covers Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew +
-Xcode CLT); `AUTO_INSTALL_DEPS=0` keeps it check-only, as in CI.
+Install covers Linux (apt, dnf/yum, pacman, zypper, apk) and macOS (Homebrew + Xcode CLT); `AUTO_INSTALL_DEPS=0` keeps it check-only, as in CI.
 
 ---
 
 ## Quick Start
 
-Clone, then one command from a fresh clone to a running client on the shared
-tetriSH server:
+Clone, then one command from a fresh clone to a running client on the shared tetriSH server:
 
 ```bash
 git clone https://github.com/ziqiqiiii/MacMini_tetriSH.git
@@ -62,13 +103,6 @@ make play-image    # client built in a container instead
 ```
 
 Either installs what is missing, compiles it, opens a kitty window and starts the game in it. Every step checks before it acts, so re-running is how you restart.
-
-| | `make play` | `make play-image` |
-|---|---|---|
-| Toolchain, notcurses, SDL2 | installed on this host | carried by the image |
-| Host needs a compiler | yes | no |
-| Container engine needed | no | yes |
-| Works on macOS | no | yes |
 
 ---
 
@@ -87,27 +121,65 @@ Stop a local server with `bash scripts/play.sh --stop`; `bash scripts/play.sh --
 
 ---
 
+## Controls
+
+Menu screens label their own keys. These are the ones they do not.
+
+### Match
+
+| Key | Action |
+|---|---|
+| `←` / `→` | Move the piece |
+| `↓` | Soft drop |
+| `↑` / `X` | Rotate clockwise |
+| `Z` | Rotate counter-clockwise |
+| `Space` | Hard drop |
+| `C` | Hold |
+| `1`–`4` | Use the charged ability in that slot |
+| `W` `A` `S` `D` | Declare a targeting mode — KOs, Randoms, Attackers, Badges (Battle Royale only) |
+| `←` / `→`, `Enter` | Pick and lock a fighter, during the character-select window |
+| `P` | Pause — Solo only |
+| `R` | Restart, on the Solo game-over screen |
+| `Esc` / `Q` | Leave the match |
+
+There is deliberately no pause in a match: a key that froze your board while rivals kept playing would be worse than no key at all, so `P` does nothing there.
+
+### Waiting Room
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move the roster pointer |
+| `PgUp` / `PgDn` | Page the roster |
+| `←` / `→` | Cycle your character |
+| `C` / `Enter` | Compose a chat line |
+| `R` | Toggle ready |
+| `S` | Start the match (owner only) |
+| `B` | Add a bot (owner only, up to 4 and never past the free seats) |
+| `K` | Kick the bot under the pointer (your own bots only) |
+| `F1` | Fill every free seat with bots — stress tool, up to 50 |
+| `+` / `-` | Volume |
+| `Esc` / `L` | Leave the room |
+| `Q` | Quit |
+
+---
+
 ## Run the Server Yourself
 
-[Quick Start](#quick-start) is the short route to a client. Run the stack by
-hand when working on the server (Linux or WSL only).
+[Quick Start](#quick-start) is the short route to a client. Run the stack by hand when working on the server (Linux or WSL only).
 
 **1. Build and launch the shell:**
 ```bash
 make run
 ```
 
-This symlinks every built binary into `./bin`, which the shell prepends to
-`$PATH`, then sources `.tetrishrc`.
+This symlinks every built binary into `./bin`, which the shell prepends to `$PATH`, then sources `.tetrishrc`.
 
 **2. Launch the daemons from inside the shell:**
 ```
 tetrish$ tetrisctl start
 ```
 
-`.tetrishrc` already ends with that line, so the daemons come up before the
-first prompt. `tetrisctl start` returns only once they are up — and non-zero,
-with the reason on the terminal, if one is not.
+`.tetrishrc` already ends with that line, so the daemons come up before the first prompt. `tetrisctl start` returns only once they are up — and non-zero, with the reason on the terminal, if one is not.
 
 **3. Connect a client (in a separate terminal):**
 ```bash
@@ -116,11 +188,14 @@ with the reason on the terminal, if one is not.
 
 On the sign-in screen, **SERVER ID** is `localhost` or `127.0.0.1` (the default), then **CHECK SERVER** before **LOGIN** or **SIGN UP**.
 
-**4. Inspect and stop:**
+**4. Inspect, rotate logs, and stop:**
 ```
 tetrish$ tetrisctl status
+tetrish$ tetrisctl rotate          # reopen the logs, once something has moved them
 tetrish$ tetrisctl stop            # reverse of launch order, blocks until down
 ```
+
+`rotate` is the operator's half of a log rotation: the file is moved by [`scripts/logrotate.sh`](scripts/logrotate.sh)'s rule or by hand, and the daemon holding it only lets go of that inode on `SIGHUP`.
 
 ---
 
@@ -137,6 +212,7 @@ Components are matched by their `Makefile`, so the ones that have not landed yet
 | `make certs` | Generate the development CA and server certificate `tetrisd` boots with |
 | `make stack` | Build, then launch the available daemons headless for integration tests |
 | `make test` | Build, then run every available component test suite |
+| `make stress` | Put a fleet of players on one `tetrisd` and report the cost |
 | `make clean` / `make fclean` | Remove objects; `fclean` also removes binaries and `./bin` |
 | `make reset` | Stop the daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) — the player store survives |
 | `make del-db` | Stop the daemons, then delete the player store (`TETRISD_DATA_DIR/players.log`) |
@@ -144,21 +220,46 @@ Components are matched by their `Makefile`, so the ones that have not landed yet
 
 ---
 
+## Project Structure
+
+```
+MacMini_tetriSH/
+├── src/
+│   ├── tetrish/       Interactive shell → macmini_shell, plus bin/ programs
+│   ├── tetrisd/       Concurrent game server → tetrisd
+│   ├── tetrislogd/    Separate logger process → tetrislogd
+│   ├── tetrisctl/     Admin CLI owning both daemons' lifecycle → tetrisctl
+│   └── tetrisu/       Terminal client → tetrisu
+├── lib/               Statically linked libraries (libXXX/libXXX.a)
+├── docs/              Architecture, glossary, specs, diagrams, post-mortems
+├── scripts/           Dependency install, container, and play entry points
+├── certs/             Development CA and server certificate (make certs)
+├── .tetrishrc         Shell start-up file; the only place config keys live
+└── Makefile           Umbrella build over every component
+```
+
+Each `lib/libXXX/` is self-contained — its own `Makefile`, `include/`, `src/`, and `tests/`, building an archive in place. Layers, protocol, and the full component map are in [`docs/architecture.md`](docs/architecture.md).
+
+---
+
 ## Testing
 
-`make test` from the root builds everything, then runs every available suite.
-Each component also runs on its own, the shell splits unit from integration, and
-every suite takes a `FILTER` substring:
+`make test` from the root builds everything, then runs every available suite. Each component also runs on its own, and every suite takes a `FILTER` substring:
 
 ```bash
 make -C lib/libtetrisbrain test FILTER=abilities
+make -C src/tetrisd test FILTER=ability_matrix
 make -C src/tetrish unit FILTER=lexer
 make -C src/tetrish integration
 ```
 
-Everything compiles clean under `-Wall -Wextra -Werror`, and test binaries pass
-`valgrind --leak-check=full --error-exitcode=1`. Run memory-safety checks on
-Linux or WSL; valgrind is unreliable on current macOS.
+The client's end-to-end suites drive a real `tetrisu` against a real `tetrisd` and live in `src/tetrisu/tests/integration/` — session and login, Solo, Double, the Battle Royale arena, the store, chat, and bots:
+
+```bash
+bash src/tetrisu/tests/integration/test_net_arena.sh
+```
+
+Everything compiles clean under `-Wall -Wextra -Werror`, and test binaries pass `valgrind --leak-check=full --error-exitcode=1`. Run memory-safety checks on Linux or WSL; valgrind is unreliable on current macOS.
 
 ---
 
@@ -175,11 +276,10 @@ Linux or WSL; valgrind is unreliable on current macOS.
 | [`docs/naming.md`](docs/naming.md) | Naming conventions; §2 is the live prefix namespace |
 | [`docs/test_plan.md`](docs/test_plan.md) | Cross-component test plan |
 | [`docs/diagrams/`](docs/diagrams/) | Class, sequence, domain, component, and use-case diagrams |
-| [`docs/adr/`](docs/adr/) | Architecture decision records |
 | [`docs/bugs/`](docs/bugs/) | Post-mortems: what broke, the fix, the lesson |
 | [`docs/superpowers/`](docs/superpowers/) | Completed specs and plans, kept as a record |
 | [`.claude/skills/`](.claude/skills/) | Style guides for code, Makefiles, and READMEs |
 
 ---
 
-*50.003 × 50.005 CoreStack Challenge — SUTD, Summer 2026*
+[*50.003 × 50.005 CoreStack Challenge — SUTD, Summer 2026*](https://natalieagus.github.io/50005/pa/tetrish)
