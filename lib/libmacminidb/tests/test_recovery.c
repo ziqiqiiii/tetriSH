@@ -10,6 +10,7 @@
 // Static Functions
 static t_player	sample_player(const char *name, t_player_id id, int64_t score);
 static t_dblog	*fresh_log(void);
+static size_t	recover_and_release(t_dblog *log, const char *expect);
 
 // Latest record for a username supersedes the earlier one (LWW), and next_id is
 // the highest player_id seen plus one.
@@ -125,12 +126,41 @@ void	test_a_name_the_wire_cannot_carry_is_not_recovered(void)
 	printf("PASS test_a_name_the_wire_cannot_carry_is_not_recovered\n");
 }
 
+// Recovery cuts a torn tail off instead of leaving it in the file. The log is
+// O_APPEND, so the next write cannot overwrite the tail — it lands after it, and
+// the boot after that meets the garbage mid-file, where a short read is
+// corruption rather than EOF. That failed db_open for good, and the only way
+// back was deleting everybody's accounts.
+void	test_a_torn_tail_is_cut_off_rather_than_buried(void)
+{
+	t_dblog		*log;
+	t_player	p;
+
+	log = fresh_log();
+	p = sample_player("alice", 1, 100);
+	assert(log_append(log, &p) == DB_OK);
+	// A partial header behind a whole record: the torn last write of a crash.
+	assert(write(log->fd, "\0\0\0\0\0", 5) == 5);
+	assert(recover_and_release(log, "alice") == 1);
+	p = sample_player("bob", 2, 200);
+	assert(log_append(log, &p) == DB_OK);
+	log_close(log);
+	// The second boot: the append above has to be readable, which it only is if
+	// it landed on the frame boundary rather than behind the five junk bytes.
+	log = log_open(TEST_DIR);
+	assert(log != NULL);
+	assert(recover_and_release(log, "bob") == 2);
+	log_close(log);
+	printf("PASS test_a_torn_tail_is_cut_off_rather_than_buried\n");
+}
+
 int	main(void)
 {
 	test_lww_latest_wins();
 	test_seeds_skiplist_and_next_id();
 	test_empty_log_starts_fresh();
 	test_a_name_the_wire_cannot_carry_is_not_recovered();
+	test_a_torn_tail_is_cut_off_rather_than_buried();
 	return (0);
 }
 
@@ -156,4 +186,31 @@ static t_dblog	*fresh_log(void)
 	log = log_open(TEST_DIR);
 	assert(log != NULL);
 	return (log);
+}
+
+/**
+ * @brief Recover into throwaway indexes, check one name, free them, report size.
+ *
+ * Lets a case boot the same log twice without carrying two sets of indexes in
+ * its own frame. The log handle is left open for the caller.
+ *
+ * @param log The open log handle to recover from.
+ * @param expect A username that must survive the recovery, or NULL for none.
+ * @return The number of players recovered into the map.
+ */
+static size_t	recover_and_release(t_dblog *log, const char *expect)
+{
+	t_hashmap	*hm;
+	t_skiplist	*sl;
+	t_player_id	next_id;
+	size_t		size;
+
+	hm = hashmap_create(DB_HASH_BUCKETS);
+	sl = skiplist_create();
+	assert(recovery_run(log, hm, sl, &next_id) == DB_OK);
+	size = hm->size;
+	assert(!expect || hashmap_get(hm, expect) != NULL);
+	skiplist_destroy(sl);
+	hashmap_destroy(hm);
+	return (size);
 }

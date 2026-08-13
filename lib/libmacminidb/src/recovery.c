@@ -27,29 +27,40 @@ static void	seed_skiplist(t_player *p, void *ctx);
  * Replays the log front->back into the hash map (latest record per username
  * wins), then iterates the map once to seed the skip list with the surviving
  * players. next_id is the highest player_id seen plus one, so the allocator
- * never reuses a recovered id. A torn tail is handled by log_replay itself.
+ * never reuses a recovered id.
+ *
+ * A torn tail stops the replay cleanly, and this is where it is cut off — the
+ * log is O_APPEND, so a tail left in place is buried under the next append
+ * rather than overwritten by it, and the boot after that meets it mid-file,
+ * where it is corruption rather than EOF and fails db_open for good. Recovery
+ * is the one moment the file is known to have no writer.
  *
  * @param log The open log handle to replay.
  * @param hm The (empty) hash map to populate; takes ownership of the copies.
  * @param sl The (empty) skip list to seed from the recovered map.
  * @param out_next_id Receives the next id to allocate (max seen + 1, or 1).
- * @return DB_OK on a clean replay, DB_IO_ERROR on a read/alloc failure.
+ * @return DB_OK on a clean replay, DB_IO_ERROR on a read/alloc/truncate failure.
  */
 t_db_result	recovery_run(t_dblog *log, t_hashmap *hm, t_skiplist *sl, t_player_id *out_next_id)
 {
 	t_replay_ctx	rc;
 	t_db_result		r;
+	off_t			clean_end;
 
 	if (!log || !hm || !sl || !out_next_id)
 		return (DB_INVALID);
 	rc.hm = hm;
 	rc.max_id = 0;
 	rc.failed = 0;
-	r = log_replay(log, replay_cb, &rc);
+	clean_end = 0;
+	r = log_replay(log, replay_cb, &rc, &clean_end);
 	if (r != DB_OK)
 		return (r);
 	if (rc.failed)
 		return (DB_IO_ERROR);
+	r = log_truncate_tail(log, clean_end);
+	if (r != DB_OK)
+		return (r);
 	hashmap_foreach(hm, seed_skiplist, sl);
 	*out_next_id = rc.max_id + 1;
 	return (DB_OK);

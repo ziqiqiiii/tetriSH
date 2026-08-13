@@ -7,6 +7,12 @@
 /*   a full owned list, then deduct the cost, append the id to the owned list,  */
 /*   and persist. Run under the write lock with a page-cache log append.        */
 /*                                                                            */
+/*   The charge and the grant land in one record: both are applied to a copy   */
+/*   of the player, that copy is what is persisted, and only a persisted copy  */
+/*   is committed back over the live row. Deducting after the log append wrote */
+/*   a record that owned the item and had not paid for it — replayed after a   */
+/*   crash, that is a free purchase.                                           */
+/*                                                                            */
 /* ************************************************************************** */
 
 #include "internal.h"
@@ -19,8 +25,9 @@ static t_db_result	grant(t_db *db, t_player *p, t_item_id *ids, size_t *count, t
  *
  * Fails if the player or character id is unknown (DB_NOT_FOUND), the character
  * is already owned (DB_EXISTS), or the wallet cannot cover the cost
- * (DB_INSUFFICIENT). On success the cost is deducted, the id is added to the
- * owned list, and the player is persisted.
+ * (DB_INSUFFICIENT). The charge and the grant are applied to a copy, which is
+ * persisted before it is committed, so a record never says "owned" without
+ * also saying "paid".
  *
  * @param db The handle.
  * @param id The buying player's id.
@@ -30,6 +37,7 @@ static t_db_result	grant(t_db *db, t_player *p, t_item_id *ids, size_t *count, t
 t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
 {
 	t_player			*p;
+	t_player			tmp;
 	const t_character	*c;
 	t_db_result			r;
 
@@ -48,9 +56,11 @@ t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
 		r = DB_FULL;
 	else
 	{
-		r = grant(db, p, p->owned_characters, &p->owned_characters_count, cid);
+		tmp = *p;
+		tmp.wallet_points -= c->cost_points;
+		r = grant(db, &tmp, tmp.owned_characters, &tmp.owned_characters_count, cid);
 		if (r == DB_OK)
-			p->wallet_points -= c->cost_points;
+			*p = tmp;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
@@ -61,8 +71,9 @@ t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
  *
  * Fails if the player or theme id is unknown (DB_NOT_FOUND), the theme is
  * already owned (DB_EXISTS), or the wallet cannot cover the cost
- * (DB_INSUFFICIENT). On success the cost is deducted, the id is added to the
- * owned list, and the player is persisted.
+ * (DB_INSUFFICIENT). The charge and the grant are applied to a copy, which is
+ * persisted before it is committed, so a record never says "owned" without
+ * also saying "paid".
  *
  * @param db The handle.
  * @param id The buying player's id.
@@ -72,6 +83,7 @@ t_db_result	db_buy_character(t_db *db, t_player_id id, t_item_id cid)
 t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
 {
 	t_player		*p;
+	t_player		tmp;
 	const t_theme	*t;
 	t_db_result		r;
 
@@ -90,9 +102,11 @@ t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
 		r = DB_FULL;
 	else
 	{
-		r = grant(db, p, p->owned_themes, &p->owned_themes_count, tid);
+		tmp = *p;
+		tmp.wallet_points -= t->cost_points;
+		r = grant(db, &tmp, tmp.owned_themes, &tmp.owned_themes_count, tid);
 		if (r == DB_OK)
-			p->wallet_points -= t->cost_points;
+			*p = tmp;
 	}
 	pthread_rwlock_unlock(&db->lock);
 	return (r);
@@ -103,7 +117,8 @@ t_db_result	db_buy_theme(t_db *db, t_player_id id, t_item_id tid)
  *
  * Adds the id (guarded by owned_add's capacity check) and logs the updated
  * player so the purchase is durable. The caller holds the write lock and has
- * already deducted any cost.
+ * already deducted the cost — from p, which is the caller's uncommitted copy,
+ * never the live row, so a failure here leaves nothing behind.
  *
  * @param db The handle (for the log append).
  * @param p The player being modified and persisted.

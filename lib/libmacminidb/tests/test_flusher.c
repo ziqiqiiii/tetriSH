@@ -119,6 +119,6 @@ static size_t	replay_count(t_dblog *log)
 	size_t	n;
 
 	n = 0;
-	assert(log_replay(log, count_cb, &n) == DB_OK);
+	assert(log_replay(log, count_cb, &n, NULL) == DB_OK);
 	return (n);
 }

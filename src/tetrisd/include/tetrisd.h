@@ -415,11 +415,11 @@ typedef struct s_game
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
-	int				pending_garbage;
-	int				pending_ability_garbage;
-	int				fry_owed;
-	int				dark_pieces;
-	int				pals_pieces;
+	int					pending_garbage;
+	int					pending_ability_garbage;
+	int					fry_owed;
+	int					dark_pieces;
+	int					pals_pieces;
 	/*
 	** Where the holes in this game's garbage go: an LCG state seeded from the
 	** game's own seed, and the column the last row left open.

@@ -188,11 +188,14 @@ tetrish$ tetrisctl start
 
 On the sign-in screen, **SERVER ID** is `localhost` or `127.0.0.1` (the default), then **CHECK SERVER** before **LOGIN** or **SIGN UP**.
 
-**4. Inspect, and stop:**
+**4. Inspect, rotate logs, and stop:**
 ```
 tetrish$ tetrisctl status
+tetrish$ tetrisctl rotate          # reopen the logs, once something has moved them
 tetrish$ tetrisctl stop            # reverse of launch order, blocks until down
 ```
+
+`rotate` is the operator's half of a log rotation: the file is moved by [`scripts/logrotate.sh`](scripts/logrotate.sh)'s rule or by hand, and the daemon holding it only lets go of that inode on `SIGHUP`.
 
 ---
 

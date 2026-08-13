@@ -15,6 +15,7 @@
 #include <assert.h>
 
 // Static Functions
+static const char	*play_path(const t_harness *hc);
 static void	test_accept_and_handshake_are_logged(void);
 static void	test_signup_is_one_access_line(void);
 static void	test_access_line_names_the_logged_in_player(void);
@@ -92,19 +93,12 @@ static void	test_access_line_names_the_logged_in_player(void)
 	printf("PASS test_access_line_names_the_logged_in_player\n");
 }
 
-static void	play_path(t_harness *hc, char *out, size_t cap)
-{
-	snprintf(out, cap, "/room/S-01/player/%llu",
-		(unsigned long long)hc->player_id);
-}
-
 static void	test_gameplay_verbs_reach_a_daemon_at_info(void)
 {
 	t_htttp_message	resp;
 	t_log_record	rec;
 	t_fixture		fx;
 	t_harness		hc;
-	char			path[64];
 
 	/*
 	** The fixture runs at info, which is the level a daemon is configured with.
@@ -115,12 +109,11 @@ static void	test_gameplay_verbs_reach_a_daemon_at_info(void)
 	assert(hc_connect(&hc, &fx) == 0);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	play_path(&hc, path, sizeof(path));
 	/*
 	** The move is refused - this player is in no room - and that is the point:
 	** the line is written for the verb, not for whether the verb succeeded.
 	*/
-	assert(hc_request(&hc, "MOVE", path, "LEFT\n", &resp) == 0);
+	assert(hc_request(&hc, "MOVE", play_path(&hc), "LEFT\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber MOVE LEFT", &rec, HC_TIMEOUT_MS) == 0);
 	assert(rec.level == COREIPC_LOG_INFO);
@@ -135,21 +128,19 @@ static void	test_move_names_the_direction(void)
 	t_log_record	rec;
 	t_fixture		fx;
 	t_harness		hc;
-	char			path[64];
 
 	assert(fx_start_logged(&fx, COREIPC_LOG_DEBUG) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	play_path(&hc, path, sizeof(path));
 	/*
 	** Two MOVEs that differ only in their body used to log the same line, so
 	** the record said a piece had been driven without saying which way.
 	*/
-	assert(hc_request(&hc, "MOVE", path, "LEFT\n", &resp) == 0);
+	assert(hc_request(&hc, "MOVE", play_path(&hc), "LEFT\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber MOVE LEFT 409", &rec, HC_TIMEOUT_MS) == 0);
-	assert(hc_request(&hc, "MOVE", path, "RIGHT\n", &resp) == 0);
+	assert(hc_request(&hc, "MOVE", play_path(&hc), "RIGHT\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber MOVE RIGHT 409", &rec, HC_TIMEOUT_MS) == 0);
 	hc_close(&hc);
@@ -162,21 +153,19 @@ static void	test_rotate_and_drop_name_their_word(void)
 	t_htttp_message	resp;
 	t_fixture		fx;
 	t_harness		hc;
-	char			path[64];
 
 	assert(fx_start_logged(&fx, COREIPC_LOG_DEBUG) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	play_path(&hc, path, sizeof(path));
 	/*
 	** The word is read off the body rather than from the handler, so every
 	** verb that carries one reports it without a table of its own.
 	*/
-	assert(hc_request(&hc, "ROTATE", path, "CCW\n", &resp) == 0);
+	assert(hc_request(&hc, "ROTATE", play_path(&hc), "CCW\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber ROTATE CCW 409", NULL, HC_TIMEOUT_MS) == 0);
-	assert(hc_request(&hc, "DROP", path, "HARD\n", &resp) == 0);
+	assert(hc_request(&hc, "DROP", play_path(&hc), "HARD\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber DROP HARD 409", NULL, HC_TIMEOUT_MS) == 0);
 	hc_close(&hc);
@@ -190,18 +179,16 @@ static void	test_hold_names_no_word(void)
 	t_log_record	rec;
 	t_fixture		fx;
 	t_harness		hc;
-	char			path[64];
 
 	assert(fx_start_logged(&fx, COREIPC_LOG_DEBUG) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	play_path(&hc, path, sizeof(path));
 	/*
 	** HOLD carries no body, so there is nothing to name and the line stays the
 	** plain one - no stray separator where a word would have gone.
 	*/
-	assert(hc_request(&hc, "HOLD", path, NULL, &resp) == 0);
+	assert(hc_request(&hc, "HOLD", play_path(&hc), NULL, &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber HOLD", &rec, HC_TIMEOUT_MS) == 0);
 	assert(strcmp(rec.msg, "conn 1 amber HOLD 409") == 0);
@@ -216,20 +203,18 @@ static void	test_a_forged_word_never_reaches_the_log(void)
 	t_log_record	rec;
 	t_fixture		fx;
 	t_harness		hc;
-	char			path[64];
 
 	assert(fx_start_logged(&fx, COREIPC_LOG_DEBUG) == 0);
 	assert(hc_connect(&hc, &fx) == 0);
 	assert(hc_signup(&hc, "amber", "hunter2") == 201);
 	assert(hc_login(&hc, "amber", "hunter2") == 200);
-	play_path(&hc, path, sizeof(path));
 	/*
 	** The body is the client's, so a word going into a log line is an
 	** injection site: this one carries a newline and a second record's worth
 	** of text behind it. A word that is not plain letters is dropped whole,
 	** which is why the line below is the bare one and not a truncation.
 	*/
-	assert(hc_request(&hc, "MOVE", path, "L\nconn 1 amber LOGIN 200\n", &resp) == 0);
+	assert(hc_request(&hc, "MOVE", play_path(&hc), "L\nconn 1 amber LOGIN 200\n", &resp) == 0);
 	htttp_message_free(&resp);
 	assert(fx_log_wait(&fx, "conn 1 amber MOVE", &rec, HC_TIMEOUT_MS) == 0);
 	assert(strcmp(rec.msg, "conn 1 amber MOVE 409") == 0);
@@ -271,4 +256,23 @@ static void	test_disconnect_carries_the_connection_id(void)
 	assert(fx_log_wait(&fx, "conn 1 amber disconnected", NULL, HC_TIMEOUT_MS) == 0);
 	fx_stop(&fx);
 	printf("PASS test_disconnect_carries_the_connection_id\n");
+}
+
+/*
+** The route a seated player's own input goes to.
+**
+** It used to be the literal "/room/S-01/player/1", which was true only while
+** the first account signed up was the first Player the store ever made. The
+** server mints TETRISD_BOT_ACCOUNTS reserved accounts at boot for the bots a
+** player fills a room with, so amber is not id 1 any more and the literal
+** addressed somebody else - answering 403 rather than the 409 these tests are
+** about, on a line that still read "MOVE LEFT" and so looked right.
+*/
+static const char	*play_path(const t_harness *hc)
+{
+	static char	path[64];
+
+	snprintf(path, sizeof(path), "/room/S-01/player/%llu",
+		(unsigned long long)hc->player_id);
+	return (path);
 }

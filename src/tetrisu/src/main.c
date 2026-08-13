@@ -2551,6 +2551,17 @@ static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
 	session->has_catalogue = false;
 	memset(mp_session->room_id, 0, sizeof(mp_session->room_id));
 	mp_session->create_pending = false;
+	/*
+	 * The screen being abandoned is torn down here, because the one place that
+	 * ordinarily does it cannot. leave_multiplayer runs immediately after a
+	 * multiplayer screen returns and refuses while the navigation still names
+	 * one - which it does, since nothing has moved it yet; this function is
+	 * what moves it, and it runs on the *next* pass of the loop. So a drop in a
+	 * room left its planes alive, and LOGIN and HOME drew underneath them: the
+	 * player signed in again and was still looking at the room they had lost.
+	 */
+	if (is_multiplayer_screen(navigation->current))
+		render_multiplayer_destroy(ctx);
 	sign_in_again = confirmation_prompt_run(ctx, audio,
 			CONFIRM_CONNECTION_LOST);
 	navigation->previous = navigation->current;
