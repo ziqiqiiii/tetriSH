@@ -189,7 +189,8 @@ waiting room with chat and a pre-match countdown — while the authoritative
   ceiling.
 - Entering a waiting room plays the short dialog acknowledgement once. It uses
   the menu-select mix level (48 rather than the normal gameplay 72), so the cue
-  stays softer than match effects and remains governed by the shared volume.
+  stays softer than match effects. Like every effect it does not follow the
+  volume keys — those are the music's.
 - Lobby and waiting-room volume keys use the same floating music-volume card
   as Home and Solo; they do not replace room-list, readiness, countdown, or
   chat feedback.
@@ -230,9 +231,10 @@ waiting room with chat and a pre-match countdown — while the authoritative
   by their catalogue asset path.
 - Offline Settings keeps only current-run local controls/status and never
   invents account identity, inventory, wallet, score, or rank
-- `+` / `-` drive one volume. Menu and gameplay effects are scaled by it
-  alongside the music, so the per-effect constants stay purely as the mix
-  balance; at full volume the balance is exactly what it was before
+- `+` / `-` drive the **music** volume and nothing else. Menu and gameplay
+  effects sit at their own mix constants and are set once per load: muting the
+  soundtrack used to mute the hard drop, the Tetris and the incoming-attack cue
+  along with it, so playing without music meant playing without feedback
 
 HOLD is implemented under temporary local Solo authority. The
 [migration guide](../../docs/tetrisu-local-to-tetrisd.md) describes how it
