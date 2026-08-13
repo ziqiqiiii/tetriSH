@@ -500,17 +500,48 @@ ensure_terminal() {
 #                                    LAUNCH                                    #
 ################################################################################
 
+# The command a windowed terminal actually runs: the client, wrapped so the
+# window closes when the game ends and stays open when it did not.
+#
+# kitty's own --hold is all-or-nothing, and both halves of it matter here for
+# opposite reasons. Without holding, a client that dies during start-up closes
+# its window along with whatever it printed about why, which is
+# indistinguishable from the window never opening. With it, quitting the game
+# leaves the player sitting in a dead kitty window they have to close by hand -
+# and that window is a terminal they did not ask for, not the shell they typed
+# `make play` in.
+#
+# So the exit status decides. tetrisu returns 0 from a clean quit and 1 with a
+# line on stderr when it gives up (see g_exit_reason in src/tetrisu/src/main.c);
+# a crash arrives as 128+signal. 130 and 143 are Ctrl-C and SIGTERM, which is
+# what closing the window looks like from in here, so they count as quitting
+# too.
+#
+# Emitted as a script for `bash -c`, with the command passed as its positional
+# arguments rather than pasted into the text - the client's path can contain
+# anything a path can contain, and it must not be re-parsed as shell.
+hold_on_failure_script() {
+    cat <<'EOF'
+"$@"
+status=$?
+case "$status" in
+    0|130|143) exit "$status" ;;
+esac
+printf '\n\033[1;31m%s\033[0m\n' "the client exited with status $status." >&2
+printf '\033[1;33m%s\033[0m\n' "This window is held open so the reason above can be read." >&2
+printf '%s' "Press Enter to close it. " >&2
+read -r _ || true
+exit "$status"
+EOF
+}
+
 # Runs the command in the chosen terminal, replacing this process so the
 # caller's exit status is the terminal's.
-#
-# --hold on kitty keeps the window open after the command exits. Without it a
-# client that dies during start-up closes its own window along with whatever it
-# printed about why, which is indistinguishable from the window never opening.
 launch_in_terminal() {
     local choice="$1" path="$2"; shift 2
     case "$choice" in
         kitty)
-            exec "$path" --hold -e "$@"
+            exec "$path" -e bash -c "$(hold_on_failure_script)" tetrisu "$@"
             ;;
         wezterm)
             # Launched from Windows, so it has to re-enter this distro to reach
