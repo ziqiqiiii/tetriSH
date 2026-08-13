@@ -6,7 +6,11 @@
 /*   [payload] frame in write order and hands the decoded player to cb. Order */
 /*   is preserved so a later record for a key supersedes an earlier one (LWW) */
 /*   — the dedup itself is the caller's job (recovery.c). A truncated tail    */
-/*   (torn last write) stops the scan cleanly rather than failing the boot.   */
+/*   (torn last write) stops the scan cleanly rather than failing the boot,   */
+/*   and the offset it stopped at is reported so the caller can cut it off:   */
+/*   the fd is O_APPEND, so a tail left in place is one that the next append  */
+/*   writes a valid frame *after*, and the boot after that meets the garbage  */
+/*   mid-file, where a short read no longer looks like EOF.                   */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -22,27 +26,40 @@ static t_db_result	replay_frame(int fd, void (*cb)(const t_player *, void *), vo
  * Seeks to the start and walks frame by frame, decoding each payload back into
  * a t_player and invoking cb. A clean EOF — including a torn final frame whose
  * header or body is short — ends the replay with DB_OK; only a read error or a
- * frame that fails validation aborts with DB_IO_ERROR.
+ * frame that fails validation aborts with DB_IO_ERROR. out_clean_end receives
+ * the offset just past the last whole frame, which is where the file ends if
+ * nothing was torn and where the torn tail begins if something was.
  *
  * @param log The open log handle.
  * @param cb Callback invoked once per decoded record, in order.
  * @param ctx Opaque context forwarded to cb.
+ * @param out_clean_end Receives the end of the last whole frame (may be NULL).
  * @return DB_OK on a full clean replay, DB_IO_ERROR on a read/decode failure.
  */
-t_db_result	log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx)
+t_db_result	log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx, off_t *out_clean_end)
 {
 	t_db_result	r;
+	off_t		clean;
 	int			done;
 
 	if (lseek(log->fd, 0, SEEK_SET) < 0)
 		return (DB_IO_ERROR);
+	clean = 0;
 	done = 0;
 	while (!done)
 	{
 		r = replay_frame(log->fd, cb, ctx, &done);
 		if (r != DB_OK)
 			return (r);
+		if (!done)
+		{
+			clean = lseek(log->fd, 0, SEEK_CUR);
+			if (clean < 0)
+				return (DB_IO_ERROR);
+		}
 	}
+	if (out_clean_end)
+		*out_clean_end = clean;
 	return (DB_OK);
 }
 

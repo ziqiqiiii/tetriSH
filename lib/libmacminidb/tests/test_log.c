@@ -33,7 +33,7 @@ void	test_append_replay_preserves_order(void)
 	p = sample_player("bob", 2, 200);
 	assert(log_append(log, &p) == DB_OK);
 	got.count = 0;
-	assert(log_replay(log, collect_cb, &got) == DB_OK);
+	assert(log_replay(log, collect_cb, &got, NULL) == DB_OK);
 	assert(got.count == 3);
 	assert(strcmp(got.players[0].username, "zoe") == 0);
 	assert(got.players[1].player_id == 1);
@@ -57,7 +57,7 @@ void	test_replay_roundtrips_full_record(void)
 	in.games_won = 5;
 	assert(log_append(log, &in) == DB_OK);
 	got.count = 0;
-	assert(log_replay(log, collect_cb, &got) == DB_OK);
+	assert(log_replay(log, collect_cb, &got, NULL) == DB_OK);
 	assert(got.count == 1);
 	assert(memcmp(&in, &got.players[0], sizeof(t_player)) == 0);
 	log_close(log);
@@ -71,7 +71,7 @@ void	test_replay_empty_log(void)
 
 	log = fresh_log();
 	got.count = 0;
-	assert(log_replay(log, collect_cb, &got) == DB_OK);
+	assert(log_replay(log, collect_cb, &got, NULL) == DB_OK);
 	assert(got.count == 0);
 	log_close(log);
 	printf("PASS test_replay_empty_log\n");
@@ -82,20 +82,49 @@ void	test_replay_stops_on_torn_tail(void)
 	t_dblog		*log;
 	t_collected	got;
 	t_player	dave;
-	uint8_t		junk[5];
+	struct stat	st;
+	off_t		clean;
 
 	log = fresh_log();
 	dave = sample_player("dave", 9, 50);
 	assert(log_append(log, &dave) == DB_OK);
 	// A partial header written after a complete record: a torn last write.
-	memset(junk, 0, sizeof(junk));
-	assert(write(log->fd, junk, sizeof(junk)) == (ssize_t)sizeof(junk));
+	assert(write(log->fd, "\0\0\0\0\0", 5) == 5);
 	got.count = 0;
-	assert(log_replay(log, collect_cb, &got) == DB_OK);
+	clean = -1;
+	assert(log_replay(log, collect_cb, &got, &clean) == DB_OK);
 	assert(got.count == 1);
 	assert(got.players[0].player_id == 9);
+	// The reported end is the frame boundary, so the caller can cut the 5 bytes
+	// of tail off rather than let the next O_APPEND bury a valid frame behind it.
+	assert(fstat(log->fd, &st) == 0);
+	assert(clean == st.st_size - 5);
 	log_close(log);
 	printf("PASS test_replay_stops_on_torn_tail\n");
+}
+
+// A log with no torn tail reports its own size, so the caller's truncate is a
+// no-op on the ordinary boot rather than something it has to special-case.
+void	test_replay_reports_the_end_of_a_clean_log(void)
+{
+	t_dblog		*log;
+	t_collected	got;
+	t_player	eve;
+	struct stat	st;
+	off_t		clean;
+
+	log = fresh_log();
+	eve = sample_player("eve", 4, 20);
+	assert(log_append(log, &eve) == DB_OK);
+	got.count = 0;
+	clean = -1;
+	assert(log_replay(log, collect_cb, &got, &clean) == DB_OK);
+	assert(fstat(log->fd, &st) == 0);
+	assert(clean == st.st_size);
+	assert(log_truncate_tail(log, clean) == DB_OK);
+	assert(fstat(log->fd, &st) == 0 && st.st_size == clean);
+	log_close(log);
+	printf("PASS test_replay_reports_the_end_of_a_clean_log\n");
 }
 
 int	main(void)
@@ -104,6 +133,7 @@ int	main(void)
 	test_replay_roundtrips_full_record();
 	test_replay_empty_log();
 	test_replay_stops_on_torn_tail();
+	test_replay_reports_the_end_of_a_clean_log();
 	return (0);
 }
 

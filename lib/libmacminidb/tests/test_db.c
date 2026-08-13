@@ -238,6 +238,35 @@ void	test_durability_roundtrip(void)
 	printf("PASS test_durability_roundtrip\n");
 }
 
+// The record a purchase writes has to say "paid" as well as "owned". The
+// deduction used to happen after the log append, so the record granted the item
+// against an uncharged wallet and a crash before the player's next write
+// replayed a free purchase.
+//
+// Nothing may follow the buys here: the roundtrip case above equips afterwards,
+// and that write persists the already-corrected wallet, which is exactly how
+// the defect hid from it.
+void	test_a_purchase_is_paid_for_in_the_record_that_grants_it(void)
+{
+	t_db		*db;
+	t_player_id	id;
+	t_player	out;
+
+	db = fresh_db();
+	assert(db_signup(db, "nadia", "hashN", "saltN", &id) == DB_OK);
+	assert(db_record_game(db, id, 100, 1000, true) == DB_OK);
+	assert(db_buy_character(db, id, 3) == DB_OK);
+	assert(db_buy_theme(db, id, 3) == DB_OK);
+	db_close(db);
+	assert(db_open(DATA_DIR, CFG_DIR, &db) == DB_OK);
+	assert(db_get_player(db, id, &out) == DB_OK);
+	assert(db_player_owns_character(db, id, 3) == DB_TRUE);
+	assert(db_player_owns_theme(db, id, 3) == DB_TRUE);
+	assert(out.wallet_points == 1000 - 10 - 5);
+	db_close(db);
+	printf("PASS test_a_purchase_is_paid_for_in_the_record_that_grants_it\n");
+}
+
 // The catalogue is reachable through the db handle.
 void	test_catalogue_passthrough(void)
 {
@@ -382,6 +411,7 @@ int	main(void)
 	test_leaderboard_and_rank();
 	test_the_board_ranks_your_best_game_not_your_total();
 	test_durability_roundtrip();
+	test_a_purchase_is_paid_for_in_the_record_that_grants_it();
 	test_catalogue_passthrough();
 	test_catalogue_enumeration();
 	return (0);

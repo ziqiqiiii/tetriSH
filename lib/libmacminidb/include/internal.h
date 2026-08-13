@@ -148,6 +148,7 @@ t_db_result			player_deserialise(const uint8_t *buf, size_t len, t_player *out);
 t_dblog				*log_open(const char *data_dir);
 void				log_close(t_dblog *log);
 t_db_result			log_fsync(t_dblog *log);
+t_db_result			log_truncate_tail(t_dblog *log, off_t clean_end);
 
 /* LOG_APPEND.C */
 
@@ -155,7 +156,7 @@ t_db_result			log_append(t_dblog *log, const t_player *p);
 
 /* LOG_REPLAY.C */
 
-t_db_result			log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx);
+t_db_result			log_replay(t_dblog *log, void (*cb)(const t_player *, void *), void *ctx, off_t *out_clean_end);
 
 /* FLUSHER.C */
 
