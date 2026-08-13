@@ -104,6 +104,7 @@
 # define TETRISD_BODY_MAX_BYTES					8192
 # define TETRISD_CONFIG_LINE_MAX				512
 # define TETRISD_OUTBOX_CAPACITY				32
+# define TETRISD_ACCESS_WORD_MAX				16
 
 # define TETRISD_CHAT_CAPACITY					16
 
@@ -119,6 +120,29 @@
 # define TETRISD_EPOLL_BATCH					64
 # define TETRISD_LENGTH_PREFIX_BYTES			4
 # define TETRISD_READ_CHUNK_BYTES				4096
+
+/*
+** The Control channel: the local, Administrator-only way in, separate from the
+** port players connect to. Reachability is the credential - the socket is
+** 0600 in a directory only the server's user writes - so nothing arriving on
+** it names a Player and no session is established over it.
+**
+** Four connections is a ceiling rather than a budget: tetrisctl opens one,
+** sends one request and exits, so the only way to reach four is several admins
+** at once or one that has stopped reading.
+**
+** Bodies are capped rather than grown. PLAYERS on a server at the 4096-client
+** limit would not fit any fixed buffer, so the listing stops at the cap and
+** says how many it left out - a truncated answer an operator can see is
+** truncated beats an allocation that scales with load on the reactor thread.
+*/
+# define TETRISD_CONTROL_MAX_CONNECTIONS		4
+# define TETRISD_CONTROL_SOCKET_MODE			0600
+# define TETRISD_CONTROL_BACKLOG				4
+# define TETRISD_CONTROL_BODY_MAX				32768
+# define TETRISD_CONTROL_FRAME_MAX				HTTTP_MAX_MESSAGE_SIZE
+# define TETRISD_CONTROL_ROUTE					"/admin"
+# define TETRISD_CONTROL_ROUTE_PLAYER			"/admin/player/"
 # define TETRISD_RECV_BUFFER_MAX				(TETRISD_LENGTH_PREFIX_BYTES + TETRISSH_MAX_FRAME)
 
 # define TD_MAX_GAMES							16
@@ -440,6 +464,41 @@ struct s_handshake_pool
 	t_server			*srv;
 };
 
+/*
+** One Administrator's connection. The tag is first because the reactor reads
+** epoll_event.data.ptr as a t_event_tag before it knows what kind of object it
+** has, exactly as it does for a client.
+**
+** Unlike a client this carries no session: the bytes on the wire are plaintext
+** HTTTP behind the same four-byte length prefix, because there is no peer to
+** authenticate that filesystem permissions have not already authenticated.
+*/
+typedef struct s_control_connection
+{
+	t_event_tag		tag;
+	t_server		*srv;
+	int				fd;
+	bool			open;
+	bool			writable_armed;
+	t_buffer		recv;
+	t_buffer		send;
+}	t_control_connection;
+
+/*
+** The listener and its connections. `stop_requested` is how SHUTDOWN answers
+** before it acts: the reply has to reach the Administrator who asked for it,
+** so the loop is stopped only once that reply has actually been written.
+*/
+typedef struct s_control
+{
+	t_event_tag				tag;
+	int						listen_fd;
+	char					path[TETRISD_FILESYSTEM_PATH_MAX];
+	t_control_connection	slots[TETRISD_CONTROL_MAX_CONNECTIONS];
+	char					body[TETRISD_CONTROL_BODY_MAX];
+	bool					stop_requested;
+}	t_control;
+
 struct s_server
 {
 	t_config			cfg;
@@ -457,6 +516,7 @@ struct s_server
 	t_event_tag		listener_tag;
 	t_event_tag		wake_tag;
 	t_event_tag		timer_tag;
+	t_control		control;
 	t_handshake_pool	pool;
 	t_client		*zombies;
 	unsigned char	*scratch;
@@ -488,6 +548,21 @@ typedef struct s_request_context
 	size_t					body_len;
 	const char				*content_type;
 }	t_request_context;
+
+/*
+** One Control channel request in flight. It mirrors t_request_context, minus
+** the client: an Administrator is not a Player and has no connection state to
+** answer against. The body is borrowed from t_control rather than held inline,
+** so a 32 KiB answer never lands on the reactor's stack.
+*/
+typedef struct s_control_context
+{
+	t_server				*srv;
+	t_control_connection	*conn;
+	const t_htttp_message	*msg;
+	char					*body;
+	size_t					body_len;
+}	t_control_context;
 
 /* CONFIG.C */
 void				config_defaults(t_config *cfg);

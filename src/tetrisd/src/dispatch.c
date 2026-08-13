@@ -27,8 +27,9 @@ static const t_htttp_route	g_routes[] = {
 static unsigned int	result_status(t_htttp_result res, const t_htttp_message *msg);
 static const char	*reason_for(unsigned int status);
 static bool			body_declares_itself(const t_htttp_message *msg);
-static void			log_access(const t_client *cli, const char *method, unsigned int status);
+static void			log_access(const t_client *cli, const t_htttp_message *msg, unsigned int status);
 static bool			is_gameplay_verb(const char *method);
+static void			input_word(const t_htttp_message *msg, char *out, size_t cap);
 
 /**
  * @brief Turns one decrypted frame into exactly one response.
@@ -68,7 +69,7 @@ void	client_handle_frame(t_client *cli, const unsigned char *frame, size_t len)
 			status = (int)result_status(res, &msg);
 	}
 	request_reply(cli, (unsigned int)status, ctx.body, ctx.body_len);
-	log_access(cli, msg.method, (unsigned int)status);
+	log_access(cli, &msg, (unsigned int)status);
 	htttp_message_free(&msg);
 }
 
@@ -263,32 +264,42 @@ static const char	*reason_for(unsigned int status)
 /**
  * @brief Writes the one Access line standing for a finished HTTTP exchange.
  *
- * Gameplay verbs go to debug and everything else to info: a match sends tens a
- * second per player, which at info would bury every login and refusal.
+ * Every exchange logs at info, gameplay included. Those four verbs were held
+ * at debug so a match would not bury the logins and refusals around it, but
+ * debug is below the level a daemon actually runs at, so in practice they were
+ * not written at all - and a record of a match that omits the match is the
+ * wrong trade. The cost is real and is the operator's to manage: a live match
+ * sends these at key-repeat rate per player.
+ *
+ * A gameplay verb also names the word its body carried, the method alone not
+ * distinguishing a move left from a move right.
  *
  * @param cli Client the exchange happened on; NULL is ignored.
- * @param method Method that arrived, or NULL when the frame never parsed.
+ * @param msg The parsed request; its method is NULL when the frame never parsed.
  * @param status Status the server answered with.
  */
-static void	log_access(const t_client *cli, const char *method, unsigned int status)
+static void	log_access(const t_client *cli, const t_htttp_message *msg, unsigned int status)
 {
-	t_log_level	level;
+	char		word[TETRISD_ACCESS_WORD_MAX];
+	const char	*method;
 
 	if (cli == NULL)
 		return ;
-	level = COREIPC_LOG_INFO;
+	method = msg->method;
+	word[0] = '\0';
 	if (is_gameplay_verb(method))
-		level = COREIPC_LOG_DEBUG;
-	logger_emit(&cli->srv->log, level, "conn %u %s %s %u", cli->conn_id,
-		cli->username[0] != '\0' ? cli->username : "(anonymous)",
-		method != NULL ? method : "-", status);
+		input_word(msg, word, sizeof(word));
+	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "conn %u %s %s%s %u",
+		cli->conn_id, cli->username[0] != '\0' ? cli->username : "(anonymous)",
+		method != NULL ? method : "-", word, status);
 }
 
 /**
  * @brief Says whether a method is one of the four that drive a falling piece.
  *
- * These are the only methods sent at key-repeat rate; READY, START and ABILITY
- * are sent once each and belong at info with the rest.
+ * These are the methods whose body carries a word worth naming on the Access
+ * line. READY, START and ABILITY are sent once each and are told apart by
+ * their method alone.
  *
  * @param method Method name, or NULL when the frame never parsed.
  * @return true for MOVE, ROTATE, DROP and HOLD, false for everything else.
@@ -299,4 +310,50 @@ static bool	is_gameplay_verb(const char *method)
 		return (false);
 	return (strcmp(method, "MOVE") == 0 || strcmp(method, "ROTATE") == 0
 		|| strcmp(method, "DROP") == 0 || strcmp(method, "HOLD") == 0);
+}
+
+/**
+ * @brief Renders a gameplay body as the separated word the Access line appends.
+ *
+ * The body is the client's, so this is an injection site: a word carrying a
+ * newline would forge a second record. Only plain letters are accepted and a
+ * body that is anything else is dropped whole rather than truncated, so the
+ * line falls back to naming the verb alone - which is what HOLD, carrying no
+ * body at all, gets too. The word is read here rather than passed out of the
+ * handler because the status is already decided before a handler reads a body:
+ * a MOVE refused for being in no room still says which way it was driven.
+ *
+ * @param msg The parsed request holding the body.
+ * @param out Buffer receiving " WORD", or "" when there is no word to name.
+ * @param cap Size of out; a word that would not fit is dropped.
+ */
+static void	input_word(const t_htttp_message *msg, char *out, size_t cap)
+{
+	size_t	len;
+	size_t	i;
+
+	out[0] = '\0';
+	if (msg->body == NULL || msg->body_len == 0)
+		return ;
+	len = msg->body_len;
+	while (len > 0 && (msg->body[len - 1] == '\n' || msg->body[len - 1] == '\r'
+			|| msg->body[len - 1] == ' '))
+		len--;
+	if (len == 0 || len + 2 > cap)
+		return ;
+	i = 0;
+	while (i < len)
+	{
+		if (isalpha(msg->body[i]) == 0)
+			return ;
+		i++;
+	}
+	out[0] = ' ';
+	i = 0;
+	while (i < len)
+	{
+		out[i + 1] = (char)toupper(msg->body[i]);
+		i++;
+	}
+	out[len + 1] = '\0';
 }

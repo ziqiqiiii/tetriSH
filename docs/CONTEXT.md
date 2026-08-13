@@ -140,7 +140,9 @@ of the system.
 One log record standing for one complete HTTTP exchange — the method that
 arrived, who sent it, and the status that went back. It is written once the
 answer is known, so a request and its response are a single line rather than
-two, and an exchange that failed before reaching a handler still has one.
+two, and an exchange that failed before reaching a handler still has one. A
+method that drives the falling piece also names the word its body carried, the
+method alone not being enough to tell a move left from a move right.
 
 **Interval report**:
 The counter line a Daemon emits on a fixed cadence rather than in answer to an
