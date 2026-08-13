@@ -79,8 +79,12 @@ Losing a game because the stack leaves no room for the next piece to spawn.
 
 **Forfeit**:
 The immediate, irrevocable end of a player's participation in an in-progress
-game — whether by top-out, by leaving, or by disconnection. All three are the
-same event; there is no grace period and no rejoining a game in progress.
+game — whether by top-out, by leaving, by disconnection, or by an
+Administrator's kick. All four are the same event; there is no grace period and
+no rejoining a game in progress. A kick is not a fifth mechanism standing
+beside the others: it closes the session, so it reaches the game as a
+disconnection and takes that path, which is how it inherits ownership transfer
+and the rule that an unfinished game is never recorded.
 _Avoid_: quit, abandon, drop out
 
 ### Processes
@@ -97,11 +101,23 @@ _Avoid_: service, background process
 
 **Control channel**:
 The local, Administrator-only way into a running Daemon, separate from the port
-players connect to. Each Daemon has its own. Reaching it is a matter of local
-filesystem access rather than of holding a player's identity, which is why
-nothing arriving on it names a Player — the reachability *is* the credential.
-It carries HTTTP, like everything else two tetriSH processes say to each other.
+players connect to. A Daemon may expose one: `tetrisd` does, `tetrislogd` does
+not, which is why the logger's own counts reach an operator through the Sink
+rather than over the wire. Reaching it is a matter of local filesystem access
+rather than of holding a player's identity, which is why nothing arriving on it
+names a Player — the reachability *is* the credential. It carries HTTTP, like
+everything else two tetriSH processes say to each other.
 _Avoid_: control plane, admin socket, control socket
+
+**Health**:
+The report of a Daemon's own condition — uptime, connections, rooms, the tick
+interval it is configured for, whether its records are reaching the Sink —
+assembled on demand and answered over the Control channel. Distinct from an
+Interval report in all three respects that matter: Health is a total rather
+than a delta, it is asked for rather than emitted on a cadence, and it counts
+what the Daemon *is* rather than what it has lost.
+_Avoid_: status (which names every answer tetrisd sends, not this one),
+snapshot (which is a STATE)
 
 ### Logging
 
