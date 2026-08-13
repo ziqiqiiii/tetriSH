@@ -114,6 +114,8 @@ with the reason on the terminal, if one is not.
 ./src/tetrisu/bin/tetrisu
 ```
 
+On the sign-in screen, **SERVER ID** is `localhost` or `127.0.0.1` (the default), then **CHECK SERVER** before **LOGIN** or **SIGN UP**.
+
 **4. Inspect and stop:**
 ```
 tetrish$ tetrisctl status
