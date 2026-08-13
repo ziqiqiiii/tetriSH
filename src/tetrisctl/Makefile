@@ -41,7 +41,7 @@ INC_DIR		:= include
 # One archive per CoreStack library, each with the include path that goes with
 # it. tetrisctl drives the daemons by pidfile and signal, so libcoredaemon is
 # all it needs; the control socket that would pull in libhtttp is a later step.
-LIB_NAMES	:= libcoredaemon
+LIB_NAMES	:= libcoredaemon libcoreipc libhtttp libstatusbody
 LIB_DIRS	:= $(LIB_NAMES:%=$(LIB_ROOT)/%)
 LIB_ARCS	:= $(foreach l,$(LIB_NAMES),$(LIB_ROOT)/$(l)/$(l).a)
 LIB_INC		:= $(LIB_DIRS:%=-I%/include)

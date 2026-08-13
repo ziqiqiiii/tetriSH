@@ -89,6 +89,7 @@ run: $(NAME)
 
 TESTS_DIR		:= tests
 TEST_BIN_DIR	:= $(TESTS_DIR)/bin
+INTEGRATION_DIR	:= $(TESTS_DIR)/integration
 
 TEST_SRC		:= $(wildcard $(TESTS_DIR)/test_*.c)
 TEST_BINS		:= $(TEST_SRC:$(TESTS_DIR)/%.c=$(TEST_BIN_DIR)/%)
@@ -110,9 +111,18 @@ $(TEST_BIN_DIR)/test_%: $(TESTS_DIR)/test_%.c $(TEST_HELPERS) \
 		$(LIB_ARCS) $(LDLIBS) -o $@
 
 # Filter a subset with: make test FILTER=sink
-test: $(TEST_BINS)
+unit: $(TEST_BINS)
 	@ echo "\n$(CYAN)==> Running unit tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) unit $(TEST_BINS)
+
+# The rotation rule is shell against a real logrotate, not a linked suite: what
+# it guards is the handover between logrotate and the daemon, and neither half
+# of that exists inside a test binary.
+integration:
+	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
+	@ $(TEST_RUNNER) integration $(INTEGRATION_DIR)/*.sh
+
+test: unit integration
 
 ################################################################################
 #                                   CLEANUP                                    #
@@ -134,6 +144,6 @@ re: fclean all
 #                              PHONY && PRECIOUS                               #
 ################################################################################
 
-.PHONY:		all libs run test clean fclean re
+.PHONY:		all libs run unit integration test clean fclean re
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

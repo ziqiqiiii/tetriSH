@@ -1,15 +1,14 @@
 # CLAUDE.md
 
-tetriSH is a terminal-based Battle Royale Tetris system in C, built for the
-CoreStack Challenge (50.003 × 50.005) at SUTD: a shell, three daemons, a
-notcurses client, and eight self-contained static libraries.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Every component owns a `README.md` that is the authority on its scope, API, and
-build — read that component's README before changing it. `src/tetrish/` owns a
-second `CLAUDE.md` for the shell's pipeline, test conventions, and 42-school
-code style.
+`src/tetrish/` has its own CLAUDE.md covering the shell's pipeline, test conventions, and 42-school code style — read that one when working inside the shell.
 
-## Status
+## Project
+
+tetriSH is a terminal-based Battle Royale Tetris system in C, built for the CoreStack Challenge (50.003 × 50.005) at SUTD.
+
+Implementation status:
 
 | Component | Status |
 |---|---|
@@ -25,45 +24,68 @@ code style.
 | `lib/libtetrisroom` | implemented — room/slot/lobby domain + tests (7 of 7 suites pass). Two statuses beyond the obvious four: `ROOM_SELECTING` is the character-select window a committed room holds open before it deals, and `room_rematch` is the other way a match can end — the game stops and the room does not |
 | `src/tetrisd` | implemented — Single mode end to end: config, logging, listener, epoll reactor, handshake pool, auth, lobby, one gravity `timerfd`, `STATE` push, signals (incl. `SIGUSR1` state dump), input rate limiting, hold, pause/resume, restart, a held line-clear phase (the completed rows stay on the board for `clear_duration_ms` and reach the client as `phase clearing` + rows + offset), Guideline lock delay (a landed piece keeps `LOCKDOWN_DELAY_MS` and 15 move/rotate resets; hard drop is exempt, soft drop into the floor is refused), and the whole Gaiden ability catalogue + tests (22 of 22 suites pass). A game that reaches game-over or is forfeited is recorded once through `award_game` in `room.c`, which credits the wallet at `TETRISD_POINTS_PER_WALLET_POINT` (100) game points each — as the difference between what the player's `lifetime_points` were worth before the game and after, so a game worth less than the rate carries its remainder rather than rounding to nothing. The same call ranks the player on their **best single game**, never on that total. Room chat and system narration are served here too, as one feed with two authors: `CHAT /room/<name>` posts a line, `narrate.c` writes the server's own (`joined the room`, `set as owner`, `left the room`, the successor after an owner leaves), and both are pushed as a server-originated `CHAT`. The feed rides a **third outbox lane** — a small drop-oldest ring that never closes a client — because a room narrating a Battle Royale's knockouts would otherwise fill the response FIFO and kill a slow connection. Narration is emitted only from `room.c`, the one module holding both halves of a Room, and no history is kept: a late joiner has missed what was said. Steps 1–5 of the event-driven migration are done — the migration is complete. Double (step 6) is built: a room with an opponent in it reaches a match one way whichever route asked for it, because the owner's `START` opens a `SELECTING` window rather than dealing. A seat arrives **ready** (`slot_occupy`), since joining and holding the connection through `room_seat`'s probe is already the answer readiness asks; `room_set_ready` still moves it either way, and it only decides which way it starts. That retired the other route into a match — the last seat to declare ready used to open the window too, which only worked while a seat arrived not ready and declaring was deliberate; with every seat ready from the moment a room fills, that branch would have opened the window on whatever the next `READY` happened to be, including one *withdrawing* it. A room left holding nothing but `BOT_` accounts is ended: `server_rooms_evict_abandoned` runs once per reactor batch, armed by a departure rather than asked every batch, and kills those clients so their seats are released by the one path every dropped connection takes and `room_close` takes the room on the last one out. The window clears every seat's declared character, so "locked in" is a fact about this match and not a leftover from the last; it ends the moment every seat has named a fighter or `TETRISD_MATCH_SELECT_MS` runs out, and the room deals itself. `room_rematch` ends a match without ending the room, so the two players come back to the seats they never left. All sixteen abilities are served, the eleven that need a Target included — `src/tetrisd/tests/test_ability_matrix.c` asserts one consequence specific to each. Battle Royale is built: a room of 4–99 seats that only its owner may start, a select window that survives a departure, and an **arena** of one-bit board masks on its own cadence (`TETRISD_BR_ARENA_MS`) so ninety-eight rivals cost what a thumbnail costs rather than what a board does. Garbage leaves one hole per row, drawn from the game's own seeded LCG with only the previous column excluded — it was `garbage_seq % BOARD_WIDTH` off a counter, which moves the hole every row (the stated requirement, and what its test asserted) by marching it one column right, so a Battle Royale's worth of rows drew a diagonal across the board (`docs/bugs/the_garbage_holes_marched_in_a_line.md`). A placing is taken the moment a player goes out — everybody eliminated on one tick shares it and the next skips the numbers they took — and a knockout is credited to whoever's garbage last *landed*, narrated on the chat lane. `TARGET /room/<name>` declares one of four targeting modes, and the mode decides how many rivals an attack reaches as well as which: Attackers (everyone landing rows on you) and KOs (every stack level with the tallest) hit **all** of what they matched, while Randoms and Badges hit **one**, drawn from a seed of the room's own — both of those match a crowd, so spraying either would put one clear onto most of the room. Every Target is queued the whole amount, never a share. A mode that matched nobody falls back to one drawn rival, so declaring Attackers before anybody has attacked never hits the room — the client's legend reads `(ANY)` rather than `(0)` in that state, because `(0)` describes an empty match set as an empty outcome and was read as targeting having stopped working. The same set answers abilities, except for the four that need a Target but transform their caster (Mirror, Pals, Vampire, Copy) — those land once (`hits_every_target` in the ability table). `make stress --mode br --players 99` seats a full room and plays it: 7440 arena pushes in 60 s, no session lost |
 | `src/tetrislogd` | implemented — sink + reclaim, dgram receive, counters, signals, self-detach + pidfile; 4 suites pass, valgrind-clean |
-| `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal + tests (2 of 2 suites pass, valgrind-clean); the control socket is a later step |
+| `src/tetrisctl` | partial — `start`/`status`/`stop`/`restart` by pidfile and signal, plus the four read-only Control-channel verbs (3 unit suites pass, valgrind-clean). `status`, `rooms`, `players` and `dropped-logs` ask a running `tetrisd` over `TETRISD_CONTROL_PATH` — an `AF_UNIX` socket, mode `0600`, plaintext HTTTP behind the same 4-byte length prefix, no session and no certificates, because authorisation is the ability to open the socket and nothing sent there names a Player. Which daemons have a channel is compiled in beside the pidfile keys (`control_key` in `g_known`), since it is knowledge about the programs rather than about a deployment: `tetrisd` serves one, `tetrislogd` does not, and no configuration can give the logger a channel it never implemented. A missing `TETRISD_CONTROL_PATH` is deliberately not fatal at load time — a pidfile is how every verb works and a channel is how four of them work, so a signal-managed stack still starts and stops and only the admin verbs refuse. `status` prints the pidfile rows first and Health after, never the reverse: the lock is the question that needs no running server, so an unreachable channel exits non-zero without retracting rows already printed. Every exchange is bounded by `TETRISCTL_CONTROL_MS` (3 s), because a daemon that accepts the connection and then says nothing would otherwise cost the operator their terminal rather than three seconds. `KICK` and `SHUTDOWN` (UC-23/24) are not built; `stop` remains `SIGTERM` plus the pidfile lock, which is what makes a returning `stop` mean gone rather than signalled |
 
 ## Build & Test
 
-The root `Makefile` is an umbrella: deps, then every `lib/lib*/` with a
-Makefile, then the shell, then whichever daemon directories exist (matched via
-`wildcard`, so unbuilt components are skipped rather than erroring). `README.md`
-and the root `Makefile`'s `.PHONY` line carry the target list; each library
-exposes the same five targets (`all`, `test`, `clean`, `fclean`, `re`) and the
-same `FILTER=` convention:
+The root `Makefile` is an umbrella: it installs dependencies, recurses into every
+`lib/lib*/` that has a Makefile, builds the shell, then builds whichever daemon
+directories exist (matched via `wildcard`, so unbuilt components are skipped
+rather than erroring).
 
 ```bash
-make -C lib/libtetrisbrain test FILTER=abilities   # one suite
-gcc ... lib/libX/libX.a -I lib/libX/include        # to link one
+make              # deps + libs + shell + daemons
+make test         # build, then run every library and component suite
+make stress       # put a fleet of players on one tetrisd and report the cost
+make run          # build, then launch the shell (sources .tetrishrc)
+make stack        # build, then launch available daemons headless
+make deps         # check/install dependencies for this OS
+make check-deps   # verify dependencies without changing the system
+make clean / fclean / re
+make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
+make play         # set up everything and launch a client against a server
 ```
 
-What the targets do not say out loud:
+Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root
+dependencies are the toolchain, pkg-config, OpenSSL, readline, and ncurses;
+`tetrisu` additionally needs notcurses (required) and SDL2 + SDL2_mixer
+(optional — audio compiles out via `-DTETRISU_ENABLE_AUDIO=0`).
 
-- `make reset` stops the daemons, then `fclean`s **and wipes their runtime
-  state** — `tmp/`, `archive/`, `bin/` — but stashes the player store
-  (`TETRISD_DATA_DIR/players.log`) across the wipe and puts it back, so a
-  rebuild never costs the accounts people signed up with. `make del-db` is the
-  only target that deletes it.
-- `AUTO_INSTALL_DEPS=0` makes the dependency step check-only (CI).
-- **macOS runs the client only.** `tetrisd` is built on `epoll_create1`/
-  `timerfd` and `libcoreipc` on POSIX `mq_open`; Darwin ships none of them, so
-  neither compiles there and `make play` drops the server steps.
-- The daemons are launched by `tetrisctl start` from inside the shell (see
-  `.tetrishrc`), never from the root Makefile. `TETRISCTL_DAEMONS` is the one
-  place launch order is written down — logger → game server, teardown reversed,
-  so `tetrisd`'s shutdown still reaches the log.
+**macOS cannot run the server**, and it is not a packaging gap: `tetrisd` is
+built directly on `epoll_create1`/`epoll_ctl`/`epoll_wait` plus `timerfd`, and
+`libcoreipc`'s mqueue module on POSIX `mq_open`/`mq_send`/`mq_receive` — Darwin
+has none of the three, so neither compiles there. `tetrisu` does build there and
+wants the host's own terminal, because the board is Kitty-protocol bitmaps a
+container cannot hand to a Mac. So a macOS checkout builds and runs `tetrisu`
+only (`make play`) and connects to a `tetrisd` running elsewhere —
+`scripts/play.sh --host ADDR` (`make play-local HOST=...`) checks that server is
+reachable and verifies it against the committed demo CA before launching the
+client. There is no local server path on macOS.
 
-`make play` (host build) and `make play-image` (container build) both end in a
-kitty window on the shared server; `README.md` owns the terminal matrix, the
-one-CA-per-run rule, and the flags. Three scripts own one concern each —
-`scripts/container.sh` the engine, image and run; `scripts/terminal.sh` which
-terminal draws; `scripts/play.sh` the order.
+Each library is also **self-contained** — it owns a Makefile that builds its
+archive in place and runs its own tests:
+
+```bash
+make -C lib/libtetrisbrain                        # -> lib/libtetrisbrain/libtetrisbrain.a
+make -C lib/libtetrisbrain test                   # formatted unit test output
+make -C lib/libtetrisbrain test FILTER=abilities  # run a single suite
+make -C lib/libtetrisbrain clean|fclean|re
+```
+
+Every library exposes the same five targets (`all`, `test`, `clean`, `fclean`,
+`re`) and the same `FILTER=` convention. To link one into other code, add the
+archive and its header path:
+
+```bash
+gcc ... lib/libtetrisbrain/libtetrisbrain.a -I lib/libtetrisbrain/include ...
+```
+
+The networked binaries will each link the archives they need plus OpenSSL
+(`-lssl -lcrypto`); `libmacminidb` also needs `-lpthread`.
 
 ## Architecture
+
+Three layers above the kernel:
 
 ```
 HTTTP (application protocol)
@@ -71,71 +93,51 @@ Secure session (cert auth, RSA-OAEP key exchange, AES-256 frames)
 TCP (POSIX sockets)
 ```
 
-**Binaries** — `tetrish` (interactive shell; its `dspawn`/`dcheck`/`dkill`
-daemonise arbitrary programs and are *not* the game daemons' lifecycle
-manager), `tetrisd` (server-authoritative game server — rooms, game logic,
-chat, narration, and the marketplace over the same authenticated session),
-`tetrislogd` (separate logger, survives `tetrisd` restarts), `tetrisctl`
-(admin CLI owning both daemons' lifecycle), `tetrisu` (terminal client).
+**Binaries:**
 
-**Libraries** — `libtetrisbrain` (pure game logic), `libtetrisroom` (pure
-lobby/room/slot domain), `libmacminidb` (in-memory store with WAL and crash
-recovery), `libtetrissh` (handshake + encrypted framing), `libcoreipc` (IPC
-primitives, built first, no internal deps), `libcoredaemon` (both sides of
-daemonising), `libhtttp` (parser/serialiser + the protocol grammar and method
-table), `libstatusbody` (message-body codec — `tetrisd` encodes, `tetrisu`
-decodes).
+- `tetrish` — interactive shell (REPL, builtins, `.tetrishrc`). Builds as `src/tetrish/macmini_shell`; its system programs land in `src/tetrish/bin/` and are symlinked into `./bin` by the root `bin-link` target. Its `dspawn`/`dcheck`/`dkill` are generic tools for daemonising arbitrary programs and are *not* the lifecycle manager for the game daemons.
+- `tetrisd` — concurrent game server; server-authoritative; manages rooms, game logic, clients
+- `tetrislogd` — separate logger process; receives log records over IPC; survives `tetrisd` restarts
+- `tetrisctl` — admin CLI; owns both daemons' lifecycle (`start`/`status`/`stop`/`restart`) through their locked pidfiles, and asks a running `tetrisd` for Health, rooms, connections and the Dropped counter over its local-only Control channel (`TETRISD_CONTROL_PATH`, not the public TCP port). `KICK` and `SHUTDOWN` on that channel are a later step
+- `tetrisu` — terminal client; renders board, handles input + network simultaneously
 
-**HTTTP** is HTTP-like. `STATE` is server-originated; `CHAT` is the only method
-travelling both ways — up as a typed command (`application/tetris-command`),
-down as a feed line (`application/tetris-chat`) — so `htttp_validate` accepts
-either type for it and one type for everything else. `Player-Id` is required on
-every authenticated request.
+Room chat, narration, and the marketplace (buy/equip/profile/leaderboard) are
+served by `tetrisd` itself over the same authenticated session — there are no
+separate social-layer daemons.
 
-## Invariants
+Both daemons perform their own double-fork at start-up and publish a locked
+pidfile; the fork lives in each one's `main.c` only, never behind
+`server_start`/`logd_start`, or the in-process test suites would begin forking.
+They are launched by `tetrisctl start` from inside the shell (see
+`.tetrishrc`), never from the root Makefile. `TETRISCTL_DAEMONS` in
+`.tetrishrc` is the only place launch order is written down — logger → game
+server — and teardown is that order reversed, because stopping the logger first
+would push `tetrisd`'s whole shutdown into its error file instead of the log.
 
-These bind every change. Breaking one is a design regression, not a bug.
+**Libraries (statically linked):** each is a self-contained directory with its
+own `Makefile`, `src/`, `include/`, and `tests/`, building into `lib/libXXX/libXXX.a`.
 
-- `common.c` / `common.h` are **frozen** (`lib/libtetrissh/src/common.c`,
-  `include/libs/common.h`) — all crypto goes through them as they stand, and the
-  handshake is manual: no TLS, no `SSL_*`.
-- `libtetrisbrain` and `libtetrisroom` are **pure** — logic only, no I/O, no
-  side effects. External facts arrive as a caller-supplied `probe` callback.
-- `libcoreipc` reports through errno-style returns alone, because it *is* the
-  log path and logging from it recurses into itself.
-- Paths come from `.tetrishrc` or from the caller, at every site.
-- `tetrisd` has **one owner** of all mutable game state: the reactor thread. The
-  two surviving locks (the handshake pool's, `libmacminidb`'s internal) guard
-  none of it, and wanting a third means the work is on the wrong thread.
-  Everywhere else in the project, lock order is documented and no mutex is held
-  across a blocking syscall.
-- No client is freed inside the event loop: `client_kill` parks it on the zombie
-  list and `client_reap` is the only `free()` site, which is what keeps
-  `epoll_event.data.ptr` valid.
-- The **single-instance guard** is the `flock` on each daemon's pidfile and
-  nothing else — claimed after the double-fork (the pid written must be the
-  detached process's) and before anything a second instance could damage, which
-  for `tetrislogd` means before `unixsock_dgram_bind` unlinks its socket path.
-  The fork lives in each `main.c` only, so in-process suites never fork.
-- A daemon keeps `stderr` on the terminal until boot succeeds, then moves it to
-  its configured error file: boot failures have to reach the person who typed
-  the command.
-- Log-record vocabulary is three different counts — **Dropped** (producer-side
-  ring full, `tetrisd`), **Rejected** (malformed on arrival, `tetrislogd`),
-  **Degraded** (valid, sink unavailable, written to stderr). See
-  `docs/CONTEXT.md`.
-- Cross-player effects (garbage, offensive abilities) are queued against a
-  **Target** and applied at that player's next piece lock; a player's own inputs
-  apply immediately. Injecting garbage under an active piece can produce a board
-  `piece_is_valid` rejects, so this is a game rule rather than an optimisation.
-  Garbage never crosses rooms.
-- Frame cap is 64 KiB; a larger HTTTP message answers `413 Payload Too Large`.
-- Everything compiles clean under `-Wall -Wextra -Werror`, and test binaries
-  pass `valgrind --leak-check=full --error-exitcode=1`.
+- `libtetrisbrain/` — pure game logic (no I/O, no networking); linked into `tetrisd` and optionally `tetrisu` for client-side prediction
+- `libtetrisroom/` — pure lobby/room/slot domain — seating, ownership succession, start verdicts, room listing
+- `libmacminidb/` — in-memory NoSQL store ("NoSQLite") for player/character/theme state, with an append-only log and crash recovery
+- `libtetrissh/` — secure session handshake and encrypted framing; linked into both `tetrisd` and `tetrisu`
+- `libcoreipc/` — IPC primitives (log records, ring buffer, `AF_UNIX` helpers, self-pipe, POSIX message queues); no internal dependencies, built first
+- `libcoredaemon/` — both sides of daemonising: detach, readiness pipe and pidfile claim for the daemons; pidfile read, probe and wait-for-exit for `tetrisctl`. Never logs — it is the path a daemon uses to report that it cannot start
+- `libhtttp/` — HTTTP parser and serialiser; linked into both `tetrisd` and `tetrisu`
+- `libstatusbody/` — HTTTP message-body codec — encodes the bodies `tetrisd` sends, decodes the ones `tetrisu` receives
 
-## Traps
+**Self-contained library layout** (every `libXXX/` follows this):
 
-Non-obvious rules that have each already cost a bug.
+```
+libXXX/
+├── Makefile          # make -C lib/libXXX [test|clean|fclean|re]; builds libXXX.a
+├── include/XXX.h     # public header — consumers add -I lib/libXXX/include
+├── src/*.c           # implementation
+├── tests/test_*.c    # unit tests, each with its own main()
+├── scripts/run_tests.sh
+├── obj/              # generated objects
+└── libXXX.a          # generated archive
+```
 
 ## libtetrisbrain API (tetrisbrain.h)
 
@@ -280,6 +282,27 @@ wrong thread.
 Steps 1–5 of the event-driven migration are
 implemented. Steps 6 and 7 are Double mode and Battle Royale.
 
+The **Control channel** is served too, in the reactor's own epoll set rather
+than on a thread of its own: `STATUS`, `ROOMS`, `PLAYERS` and `DROPPED` on
+`/admin`, over an `AF_UNIX` socket at `TETRISD_CONTROL_PATH` (mode `0600`, four
+connections, plaintext HTTTP behind the 4-byte length prefix). That placement is
+the point — every one of those answers is read straight out of the lobby, the
+registry or the logger, and the reactor already owns all three, so serving them
+needs no lock and no handoff. A listener thread would have had to hand each
+request over the wake fd and wait for it, which is a rendezvous bought to reach
+state the answering thread was already sitting on. Authorisation is the socket's
+mode: nothing arriving there names a Player, so there is no session and no
+`Player-Id`. Health is assembled once by `server_health_assemble` and rendered
+twice — `SIGUSR1` as a log line, `STATUS` as a body — so the two can never
+disagree; the tick it reports is the **configured** one and says so on the wire,
+because nothing measures an observed rate. `ROOMS` shares `server_rooms_list`
+with `LIST /rooms` rather than building its own rows, so the lobby's view and the
+Administrator's cannot drift. `KICK` and `SHUTDOWN` are specified and answer
+`404`. The control fd is set to `-1` before anything in boot can fail, for the
+reason `logger_blank` exists: teardown is shared with the start-up failure path,
+and a zeroed fd is 0, so the tolerant `destroy` would have closed stdin and
+unlinked a path it never bound.
+
 M1 serves Single mode: `SIGNUP`, `LOGIN`, `LIST` (`/rooms` and `/store`),
 `JOIN` (`/rooms` creates, `/room/<name>` joins), `LEAVE`, `START`, `MOVE`,
 `ROTATE`, `DROP`, `LEADERBOARD`, `PROFILE`, `BUY`, `EQUIP`, plus pushed
@@ -329,34 +352,14 @@ site, `JOIN`; every other route refuses and leaves it.
 
 Custom HTTP-like protocol. Two methods are server-originated (pushed): `STATE`, and `CHAT` when the server is delivering a room's feed rather than receiving a line for it. `CHAT` is the only method that travels in both directions — up as a command a player typed (`application/tetris-command`), down as a line of the feed (`application/tetris-chat`) — which is why `htttp_validate` accepts either type for it and one type for everything else. All other methods are client-initiated request/response. The `Player-Id` header is required on every authenticated request. `lib/libhtttp/README.md` carries the grammar and method table; `lib/libstatusbody/README.md` documents the body formats.
 
-## Things that have already gone wrong
+## Traps
 
-Merged from `dev`. Each line is a defect somebody paid for once.
+Non-obvious rules that have each already cost a bug.
 
-- `board_get` returns `CELL_FILLED` out of bounds (a solid wall), so collision
-  checks need no range guard in every caller.
 - `db_player_owns_character` / `db_player_owns_theme` answer a predicate and
   return `t_db_bool` — `DB_TRUE`, `DB_FALSE`, `DB_UNKNOWN`. `DB_FALSE` is a
   successful read meaning "does not own it", so comparing these against `DB_OK`
   turns every non-owner into an error.
-- A Player carries three running numbers answering three questions:
-  `leaderboard_score` is the **best single game** (what the board ranks on),
-  `lifetime_points` is every point ever scored (what the wallet rate is charged
-  against), `wallet_points` is what is left to spend. `award_game` in
-  `src/tetrisd/src/room.c` credits and ranks in one call — never rank on a
-  total.
-- Catalogue ids live in players' owned lists, so they are never renumbered: they
-  carry gaps and are never a position. Enumerate a catalogue with
-  `db_characters` / `db_themes`; probing ids stops at the first gap.
-- A username is printable ASCII with no space (`db_username_valid`) because
-  every body naming a player is whitespace-delimited — one player called
-  `amber lee` had the whole leaderboard rejected as malformed. `tetrisu` keeps
-  its own copy of the rule in `auth_form.c`, since it cannot link the archive.
-- A Room is two objects sharing a lobby index — the domain `t_room` and the
-  runtime beside it — and `src/tetrisd/src/room.c` is the only module holding
-  either. Handlers ask the Room (`server_room_seat`, `server_room_start`,
-  `server_room_input`, `server_room_describe`, `server_room_resolve`) rather
-  than reaching through `->room`.
 - Audio is optional, and a warning-level dependency never reaches the install
   path: `check_deps.sh` warns about missing SDL2 and exits `0`, so audio gets
   its own step in `src/tetrisu/scripts/deps.sh` through `install_deps.sh audio`.
@@ -386,19 +389,13 @@ Merged from `dev`. Each line is a defect somebody paid for once.
 
 ## Docs
 
-- **A domain term you are about to invent** → `docs/CONTEXT.md` first, the
-  shared glossary
-- **Writing C, a Makefile, or a README** → the auto-invoked skills in
-  `.claude/skills/`; `c-style` discloses layout and test conventions,
-  `makefile-style` discloses dependency-script rules
-- **A design defect's history** → `docs/bugs/*.md`, one post-mortem each: what
-  broke, the fix, the lesson
-- **Why a hardening or migration was done the way it was** →
-  `docs/superpowers/{specs,plans}/`, completed work kept as a record. Each
-  carries a status banner; the component README, not the plan, is current
-- **Gameplay, ability text, or the economy** → `docs/use_cases.md`,
-  `docs/themes.md` (source of truth for ability text),
-  `docs/game-economics.md`
-- **Naming a new symbol or prefix** → `docs/naming.md` §2 is the live namespace
-- **Diagrams** → `docs/diagrams/`, per use case and per component
-- **A `.tetrishrc` key** → `.tetrishrc`, documented inline
+- `README.md` — project identity and context only; the detail lives in the per-component READMEs below
+- `lib/*/README.md`, `src/*/README.md` — each component's own scope, API, and build; `libhtttp` carries the protocol grammar and method table
+- `.tetrishrc` — the shell start-up file; its keys are documented inline as comments
+- `docs/CONTEXT.md` — the shared glossary; domain terms only, no implementation. Check a term here before inventing one
+- `docs/use_cases.md`, `docs/game-economics.md`, `docs/themes.md` — gameplay and economy specs. `themes.md` is the source of truth for ability text; `use_cases.md` carries a second table of the same abilities as server-enforced effects, kept in step with it
+- `docs/diagrams/class_and_sequence_diagrams/cd_sd_uc*.md` — per-use-case class, sequence, domain, and solution diagrams
+- `docs/diagrams/{component_diagrams,use_case_diagrams}/` — component and use-case diagrams
+- `docs/bugs/*.md` — post-mortem notes on design defects: what broke, the fix, and the lesson
+- `docs/naming.md` — naming conventions and the one-time rename that reached them. All three stages are applied, so the prefix map in §2 is the live namespace: check it before inventing a prefix. §4.3 and §5.4 record the two decisions `daemon_` forced, and §5.6 the one rename deliberately left undone
+- `.claude/skills/{c-style,makefile-style,readme-style}/` — the style guides these files are expected to follow, as auto-invoked skills. `c-style` discloses component layout to `LAYOUT.md` and test conventions to `TESTING.md`; `makefile-style` discloses dependency-script rules to `DEPS_SCRIPTS.md`

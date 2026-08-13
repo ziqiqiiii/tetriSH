@@ -37,8 +37,8 @@
 - [Profile, Settings & Leaderboard](#profile-settings--leaderboard)
   - [UC-20 — View Settings / Profile](#uc-20--view-settings--profile)
   - [UC-21 — View Leaderboard](#uc-21--view-leaderboard)
-- [Administration — `tetrisctl` Control Plane](#administration--tetrisctl-control-plane)
-  - [UC-22 — Query Server Status](#uc-22--query-server-status)
+- [Administration — the `tetrisctl` Control Channel](#administration--the-tetrisctl-control-channel)
+  - [UC-22 — Query Server Health](#uc-22--query-server-health)
   - [UC-23 — Graceful Shutdown](#uc-23--graceful-shutdown)
   - [UC-24 — Kick Player](#uc-24--kick-player)
   - [UC-25 — List Rooms](#uc-25--list-rooms)
@@ -56,7 +56,7 @@
 | **Guest** | An unauthenticated user. Can only register or log in. |
 | **Player** | An authenticated user. Primary actor for all gameplay, marketplace, settings, and lobby use cases. |
 | **Room Owner** | A specialization of Player who created a room; gains room-control use cases (Start Game). |
-| **Administrator** | An operator with filesystem access to `tetrisd`'s control socket. Primary actor for all `tetrisctl` control-plane use cases (server status, shutdown, kick, list rooms/players, dropped-log queries). |
+| **Administrator** | An operator with filesystem access to `tetrisd`'s Control channel. Primary actor for every `tetrisctl` administration use case (health, shutdown, kick, list rooms/players, dropped-record queries). Never a Player, and holds no standing in the game. |
 | **Game Server (tetrisd)** | Supporting actor. Server-authoritative game loop; validates moves, pushes board STATE. Holds all room/lobby/live-game state in memory. Also mediates purchases and equips (calling the persistence layer for wallet/inventory changes) and owns room chat and system narration. |
 | **Logger Daemon (tetrislogd)** | Supporting actor. Separate logger process; receives log records over IPC and survives `tetrisd` restarts; tracks dropped-record counts under IPC pressure. |
 | **DB** | Custom DB |
@@ -98,8 +98,8 @@ Every use case's wire request and the status codes it can return. Two transports
 
 - **HTTTP → tetrisd**
     - the fixed game protocol (`METHOD PATH HTTTP/1.0`) over the authenticated TCP session. `tetrisd` serves every client-facing method — gameplay, chat, abilities, and the marketplace/profile/leaderboard calls — over this one session.
-- **tetrisctl → HTTTP → tetrisd (control socket)**
-    - `tetrisctl`'s admin channel: same wire format, over a local-only Unix control socket instead of the public TCP port.
+- **tetrisctl → HTTTP → tetrisd (Control channel)**
+    - the Administrator's way in: the same wire format, over a local-only Unix socket instead of the public TCP port, and with no session and no `Player-Id`.
 
 | UC | Request (wire) | Transport | Success | Error statuses |
 |---|---|---|---|---|
@@ -130,12 +130,12 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-20 View Settings | `PROFILE /player/<pid>` (+ rank) | HTTTP → tetrisd | `200` (player doc + rank) | `403` another player • `500` |
 | UC-14 Activate Ability | `ABILITY /room/<id>/player/<pid>` body `{ability}` | HTTTP → tetrisd | `200` applied | `403` not owned • `409` insufficient charge or otherwise ineligible |
 | UC-21 View Leaderboard | `LEADERBOARD /leaderboard` (top-N) | HTTTP → tetrisd | `200` (top entries) | `500` |
-| UC-22 Query Server Status | `STATUS /admin` | HTTTP → tetrisd (control) | `200` (status snapshot) | `500` |
-| UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (control) | `200` (shutdown complete) | `500` |
-| UC-24 Kick Player | `KICK /admin/player/<pid>` | HTTTP → tetrisd (control) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
-| UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (control) | `200` (room list) | `500` |
-| UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (control) | `200` (player list) | `500` |
-| UC-27 Query Dropped Logs | `DROPPED-LOGS /admin` | HTTTP → tetrisd (control) | `200` (dropped count) | — |
+| UC-22 Query Server Health | `STATUS /admin` | HTTTP → tetrisd (Control channel) | `200` (Health) | `500` |
+| UC-23 Graceful Shutdown | `SHUTDOWN /admin` | HTTTP → tetrisd (Control channel) | `202` (teardown started) | `500` |
+| UC-24 Kick Player | `KICK /admin/player/<username>` | HTTTP → tetrisd (Control channel) | `200` (kicked) | • `404` no such player<br>• `400` bad argument |
+| UC-25 List Rooms | `ROOMS /admin` | HTTTP → tetrisd (Control channel) | `200` (room list) | `500` |
+| UC-26 List Players | `PLAYERS /admin` | HTTTP → tetrisd (Control channel) | `200` (player list) | `500` |
+| UC-27 Query Dropped Logs | `DROPPED /admin` | HTTTP → tetrisd (Control channel) | `200` (dropped count) | — |
 
 ---
 
@@ -1140,45 +1140,53 @@ A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.m
 
 ---
 
-## Administration — `tetrisctl` Control Plane
+## Administration — the `tetrisctl` Control Channel
 
 **Transport**
 
-- Unix domain socket, path from `.tetrishrc` — local-only, not the public TCP game port.
-- Served by `tetrisd`'s dedicated `ctl_listener_thread`, separate from the public TCP accept loop, so admin control stays responsive even if the game port is flooded (e.g. `tetrisctl shutdown` still works under load).
+- Unix domain socket, mode `0600`, path from `TETRISD_CONTROL_PATH` in `.tetrishrc` — local-only, not the public TCP game port. There is no compiled default: a socket path that silently works when unconfigured is how two components end up bound to different sockets.
+- Served by `tetrisd`'s dedicated `ctl_listener_thread`, separate from the public TCP accept loop. **The thread owns the socket and nothing else** — it accepts, reads, parses, serialises and writes; every answer is computed on the reactor, which it reaches over the existing wake fd and waits on. That division is the point: the reactor remains the single owner of all mutable game state, so serving `ROOMS`, `PLAYERS` and `KICK` needs no lock over the registry or the room directory. See `docs/adr/0001`, which this supersedes, for the reasoning that was overturned and the part of it that survives.
+- Admin requests serialise. The thread polls its own descriptors so a wedged administrator cannot stall the other three connections, and at most four connections are accepted: `tetrisctl` opens one, sends one request and exits.
 - Client is `tetrisctl`, a separate binary from the player-facing game client.
-- AuthZ is by filesystem permissions on the socket, not `Player-Id`/session-based.
-- Every admin action is timestamped and forwarded to `tetrislogd`.
+- AuthZ is by filesystem permissions on the socket, not `Player-Id`/session-based. Nothing arriving here names a Player — the reachability *is* the credential.
+- Every admin exchange is one Access line, timestamped and forwarded to `tetrislogd`, with the sender rendered `(admin)`.
 
 **Wire format**
 
 - Fixed to HTTTP — same protocol as the public game traffic, not a bespoke admin format.
+- Framed by the same 4-byte length prefix the game path uses, but plaintext: there is no session here, so nothing is encrypted and nothing is negotiated.
 - Same `libhtttp` parses/serializes both `tetrisctl` requests and `tetrisd` responses.
-- Same HTTTP status code set, no separate admin-specific codes.
+- Bodies are `libstatusbody`, `Content-Type: application/tetris-status` — the same whitespace-delimited codecs `tetrisu` decodes. There is no JSON anywhere in tetriSH.
+- Same HTTTP status code set, no separate admin-specific codes. `SHUTDOWN` introduces `202 Accepted`, which `libhtttp` owns like every other status code.
 
 ---
 
-### UC-22 — Query Server Status
+### UC-22 — Query Server Health
 
 | Field | Content |
 |---|---|
 | **ID** | UC-22 |
 | **Primary Actor** | Administrator |
-| **Goal** | Retrieve a health/status snapshot of the running daemon. |
-| **Preconditions** | `tetrisd` is running; the control socket exists and the operator can reach it. |
-| **Postconditions (success)** | A status snapshot (uptime, room count, player/connection count, tick rate, health) is returned to the operator; the query is logged. No server state changes. |
+| **Goal** | Retrieve the running daemon's Health — the report of its own condition. |
+| **Preconditions** | `tetrisd` is running; the Control channel exists and the operator can reach it. |
+| **Postconditions (success)** | Health (pid, uptime, connections, rooms, configured tick interval, whether records are reaching the Sink) is returned to the operator; the query is logged. No server state changes. |
 | **Trigger** | Operator runs `tetrisctl status`. |
-| **Request** | `STATUS /admin HTTTP/1.0` over the control socket (control IPC, local). |
-| **Return** | • `200 OK` + status body<br>• `500` internal error |
+| **Request** | `STATUS /admin HTTTP/1.0` over the Control channel. |
+| **Return** | • `200 OK` + Health body<br>• `500` internal error |
 
 **Main Success Scenario**
-1. Operator runs `tetrisctl status`.
-2. `tetrisctl` connects to the control socket and sends `STATUS /admin`.
-3. `ctl_listener_thread` gathers a snapshot (uptime, rooms, players/connections, tick rate) and replies `200 OK` with the body.
-4. `tetrisctl` prints the snapshot and exits; the action is logged.
+1. Operator runs `tetrisctl status`. It first reports each daemon's pidfile lock — the question that needs no running server — and then asks `tetrisd` for its Health.
+2. `tetrisctl` connects to the Control channel and sends `STATUS /admin`.
+3. `ctl_listener_thread` hands the request to the reactor, which assembles Health and replies `200 OK` with the body.
+4. `tetrisctl` prints it and exits; the exchange is logged.
 
 **Extensions / Alternate Flows**
-- **2a. Control socket missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach control plane" and exits non-zero (no `tetrisd` response).
+- **2a. Control channel missing/unreachable:** `tetrisctl` prints "daemon not running / cannot reach the control channel" and exits non-zero. The pidfile lines from step 1 are still printed — a stopped daemon is a successful report, and that is what `status` can honestly say about it.
+
+**Notes**
+- Health is assembled once and rendered twice. `SIGUSR1` dumps the same structure as a log line; `STATUS` encodes it as a body. One assembler, two renderers, so the two can never disagree about what the server is doing.
+- The tick interval reported is the **configured** one (`TETRISD_TICK_MS`), and is labelled as configured. Nothing measures an observed rate today, and echoing `.tetrishrc` back while implying measurement would be worse than saying nothing.
+- There is no "health" *field*. The fields are the Health; a daemon that answers at all has already reported the only summary judgement it could make.
 
 **Related Use Cases**
 - None.
@@ -1186,7 +1194,7 @@ A **Target** is the player an offensive ability lands on ([CONTEXT.md](CONTEXT.m
 **Example**
 
 ```
-GET /admin/status HTTTP/1.0
+STATUS /admin HTTTP/1.0
 Host: tetrish.local
 Client: tetrisctl
 ```
@@ -1194,10 +1202,15 @@ Client: tetrisctl
 ```
 HTTTP/1.0 200 OK
 Date: Tue, 21 Jul 2026 09:14:02 GMT
-Content-Type: application/json
-Content-Length: 97
+Content-Type: application/tetris-status
+Content-Length: 85
 
-{"uptime_s":8412,"rooms":3,"players":7,"tcp_listener":"up","logd":"connected","pid":4123}
+pid 4123
+uptime_ms 8412000
+connections 7
+rooms 3
+tick_ms 12 configured
+sink reaching
 ```
 
 ---
@@ -1210,22 +1223,30 @@ Content-Length: 97
 | **Primary Actor** | Administrator |
 | **Goal** | Stop `tetrisd` cleanly without data loss, even under load. |
 | **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the control socket, and exits. |
-| **Trigger** | Operator runs `tetrisctl shutdown`. |
-| **Request** | `SHUTDOWN /admin HTTTP/1.0` over the control socket (equivalently triggers the same path as `SIGTERM`). `tetrisctl` blocks on the response — it does not return control until `tetrisd` has finished tearing down. |
-| **Return** | • `200 OK` (shutdown complete, daemon has exited)<br>• `500` |
+| **Postconditions (success)** | Daemon stops accepting new connections, drains in-flight work, **flushes persistence (`db_close` → final fsync)** and log records, closes the Control channel, and exits. |
+| **Trigger** | Operator runs `tetrisctl stop`. |
+| **Request** | `SHUTDOWN /admin HTTTP/1.0` over the Control channel. The handler sets the same flag `SIGTERM` sets, and answers **before** teardown begins. |
+| **Return** | • `202 Accepted` (teardown accepted and started)<br>• `500` |
 
 **Main Success Scenario**
-1. Operator runs `tetrisctl shutdown` (works even while the public TCP port is flooded, because the control listener is a separate thread).
-2. `tetrisctl` sends `SHUTDOWN /admin` and blocks, awaiting a response.
-3. `tetrisd` stops accepting new TCP connections and stops room tickers.
-4. In-flight rooms are ended/notified; pending log records are shipped to `tetrislogd`.
-5. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
-6. `tetrisd` frees resources; the control listener replies `200 OK`, then `tetrisd` closes the control socket and exits.
-7. `tetrisctl` receives `200 OK`, prints confirmation that the server has shut down, and exits.
+1. Operator runs `tetrisctl stop`.
+2. `tetrisctl` sends `SHUTDOWN /admin`.
+3. The reactor pushes one Narration line to every Room — the server announcing its own exit — flushes, and sets the teardown flag. The control thread writes `202 Accepted`.
+4. `tetrisd` stops accepting new TCP connections and stops room tickers.
+5. In-flight rooms are ended; pending log records are shipped to `tetrislogd`.
+6. Persistence is closed cleanly: `db_close` stops the flusher and performs a **final fsync** of the append-only player log.
+7. `tetrisd` frees resources, joins the control thread once its reply has drained, closes the Control channel and exits — releasing the pidfile lock as its last act.
+8. `tetrisctl` blocks on that lock. When it comes free, the process is gone, and `tetrisctl` prints confirmation and exits.
 
 **Extensions / Alternate Flows**
-- **4a. A game is mid-play:** terminate it, on tetrisu show countdown timer for `server shutting down in 10s`; **no `db_record_game` for unfinished games** (consistent with UC-10/11/12 quit rule).
+- **3a. A game is mid-play:** it ends with the rest; **no `db_record_game` for unfinished games** (consistent with the UC-10/11/12 quit rule, and with Forfeit).
+- **8a. No answer within `TETRISCTL_STOP_MS`:** `tetrisctl` escalates — `SIGTERM`, then the same blocking wait on the pidfile lock. The escalation is why an unreachable Control channel cannot leave a daemon running.
+
+**Notes**
+- **Why `202` and not `200`.** At the moment the reply is written, the only true statement is that teardown has been accepted and started. `200 OK` would claim a completion the daemon cannot have observed, and a reply flushed *after* teardown would require the reactor to write while committed to dying — a state it is never in. See `docs/adr/0003`.
+- **The pidfile lock, not the status code, is the proof.** It comes free as the daemon's last act, after the drain, the final fsync and the exit line. That is what makes a returning `tetrisctl stop` mean "gone" rather than "signalled", and it is unchanged by the existence of a wire method.
+- **The announcement does not wait.** There is no countdown and no grace period. `tetrisu` already degrades on every screen when the socket dies — a match freezes and reads `CONNECTION LOST - THE MATCH IS OVER`, Solo falls back to local rules, and each other screen has its own offline text — so a wait would add warning to a path that already works. A wait long enough to be useful also exceeds `TETRISCTL_STOP_MS`, which would make `tetrisctl stop` report failure on a shutdown that succeeded, and a wait that is a *condition* rather than a deadline lets one wedged client veto shutdown entirely. The Narration keeps the part with the value: the player learns the server chose to stop.
+- `tetrislogd` has no Control channel, so `tetrisctl stop` reaches it by `SIGTERM` alone. Which daemons have a channel is compiled into `tetrisctl` beside the name→pidfile-key mapping it already carries — the same kind of knowledge about the programs, rather than about a deployment of them. Teardown order is unaffected: the logger still outlives the shutdown it records.
 
 **Related Use Cases**
 - None.
@@ -1239,12 +1260,9 @@ Client: tetrisctl
 ```
 
 ```
-HTTTP/1.0 200 OK
+HTTTP/1.0 202 Accepted
 Date: Tue, 21 Jul 2026 09:15:44 GMT
-Content-Type: application/json
-Content-Length: 18
-
-{"shutdown":true}
+Content-Length: 0
 ```
 
 ---
@@ -1255,20 +1273,24 @@ Content-Length: 18
 |---|---|
 | **ID** | UC-24  |
 | **Primary Actor** | Administrator |
-| **Goal** | Forcibly disconnect a player and update their room. |
+| **Goal** | Forcibly disconnect a player from the server and update their room. |
 | **Preconditions** | `tetrisd` is running; target player is connected. |
 | **Postconditions (success)** | The player's session is closed, their slot in any room is freed (ownership transfers per UC-07a if they owned the room), the room update is broadcast, and the action is logged. |
-| **Trigger** | Operator runs `tetrisctl kick <player>`. |
-| **Request** | `KICK /admin/player/<pid> HTTTP/1.0` over the control socket. |
+| **Trigger** | Operator runs `tetrisctl kick <username>`. |
+| **Request** | `KICK /admin/player/<username> HTTTP/1.0` over the Control channel. |
 | **Return** | • `200 OK` (kicked)<br>• `404` no such connected player<br>• `400` bad argument |
 
 **Main Success Scenario**
-1. Operator runs `tetrisctl kick <player>`.
-2. `tetrisd` locates the player's session, closes it, frees their room slot, and (if they were Room Owner) transfers ownership and broadcasts the room update → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
+1. Operator runs `tetrisctl kick <username>`.
+2. `tetrisd` resolves the username against its connection registry, closes that session, frees their room slot, and (if they were Room Owner) transfers ownership and broadcasts the room update → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
 3. `tetrisd` replies `200 OK`; the action is logged.
 
 **Extensions / Alternate Flows**
-- **2a. Player not found / already gone (`404`):** No change; operator informed.
+- **2a. Player not found / already gone (`404`):** No change; operator informed. `tetrisctl` exits `2` — the daemon answered, and the answer is no, which a script must be able to tell apart from a daemon it could not reach.
+
+**Notes**
+- **A kick is a Forfeit, by way of a disconnection.** It closes the session, so it reaches the game through the path a dropped connection already takes. That is what makes it inherit ownership transfer and the rule that an unfinished game is never recorded, without either being restated as an admin-specific rule.
+- **The target is a username, not a `Player-Id`.** The id is an internal handle; the operator reading UC-26's listing, or talking to the person being kicked, knows a name. Making the CLI perform a lookup round-trip to use its own kick verb would be a worse interface than making the daemon perform a comparison it already performs at login.
 
 **Related Use Cases**
 - `«include»` UC-07a Transfer Room Ownership.
@@ -1276,13 +1298,9 @@ Content-Length: 18
 **Example**
 
 ```
-KICK /admin/player/p17 HTTTP/1.0
+KICK /admin/player/alice HTTTP/1.0
 Host: tetrish.local
 Client: tetrisctl
-Content-Type: application/tetris-command
-Content-Length: 19
-
-{"reason":"admin"}
 ```
 
 ```
@@ -1301,18 +1319,23 @@ Content-Length: 0
 | **Primary Actor** | Administrator |
 | **Goal** | Get a live snapshot of all rooms on the running daemon. |
 | **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | The current room directory is returned (id, mode, players, state, owner); no state changes; the query is logged. |
+| **Postconditions (success)** | The current room directory is returned (name, mode, occupancy, status, owner); no state changes; the query is logged. |
 | **Trigger** | Operator runs `tetrisctl rooms`. |
-| **Request** | `ROOMS /admin HTTTP/1.0` over the control socket. |
+| **Request** | `ROOMS /admin HTTTP/1.0` over the Control channel. |
 | **Return** | • `200 OK` + room list<br>• `500` |
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl rooms`.
-2. `tetrisd` reads its in-memory room directory (under the room-directory lock) — the same runtime data the lobby shows (UC-03), but retrieved via the control plane.
+2. The reactor reads its in-memory room directory — the same runtime data the lobby shows (UC-03), retrieved over the Control channel instead of a session. No lock is involved: the reactor owns that directory.
 3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
 
 **Extensions / Alternate Flows**
-- **2a. No open rooms:** `200 OK` with an empty list.
+- **2a. No open rooms:** `200 OK` with an empty body. An empty list is a valid body, not an error.
+- **2b. More rooms than the listing cap:** the body carries the first N rows and an `Omitted: <n>` header. Status stays `200` — it is a complete answer to what was asked.
+
+**Notes**
+- The rows are `body_rooms_encode`'s, unchanged: `<name> <mode> <players>/<slots> <status> <owner>`, one line each. UC-25 is the same data as UC-03, so it is the same codec — one row type means the lobby's view and the Administrator's cannot drift apart. There is no tick counter in the row; it is the one number an operator cannot act on.
+- The cap is a **row count**, not a byte count, so a fixture can prove truncation and a reader can predict it. The omitted count travels as a header because the listing body is a bare sequence of rows with no place to put it.
 
 **Related Use Cases**
 - Same underlying data as UC-03 Browse Open Rooms (runtime, not DB).
@@ -1320,7 +1343,7 @@ Content-Length: 0
 **Example**
 
 ```
-GET /admin/rooms HTTTP/1.0
+ROOMS /admin HTTTP/1.0
 Host: tetrish.local
 Client: tetrisctl
 ```
@@ -1328,10 +1351,11 @@ Client: tetrisctl
 ```
 HTTTP/1.0 200 OK
 Date: Tue, 21 Jul 2026 09:16:10 GMT
-Content-Type: application/json
-Content-Length: 113
+Content-Type: application/tetris-status
+Content-Length: 67
 
-{"rooms":[{"id":"main","players":4,"state":"RUNNING","tick":48124},{"id":"lobby2","players":1,"state":"WAITING"}]}
+main BATTLE_ROYALE 4/4 IN_GAME alice
+lobby2 DOUBLE 1/2 WAITING bob
 ```
 
 ---
@@ -1344,26 +1368,31 @@ Content-Length: 113
 | **Primary Actor** | Administrator |
 | **Goal** | List the currently connected players / sessions. |
 | **Preconditions** | `tetrisd` is running. |
-| **Postconditions (success)** | Connected players are returned (player id, username, current room, session/connection info); no state changes; the query is logged. |
+| **Postconditions (success)** | Connected players are returned (connection id, username, current room); no state changes; the query is logged. |
 | **Trigger** | Operator runs `tetrisctl players`. |
-| **Request** | `PLAYERS /admin HTTTP/1.0` over the control socket. |
+| **Request** | `PLAYERS /admin HTTTP/1.0` over the Control channel. |
 | **Return** | • `200 OK` + player list<br>• `500` |
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl players`.
-2. `tetrisd` reads its connection/session table (under the appropriate lock) and assembles the connected-player list.
+2. The reactor walks its connection registry and assembles the connected-player list. No lock is involved: the registry has none, because the reactor is its only owner.
 3. `tetrisd` replies `200 OK` with the list; `tetrisctl` prints it; the query is logged.
 
 **Extensions / Alternate Flows**
-- **2a. No one connected:** `200 OK` with an empty list.
+- **2a. No one connected:** `200 OK` with an empty body.
+- **2b. More connections than the listing cap:** first N rows plus an `Omitted: <n>` header, as UC-25.
+
+**Notes**
+- A connection that has not logged in yet is a Client but not a Player. It is still listed — an Administrator deciding whether the server is busy needs the connection count, not just the authenticated part of it — and its username column reads `(anonymous)`, the same word the Access line uses for it.
+- Rows are a new codec, `body_players_*`: nothing existing carries connected-session data, and the lobby has no equivalent view to share.
 
 **Related Use Cases**
-- Provides the `<player>` targets for UC-24 Kick Player.
+- Provides the `<username>` targets for UC-24 Kick Player.
 
 **Example**
 
 ```
-GET /admin/players HTTTP/1.0
+PLAYERS /admin HTTTP/1.0
 Host: tetrish.local
 Client: tetrisctl
 ```
@@ -1371,10 +1400,12 @@ Client: tetrisctl
 ```
 HTTTP/1.0 200 OK
 Date: Tue, 21 Jul 2026 09:16:31 GMT
-Content-Type: application/json
-Content-Length: 104
+Content-Type: application/tetris-status
+Content-Length: 43
 
-{"players":[{"id":"p17","user":"alice","room":"main","score":9100},{"id":"p18","user":"bob","room":"main"}]}
+17 alice main
+18 bob main
+19 (anonymous) -
 ```
 
 ---
@@ -1390,18 +1421,19 @@ Content-Length: 104
 | **Preconditions** | `tetrisd` is running. |
 | **Postconditions (success)** | The Dropped count is returned to the operator; no state changes; the query is logged. |
 | **Trigger** | Operator runs `tetrisctl dropped-logs`. |
-| **Request** | `DROPPED-LOGS /admin HTTTP/1.0` over the control socket. |
+| **Request** | `DROPPED /admin HTTTP/1.0` over the Control channel. |
 | **Return** | • `200 OK` + count |
 
 **Main Success Scenario**
 1. Operator runs `tetrisctl dropped-logs`.
-2. `tetrisd` receives `DROPPED-LOGS /admin` and reads its own ring-buffer counter (`ring_dropped_count`).
+2. `tetrisd` receives `DROPPED /admin` and reads its own ring-buffer counter (`ring_dropped_count`, via `logger_dropped_count`).
 3. `tetrisd` replies `200 OK` with the count, labelled as producer-side Dropped records.
 4. `tetrisctl` prints the count; the query is logged.
 
 **Notes**
+- **The wire method is `DROPPED`; the CLI verb is `dropped-logs`.** The glossary term is Dropped on its own — it already counts Log records, so `DROPPED-LOGS` folds the counter and its unit into one token, and it would be the only two-word method in a table of nineteen single words. The operator's verb keeps the longer name because at a terminal, `dropped-logs` says what it fetches.
 - The log IPC channel is a one-way datagram socket, so `tetrisd` cannot query the logger over it. Dropped is a quantity only `tetrisd` can observe anyway: the record never left the ring.
-- `tetrislogd` owns two *different* counters — Rejected (arrived malformed) and Degraded (valid, sink unavailable, written to stderr). They are not Dropped records and must not be added to this total. Until `tetrisctl` gains a control channel to the logger, they surface in the log file itself at boot, on rotation, on `SIGUSR1`, and at shutdown.
+- `tetrislogd` owns two *different* counters — Rejected (arrived malformed) and Degraded (valid, sink unavailable, written to stderr). They are not Dropped records and must not be added to this total. `tetrislogd` has no Control channel, so they surface in the log file itself at boot, on rotation, on `SIGUSR1`, and at shutdown. The body is a codec rather than a bare integer precisely so those two can join it if that ever changes.
 - The state of the logger does not affect this response: `tetrisd` falls back to stderr when the logger is absent, so there is no "logger unreachable" failure to report here.
 
 **Related Use Cases**
@@ -1410,7 +1442,7 @@ Content-Length: 104
 **Example**
 
 ```
-GET /admin/logs/dropped HTTTP/1.0
+DROPPED /admin HTTTP/1.0
 Host: tetrish.local
 Client: tetrisctl
 ```
@@ -1418,10 +1450,10 @@ Client: tetrisctl
 ```
 HTTTP/1.0 200 OK
 Date: Tue, 21 Jul 2026 09:19:05 GMT
-Content-Type: application/json
-Content-Length: 44
+Content-Type: application/tetris-status
+Content-Length: 12
 
-{"logd_dropped":152,"tetrisd_local_dropped":8}
+dropped 152
 ```
 
 ---

@@ -1,7 +1,6 @@
 #include "tetrisd.h"
 
 // Static Functions
-static size_t		list_rooms(t_server *srv, t_body_room_row *rows);
 static int			read_mode(t_request_context *ctx, t_game_mode *out);
 static int			create_room(t_request_context *ctx, t_game_mode mode);
 static int			join_room(t_request_context *ctx, const char *name);
@@ -69,7 +68,7 @@ int	list_handler(const t_htttp_message *msg, void *context)
 	if (ctx->msg->path == NULL
 		|| strcmp(ctx->msg->path, TETRISD_ROUTE_ROOMS) != 0)
 		return (404);
-	count = list_rooms(ctx->srv, rows);
+	count = server_rooms_list(ctx->srv, rows, LOBBY_MAX_ROOMS);
 	len = body_rooms_encode(rows, count, ctx->body, sizeof(ctx->body));
 	if (len < 0)
 		return (500);
@@ -336,41 +335,3 @@ static t_server_room	*addressed_room(t_request_context *ctx,
 	return (server_room_resolve(ctx->srv, ctx->cli, *name));
 }
 
-/**
- * @brief Projects the lobby onto wire-facing room rows.
- *
- * Rooms nobody is sitting in are skipped: they have no owner to name.
- *
- * @param srv Server whose lobby is listed.
- * @param rows Receives up to LOBBY_MAX_ROOMS rows.
- * @return Number of rows written.
- */
-static size_t	list_rooms(t_server *srv, t_body_room_row *rows)
-{
-	t_room_snapshot	snaps[LOBBY_MAX_ROOMS];
-	size_t			count;
-	size_t			written;
-	size_t			i;
-
-	count = lobby_list_all(&srv->lobby, snaps, LOBBY_MAX_ROOMS);
-	i = 0;
-	written = 0;
-	while (i < count)
-	{
-		if (snaps[i].summary.players > 0)
-		{
-			memset(&rows[written], 0, sizeof(rows[written]));
-			snprintf(rows[written].name, sizeof(rows[written].name), "%s",
-				snaps[i].summary.name);
-			rows[written].mode = (t_body_mode)snaps[i].summary.mode;
-			rows[written].players = snaps[i].summary.players;
-			rows[written].slot_count = snaps[i].summary.slot_count;
-			rows[written].status = (t_body_room_status)snaps[i].summary.status;
-			snprintf(rows[written].owner, sizeof(rows[written].owner), "%s",
-				snaps[i].summary.owner_name);
-			written++;
-		}
-		i++;
-	}
-	return (written);
-}

@@ -120,6 +120,19 @@ so `tetrisd`'s room runtime could not use it.
 | `body_` | `libstatusbody` | body codecs |
 | `logrecord_` `ring_` `selfpipe_` `unixsock_` `msgqueue_` | `libcoreipc` | IPC primitives |
 | `daemon_` | `libcoredaemon` | daemonising — but see §4.3 |
+| `ctl_` | `tetrisd` | the Control channel — its thread, its connections, its handlers |
+
+`ctl_` is the one abbreviation this document knowingly admits, and the
+exception is recorded rather than hidden. §3.3 is a table whose whole content
+is expanding prefixes exactly like it — `cfg_`, `cli_`, `reg_`, `ob_`, `req_` —
+so `control_` was the consistent choice and was not taken. What earns the
+exception is that `ctl` is not a coinage in this codebase's vocabulary: the
+binary at the other end of the channel is `tetrisctl`, the roster key is
+`TETRISCTL_DAEMONS`, and `systemctl`/`journalctl`/`ioctl` mean a reader who has
+never opened the header still passes §1's test. The prose term is spelled out
+in full — `docs/CONTEXT.md` defines **Control channel**, and no document should
+call it a "ctl" — so the glossary and the symbols differ deliberately here,
+which is the thing worth knowing before you read either.
 
 Note `log_` in that table. `libmacminidb` already owns it internally, and
 `tetrisd` also defines `log_init`, `log_emit`, `log_shutdown`. They do not

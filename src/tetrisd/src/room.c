@@ -1054,6 +1054,54 @@ bool	server_room_describe(const t_server_room *server_room,
 }
 
 /**
+ * @brief Fills the room-directory rows both LIST /rooms and ROOMS /admin send.
+ *
+ * One function rather than two because UC-25 is the same data as UC-03 seen
+ * from the Control channel. Two builders over one codec would be two places
+ * for a room's occupancy to be read differently, and the lobby's view and the
+ * Administrator's would drift without either being wrong on its own.
+ *
+ * An empty room is skipped: a room is destroyed when its last player leaves,
+ * so a row with nobody in it describes a room that no longer exists.
+ *
+ * @param srv Server whose lobby is listed.
+ * @param rows Caller array receiving the rows.
+ * @param cap Capacity of rows; the listing stops there.
+ * @return How many rows were written.
+ */
+size_t	server_rooms_list(t_server *srv, t_body_room_row *rows, size_t cap)
+{
+	t_room_snapshot	snaps[LOBBY_MAX_ROOMS];
+	size_t			count;
+	size_t			written;
+	size_t			i;
+
+	if (srv == NULL || rows == NULL)
+		return (0);
+	count = lobby_list_all(&srv->lobby, snaps, LOBBY_MAX_ROOMS);
+	i = 0;
+	written = 0;
+	while (i < count && written < cap)
+	{
+		if (snaps[i].summary.players > 0)
+		{
+			memset(&rows[written], 0, sizeof(rows[written]));
+			snprintf(rows[written].name, sizeof(rows[written].name), "%s",
+				snaps[i].summary.name);
+			rows[written].mode = (t_body_mode)snaps[i].summary.mode;
+			rows[written].players = snaps[i].summary.players;
+			rows[written].slot_count = snaps[i].summary.slot_count;
+			rows[written].status = (t_body_room_status)snaps[i].summary.status;
+			snprintf(rows[written].owner, sizeof(rows[written].owner), "%s",
+				snaps[i].summary.owner_name);
+			written++;
+		}
+		i++;
+	}
+	return (written);
+}
+
+/**
  * @brief Projects an authoritative room and its occupied seats for a client.
  *
  * The wire model is compact but preserves server slot order. Keeping the

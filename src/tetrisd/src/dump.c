@@ -36,19 +36,56 @@ void	server_state_dump(t_server *srv)
 }
 
 /**
+ * @brief Collects the server's Health - its report of its own condition.
+ *
+ * This is the assembler behind both renderings of Health. SIGUSR1 writes it as
+ * a log line through dump_header; STATUS /admin encodes it as a body. One
+ * assembler and two renderers, so the two can never disagree about what the
+ * server is doing.
+ *
+ * The tick interval reported is the configured one. Nothing here measures an
+ * observed rate, which is why the wire labels the number `configured` rather
+ * than letting a reader assume it was counted.
+ *
+ * @param srv Server to describe.
+ * @param out Receives the report; untouched when either argument is NULL.
+ */
+void	server_health_assemble(const t_server *srv, t_body_health *out)
+{
+	if (srv == NULL || out == NULL)
+		return ;
+	memset(out, 0, sizeof(*out));
+	out->pid = (int64_t)getpid();
+	out->uptime_ms = clock_now_ms() - srv->started_ms;
+	out->connections = (int)srv->reg.count;
+	out->rooms = (int)lobby_room_count(&srv->lobby);
+	out->tick_ms = srv->tick_ms;
+	out->sink_reaching = logger_sink_reaching(&srv->log);
+}
+
+/**
  * @brief Emits the settings the server is actually running with.
+ *
+ * The first line is Health, rendered as a log record. It is the same structure
+ * STATUS /admin answers with, so an operator reading the log and an operator
+ * asking over the Control channel are told the same numbers.
  *
  * @param srv Server to describe.
  */
 static void	dump_header(t_server *srv)
 {
-	uint64_t	uptime;
+	t_body_health	health;
 
-	uptime = (clock_now_ms() - srv->started_ms) / 1000;
+	server_health_assemble(srv, &health);
 	logger_emit(&srv->log, COREIPC_LOG_INFO,
-		"state dump: port %d, uptime %llus, tick %dms, max clients %d",
-		srv->port, (unsigned long long)uptime,
-		srv->tick_ms, srv->cfg.max_clients);
+		"state dump: pid %lld, uptime %llums, connections %d, rooms %d, "
+		"tick %dms configured, sink %s",
+		(long long)health.pid, (unsigned long long)health.uptime_ms,
+		health.connections, health.rooms, health.tick_ms,
+		health.sink_reaching ? "reaching" : "unreachable");
+	logger_emit(&srv->log, COREIPC_LOG_INFO,
+		"state dump: port %d, max clients %d", srv->port,
+		srv->cfg.max_clients);
 	logger_emit(&srv->log, COREIPC_LOG_INFO,
 		"state dump: rc %s, data %s, log ipc %s",
 		srv->cfg.rc_path, srv->cfg.data_dir, srv->cfg.log_ipc);
