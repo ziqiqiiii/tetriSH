@@ -78,15 +78,20 @@ void	test_buy_and_equip(void)
 
 	db = fresh_db();
 	assert(db_signup(db, "zoe", "h", "s", &id) == DB_OK);
-	// Character 2 (Mirurun) costs 10; fresh wallet is 0.
-	assert(db_buy_character(db, id, 2) == DB_INSUFFICIENT);
-	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
+	// Character 3 (Princess) costs 10; fresh wallet is 0.
+	assert(db_buy_character(db, id, 3) == DB_INSUFFICIENT);
+	// Character 2 (Mirurun) costs nothing, so the same empty wallet buys it.
+	// A free item is still bought rather than granted - it has to leave the
+	// same owned list and answer the same ownership probe as a paid one.
 	assert(db_buy_character(db, id, 2) == DB_OK);
 	assert(db_buy_character(db, id, 2) == DB_EXISTS);
+	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
+	assert(db_buy_character(db, id, 3) == DB_OK);
+	assert(db_buy_character(db, id, 3) == DB_EXISTS);
 	assert(db_equip_character(db, id, 2) == DB_OK);
-	assert(db_equip_character(db, id, 3) == DB_NOT_OWNED);
+	assert(db_equip_character(db, id, 4) == DB_NOT_OWNED);
 	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
-	assert(db_player_owns_character(db, id, 3) == DB_FALSE);
+	assert(db_player_owns_character(db, id, 4) == DB_FALSE);
 	// A NULL handle is undeterminable, not a plain "does not own".
 	assert(db_player_owns_character(NULL, id, 2) == DB_UNKNOWN);
 	assert(db_player_owns_theme(NULL, id, 1) == DB_UNKNOWN);
@@ -214,6 +219,10 @@ void	test_durability_roundtrip(void)
 	db = fresh_db();
 	assert(db_signup(db, "amber", "hashZ", "saltZ", &id) == DB_OK);
 	assert(db_record_game(db, id, 250, 1000, true) == DB_OK);
+	// One paid and one free, because they are recovered by the same replay and
+	// a free purchase writes an owned id with no wallet movement behind it -
+	// the half a "the wallet is right" assertion cannot see.
+	assert(db_buy_character(db, id, 3) == DB_OK);
 	assert(db_buy_character(db, id, 2) == DB_OK);
 	assert(db_equip_character(db, id, 2) == DB_OK);
 	db_close(db);
@@ -223,6 +232,7 @@ void	test_durability_roundtrip(void)
 	assert(out.wallet_points == 1000 - 10);
 	assert(out.current_equipped_character == 2);
 	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
+	assert(db_player_owns_character(db, id, 3) == DB_TRUE);
 	assert(db_rank(db, id, &rank) == DB_OK && rank == 1);
 	db_close(db);
 	printf("PASS test_durability_roundtrip\n");

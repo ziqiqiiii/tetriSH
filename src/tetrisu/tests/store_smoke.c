@@ -200,10 +200,13 @@ static int	check_a_free_theme_can_be_bought(t_app_data_provider *provider,
 }
 
 /**
- * @brief A character costs 10 and the wallet holds nothing.
+ * @brief A paid character costs 10 and the wallet holds nothing.
  *
  * The refusal is the server's - db_buy_* checks and deducts under one lock -
  * and the wallet afterwards proves it did not take the money on the way out.
+ *
+ * Character 3 and not 2: Mirurun is free, so an empty wallet affords it and the
+ * question this asks would have no answer.
  *
  * @param provider Provider bound to a signed-in session.
  * @param session The signed-in session.
@@ -215,13 +218,13 @@ static int	check_an_unaffordable_buy_is_refused(t_app_data_provider *provider,
 	t_app_settings_view_model	view;
 
 	memset(&view, 0, sizeof(view));
-	if (provider->buy_item(session, APP_CATALOGUE_CHARACTERS, 2, &view)
+	if (provider->buy_item(session, APP_CATALOGUE_CHARACTERS, 3, &view)
 		== APP_PROVIDER_OK)
 		return (0);
 	memset(&view, 0, sizeof(view));
 	if (provider->load_settings(session, &view) != APP_PROVIDER_OK)
 		return (0);
-	if (find_item(&view.characters, 2)->owned)
+	if (find_item(&view.characters, 3)->owned)
 		return (0);
 	if (view.profile.wallet_points != 0)
 		return (0);
