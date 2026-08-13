@@ -1504,7 +1504,16 @@ typedef enum e_room_feedback
 	 * refusing a fork or a pipe, and they cannot.
 	 */
 	ROOM_FEEDBACK_BOT_MISSING,
-	ROOM_FEEDBACK_BOT_UNAVAILABLE
+	ROOM_FEEDBACK_BOT_UNAVAILABLE,
+	/*
+	 * The third way, and the only one that is not known when B is pressed: the
+	 * child started and then stopped. Everything a bot can fail at - the server
+	 * having no account pool, a refused JOIN, a room that filled first - happens
+	 * after the fork has already succeeded, so B answered BOT ADDED and the
+	 * seat never appeared. This is what the room says instead once the process
+	 * is collected, and it names the log because the reason is written there.
+	 */
+	ROOM_FEEDBACK_BOT_LOST
 }	t_room_feedback;
 
 typedef enum e_room_action
@@ -3371,6 +3380,8 @@ bool			waiting_room_seat_ready(const t_app_room_view_model *room,
 					int position);
 bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
 					int position);
+int				waiting_room_bot_seat_count(const t_app_room_view_model *room);
+int				waiting_room_free_seats(const t_app_room_view_model *room);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,
 					int position, char *out, size_t size);
 const char		*waiting_room_badge_text(const t_app_room_view_model *room,

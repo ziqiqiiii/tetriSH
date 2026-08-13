@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 static void	test_double_needs_both_players_ready(void);
 static void	test_battle_royale_needs_four_and_everyone_ready(void);
@@ -13,6 +14,7 @@ static void	test_slot_labels_and_badges(void);
 static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
 static void	test_bot_keys_and_seat_marks(void);
+static void	test_free_seats_bound_what_b_may_fill(void);
 static void	test_the_legend_fits_the_narrowest_panel(void);
 static void	test_a_short_room_says_how_short_and_what_to_do(void);
 static void	test_the_newest_arrival_is_on_the_first_line(void);
@@ -34,6 +36,7 @@ int	main(void)
 	test_status_and_feedback_copy();
 	test_launch_action_matches_the_mode();
 	test_bot_keys_and_seat_marks();
+	test_free_seats_bound_what_b_may_fill();
 	test_the_legend_fits_the_narrowest_panel();
 	test_a_short_room_says_how_short_and_what_to_do();
 	test_the_newest_arrival_is_on_the_first_line();
@@ -143,6 +146,48 @@ static void	test_bot_keys_and_seat_marks(void)
 	assert(!waiting_room_seat_is_bot(&room, 99));
 	assert(!waiting_room_seat_is_bot(NULL, 0));
 	printf("PASS test_bot_keys_and_seat_marks\n");
+}
+
+/*
+** How many bots a room will take is a fact about its seats, and a Double room
+** is the case that says so: two seats with the player in one, so exactly one
+** bot fits and the second press of B is a process whose entire life is a
+** handshake and a refusal. main.c does the arithmetic - free seats against the
+** bots it has started that are not seated yet - and these are the two numbers
+** it does it with.
+**
+** A bot seat is counted off the roster rather than off the farm on purpose:
+** the two disagree by exactly the bot that is still connecting, which is the
+** gap the caller needs.
+*/
+static void	test_free_seats_bound_what_b_may_fill(void)
+{
+	t_app_room_view_model	room;
+
+	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 0);
+	assert(waiting_room_free_seats(&room) == 1);
+	assert(waiting_room_bot_seat_count(&room) == 0);
+	/* The bot arrives: the seat is gone and it is visibly a bot's. */
+	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 0);
+	snprintf(room.players[1].username, sizeof(room.players[1].username),
+		"BOT_01");
+	assert(waiting_room_free_seats(&room) == 0);
+	assert(waiting_room_bot_seat_count(&room) == 1);
+	/* A Battle Royale is ninety-nine seats, so the farm is what binds there. */
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 0);
+	assert(waiting_room_free_seats(&room) == APP_ROOM_MAX_PLAYERS - 1);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 0);
+	snprintf(room.players[2].username, sizeof(room.players[2].username),
+		"BOT_07");
+	snprintf(room.players[3].username, sizeof(room.players[3].username),
+		"BOT_08");
+	assert(waiting_room_bot_seat_count(&room) == 2);
+	/* Neither answer may be a guess when there is no room to read. */
+	assert(waiting_room_free_seats(NULL) == 0);
+	assert(waiting_room_bot_seat_count(NULL) == 0);
+	room.capacity = 0;
+	assert(waiting_room_free_seats(&room) == 0);
+	printf("PASS test_free_seats_bound_what_b_may_fill\n");
 }
 
 /*
@@ -617,6 +662,23 @@ static void	test_status_and_feedback_copy(void)
 	state.feedback = ROOM_FEEDBACK_VOLUME;
 	assert(strstr(waiting_room_feedback_text(&state, line, sizeof(line)),
 			"70%") != NULL);
+	/*
+	** Every bot outcome says something, the last one included. A bot fails
+	** after the fork has already succeeded, so BOT_ADDED is printed before
+	** anything can go wrong and BOT_LOST is the only line that ever corrects
+	** it - silence there is the bug this whole set is here for.
+	*/
+	feedback = ROOM_FEEDBACK_NEED_PLAYERS_BOT;
+	while (feedback <= ROOM_FEEDBACK_BOT_LOST)
+	{
+		state.feedback = (t_room_feedback)feedback;
+		assert(waiting_room_feedback_text(&state, line, sizeof(line))[0]
+			!= '\0');
+		feedback++;
+	}
+	state.feedback = ROOM_FEEDBACK_BOT_LOST;
+	assert(strstr(waiting_room_feedback_text(&state, line, sizeof(line)),
+			BOT_LOG_NAME) != NULL);
 	assert(!waiting_room_navigation_keys_coalesce(NCKEY_UP, NCKEY_UP));
 	assert(waiting_room_action_leaves_screen(ROOM_ACTION_LAUNCH));
 	assert(!waiting_room_action_leaves_screen(ROOM_ACTION_SEND_CHAT));

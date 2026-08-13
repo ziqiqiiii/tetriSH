@@ -135,6 +135,9 @@ static bool	send_room_chat(const t_app_data_provider *provider,
 					t_waiting_room_state *state);
 static void	refresh_waiting_room(const t_app_data_provider *provider,
 					t_mp_session *session, bool *changed);
+static void	reap_lost_bots(t_mp_session *session);
+static bool	can_add_bot(const t_mp_session *session);
+static int	pending_bots(const t_mp_session *session);
 static int	waiting_room_wait_ms(const t_waiting_room_state *state,
 					uint64_t countdown_deadline, uint64_t refresh_deadline,
 					bool polling);
@@ -1945,6 +1948,16 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 				refresh_deadline = now + WAITING_ROOM_REFRESH_MS;
 				refresh_waiting_room(provider, session, &room_changed);
 				/*
+				 * On the roster's own cadence, because a bot dying and a seat
+				 * vanishing are the same event seen from the two ends. It is
+				 * also the only thing that ever notices: nothing else in the
+				 * client waits on these children, so before this a bot that
+				 * was refused stayed in the farm as a zombie, held a place
+				 * against the limit of four, and left BOT ADDED on a screen
+				 * whose roster never grew.
+				 */
+				reap_lost_bots(session);
+				/*
 				 * A poll that found nothing at the other end is the room's
 				 * heartbeat failing. Staying here would leave the player
 				 * watching a roster that has stopped updating; leaving lets
@@ -2091,7 +2104,7 @@ static void	add_bot(t_mp_session *session)
 {
 	char	binary[BOT_PATH_MAX];
 
-	if (session->bots.count >= BOT_FARM_MAX)
+	if (!can_add_bot(session))
 	{
 		session->room_state.feedback = ROOM_FEEDBACK_BOT_LIMIT;
 		return ;
@@ -2108,6 +2121,71 @@ static void	add_bot(t_mp_session *session)
 		return ;
 	}
 	session->room_state.feedback = ROOM_FEEDBACK_BOT_ADDED;
+}
+
+/**
+ * @brief Would pressing B now actually put a bot in this room?
+ *
+ * Two limits, and the second is the one that was missing. Four is what this
+ * client will run at once; the free seats are what the room will take, and a
+ * Double room is two seats with the player in one of them - so a second B
+ * there forked a process whose whole life was a handshake and a refusal, while
+ * the screen said a bot had been added.
+ *
+ * Asked by the key and by the line that advertises the key, so the room cannot
+ * offer a way out that it will then turn down.
+ *
+ * @param session The multiplayer session, for its farm and its room.
+ * @return true when a bot may be started.
+ */
+static bool	can_add_bot(const t_mp_session *session)
+{
+	if (session->bots.count >= BOT_FARM_MAX)
+		return (false);
+	return (pending_bots(session)
+		< waiting_room_free_seats(&session->room_view.data.room));
+}
+
+/**
+ * @brief How many started bots have not taken a seat yet.
+ *
+ * The farm counts processes and the roster counts seats, and between pressing
+ * B and the next refresh the two disagree by exactly the bot that is still
+ * connecting. That difference is what a free seat has to be measured against:
+ * counting only the roster would let four presses of B spawn four bots into
+ * one empty seat.
+ *
+ * @param session The multiplayer session, for its farm and its room.
+ * @return The count, never negative.
+ */
+static int	pending_bots(const t_mp_session *session)
+{
+	int	pending;
+
+	pending = session->bots.count
+		- waiting_room_bot_seat_count(&session->room_view.data.room);
+	if (pending < 0)
+		return (0);
+	return (pending);
+}
+
+/**
+ * @brief Collect any bot that stopped on its own, and say that one did.
+ *
+ * A bot fails after the fork, not during it: the account pool, the JOIN, the
+ * room that filled first are all things the child learns over its own socket
+ * long after B answered BOT ADDED. So this is the only place the room can find
+ * out, and it finds out the one way a parent ever does - the child exited.
+ *
+ * The reason is not knowable from here and is not guessed at. It is in the
+ * bot's log, which is what the message points at.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+static void	reap_lost_bots(t_mp_session *session)
+{
+	if (bot_farm_reap_exited(&session->bots) > 0)
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_LOST;
 }
 
 /**
@@ -2174,7 +2252,7 @@ static t_room_feedback	start_blocker_for(t_mp_session *session,
 	if (blocker != ROOM_FEEDBACK_NEED_PLAYERS)
 		return (blocker);
 	session->room_state.feedback_value = waiting_room_players_needed(room);
-	if (session->bots.count < BOT_FARM_MAX)
+	if (can_add_bot(session))
 		return (ROOM_FEEDBACK_NEED_PLAYERS_BOT);
 	return (blocker);
 }

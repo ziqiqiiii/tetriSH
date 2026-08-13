@@ -719,6 +719,64 @@ bool	waiting_room_seat_is_bot(const t_app_room_view_model *room,
 }
 
 /**
+ * @brief How many of this room's seats are held by bots right now.
+ *
+ * Asked of the roster rather than of the farm, because the two answer different
+ * questions: the farm knows how many processes were started and the roster
+ * knows how many of them actually got in. A bot that was spawned and refused is
+ * in the first and not the second, which is exactly the gap this is here to
+ * measure.
+ *
+ * @param room Room snapshot to scan.
+ * @return The count, 0 when the room is empty or missing.
+ */
+int	waiting_room_bot_seat_count(const t_app_room_view_model *room)
+{
+	int	position;
+	int	occupied;
+	int	bots;
+
+	if (room == NULL)
+		return (0);
+	occupied = room->player_count;
+	if (occupied > APP_ROOM_MAX_PLAYERS)
+		occupied = APP_ROOM_MAX_PLAYERS;
+	bots = 0;
+	position = 0;
+	while (position < occupied)
+	{
+		if (waiting_room_seat_is_bot(room, position))
+			bots++;
+		position++;
+	}
+	return (bots);
+}
+
+/**
+ * @brief How many seats this room still has nobody in.
+ *
+ * The number B has to respect. A Double room is two seats and the player is
+ * one of them, so a second bot there is a process that is certain to be turned
+ * away at the door - it forks, connects, completes a handshake, is refused the
+ * room, and exits, while the screen says a bot was added. Counting the seats
+ * first is how that key answers honestly instead.
+ *
+ * @param room Room snapshot to measure.
+ * @return The free seat count, 0 when the room is full, invalid or missing.
+ */
+int	waiting_room_free_seats(const t_app_room_view_model *room)
+{
+	int	free_seats;
+
+	if (!valid_room_snapshot(room))
+		return (0);
+	free_seats = waiting_room_slot_count(room) - room->player_count;
+	if (free_seats < 0)
+		return (0);
+	return (free_seats);
+}
+
+/**
  * @brief Returns the ready badge printed beside one seat.
  *
  * @param room Room snapshot to read.
@@ -813,6 +871,8 @@ static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size)
 		snprintf(out, size, "NO tetrisu-bot FOUND - REBUILD TETRISU");
 	else if (feedback == ROOM_FEEDBACK_BOT_UNAVAILABLE)
 		snprintf(out, size, "NO BOT COULD BE STARTED");
+	else if (feedback == ROOM_FEEDBACK_BOT_LOST)
+		snprintf(out, size, "A BOT STOPPED - SEE " BOT_LOG_NAME);
 }
 
 /**
