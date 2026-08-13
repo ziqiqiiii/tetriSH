@@ -6,10 +6,9 @@ Part of the [ CoreStack Challenge 50.003 × 50.005 ](https://natalieagus.github.
 
 <p align="center">
   <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/cover.png" alt="Player manual cover" width="45%"></a>
-  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="45%"></a>
 </p>
 
-<p align="center"><em>Click either page for the <a href="docs/manual/tetrish-player-manual.pdf">twenty-page player manual</a>.</em></p>
+<p align="center"><em>Click the cover for the <a href="docs/manual/tetrish-player-manual.pdf">twenty-page player manual</a>.</em></p>
 
 ---
 
@@ -110,6 +109,10 @@ make play-image    # client built in a container instead
 ```
 
 Either installs what is missing, compiles it, opens a kitty window and starts the game in it. Every step checks before it acts, so re-running is how you restart.
+
+<p align="center">
+  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="62%"></a>
+</p>
 
 ---
 
