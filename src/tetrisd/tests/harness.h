@@ -32,10 +32,13 @@ typedef struct s_fixture
 	t_config		cfg;
 	char			dir[96];
 	char			ca_path[192];
+	int				log_fd;
 }	t_fixture;
 
 /* HARNESS.C */
 int		fx_start(t_fixture *fx);
+int		fx_start_logged(t_fixture *fx, int level);
+int		fx_log_wait(t_fixture *fx, const char *needle, t_log_record *out, int timeout_ms);
 void	fx_stop(t_fixture *fx);
 int		hc_connect(t_harness *hc, const t_fixture *fx);
 void	hc_close(t_harness *hc);

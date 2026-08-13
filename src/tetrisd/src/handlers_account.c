@@ -10,8 +10,7 @@ static void	to_hex(const unsigned char *bytes, size_t len, char *out);
 /**
  * @brief SIGNUP /account - registers a new player.
  *
- * The password never reaches the store: tetrisd salts and hashes it here, so
- * what is written (and what a stolen data directory would expose) is a hash.
+ * The password never reaches the store: it is salted and hashed here.
  *
  * @param msg The request (unused; the body is read through the context).
  * @param context The request context.
@@ -47,8 +46,8 @@ int	signup_handler(const t_htttp_message *msg, void *context)
 	res = db_signup(ctx->srv->db, username, hash, salt, &id);
 	if (res != DB_OK)
 		return (signup_status(res));
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "signup %s -> player %llu",
-		username, (unsigned long long)id);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u signup %s -> player %llu",
+		ctx->cli->conn_id, username, (unsigned long long)id);
 	request_body_printf(ctx, "player-id %llu\nusername %s\n",
 		(unsigned long long)id, username);
 	return (201);
@@ -57,9 +56,8 @@ int	signup_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief LOGIN /session - authenticates and binds the connection to a player.
  *
- * Identity is owned by the connection: there are no tokens, so the
- * player bound here is the only identity this socket can ever act as, and
- * every later request's Player-Id is checked against it.
+ * Identity is owned by the connection: there are no tokens, so every later
+ * request's Player-Id is checked against the player bound here.
  *
  * @param msg The request (unused; the body is read through the context).
  * @param context The request context.
@@ -87,8 +85,8 @@ int	login_handler(const t_htttp_message *msg, void *context)
 		return (500);
 	if (db_login(ctx->srv->db, username, hash, &player) != DB_OK)
 	{
-		logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING, "login refused for %s",
-			username);
+		logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING, "conn %u login refused for %s",
+			ctx->cli->conn_id, username);
 		return (401);
 	}
 	if (db_username_is_reserved(player.username)
@@ -96,8 +94,8 @@ int	login_handler(const t_htttp_message *msg, void *context)
 		return (409);
 	displace_previous(ctx, player.player_id);
 	bind_identity(ctx, &player);
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "login %s -> player %llu",
-		username, (unsigned long long)player.player_id);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u login %s -> player %llu",
+		ctx->cli->conn_id, username, (unsigned long long)player.player_id);
 	request_body_printf(ctx, "player-id %llu\nusername %s\nscore %lld\nwallet %lld\n",
 		(unsigned long long)player.player_id, player.username,
 		(long long)player.leaderboard_score, (long long)player.wallet_points);
@@ -108,8 +106,8 @@ int	login_handler(const t_htttp_message *msg, void *context)
  * @brief Hashes a password with its account's salt.
  *
  * SHA-256 over salt-then-password, written as the 64 hex characters the store
- * expects. The salt is always DB_SALT_LEN bytes and is never NUL-terminated
- * on the store's side, so its length is fixed rather than measured.
+ * expects. The salt's length is fixed rather than measured, because the store
+ * never NUL-terminates it.
  *
  * @param password The plaintext password.
  * @param salt The account's salt, at least DB_SALT_LEN bytes.
@@ -193,16 +191,10 @@ static int	signup_status(t_db_result res)
 /**
  * @brief Ends any older connection still acting as the player logging in.
  *
- * A player has one connection at a time, so this login takes the
- * identity back rather than being turned away - otherwise a client that died
- * without closing its socket would lock its own account out for as long as
- * the kernel takes to notice, which is hours.
- *
- * Displacement is one call because the reactor owns both connections and is
- * the thread running this handler: the old one forfeits its room and unlinks
- * itself before this function returns, so its forfeit cannot reach whatever
- * room the new connection joins next. Under threads that ordering had to be
- * waited for; here it is what the code does.
+ * A player has one connection at a time, so this login takes the identity back
+ * rather than being turned away - a client that died without closing its
+ * socket would otherwise lock its own account out. The old connection forfeits
+ * its room and unlinks itself before this returns.
  *
  * @param ctx Request context of the connection claiming the player.
  * @param pid Player being claimed.
@@ -215,16 +207,16 @@ static void	displace_previous(t_request_context *ctx, t_player_id pid)
 	if (previous == NULL)
 		return ;
 	logger_emit(&ctx->srv->log, COREIPC_LOG_WARNING,
-		"player %llu logged in again; closing the previous connection",
-		(unsigned long long)pid);
+		"conn %u displaced by conn %u: player %llu logged in again",
+		previous->conn_id, ctx->cli->conn_id, (unsigned long long)pid);
 	client_kill(previous);
 }
 
 /**
  * @brief Binds an authenticated player to the connection that logged in.
  *
- * Published through the registry so that the write happens under the same
- * lock every other thread reads the binding beneath.
+ * Published through the registry, so the write happens under the lock every
+ * other thread reads the binding beneath.
  *
  * @param ctx Request context holding the client and the registry.
  * @param player The authenticated player.

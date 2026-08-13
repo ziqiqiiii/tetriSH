@@ -1,11 +1,8 @@
 #include "tetrisd.h"
 
 // Static Functions
-static int		serialise_chat(const t_server_room *server_room,
-					const t_body_chat *chat, unsigned char **bytes,
-					size_t *len);
-static void		deliver(t_server_room *server_room, const unsigned char *bytes,
-					size_t len);
+static int		serialise_chat(const t_server_room *server_room, const t_body_chat *chat, unsigned char **bytes, size_t *len);
+static void		deliver(t_server_room *server_room, const unsigned char *bytes, size_t len);
 
 /**
  * @brief Sends one line of the room's feed to everyone sitting in it.
@@ -89,8 +86,7 @@ void	room_narrate(t_server_room *server_room, const char *fmt, ...)
  * @param len Receives its length.
  * @return 0 on success, -1 when the message could not be built.
  */
-static int	serialise_chat(const t_server_room *server_room,
-	const t_body_chat *chat, unsigned char **bytes, size_t *len)
+static int	serialise_chat(const t_server_room *server_room, const t_body_chat *chat, unsigned char **bytes, size_t *len)
 {
 	t_htttp_message	msg;
 	char			path[TETRISD_CONFIG_LINE_MAX];
@@ -130,8 +126,7 @@ static int	serialise_chat(const t_server_room *server_room,
  * @param bytes Serialised message; still owned by the caller afterwards.
  * @param len Length of bytes.
  */
-static void	deliver(t_server_room *server_room, const unsigned char *bytes,
-	size_t len)
+static void	deliver(t_server_room *server_room, const unsigned char *bytes, size_t len)
 {
 	const t_slot	*slot;
 	unsigned char	*copy;

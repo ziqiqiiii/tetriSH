@@ -20,6 +20,13 @@ player to at most one client: two connections never act as the same player at
 the same time.
 _Avoid_: user, peer
 
+**Administrator**:
+The person in charge of the server, who acts on it through `tetrisctl`. Not a
+player and never in a room: an Administrator is recognised by filesystem
+access to the Control channel, not by a login, and holds no standing in the
+game. Shortened to *admin* in prose and in the `/admin` resource path.
+_Avoid_: operator, owner
+
 ### Lobby and rooms
 
 **Lobby**:
@@ -34,8 +41,10 @@ _Avoid_: seat (as a noun — "seat" is the verb for taking a slot)
 
 **Owner**:
 The player who controls a room's start. Ownership passes to a successor when
-the owner leaves.
-_Avoid_: host, admin
+the owner leaves. Ownership is a standing inside one room, which is what
+separates it from an Administrator: the Owner is a player, the Administrator
+is never one.
+_Avoid_: host, admin (as a room role — an Administrator is a different actor)
 
 **Mode**:
 How many players a room's game is played with: Single, Double, or Battle
@@ -129,6 +138,14 @@ background processes are not daemons in this sense and are no part of the game
 system.
 _Avoid_: service, background process
 
+**Control channel**:
+The local, Administrator-only way into a running Daemon, separate from the port
+players connect to. Each Daemon has its own. Reaching it is a matter of local
+filesystem access rather than of holding a player's identity, which is why
+nothing arriving on it names a Player — the reachability *is* the credential.
+It carries HTTTP, like everything else two tetriSH processes say to each other.
+_Avoid_: control plane, admin socket, control socket
+
 ### Logging
 
 **Log record**:
@@ -161,6 +178,32 @@ Where it survives depends on where stderr points; for a detached daemon that
 is an error file rather than a terminal. Still never report it as Dropped:
 Dropped means the producer never sent it, and the two blame different halves
 of the system.
+
+**Access line**:
+One log record standing for one complete HTTTP exchange — the method that
+arrived, who sent it, and the status that went back. It is written once the
+answer is known, so a request and its response are a single line rather than
+two, and an exchange that failed before reaching a handler still has one. A
+method that drives the falling piece also names the word its body carried, the
+method alone not being enough to tell a move left from a move right.
+
+**Interval report**:
+The counter line a Daemon emits on a fixed cadence rather than in answer to an
+event, carrying what has changed since the previous one. A delta, not a total,
+and emitted even when nothing changed: an interval report of zero is how the
+cadence shows it is still running. Each Daemon reports only the counts it can
+observe — Dropped is `tetrisd`'s, Rejected and Degraded are `tetrislogd`'s —
+and they are shown together but never summed.
+_Avoid_: heartbeat, drop summary, periodic dump
+
+**Flush**:
+Emptying a producer's pending log records toward the Sink on demand, ahead of
+the cadence that would have carried them. It moves records that already exist;
+it changes no Daemon state and stops nothing. Deliberately not called a
+*drain*: in its ordinary operational sense a drain refuses new work while work
+in flight finishes, which is a lifecycle state tetriSH does not currently have,
+and the word is left unclaimed for it.
+_Avoid_: drain
 
 ### Protocol
 

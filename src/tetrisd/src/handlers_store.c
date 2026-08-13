@@ -29,11 +29,8 @@ static size_t	theme_rows(t_server *srv, t_body_catalogue *out);
  * @brief BUY /store/character/<cid> or /store/theme/<tid> - UC-15 / UC-16.
  *
  * Affordability and ownership are not checked here: db_buy_* enforces both
- * atomically under its own write lock and reports which one refused, so a
- * check on this side could only disagree with the decision that counts.
- *
- * A purchase answers with the account as it stands afterwards, so the wallet
- * the screen redraws is the one the store actually holds.
+ * atomically and reports which one refused. The answer carries the account as
+ * it stands afterwards, so the wallet the screen redraws is the store's.
  *
  * @param msg The request (unused; the path is read through the context).
  * @param context The request context.
@@ -63,8 +60,8 @@ int	buy_handler(const t_htttp_message *msg, void *context)
 		res = db_buy_theme(ctx->srv->db, ctx->cli->player_id, id);
 	if (res == DB_OK)
 		logger_emit(&ctx->srv->log, COREIPC_LOG_INFO,
-			"player %llu bought %s %" PRIu32,
-			(unsigned long long)ctx->cli->player_id,
+			"conn %u player %llu bought %s %" PRIu32,
+			ctx->cli->conn_id, (unsigned long long)ctx->cli->player_id,
 			kind == ITEM_CHARACTER ? "character" : "theme", id);
 	return (buy_status(ctx, res));
 }
@@ -72,13 +69,9 @@ int	buy_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief EQUIP /player/<pid>/character/<cid> or /theme/<tid> - UC-18 / UC-19.
  *
- * The subject rides in the path like it does on the input routes, so the
- * request says whose loadout it is changing and the server checks that it is
- * this connection's.
- *
- * Equipping is refused for anything the player does not own, which is the one
- * rule that stops a client granting itself a character's abilities by naming
- * it. db_equip_* holds that rule; this handler only reports it.
+ * The subject rides in the path, and the server checks it is this connection's.
+ * Equipping is refused for anything the player does not own - the rule that
+ * stops a client granting itself a character's abilities by naming it.
  *
  * @param msg The request (unused; the path is read through the context).
  * @param context The request context.
@@ -112,12 +105,9 @@ int	equip_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief LIST /store - the catalogue, prices included.
  *
- * The client cannot hold its own copy of this: the prices and the roster live
- * in the store's config files, and a client that guessed them would offer a
- * player a purchase the server then refuses at a different price.
- *
- * Reached through list_handler rather than a method of its own, because "list
- * the collection at this path" is what LIST already means for /rooms.
+ * The client cannot hold its own copy: prices and the roster live in the
+ * store's config files. Reached through list_handler rather than a method of
+ * its own, because listing a collection is what LIST already means.
  *
  * @param ctx Request context, already authorised by list_handler.
  * @return 200 with the catalogue body, 500 when the store or codec fails.
@@ -140,11 +130,10 @@ int	store_list_catalogue(t_request_context *ctx)
 /**
  * @brief Parses which catalogue item a store path addresses.
  *
- * BUY addresses the collection (`/store/character/<cid>`) and EQUIP addresses
- * the player (`/player/<pid>/character/<cid>`), so the two differ only in
- * what stands before the kind - which is what the prefix argument names. The
- * player id is checked here rather than by the caller, so a path that named
- * somebody else can never reach a store call.
+ * BUY addresses the collection (`/store/character/<cid>`) and EQUIP the player
+ * (`/player/<pid>/character/<cid>`), so the two differ only in what stands
+ * before the kind. The player id is checked here, so a path naming somebody
+ * else can never reach a store call.
  *
  * @param ctx Request context.
  * @param prefix The route prefix this method addresses.
@@ -195,9 +184,8 @@ static int	store_target(t_request_context *ctx, const char *prefix,
 /**
  * @brief Reports whether the catalogue holds one item.
  *
- * Checked before the store call so an unknown id is always 404. db_equip_*
- * would otherwise answer DB_NOT_OWNED for an item that does not exist, which
- * reads to a client as "buy it first" for something it never can.
+ * Checked before the store call so an unknown id is always 404: db_equip_*
+ * would otherwise answer DB_NOT_OWNED for an item that does not exist.
  *
  * @param srv Server holding the store.
  * @param kind Which catalogue to look in.
@@ -214,10 +202,8 @@ static int	item_exists(t_server *srv, t_item_kind kind, t_item_id id)
 /**
  * @brief Maps a purchase outcome onto its status and reason.
  *
- * Already owning it is not a refusal (UC-15): the player asked for a state
- * the account is already in, so it answers 200 with the profile like a
- * successful purchase, and the owned list in that body is what tells the
- * screen the tile is theirs.
+ * Already owning it is not a refusal (UC-15): the account is in the state the
+ * player asked for, so it answers 200 with the profile like a purchase.
  *
  * @param ctx Request context, whose body receives the profile or the reason.
  * @param res Result from db_buy_character / db_buy_theme.

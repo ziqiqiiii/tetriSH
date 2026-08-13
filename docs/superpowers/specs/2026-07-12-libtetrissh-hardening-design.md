@@ -1,6 +1,9 @@
 # libtetrissh Hardening Design
 
 Date: 2026-07-12
+Status: **implemented** — the findings below are fixed and the design shipped.
+`lib/libtetrissh/README.md` is the current authority on the library; read this
+for why the hardening was done, not for what the code does now.
 
 ## Goal
 

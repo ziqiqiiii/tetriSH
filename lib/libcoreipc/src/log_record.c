@@ -1,5 +1,7 @@
 #include "coreipc.h"
 
+// Static Functions
+static void			timestamp_text(uint64_t timestamp_ms, char *out, size_t cap);
 static const char	*g_level_names[] = {"DEBUG", "INFO", "WARNING", "ERROR"};
 
 /**
@@ -115,8 +117,9 @@ int	logrecord_level_parse(const char *name)
 /**
  * @brief Render one record as the single line tetrislogd writes to disk.
  *
- * Format: "<timestamp_ms> <LEVEL> <component>[<pid>]: <msg>\n". Writes into
- * the caller's buffer only - this library never touches a file or stream.
+ * Format: "YYYY-MM-DD HH:MM:SS.mmm <LEVEL> <component>[<pid>]: <msg>\n", the
+ * clock read in local time. Writes into the caller's buffer only - this
+ * library never touches a file or stream.
  *
  * @param rec A record that passed logrecord_validate (fields are trusted here).
  * @param out Destination buffer.
@@ -126,15 +129,17 @@ int	logrecord_level_parse(const char *name)
  */
 int	logrecord_format_line(const t_log_record *rec, char *out, size_t cap)
 {
-	int	n;
+	char	when[COREIPC_LOG_TIME_MAX];
+	int		n;
 
 	if (!rec || !out)
 	{
 		errno = EINVAL;
 		return (-1);
 	}
-	n = snprintf(out, cap, "%" PRIu64 " %-7s %s[%" PRIu32 "]: %s\n",
-			rec->timestamp_ms, logrecord_level_name((t_log_level)rec->level),
+	timestamp_text(rec->timestamp_ms, when, sizeof(when));
+	n = snprintf(out, cap, "%s %-7s %s[%" PRIu32 "]: %s\n",
+			when, logrecord_level_name((t_log_level)rec->level),
 			rec->component, rec->pid, rec->msg);
 	if (n < 0 || (size_t)n >= cap)
 	{
@@ -142,4 +147,35 @@ int	logrecord_format_line(const t_log_record *rec, char *out, size_t cap)
 		return (-1);
 	}
 	return (n);
+}
+
+/**
+ * @brief Spell a millisecond epoch stamp as a local calendar date and time.
+ *
+ * The record still carries milliseconds since the epoch - only the rendered
+ * line is calendar text, so nothing on the wire moves. A clock the C library
+ * cannot break down (a stamp past the range of time_t, say) falls back to the
+ * raw number rather than to an empty field.
+ *
+ * @param timestamp_ms Milliseconds since the epoch, as carried by the record.
+ * @param out Destination buffer, at least COREIPC_LOG_TIME_MAX bytes.
+ * @param cap Size of out in bytes.
+ */
+static void	timestamp_text(uint64_t timestamp_ms, char *out, size_t cap)
+{
+	struct tm	parts;
+	time_t		seconds;
+	size_t		len;
+
+	seconds = (time_t)(timestamp_ms / 1000);
+	if (localtime_r(&seconds, &parts) != NULL)
+		len = strftime(out, cap, "%Y-%m-%d %H:%M:%S", &parts);
+	else
+		len = 0;
+	if (len == 0)
+	{
+		snprintf(out, cap, "%" PRIu64, timestamp_ms);
+		return ;
+	}
+	snprintf(out + len, cap - len, ".%03u", (unsigned int)(timestamp_ms % 1000));
 }

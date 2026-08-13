@@ -31,9 +31,6 @@ void	game_reset(t_game *g)
 /**
  * @brief Starts a fresh game for one player: empty board, 7-bag, first piece.
  *
- * Every game gets its own bag seeded per player, so two players in the same
- * room see independent - and equally fair - piece sequences.
- *
  * @param g Game to start.
  * @param pid Player this game belongs to.
  * @param seed Seed for this game's 7-bag randomiser.
@@ -71,23 +68,9 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 /**
  * @brief Applies however much real time has passed to the falling piece.
  *
- * Elapsed time is accumulated against this player's own level interval rather
- * than assuming one tick equals one row, so a late tick catches up
- * instead of slowing the game down.
- *
- * A paused game returns before the accumulator is touched, so time spent
- * paused is not owed back to it - resuming must not drop the piece four rows
- * to make up for the pause.
- *
- * A game holding completed rows is not falling: gravity is the clear's timer
- * for as long as it runs, and the piece that comes next has not been dealt.
- * Every tick of it is a snapshot, so the client has the frames to animate it
- * with rather than one flash at each end.
- *
- * Falling, clearing and locking consume one real-time budget. If a piece
- * touches down partway through a late tick, only the time after touchdown is
- * charged to lock down; if a clear finishes partway through, the remainder is
- * handed to the new piece.
+ * Falling, clearing and locking share one budget, so a late tick catches up
+ * across all three instead of charging itself twice. A paused game is left
+ * alone: resuming must not drop the piece to pay for the pause.
  *
  * @param g Game to advance.
  * @param elapsed_ms Milliseconds since this game was last advanced.
@@ -160,13 +143,8 @@ bool	game_rotate(t_game *g, int dir)
 /**
  * @brief Drops the falling piece: one row on a soft drop, all the way on hard.
  *
- * A hard drop always locks, which is why it can never be "blocked" - it is
- * accepted even when the piece is already resting on the stack. That is the
- * whole difference between the two under the Guideline: hard drop is the
- * input that says "and I am done with it", soft drop is only gravity in a
- * hurry. So a soft drop into the floor does nothing at all and the piece
- * keeps its lock delay, which is what leaves the player the half-second the
- * drop was pressed to reach.
+ * A hard drop always locks, so it is never blocked; a soft drop into the floor
+ * does nothing and the piece keeps its lock delay.
  *
  * @param g Game to act on.
  * @param hard true for a hard drop, false for a soft drop.
@@ -198,14 +176,9 @@ bool	game_drop(t_game *g, bool hard)
 /**
  * @brief Swaps the falling piece with the hold slot.
  *
- * The first hold of a game has nothing to swap with, so it takes the head of
- * the next queue instead - which is why the queue is refilled here and not
- * only on a lock. Either way the incoming piece is spawned fresh rather than
- * keeping the outgoing one's position, so holding cannot be used to teleport
- * a piece across the board.
- *
- * One hold per piece is the rule that makes this a swap and not a shuffle: a
- * player who could hold repeatedly would never have to place anything.
+ * The first hold takes the head of the next queue instead. Either way the
+ * incoming piece spawns fresh, so a hold cannot teleport a piece, and one hold
+ * per piece is what keeps this a swap rather than a shuffle.
  *
  * @param g Game to act on.
  * @return true when the swap happened, false when it was refused.
@@ -243,7 +216,6 @@ bool	game_hold(t_game *g)
  *
  * Pausing leaves `active` alone: a paused game is still being played, and a
  * room that read it as finished would record the score and evict the player.
- * Gravity is what stops, and it stops without owing the piece the time.
  *
  * @param g Game to act on.
  * @param paused true to pause, false to resume.
@@ -261,17 +233,10 @@ bool	game_pause(t_game *g, bool paused)
 /**
  * @brief Deals the same player a fresh game in the same slot.
  *
- * The seed is advanced rather than reused, so a restart is a new game and not
- * a replay of the one just abandoned. The score of the abandoned game is not
- * recorded: restarting is the player choosing that it did not happen, and the
- * room records what a player finishes or forfeits, not what they discard.
- *
- * The snapshot sequence is the one thing carried across. It counts STATE
- * frames on a connection, not events in a game, and the client drops any
- * snapshot numbered below the last it saw - so a counter that went back to
- * zero made the whole of the new game's opening look like replayed frames,
- * and the board sat frozen until the count climbed past where the old game
- * had left it.
+ * The seed is advanced, so a restart is a new game and not a replay, and the
+ * abandoned score is not recorded. The snapshot sequence is the one thing
+ * carried across: it counts STATE frames on a connection, and a client drops
+ * any snapshot below the last it saw.
  *
  * @param g Game to restart.
  * @return true when a new game was dealt.
@@ -295,9 +260,8 @@ bool	game_restart(t_game *g)
 /**
  * @brief Projects a game onto the wire-facing STATE body structure.
  *
- * This is the domain-to-wire boundary: everything the client renders comes
- * from here, and nothing about rooms, connections, or identity does - the
- * subject rides in the request path instead.
+ * Everything the client renders comes from here; nothing about rooms,
+ * connections or identity does.
  *
  * @param g Game to project.
  * @param out Snapshot to fill.
@@ -377,10 +341,6 @@ void	game_snapshot(const t_game *g, t_body_state *out)
 /**
  * @brief Spawns the next piece from the bag, ending the game on a top-out.
  *
- * A piece that cannot be placed at spawn is the honest end of the game: the
- * stack has reached the ceiling, so the game is over rather than the piece
- * being nudged somewhere it does not belong.
- *
  * @param g Game to spawn into.
  */
 static void	spawn_next(t_game *g)
@@ -406,16 +366,10 @@ static void	spawn_next(t_game *g)
 /**
  * @brief Locks the falling piece: stamp, clear lines, score, spawn the next.
  *
- * Thwack and Fry are applied here rather than inside board_clear_lines,
- * because they are status effects on a player and the brain's line clear is a
- * fact about a board. With Thwack active, non-crystal blocks fall out of the
- * rows above and whatever that completes clears too; Fry's three filled rows
- * burn off now, one piece after they went in (docs/themes.md, Wolf-man L4 and
- * Halloween L1). Both are read before effect_on_piece_lock, which is what
- * consumes the counters.
- *
- * Locking is also the one thing that gives the hold slot back - one hold per
- * piece, counted from the piece that just landed.
+ * Thwack and Fry are applied here rather than inside board_clear_lines: they
+ * are status effects on a player, and both must be read before
+ * effect_on_piece_lock consumes their counters. Locking is also what gives the
+ * hold slot back.
  *
  * @param g Game whose piece has landed.
  */
@@ -432,10 +386,8 @@ static void	lock_piece(t_game *g)
 /**
  * @brief Holds the rows the landed piece completed, if it completed any.
  *
- * Nothing is taken away and nothing is scored here. The rows stay on the
- * board for clear_duration_ms, which is what the client animates and what
- * makes it honest to animate: for that long the board really does still have
- * them, and there is no piece to move because none has been dealt.
+ * Nothing is taken away and nothing is scored here: the rows stay on the board
+ * for clear_duration_ms, which is what the client animates.
  *
  * @param g Game whose piece has just landed.
  * @return true when a clear is now in progress.
@@ -455,11 +407,8 @@ static bool	begin_clear(t_game *g)
 /**
  * @brief Runs the held clear out and hands the board back.
  *
- * This is the whole of what a lock used to do inline: take the rows away,
- * apply the effects that ride on a clear, score it, and deal the next piece.
- * It is also reached with clearing_count 0 by a lock that completed nothing,
- * because a lock that clears nothing still scores nothing, still consumes its
- * effects, and still needs a piece.
+ * Also reached with clearing_count 0 by a lock that completed nothing, which
+ * still consumes its effects and still needs a piece.
  *
  * @param g Game whose clear is over.
  */
@@ -503,14 +452,10 @@ static void	finish_clear(t_game *g)
 /**
  * @brief Applies the abilities that were aimed at this player.
  *
- * Before the garbage and before the next piece, for the same reason as each
- * other: there is no active piece to invalidate here, and a board that Sirtet
- * inverted should take its garbage on top of the inversion rather than have
- * the inversion applied to rows that arrived afterwards.
- *
- * The queue is emptied whether or not each entry did anything. An effect that
- * cannot be applied is spent, not held: the sender paid for it and its moment
- * has passed.
+ * Runs before the garbage and before the next piece, so a board Sirtet
+ * inverted takes its rows on top of the inversion. The queue is emptied
+ * whether or not each entry did anything - an effect that cannot be applied is
+ * spent, not held.
  *
  * @param g Game whose queue is being emptied.
  */
@@ -546,10 +491,8 @@ static void	drain_abilities(t_game *g)
 /**
  * @brief Halloween L4 (Bomb): destroys scattered cells on this board.
  *
- * "Randomly selected" without a random source: the cells walk from the game's
- * own counters, the same trick garbage's hole column uses. libtetrisbrain owns
- * no RNG on purpose, and a scatter that moves with how long the game has run
- * is unpredictable to a player without being unreproducible to a test.
+ * The cells walk from the game's own counters, the same trick garbage's hole
+ * column uses, because libtetrisbrain owns no RNG on purpose.
  *
  * @param g Game whose board is bombed.
  */
@@ -576,13 +519,9 @@ static void	apply_bomb(t_game *g)
 /**
  * @brief Queues one ability against this player, to land at their next lock.
  *
- * Only ability_ctrl.c calls this, and only for an effect that lands on
- * somebody other than the player who used it. A full queue drops its oldest
- * entry rather than refusing the newest: the newest is the one somebody just
- * spent charge on, and a queue this deep means no piece has locked in a very
- * long time.
- *
- * A game that is over takes nothing, for the same reason it takes no garbage.
+ * Only ability_ctrl.c calls this. A full queue drops its oldest entry rather
+ * than refusing the newest, which is the one somebody just spent charge on. A
+ * game that is over takes nothing.
  *
  * @param g Game the ability is aimed at.
  * @param kind Which transform it is.
@@ -612,17 +551,10 @@ void	game_queue_ability(t_game *g, t_pending_kind kind, int argument)
 /**
  * @brief Lands whatever garbage was owed, now that the board is nobody's.
  *
- * The two neighbours here are the whole reason this is a separate step. It
- * runs after the clear resolves, so a player watching their own rows go never
- * takes rows in the middle of it and never has their own clear cancelled by
- * somebody else's gift; and it runs before spawn_next, so the rows are part of
- * the board the next piece is validated against rather than something that
- * appears underneath a piece already falling.
- *
- * The hole walks by one column per row, from a counter this game owns. A run
- * of rows sharing one hole would be a wall rather than a handicap, and drawing
- * the column would put a random number generator inside libtetrisbrain, which
- * is pure by contract.
+ * Its two neighbours are the whole reason this is a separate step: after the
+ * clear resolves, so no clear is cancelled by somebody else's gift, and before
+ * spawn_next, so the rows are part of the board the next piece is validated
+ * against. The hole walks one column per row, from a counter this game owns.
  *
  * @param g Game whose queue is being emptied.
  */
@@ -723,11 +655,8 @@ static int	next_garbage_hole(t_game *g)
 /**
  * @brief Ages the two effects libtetrisbrain leaves for the server to end.
  *
- * Dark and Pals have no counter of their own - the brain's comment says the
- * server decides when they end - so this is where "for a limited time" is
- * given a length. Counted in the holder's own pieces, like every other timed
- * effect, so a player under Dark is blinded for four placements rather than
- * for four seconds of however fast they happen to be going.
+ * Dark and Pals have no counter of their own, so this is where "for a limited
+ * time" is given a length - counted in the holder's own pieces.
  *
  * @param g Game whose server-timed effects are aged by one lock.
  */
@@ -750,12 +679,8 @@ static void	age_server_effects(t_game *g)
 /**
  * @brief Queues garbage rows against this player, to land at their next lock.
  *
- * Only room.c calls this: how many rows a clear is worth is the brain's
- * (garbage_lines_from_clear) and who owes them to whom is the room's, because
- * a game does not know it has an opponent.
- *
- * A game that is over takes nothing. Burying a board nobody is playing would
- * change a finished result.
+ * Only room.c calls this: a game does not know it has an opponent. A game that
+ * is over takes nothing.
  *
  * The sender is carried rather than used. A board does not know who it is
  * playing and does not start now: the id is held until the lock that lands
@@ -779,10 +704,9 @@ void	game_queue_garbage(t_game *g, int lines, t_player_id from)
 /**
  * @brief Queues garbage an ability sent, which Pals does not absorb.
  *
- * Counted apart from the ordinary kind for one reason and it is the ability
- * text's: Pals turns incoming garbage into a gift, "garbage created by
- * abilities is excluded". A single counter could not tell Pentaris from a
- * tetris, so Pals would either eat both or neither.
+ * Counted apart from the ordinary kind because the ability text excludes
+ * ability garbage from Pals; a single counter could not tell Pentaris from a
+ * tetris.
  *
  * @param g Game the rows are owed to.
  * @param lines How many rows; zero or fewer is a no-op.
@@ -858,9 +782,8 @@ int	game_take_cleared(t_game *g)
 /**
  * @brief Charges elapsed time against a clear in progress.
  *
- * Every tick reports a change even when the millisecond count is all that
- * moved, because that count is the animation: a client sent only the first
- * and last frame would have nothing to interpolate and would flash.
+ * Every tick reports a change even when only the millisecond count moved,
+ * because that count is what the client animates.
  *
  * @param g Game holding completed rows.
  * @param remaining_ms Time still unspent; reduced by the clear's portion.
@@ -931,9 +854,8 @@ static int	step_interval(const t_game *g)
 /**
  * @brief Advances one falling or lock-down boundary from the time budget.
  *
- * Only the milliseconds needed to reach the next event are consumed. The
- * caller loops with whatever remains, which makes touchdown and lock-down two
- * consecutive portions of one tick instead of charging that tick twice.
+ * Only the milliseconds needed to reach the next event are consumed; the
+ * caller loops with whatever remains.
  *
  * @param g Game whose active piece is advancing.
  * @param remaining_ms Time still unspent; reduced by this step.

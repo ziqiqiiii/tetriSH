@@ -1,25 +1,21 @@
 #include "tetrisd.h"
 
 /*
-** The Gaiden ability catalogue and what tetrisd is allowed to do with it.
-** libtetrisbrain's charge.c names this file: it owns the charge arithmetic
-** and the pure board transforms, and says ownership, targeting and the HTTTP
-** mapping live here.
+** The Gaiden ability catalogue: ownership, targeting and the HTTTP mapping.
+** libtetrisbrain's charge.c owns the charge arithmetic and the pure board
+** transforms, and names this file for the rest.
 **
 ** Two rules decide every request, in this order:
 **
-**   1. The ability is (character, level), not level. Level 1 is Fry for
-**      Halloween and Cut for Wolf-man, so the level a client sends means
-**      nothing until it is read against the character that client has
-**      equipped - a fact this file takes from the store, never from the
-**      request.
-**   2. Single mode has no Target (docs/CONTEXT.md), so an ability that lands
-**      on somebody else has nobody to land on. It is refused, not redirected
-**      at the player who paid for it.
+**   1. The ability is (character, level), not level - level 1 is Fry for
+**      Halloween and Cut for Wolf-man - so the level a client sends is read
+**      against the character the store says it has equipped, never against
+**      the request.
+**   2. Single mode has no Target (docs/CONTEXT.md), so an ability landing on
+**      somebody else is refused, not redirected at the player who paid.
 **
-** Charge is deducted only once an activation has actually been accepted, so
-** a refusal costs nothing (UC-14 ext 4a). The client's own charge counter is
-** never read - it arrives in STATE and goes nowhere else.
+** Charge is deducted only once an activation is accepted, so a refusal costs
+** nothing (UC-14 ext 4a). The client's own charge counter is never read.
 */
 
 // Static Variables
@@ -108,14 +104,10 @@ bool	ability_is_playable_solo(const t_ability_def *def)
 }
 
 /**
- * @brief Activates one ability against its own player's game.
- *
- * The transform is tried on a copy first and only kept when the falling piece
- * survives it, so an ability that would leave the piece inside the stack is
- * refused whole rather than half-applied. Charge is spent after that check,
- * never before it.
+ * @brief Activates one ability, spending its charge only once it is accepted.
  *
  * @param g Game activating the ability.
+ * @param target The other player's game, or NULL when there is none.
  * @param def Ability being activated.
  * @param argument Ability-specific parameter; Sol's aiming column, else 0.
  * @return What the client should be told happened.
@@ -240,9 +232,6 @@ const char	*ability_verdict_reason(t_ability_verdict verdict)
 /**
  * @brief Applies whichever self-affecting transform this ability is.
  *
- * Only the four abilities a one-player room can serve reach here; anything
- * needing somebody to aim at goes through apply_targeted.
- *
  * @param g Game being transformed.
  * @param def Ability being applied.
  * @param argument Sol's aiming column, ignored by the others.
@@ -277,27 +266,8 @@ static t_ability_verdict	apply_self(t_game *g, const t_ability_def *def,
 /**
  * @brief Applies one ability that needed somebody to aim at.
  *
- * The eleven split in two, and the line between them is which board changes
- * rather than which board is read:
- *
- *   - Mirror, Pals, Vampire and Copy land on the player who used them. They
- *     are applied at once, exactly like the self-affecting four, because
- *     there is no second board to be surprised - Vampire and Copy read the
- *     Target, but a read cannot leave anybody's piece inside their stack.
- *     They still need a Target to exist: there is nothing to steal, nothing
- *     to copy, and no incoming garbage in a room of one, which is what
- *     needs_target means here.
- *
- *   - Dark, Bomb, Inversion, Pentaris, Sirtet, Paralysis and Nue land on the
- *     Target, so they are queued and applied at that player's next piece
- *     lock. A board transform arriving under an active piece can leave it
- *     inside the stack, and a status effect arriving mid-piece would spend
- *     one of the pieces it is counted in before it began.
- *
- * Mirror is checked here rather than at the landing, and that is the whole of
- * its ordering hazard: it steals *the next ability activated against* its
- * holder, so the theft happens when the effect is aimed, not when it arrives.
- * By the time a queued effect lands, three more could have been aimed.
+ * Abilities changing the caster's board apply at once; abilities changing the
+ * Target's queue until its next piece lock.
  *
  * @param g Game activating the ability.
  * @param target The other player's game, or NULL when there is none.
@@ -349,9 +319,7 @@ static t_ability_verdict	apply_targeted(t_game *g, t_game *target,
 /**
  * @brief Sends an ability back at its sender when the Target holds a Mirror.
  *
- * Consumed on use, so one Mirror steals one ability. Reflecting is not the
- * same as refusing: the sender still paid for it and it still happens, to
- * them.
+ * Consumed on use, so one Mirror steals one ability.
  *
  * @param g The player who aimed it.
  * @param target The player it was aimed at.
@@ -368,10 +336,6 @@ static t_game	*mirror_redirect(t_game *g, t_game *target)
 /**
  * @brief Halloween L3 (Vampire): takes the Target's stored charge.
  *
- * charge_transfer moves it rather than copying it, so the Target is left with
- * nothing and the total in the room is unchanged - which is what makes it a
- * theft rather than a bonus.
- *
  * @param g Game receiving the charge.
  * @param target Game losing it.
  * @return true always; there is no board to refuse it.
@@ -384,11 +348,6 @@ static bool	apply_vampire(t_game *g, t_game *target)
 
 /**
  * @brief Princess L4 (Copy): replaces the caster's field with the Target's.
- *
- * The only ability that changes the caster's board out of somebody else's, so
- * it keeps the "try it on a copy and keep it only if the piece survives"
- * discipline the self-affecting four use: a Target with a taller stack could
- * otherwise arrive underneath the caster's falling piece.
  *
  * @param g Game whose board is replaced.
  * @param target Game whose board is copied.
@@ -409,9 +368,7 @@ static bool	apply_copy(t_game *g, const t_game *target)
  * @brief Halloween L1 (Fry): fills the own bottom three rows, to burn later.
  *
  * The rows go in now and come out at the next lock, which is what game.c's
- * fry counter is for. The hole rides on the snapshot counter rather than on a
- * random source: libtetrisbrain owns no RNG on purpose, and a hole that moves
- * with how long the game has been running is fair without inventing one.
+ * fry counter is for.
  *
  * @param g Game to transform.
  * @return true when the transform was kept.
@@ -450,20 +407,8 @@ static bool	apply_mirurun(t_game *g)
 /**
  * @brief Wolf-man L1 (Cut): clears the player's own top four rows.
  *
- * The top four rows *of the stack*, not of the board. board_cut_top is the
- * other reading and it is the one this used to take: it discards the board's
- * first four rows and slides everything below them up, which for a stack
- * standing on the floor deletes four rows of empty space and lifts the stack
- * four rows closer to the ceiling. That made Cut do nothing at every height
- * it was legal at, and made it illegal at the one height a player would ever
- * spend a charge on it - a stack reaching into those rows lands under the
- * falling piece after the slide, so piece_is_valid refused the whole thing.
- *
- * Clearing where the stack actually starts needs no shift at all. Everything
- * above the highest occupied row is already empty, and everything below the
- * cut stays where it is, so the four rows come off the top and the rest of
- * the field is untouched. That also makes Cut unrefusable, which is right:
- * an ability that only ever removes cells cannot leave a piece inside them.
+ * The top four rows *of the stack*, not of the board - which is why this
+ * clears cells in place rather than calling board_cut_top.
  *
  * @param g Game to transform.
  * @return true when the transform was kept.
@@ -530,12 +475,6 @@ static int	highest_occupied_row(const t_board *b)
 /**
  * @brief Princess L1 (Sol): clears three adjacent columns off the own field.
  *
- * Sol is aimable, so the request carries the middle column; the three-second
- * auto-fire the original describes is the client's aiming affordance, and by
- * the time a request arrives the aim has already been taken. An out-of-range
- * or absent column falls back to the column the falling piece is over, which
- * is where an unaimed shot would go.
- *
  * @param g Game to transform.
  * @param argument Middle column to aim at, or -1 for the piece's own column.
  * @return true when the transform was kept.
@@ -562,10 +501,6 @@ static bool	apply_sol(t_game *g, int argument)
 
 /**
  * @brief Records the last activation so the next STATE carries its verdict.
- *
- * The client shows a short acknowledgement for an ability it asked for, and
- * it has to come from the server: the response says the request was received,
- * the snapshot says what the board did about it.
  *
  * @param g Game whose feedback slot is written.
  * @param level Ability level that was asked for.

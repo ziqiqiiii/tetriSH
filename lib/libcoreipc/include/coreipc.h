@@ -35,6 +35,7 @@
 # define COREIPC_LOG_VERSION		1
 # define COREIPC_LOG_COMPONENT_MAX	16
 # define COREIPC_LOG_MSG_MAX		256
+# define COREIPC_LOG_TIME_MAX		32
 
 typedef enum e_log_level
 {
@@ -46,14 +47,14 @@ typedef enum e_log_level
 
 typedef struct s_log_record
 {
-	uint32_t	magic;
-	uint8_t		version;
-	uint8_t		level;
-	uint16_t	msg_len;
-	uint64_t	timestamp_ms;
-	uint32_t	pid;
-	char		component[COREIPC_LOG_COMPONENT_MAX];
-	char		msg[COREIPC_LOG_MSG_MAX];
+	uint32_t				magic;
+	uint8_t					version;
+	uint8_t					level;
+	uint16_t				msg_len;
+	uint64_t				timestamp_ms;
+	uint32_t				pid;
+	char					component[COREIPC_LOG_COMPONENT_MAX];
+	char					msg[COREIPC_LOG_MSG_MAX];
 }	t_log_record;
 
 typedef struct s_ring_buffer

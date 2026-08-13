@@ -40,45 +40,25 @@
 /*
 ** tetrisd - the event-driven, server-authoritative game server.
 **
-** One reactor thread waits in epoll_wait and owns every established
-** connection: it reads the socket, opens the frame, dispatches the request,
-** seals the answer and writes it. Beside it sits a bounded pool of handshake
-** workers, because session_handshake_server is the one genuinely blocking
-** thing tetrisd does; a worker owns only its own client until it hands the
-** established session back (step 3 of the event-driven migration).
+** One reactor thread in epoll_wait owns every established connection and all
+** mutable game state: lobby, rooms, games, client registry, outboxes. Beside
+** it, a bounded pool of workers runs session_handshake_server, the one
+** genuinely blocking call, and hands the established session back.
 **
-** Gravity is one timerfd in the same epoll set. On expiry the loop reads the
-** monotonic clock once, advances every in-game room by that same elapsed, and
-** pushes STATE for whatever came back dirty - so a late or coalesced tick
-** stays correct rather than slowing the game down.
+** Gravity is one timerfd in the same epoll set: read the monotonic clock
+** once, advance every in-game room by that elapsed, push STATE for whatever
+** came back dirty - so a late or coalesced tick stays correct.
 **
-** There is no lock order, because there are no locks over game state:
+** Three rules follow, and each is structural rather than remembered:
 **
-**     tetrisd has exactly one owner of all mutable game state.
-**
-** The lobby, every room, every game, the client registry and every outbox are
-** touched by the reactor and by nothing else. The four-level lock order this
-** replaces - lobby_mutex > room->mutex > registry rwlock > outbox mutex - was
-** a rule a person had to hold in their head; this is a property of the
-** program's shape, and the cheapest way to check an invariant is to make it
-** structural (step 5 of the event-driven migration).
-**
-** Two locks survive, and neither guards game state: the handshake pool's own
-** mutex, which hands connections between the reactor and its workers, and
-** whatever libmacminidb holds internally. If you ever find yourself wanting a
-** third, the thing to question is which thread you have put the work on.
-**
-** The rule that makes epoll_event.data.ptr safe is the one that replaced the
-** registry rwlock: no client is ever freed inside the event loop. client_kill
-** unlinks it and parks it on srv->zombies; client_reap, called once after
-** every event in a batch has been processed, is the only free() site for a
-** client.
-**
-** It detaches itself and publishes a locked pidfile; tetrisctl starts,
-** inspects and stops it through that file. Both the fork and
-** the claim live in main.c alone - server_start must stay the seam the tests
-** drive in-process, and a start function that forked would take every suite
-** with it.
+** - No lock guards game state. The two survivors - the handshake pool's mutex
+**   and libmacminidb's internal one - guard none of it; wanting a third means
+**   the work is on the wrong thread.
+** - No client is freed inside the event loop. client_kill parks it on
+**   srv->zombies and client_reap, run after each event batch, is the only
+**   free() site - which is what keeps epoll_event.data.ptr valid.
+** - The double-fork and the pidfile flock live in main.c alone, so
+**   server_start stays the seam the suites drive in-process.
 */
 
 # define TETRISD_FILESYSTEM_PATH_MAX					1024
@@ -92,6 +72,7 @@
 # define TETRISD_DEFAULT_KEY_PATH				"certs/server.key"
 # define TETRISD_DEFAULT_CA_PATH				"certs/ca.crt"
 # define TETRISD_DEFAULT_LOG_IPC_PATH			"tmp/tetrisd/tetrislogd.sock"
+# define TETRISD_DEFAULT_CONTROL_PATH			"tmp/tetrisd/tetrisd.ctl"
 # define TETRISD_DEFAULT_PID_PATH				"tmp/tetrisd/tetrisd.pid"
 # define TETRISD_DEFAULT_ERR_PATH				"tmp/tetrisd/tetrisd.err"
 /*
@@ -149,11 +130,7 @@
 # define TETRISD_HANDSHAKE_TIMEOUT_MIN			100
 # define TETRISD_HANDSHAKE_TIMEOUT_MAX			60000
 
-/*
-** The token bucket is counted in thousandths of a token, so a refill rate in
-** whole tokens per second turns into an exact integer per millisecond and no
-** floating point is needed on the input path.
-*/
+
 # define TETRISD_TOKEN_SCALE					1000
 
 /* buffers */
@@ -181,47 +158,46 @@ _Static_assert(TETRISD_BODY_MAX_BYTES >= BODY_STATE_MAX_BYTES,
 _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 	"a body that cannot fit in a frame would be built and then refused");
 # define TETRISD_OUTBOX_CAPACITY				32
-/*
-** The chat lane is its own ring and its own size. It is small because a
-** client that has fallen this far behind wants the newest of the feed, not
-** all of it, and because chat must never be able to crowd out a response.
-*/
+# define TETRISD_ACCESS_WORD_MAX				16
+
 # define TETRISD_CHAT_CAPACITY					16
-/*
-** Chat's own token bucket, in whole messages. It is deliberately generous:
-** its job is to keep a flood off the reactor, not to pace a conversation, and
-** a room's feed is already bounded by the drop-oldest ring above. Sized too
-** tightly it refuses the sixth line somebody sends in a second, which is
-** ordinary use rather than abuse.
-**
-** A constant rather than a config key because it bounds a person typing, which
-** does not vary between deployments the way an input budget does.
-*/
+
 # define TETRISD_CHAT_BURST						20
 # define TETRISD_CHAT_RATE_PER_SEC				5
-/*
-** Twice the field a message ends up in, so a line that is merely too long is
-** read whole and can be told apart from one carrying a control character. A
-** line longer even than this is refused as unsendable, which is honest: at
-** that point the server has not read enough of it to say why.
-*/
+
 # define TETRISD_CHAT_TEXT_RAW_MAX				(BODY_CHAT_TEXT_MAX * 2)
 # define TETRISD_LOG_RING_CAPACITY				1024
 # define TETRISD_LOG_DRAIN_MAX					64
 # define TETRISD_LOG_SHIPPER_WAIT_MS			20
 # define TETRISD_PASSWORD_MAX					128
 
-/*
-** Reactor sizing. The length prefix is the 4 bytes libtetrissh writes in front
-** of every frame, so a receive buffer that holds the prefix plus the largest
-** frame can always make progress on a well-formed stream; a client is read in
-** chunks up to that ceiling rather than being given it up front.
-*/
 # define TETRISD_EPOLL_BATCH					64
 # define TETRISD_LENGTH_PREFIX_BYTES			4
 # define TETRISD_READ_CHUNK_BYTES				4096
-# define TETRISD_RECV_BUFFER_MAX				(TETRISD_LENGTH_PREFIX_BYTES \
-													+ TETRISSH_MAX_FRAME)
+
+/*
+** The Control channel: the local, Administrator-only way in, separate from the
+** port players connect to. Reachability is the credential - the socket is
+** 0600 in a directory only the server's user writes - so nothing arriving on
+** it names a Player and no session is established over it.
+**
+** Four connections is a ceiling rather than a budget: tetrisctl opens one,
+** sends one request and exits, so the only way to reach four is several admins
+** at once or one that has stopped reading.
+**
+** Bodies are capped rather than grown. PLAYERS on a server at the 4096-client
+** limit would not fit any fixed buffer, so the listing stops at the cap and
+** says how many it left out - a truncated answer an operator can see is
+** truncated beats an allocation that scales with load on the reactor thread.
+*/
+# define TETRISD_CONTROL_MAX_CONNECTIONS		4
+# define TETRISD_CONTROL_SOCKET_MODE			0600
+# define TETRISD_CONTROL_BACKLOG				4
+# define TETRISD_CONTROL_BODY_MAX				32768
+# define TETRISD_CONTROL_FRAME_MAX				HTTTP_MAX_MESSAGE_SIZE
+# define TETRISD_CONTROL_ROUTE					"/admin"
+# define TETRISD_CONTROL_ROUTE_PLAYER			"/admin/player/"
+# define TETRISD_RECV_BUFFER_MAX				(TETRISD_LENGTH_PREFIX_BYTES + TETRISSH_MAX_FRAME)
 
 /*
 ** Games a single room can run at once, which is every slot the room domain
@@ -243,56 +219,17 @@ _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 */
 # define TD_MAX_GAMES							99
 
-/*
-** Abilities that can be waiting on one player's lock at once. Four is the
-** whole of a rival's meter spent without a single piece landing, which is the
-** worst a Double match can do; past that the oldest is dropped rather than the
-** newest refused, because the newest is the one the sender just paid for.
-*/
 # define TD_MAX_PENDING							8
 
-/*
-** Rows Pentaris sends (docs/use_cases.md). It is written here rather than in
-** libtetrisbrain because it is a property of one character's level 3, not of
-** what a garbage row is.
-*/
 # define TETRISD_PENTARIS_ROWS					5
 
-/*
-** Cells Bomb destroys on the Target's field. Enough to matter and few enough
-** that the board is still the one the player was building.
-*/
 # define TETRISD_BOMB_CELLS						12
 
-/*
-** How many of the Target's pieces Dark and Pals last. Four matches Nue and
-** Thwack, the two piece-counted effects libtetrisbrain does time itself, so
-** "a limited time" means the same length whoever is counting it.
-*/
-# define TETRISD_DARK_PIECES						4
-# define TETRISD_PALS_PIECES						4
+# define TETRISD_DARK_PIECES					4
+# define TETRISD_PALS_PIECES					4
 
-/*
-** Game points that buy one wallet point (docs/game-economics.md). It is the
-** whole of the economy's exchange rate, and it is charged against a player's
-** running total rather than each game on its own - see room.c's award_game.
-*/
-# define TETRISD_POINTS_PER_WALLET_POINT			100
+# define TETRISD_POINTS_PER_WALLET_POINT		100
 
-/*
-** How long a dealt match is held still before it begins.
-**
-** Two players have to start on the same tick, and neither client can arrange
-** that for itself: each reaches its match screen at a different moment, and
-** PAUSE - which is how Solo freezes the board for its own 3-2-1 - is refused
-** in a room with anybody else in it precisely because one player stopping
-** their own clock is an advantage. So the hold belongs to the room, and the
-** client draws its countdown from the number this produces rather than from a
-** timer of its own.
-**
-** Single does not take one: its client already runs a 3-2-1 of its own and
-** moving it would change a mode this step is not touching.
-*/
 # define TETRISD_MATCH_COUNTDOWN_MS				3000
 # define TETRISD_MATCH_SELECT_MS				15000
 /*
@@ -350,27 +287,18 @@ _Static_assert(TETRISD_BODY_MAX_BYTES <= TETRISD_FRAME_MAX_BYTES,
 # define TETRISD_SEGMENT_CHARACTER				"character/"
 # define TETRISD_SEGMENT_THEME					"theme/"
 
-/*
-** How many leaderboard lines one answer carries. The store's skip list is
-** ordered by (score, id), so this is a top-N read and not a page: a client
-** that wanted the whole table would be asking for a different route.
-*/
 # define TETRISD_LEADERBOARD_ROWS				10
 
 typedef struct s_server	t_server;
 typedef struct s_client	t_client;
 
-/*
-** What an epoll_event.data.ptr points back at. Every watched object begins
-** with one of these, so the reactor reads the tag first and only then knows
-** which pointer it is holding - which is what lets a client be recovered from
-** the kernel without an fd-to-client map to keep in step.
-*/
 typedef enum e_event_source
 {
 	EVENT_LISTENER,
 	EVENT_WAKE,
 	EVENT_TIMER,
+	EVENT_CONTROL_LISTENER,
+	EVENT_CONTROL,
 	EVENT_CLIENT
 }	t_event_source;
 
@@ -379,12 +307,6 @@ typedef struct s_event_tag
 	t_event_source	source;
 }	t_event_tag;
 
-/*
-** A growable byte buffer with a cursor. `len` is how many bytes are valid and
-** `used` how many of them are finished with - consumed, on the receive side,
-** or already written to the socket on the send side. The cursor is what makes
-** a short write survivable now that no retry loop is allowed to block.
-*/
 typedef struct s_bytes
 {
 	unsigned char	*data;
@@ -393,10 +315,6 @@ typedef struct s_bytes
 	size_t			used;
 }	t_buffer;
 
-/*
-** Every setting tetrisd reads out of .tetrishrc, plus the rc path it was
-** read from (SIGHUP re-reads the same file).
-*/
 typedef struct s_config
 {
 	int		port;
@@ -406,6 +324,7 @@ typedef struct s_config
 	char	key_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char	ca_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char	log_ipc[TETRISD_FILESYSTEM_PATH_MAX];
+	char	control_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char	pid_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char	err_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char	rc_path[TETRISD_FILESYSTEM_PATH_MAX];
@@ -420,11 +339,6 @@ typedef struct s_config
 	int		bot_accounts;
 }	t_config;
 
-/*
-** Log path. Producers push into the ring and never block; the shipper thread
-** drains it and datagrams each record to tetrislogd, falling back to stderr
-** while the logger is unreachable. Drops are counted, never waited on.
-*/
 typedef struct s_logger
 {
 	t_ring_buffer	ring;
@@ -438,38 +352,12 @@ typedef struct s_logger
 	atomic_bool		fallback;
 }	t_logger;
 
-/* one serialised message waiting for the reactor to seal and write it */
 typedef struct s_outbound_message
 {
 	unsigned char	*bytes;
 	size_t			len;
 }	t_outbound_message;
 
-/*
-** Three lanes, because three kinds of message fail differently.
-**
-** A bounded FIFO of responses: a response belongs to a request the client is
-** waiting on, so losing one is not an option and overflow closes the client
-** instead (it cannot keep up).
-**
-** A one-slot mailbox holding the latest STATE: a snapshot supersedes the one
-** before it, so it overwrites and a stalled client loses intermediate frames
-** but never holds up the tick that produced them.
-**
-** A small ring of chat: best-effort by specification (UC-09 E1), so it drops
-** its oldest message and **never closes the client**. It cannot share the
-** response FIFO - a room narrating a Battle Royale's knockouts would fill it
-** and the next genuine response would kill a connection whose only fault was
-** being slow, which is the opposite of what that FIFO's rule is for.
-**
-** The split is the load-bearing idea and has nothing to do with threading,
-** which is why it outlived the writer thread, the condition variable and the
-** mutex unchanged.
-**
-** Three lanes means there is no total order between a response, a snapshot
-** and a chat line. Chat is ordered within itself and against nothing else,
-** which is why every message carries its own `seq`.
-*/
 typedef struct s_outbox
 {
 	t_outbound_message	slots[TETRISD_OUTBOX_CAPACITY];
@@ -485,18 +373,6 @@ typedef struct s_outbox
 	bool				overflowed;
 }	t_outbox;
 
-/*
-** One player's game: the aggregate libtetrisbrain deliberately does not own.
-** The reactor is its only writer, which is now the whole of the rule.
-*/
-/*
-** What one queued ability is, waiting on a Target's lock.
-**
-** `kind` names the transform rather than the ability, because several
-** abilities reduce to the same thing done to a board - and because the
-** ability that queued it belongs to the sender, whose character the receiver
-** has no business knowing.
-*/
 typedef enum e_pending_kind
 {
 	PENDING_NONE = 0,
@@ -520,115 +396,28 @@ typedef struct s_game
 	t_charge_state		charge;
 	t_effect_state		effects;
 	int					next[BODY_NEXT_COUNT];
-	/*
-	** The hold slot, which libtetrisbrain deliberately does not own: it is a
-	** rule about a session, not about a board. `hold_used` is what makes hold
-	** a swap rather than a shuffle - it is set on every hold and cleared only
-	** by a lock, so a piece can be held once and no more.
-	*/
 	int					hold;
 	bool				has_hold;
 	bool				hold_used;
 	int					lines;
 	int					level;
-	/*
-	** How many snapshots this game has had pushed. It counts STATE frames,
-	** not events: docs/tetrisu-local-to-tetrisd.md asks for a monotonically
-	** increasing sequence number so a client can ignore a replayed or
-	** out-of-order snapshot, and a counter that only moved on interesting
-	** events would let two different boards share a number - which is
-	** exactly the case that check cannot catch. room.c bumps it once, at the
-	** one place a snapshot is taken. The number on the wire is not this one,
-	** though: it is the owning connection's state_seq, because the client's
-	** staleness check numbers a stream that outlives any one game.
-	*/
 	uint64_t			seq;
 	int					accum_ms;
-	/*
-	** How long the piece that has landed still belongs to the player.
-	**
-	** Guideline Extended Placement: a piece does not lock the instant it
-	** touches down, it locks half a second later, and moving or rotating it
-	** buys that half-second back fifteen times over. It is what makes it
-	** possible to slide a piece into a gap under an overhang instead of only
-	** dropping it onto one, so it is a rule of the game and belongs to
-	** whoever owns the board - here.
-	*/
 	t_lockdown			lockdown;
-	/*
-	** `active` is "this game is still being played" and is what decides
-	** whether the room is over; `paused` is "it is being played, but not
-	** right now". They have to be separate flags: a pause that cleared
-	** `active` would read as a finished game and the room would record the
-	** score and evict the player who asked for a breather.
-	*/
 	bool				active;
 	bool				paused;
 	bool				topped_out;
 	bool				recorded;
 	t_player_id			player_id;
-	/* the seed this game was dealt, so a restart can deal the next one */
 	uint32_t			seed;
 	t_body_ability		last_ability;
 	t_body_clear_label	last_clear;
-	/*
-	** The completed rows, still on the board, waiting to be taken away.
-	**
-	** A clear is not instantaneous: for clear_duration_ms the rows are there,
-	** no piece has spawned, and the player cannot act. That is a rule and not
-	** a flourish, which is why it is the server holding it - a client that
-	** animated a clear the server had already finished would be drawing rows
-	** that were gone (docs/bugs/the_line_clear_never_reached_the_client.md).
-	**
-	** clearing_count is 0 whenever no clear is in progress, and it is the
-	** whole of the "am I clearing?" question.
-	*/
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
-	/*
-	** Garbage rows owed to this player, and not yet on their board.
-	**
-	** They land at the next piece lock and never on arrival. That is a rule
-	** of the game rather than a scheduling convenience: injecting rows under
-	** an active piece raises the stack beneath it and can produce a board
-	** piece_is_valid would reject, so there is no correct thing to do with
-	** the piece already in the air. Waiting for the lock means the rows are
-	** always part of the board the *next* piece is validated against, and a
-	** spawn that then fails is a top-out, which is the right outcome of being
-	** buried.
-	**
-	** It is also the receiver's warning: the count is on the wire from the
-	** moment it is queued, so a player can see what is coming and clear
-	** underneath it.
-	*/
 	int					pending_garbage;
-	/*
-	** Garbage an ability sent, kept apart from the ordinary kind because Pals
-	** treats the two differently: "incoming ordinary garbage lowers the
-	** Player's stack instead of raising it; garbage created by abilities is
-	** excluded" (docs/use_cases.md). One counter could not tell them apart, so
-	** Pals would either absorb Pentaris - which the text forbids - or absorb
-	** nothing.
-	*/
 	int					pending_ability_garbage;
-	/*
-	** Rows Fry burned off this player's own floor and has not yet passed on.
-	** Fry is two halves and only the first was built: the rows go in, and at
-	** the next lock they clear *and are sent to the Target*. The burn is
-	** consumed by effect_on_piece_lock, so the count is taken before that runs
-	** and handed to room.c, which is the only module that knows who the Target
-	** is.
-	*/
 	int					fry_owed;
-	/*
-	** How many more of this player's pieces Dark and Pals last.
-	**
-	** libtetrisbrain deliberately leaves both open-ended - its comment says
-	** "Dark/Pals/Mirror stay on until effect_clear, the server decides when
-	** they end" - so this is the server deciding. Without it "for a limited
-	** time" would be forever, and a single Dark would end the game.
-	*/
 	int					dark_pieces;
 	int					pals_pieces;
 	/*
@@ -678,28 +467,7 @@ typedef struct s_game
 	** tick that ran two clear completions owes both.
 	*/
 	int					cleared_owed;
-	/*
-	** The character this game is being played with, or 0 when the player did
-	** not declare one and the account's equipped character stands. It decides
-	** which four abilities each level selects from, and it is copied in once
-	** at deal time so an EQUIP made mid-match cannot change it.
-	*/
 	t_item_id			character_id;
-	/*
-	** Abilities aimed at this player, waiting for their next piece lock.
-	**
-	** They wait for the same reason garbage does, and the reason is stronger
-	** here: a board transform landing under an active piece can leave that
-	** piece inside the stack, and a status effect landing mid-piece would
-	** take hold of a piece already in the air - so the count of pieces it is
-	** meant to last would be short by one before it started. At the lock
-	** there is no piece, which is what makes the lock the safe point.
-	**
-	** Only effects that land on somebody *else* queue. An ability that lands
-	** on the player who used it - Mirror, Pals, Copy, Vampire - is applied at
-	** once, exactly like the self-affecting four, because there is no second
-	** board to be surprised.
-	*/
 	t_pending_ability	pending[TD_MAX_PENDING];
 	int					pending_count;
 }	t_game;
@@ -925,12 +693,12 @@ typedef struct s_server_room
 /* everything a reader outside room.c may know about a room, in one read */
 typedef struct s_server_room_view
 {
-	const char		*name;
-	t_game_mode		mode;
-	t_room_status	status;
-	int				players;
-	int				slot_count;
-	bool			ticking;
+	const char			*name;
+	t_game_mode			mode;
+	t_room_status		status;
+	int					players;
+	int					slot_count;
+	bool				ticking;
 }	t_server_room_view;
 
 /* what one input request asks the game to do */
@@ -998,87 +766,40 @@ typedef enum e_client_state
 	CLI_CLOSING
 }	t_client_state;
 
-/*
-** The client's half of a Slot: which room it is sitting in and where. A Slot
-** is one fact held in two places, so this is written by room.c and by nothing
-** else - server_room_open and server_room_seat bind it, server_room_unbind is
-** the only way it is cleared, and server_room_resolve is how everyone else
-** asks what it currently means. Reading it is free; a reader that wants to
-** act on it resolves it first, because a finished game clears every slot and
-** the binding outlives the seat.
-**
-** `room_index` of -1 is "sitting in no room", which is what a fresh connection
-** and a forfeited one both are.
-*/
 typedef struct s_room_binding
 {
-	char			room_name[ROOM_NAME_MAX];
-	int				room_index;
-	int				slot_index;
+	char				room_name[ROOM_NAME_MAX];
+	int					room_index;
+	int					slot_index;
 }	t_room_binding;
 
 struct s_client
 {
-	/* first member: this is what epoll_event.data.ptr is read back through */
-	t_event_tag		tag;
-	int				fd;
-	int				index;
-	t_session		sess;
-	t_server		*srv;
-	t_outbox		outbox;
+	t_event_tag			tag;
+	int					fd;
+	int					index;
+	unsigned int		conn_id;
+	t_session			sess;
+	t_server			*srv;
+	t_outbox			outbox;
 	t_buffer			recv;
 	t_buffer			send;
-	t_client_state	state;
-	t_player_id		player_id;
-	char			username[DB_MAX_USERNAME];
-	t_room_binding	binding;
-	/*
-	** Reactor bookkeeping. `watched` says the descriptor is in the epoll set,
-	** so the socket is established and non-blocking; `writable_armed` tracks
-	** EPOLLOUT, which is only asked for after a short write. `dead` marks a
-	** client that has been unlinked and is waiting on the zombie list - every
-	** later event in the same batch has to skip it rather than touch it.
-	*/
-	bool			watched;
-	bool			writable_armed;
-	bool			dead;
-	bool			handshake_ok;
-	/*
-	** The wall-clock moment this connection's handshake stops being worth
-	** waiting for, set when a worker picks it up. It is a budget for the whole
-	** handshake, not for one read: SO_RCVTIMEO bounds a single recv, and
-	** libtetrissh loops until it has the bytes it asked for, so a peer that
-	** dribbles one byte per timeout would otherwise hold a worker
-	** indefinitely - the very denial of service the pool has to survive.
-	*/
-	uint64_t		handshake_deadline_ms;
-	bool			handshake_expired;
-	t_client		*next_zombie;
-	/*
-	** Input rate bucket. Only ever touched by the reactor, which is why it
-	** needs no lock of its own.
-	*/
-	int				tokens;
-	uint64_t		tokens_at_ms;
-	/*
-	** Chat's own bucket, and it is deliberately not the input one. Sharing a
-	** budget meant a line of chat cost a piece movement and a busy match could
-	** answer 429 to somebody typing, which is two unrelated floods policed by
-	** one number. A person types far slower than they press, so this one is
-	** sized in whole messages rather than from .tetrishrc.
-	*/
-	int				chat_tokens;
-	uint64_t		chat_tokens_at_ms;
-	/*
-	** The number stamped on the last STATE frame this connection was sent.
-	** The client's staleness check is per connection, so the counter is per
-	** connection too: it survives the game and the room that produced the
-	** frames, both of which a finished match destroys. Numbering from the
-	** game instead reset the stream to zero on every new game, and a client
-	** that had not left since the last one dropped the whole of the next as
-	** replayed frames.
-	*/
-	uint64_t		state_seq;
+	t_client_state		state;
+	t_player_id			player_id;
+	char				username[DB_MAX_USERNAME];
+	t_room_binding		binding;
+	bool				watched;
+	bool				writable_armed;
+	bool				dead;
+	bool				handshake_ok;
+	uint64_t			handshake_deadline_ms;
+	bool				handshake_expired;
+	t_client			*next_zombie;
+	int					tokens;
+	uint64_t			tokens_at_ms;
+	int					chat_tokens;
+	uint64_t			chat_tokens_at_ms;
+	uint64_t			state_seq;
 };
 
 /*
@@ -1128,17 +849,46 @@ struct s_handshake_pool
 	t_server			*srv;
 };
 
+/*
+** One Administrator's connection. The tag is first because the reactor reads
+** epoll_event.data.ptr as a t_event_tag before it knows what kind of object it
+** has, exactly as it does for a client.
+**
+** Unlike a client this carries no session: the bytes on the wire are plaintext
+** HTTTP behind the same four-byte length prefix, because there is no peer to
+** authenticate that filesystem permissions have not already authenticated.
+*/
+typedef struct s_control_connection
+{
+	t_event_tag		tag;
+	t_server		*srv;
+	int				fd;
+	bool			open;
+	bool			writable_armed;
+	t_buffer		recv;
+	t_buffer		send;
+}	t_control_connection;
+
+/*
+** The listener and its connections. `stop_requested` is how SHUTDOWN answers
+** before it acts: the reply has to reach the Administrator who asked for it,
+** so the loop is stopped only once that reply has actually been written.
+*/
+typedef struct s_control
+{
+	t_event_tag				tag;
+	int						listen_fd;
+	char					path[TETRISD_FILESYSTEM_PATH_MAX];
+	t_control_connection	slots[TETRISD_CONTROL_MAX_CONNECTIONS];
+	char					body[TETRISD_CONTROL_BODY_MAX];
+	bool					stop_requested;
+}	t_control;
+
 struct s_server
 {
 	t_config			cfg;
 	t_logger		log;
 	t_db			*db;
-	/*
-	** The certificate bytes and parsed private key, read once at boot. They
-	** are immutable afterwards, so every handshake worker shares one copy and
-	** none of them opens a file. SIGHUP does not reload them - the listening
-	** socket they authenticate is already open.
-	*/
 	t_tetrissh_credentials	*credentials;
 	t_registry		reg;
 	t_lobby			lobby;
@@ -1151,12 +901,8 @@ struct s_server
 	t_event_tag		listener_tag;
 	t_event_tag		wake_tag;
 	t_event_tag		timer_tag;
+	t_control		control;
 	t_handshake_pool	pool;
-	/*
-	** Clients unlinked during the current batch, freed by client_reap once the
-	** batch is over, and the scratch buffer every frame is decrypted into.
-	** Both belong to the reactor thread alone.
-	*/
 	t_client		*zombies;
 	unsigned char	*scratch;
 	t_client		**sweep;
@@ -1173,21 +919,12 @@ struct s_server
 	bool			loop_started;
 	atomic_bool		running;
 	atomic_bool		stopping;
-	/*
-	** The live tick period and when the timer last fired. Both belong to the
-	** loop alone: SIGHUP retiming is now a timerfd_settime call on the thread
-	** that owns the timer, rather than a store ninety-nine tickers read.
-	*/
 	int				tick_ms;
 	struct timespec	last_tick;
 	uint64_t		started_ms;
+	unsigned int	next_conn_id;
 };
 
-/*
-** Which catalogue a store request addresses. The two kinds are bought and
-** equipped by different store calls but through identical paths, so the path
-** parser reports the kind rather than each handler spelling out both routes.
-*/
 typedef enum e_item_kind
 {
 	ITEM_CHARACTER,
@@ -1205,89 +942,104 @@ typedef struct s_request_context
 	const char				*content_type;
 }	t_request_context;
 
+/*
+** One Control channel request in flight. It mirrors t_request_context, minus
+** the client: an Administrator is not a Player and has no connection state to
+** answer against. The body is borrowed from t_control rather than held inline,
+** so a 32 KiB answer never lands on the reactor's stack.
+*/
+typedef struct s_control_context
+{
+	t_server				*srv;
+	t_control_connection	*conn;
+	const t_htttp_message	*msg;
+	char					*body;
+	size_t					body_len;
+}	t_control_context;
+
 /* CONFIG.C */
-void			config_defaults(t_config *cfg);
-int				config_resolve_rc_path(const char *override, char *out, size_t cap);
-int				config_set(t_config *cfg, const char *key, const char *value);
-int				config_parse_line(t_config *cfg, const char *line);
-int				config_load(t_config *cfg, const char *override);
-int				config_validate(const t_config *cfg);
+void				config_defaults(t_config *cfg);
+int					config_resolve_rc_path(const char *override, char *out, size_t cap);
+int					config_set(t_config *cfg, const char *key, const char *value);
+int					config_parse_line(t_config *cfg, const char *line);
+int					config_load(t_config *cfg, const char *override);
+int					config_validate(const t_config *cfg);
 
 /* LOGGER.C */
-void			logger_blank(t_logger *lg);
-int				logger_init(t_logger *lg, const t_config *cfg);
-void			logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...);
-uint64_t		logger_dropped_count(const t_logger *lg);
-void			logger_shutdown(t_logger *lg);
+void				logger_blank(t_logger *lg);
+int					logger_init(t_logger *lg, const t_config *cfg);
+void				logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...);
+uint64_t			logger_dropped_count(const t_logger *lg);
+void				logger_shutdown(t_logger *lg);
 
 /* LISTENER.C */
-int				listener_open(int port, int *out_port);
-int				listener_accept(int listen_fd);
+int					listener_open(int port, int *out_port);
+int					listener_accept(int listen_fd);
 
 /* CLOCK.C */
-uint64_t		clock_now_ms(void);
-int				clock_elapsed_ms(struct timespec *last);
+uint64_t			clock_now_ms(void);
+int					clock_elapsed_ms(struct timespec *last);
 
 /* BUFFER.C */
-int				buffer_reserve(t_buffer *b, size_t cap);
-void			buffer_compact(t_buffer *b);
-void			buffer_put_u32(unsigned char *p, uint32_t value);
-uint32_t		buffer_get_u32(const unsigned char *p);
-void			buffer_free(t_buffer *b);
+int					buffer_reserve(t_buffer *b, size_t cap);
+void				buffer_compact(t_buffer *b);
+void				buffer_put_u32(unsigned char *p, uint32_t value);
+uint32_t			buffer_get_u32(const unsigned char *p);
+void				buffer_free(t_buffer *b);
 
 /* OUTBOX.C */
-int				outbox_init(t_outbox *ob);
-int				outbox_push(t_outbox *ob, unsigned char *bytes, size_t len);
-int				outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
-int				outbox_push_chat(t_outbox *ob, unsigned char *bytes, size_t len);
-int				outbox_pop(t_outbox *ob, t_outbound_message *out);
-bool			outbox_idle(t_outbox *ob);
-void			outbox_drop_room_pushes(t_outbox *ob);
-void			outbox_close(t_outbox *ob);
-void			outbox_destroy(t_outbox *ob);
+int					outbox_init(t_outbox *ob);
+int					outbox_push(t_outbox *ob, unsigned char *bytes, size_t len);
+int					outbox_push_state(t_outbox *ob, unsigned char *bytes, size_t len);
+int					outbox_push_chat(t_outbox *ob, unsigned char *bytes, size_t len);
+int					outbox_pop(t_outbox *ob, t_outbound_message *out);
+bool				outbox_idle(t_outbox *ob);
+void				outbox_drop_room_pushes(t_outbox *ob);
+void				outbox_close(t_outbox *ob);
+void				outbox_destroy(t_outbox *ob);
 
 /* REGISTRY.C */
-int				registry_init(t_registry *rg, size_t cap);
-int				registry_add(t_registry *rg, t_client *cli);
-void			registry_remove(t_registry *rg, t_client *cli);
-int				registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len, bool is_state);
-int				registry_enqueue_chat(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len);
-void			registry_bind(t_registry *rg, t_client *cli, t_player_id pid, const char *username);
-void			registry_mark_state(t_registry *rg, t_client *cli, t_client_state state);
-t_client		*registry_find_other(t_registry *rg, t_player_id pid, const t_client *keep);
-size_t			registry_snapshot(t_registry *rg, t_client **out, size_t cap);
-bool			registry_player_online(t_registry *rg, t_player_id pid);
-void			registry_destroy(t_registry *rg);
+int					registry_init(t_registry *rg, size_t cap);
+int					registry_add(t_registry *rg, t_client *cli);
+void				registry_remove(t_registry *rg, t_client *cli);
+int					registry_enqueue(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len, bool is_state);
+int					registry_enqueue_chat(t_registry *rg, t_player_id pid, unsigned char *bytes, size_t len);
+void				registry_bind(t_registry *rg, t_client *cli, t_player_id pid, const char *username);
+void				registry_mark_state(t_registry *rg, t_client *cli, t_client_state state);
+t_client			*registry_find_other(t_registry *rg, t_player_id pid, const t_client *keep);
+size_t				registry_snapshot(t_registry *rg, t_client **out, size_t cap);
+bool				registry_player_online(t_registry *rg, t_player_id pid);
+void				registry_destroy(t_registry *rg);
 
 /* HANDSHAKE_POOL.C */
-int				handshake_pool_start(t_handshake_pool *pool, t_server *srv);
-int				handshake_pool_submit(t_handshake_pool *pool, t_client *cli);
-int				handshake_pool_take(t_handshake_pool *pool, t_client **out);
-int				handshake_pool_expire(t_handshake_pool *pool);
-void			handshake_pool_stop(t_handshake_pool *pool);
-void			handshake_pool_destroy(t_handshake_pool *pool);
+int					handshake_pool_start(t_handshake_pool *pool, t_server *srv);
+int					handshake_pool_submit(t_handshake_pool *pool, t_client *cli);
+int					handshake_pool_take(t_handshake_pool *pool, t_client **out);
+int					handshake_pool_expire(t_handshake_pool *pool);
+void				handshake_pool_stop(t_handshake_pool *pool);
+void				handshake_pool_destroy(t_handshake_pool *pool);
 
 /* CLIENT.C */
-int				client_spawn(t_server *srv, int fd);
-void			client_adopt(t_client *cli);
-void			client_kill(t_client *cli);
-void			client_reap(t_server *srv);
+int					client_spawn(t_server *srv, int fd);
+void				client_adopt(t_client *cli);
+void				client_kill(t_client *cli);
+void				client_reap(t_server *srv);
 
 /* CLIENTIO.C */
-void			client_readable(t_client *cli);
-void			client_flush(t_client *cli);
-void			client_send(t_client *cli, t_htttp_message *msg, bool is_state);
+void				client_readable(t_client *cli);
+void				client_flush(t_client *cli);
+void				client_send(t_client *cli, t_htttp_message *msg, bool is_state);
 
 /* REACTOR.C */
-void			reactor_run(t_server *srv);
-int				reactor_arm_timer(t_server *srv);
+void				reactor_run(t_server *srv);
+int					reactor_arm_timer(t_server *srv);
 
 /* DISPATCH.C */
-void			client_handle_frame(t_client *cli, const unsigned char *frame, size_t len);
-void			request_reply(t_client *cli, unsigned int status, const char *body, size_t body_len);
-const char		*request_body_field(const t_request_context *ctx, const char *key, char *out, size_t cap);
-void			request_body_printf(t_request_context *ctx, const char *fmt, ...);
-int				request_refuse(t_request_context *ctx, const char *reason);
+void				client_handle_frame(t_client *cli, const unsigned char *frame, size_t len);
+void				request_reply(t_client *cli, unsigned int status, const char *body, size_t body_len);
+const char			*request_body_field(const t_request_context *ctx, const char *key, char *out, size_t cap);
+void				request_body_printf(t_request_context *ctx, const char *fmt, ...);
+int					request_refuse(t_request_context *ctx, const char *reason);
 
 /* HANDLERS_ACCOUNT.C */
 int				signup_handler(const t_htttp_message *msg, void *context);
@@ -1301,53 +1053,52 @@ int				bot_pool_hash(const char *name, char *out, size_t cap);
 int				salt_generate(char *out, size_t cap);
 
 /* HANDLERS_LOBBY.C */
-int				list_handler(const t_htttp_message *msg, void *context);
-int				join_handler(const t_htttp_message *msg, void *context);
-int				leave_handler(const t_htttp_message *msg, void *context);
-int				start_handler(const t_htttp_message *msg, void *context);
-bool			request_is_authorised(t_request_context *ctx);
+int					list_handler(const t_htttp_message *msg, void *context);
+int					join_handler(const t_htttp_message *msg, void *context);
+int					leave_handler(const t_htttp_message *msg, void *context);
+int					start_handler(const t_htttp_message *msg, void *context);
+bool				request_is_authorised(t_request_context *ctx);
 
 /* HANDLERS_READY.C */
-int				ready_handler(const t_htttp_message *msg, void *context);
+int					ready_handler(const t_htttp_message *msg, void *context);
 
 /* HANDLERS_CHAT.C */
-int				chat_handler(const t_htttp_message *msg, void *context);
+int					chat_handler(const t_htttp_message *msg, void *context);
 
 /* HANDLERS_TARGET.C */
 int				target_handler(const t_htttp_message *msg, void *context);
 
 /* HANDLERS_LEADERBOARD.C */
-int				leaderboard_handler(const t_htttp_message *msg, void *context);
+int					leaderboard_handler(const t_htttp_message *msg, void *context);
 
 /* HANDLERS_PROFILE.C */
-int				profile_handler(const t_htttp_message *msg, void *context);
-int				request_profile_body(t_request_context *ctx);
+int					profile_handler(const t_htttp_message *msg, void *context);
+int					request_profile_body(t_request_context *ctx);
 
 /* HANDLERS_STORE.C */
-int				buy_handler(const t_htttp_message *msg, void *context);
-int				equip_handler(const t_htttp_message *msg, void *context);
-int				store_list_catalogue(t_request_context *ctx);
+int					buy_handler(const t_htttp_message *msg, void *context);
+int					equip_handler(const t_htttp_message *msg, void *context);
+int					store_list_catalogue(t_request_context *ctx);
 
 /* REQUEST_TARGET.C */
-int				request_input_target(t_request_context *ctx, t_server_room **out);
-const char		*request_room_name(const t_request_context *ctx);
-t_player_id		request_player_id(const char *text, const char **end);
-int				request_body_token(t_request_context *ctx, char *out, size_t cap);
-bool			rate_limit_take_token(t_client *cli);
-bool			rate_limit_take_chat_token(t_client *cli);
-int				rate_limit_refill_level(int tokens, uint64_t elapsed_ms,
-					int cap, int rate);
+int					request_input_target(t_request_context *ctx, t_server_room **out);
+const char			*request_room_name(const t_request_context *ctx);
+t_player_id			request_player_id(const char *text, const char **end);
+int					request_body_token(t_request_context *ctx, char *out, size_t cap);
+bool				rate_limit_take_token(t_client *cli);
+bool				rate_limit_take_chat_token(t_client *cli);
+int					rate_limit_refill_level(int tokens, uint64_t elapsed_ms, int cap, int rate);
 
 /* HANDLERS_INPUT.C */
-int				move_handler(const t_htttp_message *msg, void *context);
-int				rotate_handler(const t_htttp_message *msg, void *context);
-int				drop_handler(const t_htttp_message *msg, void *context);
-int				hold_handler(const t_htttp_message *msg, void *context);
+int					move_handler(const t_htttp_message *msg, void *context);
+int					rotate_handler(const t_htttp_message *msg, void *context);
+int					drop_handler(const t_htttp_message *msg, void *context);
+int					hold_handler(const t_htttp_message *msg, void *context);
 
 /* HANDLERS_GAME.C */
-int				pause_handler(const t_htttp_message *msg, void *context);
-int				restart_handler(const t_htttp_message *msg, void *context);
-int				ability_handler(const t_htttp_message *msg, void *context);
+int					pause_handler(const t_htttp_message *msg, void *context);
+int					restart_handler(const t_htttp_message *msg, void *context);
+int					ability_handler(const t_htttp_message *msg, void *context);
 
 /* GAME.C */
 void			game_reset(t_game *g);
@@ -1420,27 +1171,26 @@ bool			server_room_is_muted(const t_server_room *server_room, t_player_id pid);
 const t_game	*server_room_game_at(const t_server_room *server_room, int slot);
 
 /* NARRATE.C */
-bool			room_chat_broadcast(t_server_room *server_room, t_body_chat *chat);
-void			room_narrate(t_server_room *server_room, const char *fmt, ...)
-					__attribute__((format(printf, 2, 3)));
+bool				room_chat_broadcast(t_server_room *server_room, t_body_chat *chat);
+void				room_narrate(t_server_room *server_room, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /* SERVER.C */
-int				server_start(const t_config *cfg, t_server **out);
-void			server_stop(t_server *srv);
-int				server_port(const t_server *srv);
-void			server_wait(t_server *srv);
-void			server_request_stop(t_server *srv);
-void			server_wake(t_server *srv);
-void			server_reload(t_server *srv);
+int					server_start(const t_config *cfg, t_server **out);
+void				server_stop(t_server *srv);
+int					server_port(const t_server *srv);
+void				server_wait(t_server *srv);
+void				server_request_stop(t_server *srv);
+void				server_wake(t_server *srv);
+void				server_reload(t_server *srv);
 
 /* SIGNALS.C */
-void			signals_install(t_server *srv);
-bool			signals_take_stop(void);
-void			signals_restore(void);
-bool			signals_take_reload(void);
-bool			signals_take_state_dump(void);
+void				signals_install(t_server *srv);
+bool				signals_take_stop(void);
+void				signals_restore(void);
+bool				signals_take_reload(void);
+bool				signals_take_state_dump(void);
 
 /* DUMP.C */
-void			server_state_dump(t_server *srv);
+void				server_state_dump(t_server *srv);
 
 # endif
