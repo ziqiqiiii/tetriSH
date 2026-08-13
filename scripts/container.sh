@@ -416,11 +416,21 @@ run_client() {
     # the terminal that will render the output: notcurses inside the container
     # must see the capabilities of the terminal on the far end of the pty, not
     # a guess about it.
+    #
+    # --init matters more than it looks: tetrisu is the image's ENTRYPOINT and
+    # installs no signal handlers, so without it tetrisu is PID 1 of its own
+    # namespace, where Linux discards any signal with no explicit handler
+    # instead of taking the default action. Closing the kitty window hangs up
+    # the pty (SIGHUP) to this docker client, which forwards it into the
+    # container - and PID 1 drops it on the floor, so the container outlives
+    # the window and --rm never runs. --init puts Docker's bundled tini at
+    # PID 1 instead, so tetrisu runs at PID 2 or later under ordinary signal
+    # semantics and the forwarded SIGHUP actually kills it.
     # shellcheck disable=SC2086 # $net is deliberately word-split into flags
     # ${a[@]+"${a[@]}"} rather than "${a[@]}": under `set -u` bash 3.2, which is
     # what macOS ships, an empty array expands as an unset variable and aborts -
     # and macOS is precisely where it stays empty, having no socket to pass.
-    exec "$engine" run --rm -it \
+    exec "$engine" run --rm -it --init \
         $net \
         ${AUDIO_FLAGS[@]+"${AUDIO_FLAGS[@]}"} \
         -e TERM="${TERM:-xterm-kitty}" \
