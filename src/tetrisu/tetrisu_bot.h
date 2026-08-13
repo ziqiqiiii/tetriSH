@@ -226,11 +226,24 @@ typedef struct s_bot
 }	t_bot;
 
 /*
-** How many bots one player may add to one room. Four is enough to reach a
+** Two limits, because there are two reasons to add a bot.
+**
+** BOT_FARM_HAND_MAX is the one a player meets: four is enough to reach a
 ** Battle Royale's minimum of four from a single person, and one is enough for
-** a Double.
+** a Double. It is what B offers and what B refuses past.
+**
+** BOT_FARM_MAX is the array, and it is fifty because filling a room to see
+** what fifty boards cost is a thing worth doing and nothing else in the client
+** can do it. It is not reachable from B - only F1 goes past the first limit -
+** so a player cannot walk into fifty processes by holding a key down.
+**
+** Fifty rather than the ninety-nine a Battle Royale seats: every bot is a
+** process of this client's own, and the server's account pool is the other
+** ceiling (TETRISD_BOT_ACCOUNTS, 64 by default), so the number that fits is
+** smaller than the number of seats and always will be.
 */
-# define BOT_FARM_MAX			4
+# define BOT_FARM_HAND_MAX		4
+# define BOT_FARM_MAX			50
 # define BOT_PATH_MAX			4096
 
 /*

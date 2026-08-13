@@ -12,7 +12,8 @@ static bool	valid_slot(const t_app_room_view_model *room, int index);
 static bool	valid_room_snapshot(const t_app_room_view_model *room);
 static void	append_fighter(const t_waiting_room_state *state, char *out,
 				size_t size);
-static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size);
+static void	bot_feedback_text(t_room_feedback feedback, int value,
+				char *out, size_t size);
 static void	move_roster(t_waiting_room_state *state,
 					const t_app_room_view_model *room, int delta);
 
@@ -842,7 +843,7 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
 		snprintf(out, size, "NEED %d MORE - PRESS B TO ADD A BOT",
 			state->feedback_value);
 	else
-		bot_feedback_text(state->feedback, out, size);
+		bot_feedback_text(state->feedback, state->feedback_value, out, size);
 	return (out);
 }
 
@@ -857,7 +858,8 @@ const char	*waiting_room_feedback_text(const t_waiting_room_state *state,
  * @param out Buffer receiving the line.
  * @param size Size of out.
  */
-static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size)
+static void	bot_feedback_text(t_room_feedback feedback, int value,
+			char *out, size_t size)
 {
 	if (feedback == ROOM_FEEDBACK_BOT_ADDED)
 		snprintf(out, size, "BOT ADDED");
@@ -873,6 +875,9 @@ static void	bot_feedback_text(t_room_feedback feedback, char *out, size_t size)
 		snprintf(out, size, "NO BOT COULD BE STARTED");
 	else if (feedback == ROOM_FEEDBACK_BOT_LOST)
 		snprintf(out, size, "A BOT STOPPED - SEE " BOT_LOG_NAME);
+	else if (feedback == ROOM_FEEDBACK_BOT_FILLED)
+		snprintf(out, size, "FILLED WITH %d BOT%s", value,
+			value == 1 ? "" : "S");
 }
 
 /**
@@ -945,6 +950,13 @@ static t_room_action	handle_room_key(t_waiting_room_state *state,
 		return (ROOM_ACTION_ADD_BOT);
 	if (key == 'k' || key == 'K')
 		return (ROOM_ACTION_KICK_BOT);
+	/*
+	 * F1 fills the room with bots past the four B offers. It is a stress tool
+	 * and it is on a function key on purpose: nothing advertises it, and no
+	 * letter a player might reach for starts fifty processes.
+	 */
+	if (key == NCKEY_F01)
+		return (ROOM_ACTION_FILL_BOTS);
 	if (key == NCKEY_UP)
 		move_roster(state, room, -1);
 	else if (key == NCKEY_DOWN)

@@ -1514,7 +1514,13 @@ typedef enum e_room_feedback
 	 * seat never appeared. This is what the room says instead once the process
 	 * is collected, and it names the log because the reason is written there.
 	 */
-	ROOM_FEEDBACK_BOT_LOST
+	ROOM_FEEDBACK_BOT_LOST,
+	/*
+	 * F1's answer, and it carries feedback_value: filling stops on the first
+	 * refusal, so how many actually started is the only useful thing to say.
+	 * A stress tool, not a feature - see BOT_FARM_MAX.
+	 */
+	ROOM_FEEDBACK_BOT_FILLED
 }	t_room_feedback;
 
 typedef enum e_room_action
@@ -1536,6 +1542,12 @@ typedef enum e_room_action
 	 */
 	ROOM_ACTION_ADD_BOT,
 	ROOM_ACTION_KICK_BOT,
+	/*
+	 * F1: fill the room with bots past the four B offers. Deliberately not on
+	 * a letter and deliberately not advertised in the hint line - it is here to
+	 * measure what fifty boards cost, not to be found by a player.
+	 */
+	ROOM_ACTION_FILL_BOTS,
 	ROOM_ACTION_QUIT
 }	t_room_action;
 
