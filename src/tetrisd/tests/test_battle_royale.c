@@ -46,6 +46,7 @@ static void	test_a_quitter_keeps_the_placing_they_quit_at(void);
 static void	test_a_targeting_mode_is_declared_and_kept(void);
 static void	test_a_target_outside_a_battle_royale_is_refused(void);
 static void	test_a_mode_marks_the_rivals_it_singles_out(void);
+static void	test_a_card_tells_garbage_from_a_piece(void);
 
 static int	start_match(t_fixture *fx, t_harness *players, int count,
 				char *room, size_t cap, char *path, size_t path_cap);
@@ -87,6 +88,7 @@ int	main(void)
 	test_a_targeting_mode_is_declared_and_kept();
 	test_a_target_outside_a_battle_royale_is_refused();
 	test_a_mode_marks_the_rivals_it_singles_out();
+	test_a_card_tells_garbage_from_a_piece();
 	return (0);
 }
 
@@ -430,13 +432,65 @@ static void	test_a_match_sends_an_arena_of_every_seat(void)
 		assert(state.arena[i].flags & BODY_ARENA_ALIVE);
 		/* a live card always carries its board */
 		assert(state.arena[i].flags & BODY_ARENA_MASK_PRESENT);
-		assert(state.arena[i].mask_valid);
+		assert(state.arena[i].cells_valid);
 		assert(state.arena[i].rank == 0);
 		i++;
 	}
 	close_all(players, BR_SEATS);
 	fx_stop(&fx);
 	printf("PASS test_a_match_sends_an_arena_of_every_seat\n");
+}
+
+/*
+** A card says what each cell *is*, not merely that something is there.
+**
+** It was one bit per cell until a player reported that every block in the mode
+** drew grey, and it could not have drawn anything else: a silhouette cannot
+** tell a piece somebody placed from a row somebody else sent them. So the
+** codes are asserted rather than the occupancy - 1 for garbage, 2 upward for a
+** piece in the seven types' own order - because "not zero" is exactly the
+** assertion that passed all the way through the bug.
+*/
+static void	test_a_card_tells_garbage_from_a_piece(void)
+{
+	t_body_state	state;
+	t_fixture		fx;
+	t_harness		players[BR_SEATS];
+	char			room[ROOM_NAME_MAX];
+	char			path[64];
+	char			play[128];
+	int				garbage;
+	int				piece;
+	int				row;
+	int				col;
+
+	assert(start_match(&fx, players, BR_SEATS, room, sizeof(room), path,
+			sizeof(path)) == 0);
+	play_path(play, sizeof(play), room, players[0].player_id);
+	assert(hc_send(&players[0], "DROP", play, "HARD\n") == 0);
+	assert(wait_arena(&players[0], &state, HC_TIMEOUT_MS) == 0);
+	assert(state.arena[0].cells_valid);
+	garbage = 0;
+	piece = 0;
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			garbage += (state.arena[0].cells[row][col] == 1);
+			piece += (state.arena[0].cells[row][col] >= 2);
+			col++;
+		}
+		row++;
+	}
+	/* one tetromino landed and nobody has sent anybody anything, so the card
+	** carries exactly four piece cells and no garbage at all */
+	assert(piece == 4);
+	assert(garbage == 0);
+	close_all(players, BR_SEATS);
+	fx_stop(&fx);
+	printf("PASS test_a_card_tells_garbage_from_a_piece\n");
 }
 
 /*

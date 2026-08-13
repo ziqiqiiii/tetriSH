@@ -129,8 +129,8 @@ static int	check_the_match_deals(t_net_client *net, const char *room)
 
 /*
 ** The arena is where a bot's play is visible from here: a card per seat with
-** a one-bit mask of that board. A bot that connected and did nothing would
-** fill the roster and leave every mask empty, which is exactly the failure
+** a nibble-per-cell picture of that board. A bot that connected and did
+** nothing would fill the roster and leave every card empty, which is the failure
 ** this is looking for - so what is asserted is that cells appear on boards
 ** that are not the player's.
 */
@@ -324,7 +324,7 @@ static int	pump_for(t_net_client *net, int ms)
 /**
  * @brief How many arena cards belong to somebody else and carry a stack.
  *
- * A card with no mask is a board nothing has landed on yet, which is what a
+ * A card with no cells set is a board nothing has landed on yet, which is what a
  * bot that connected and never played would leave behind.
  *
  * @param snap The snapshot to read.
@@ -341,9 +341,9 @@ static int	alive_arena_cards(const t_body_state *snap)
 	while (index < snap->arena_count)
 	{
 		byte = 0;
-		while (byte < sizeof(snap->arena[index].mask))
+		while (byte < sizeof(snap->arena[index].cells))
 		{
-			if (((const unsigned char *)snap->arena[index].mask)[byte] != 0)
+			if (((const unsigned char *)snap->arena[index].cells)[byte] != 0)
 			{
 				count++;
 				break ;

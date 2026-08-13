@@ -33,14 +33,15 @@ static void	fill_opponent(t_body_opponent *opponent);
 void		test_state_build_body_is_valid(void);
 void		test_state_absent_arena_is_not_an_empty_one(void);
 void		test_state_arena_round_trips_every_card(void);
-void		test_state_arena_mask_survives_the_wire(void);
-void		test_state_arena_mask_is_optional_per_card(void);
+void		test_state_arena_cells_survive_the_wire(void);
+void		test_state_arena_cells_are_optional_per_card(void);
 void		test_state_decode_rejects_arena_count_mismatch(void);
 void		test_state_arena_fits_the_derived_cap(void);
 void		test_state_arena_seats_are_numbered_from_one(void);
-static void	fill_card(t_body_arena_slot *card, int slot, bool with_mask);
-static bool	mask_bit(const t_body_arena_slot *card, int row, int col);
-static void	set_mask_bit(t_body_arena_slot *card, int row, int col);
+static void	fill_card(t_body_arena_slot *card, int slot, bool with_cells);
+static int	card_cell(const t_body_arena_slot *card, int row, int col);
+static void	set_card_cell(t_body_arena_slot *card, int row, int col,
+				int code);
 
 // a full, valid frame matching g_head with an all-empty board
 static void	make_state(t_body_state *st)
@@ -628,8 +629,8 @@ int	main(void)
 	test_state_absent_arena_is_not_an_empty_one();
 	test_state_arena_seats_are_numbered_from_one();
 	test_state_arena_round_trips_every_card();
-	test_state_arena_mask_survives_the_wire();
-	test_state_arena_mask_is_optional_per_card();
+	test_state_arena_cells_survive_the_wire();
+	test_state_arena_cells_are_optional_per_card();
 	test_state_decode_rejects_arena_count_mismatch();
 	test_state_arena_fits_the_derived_cap();
 	return (0);
@@ -739,22 +740,22 @@ void	test_state_arena_round_trips_every_card(void)
 		assert(st.arena[i].ko == expect.ko);
 		assert(st.arena[i].rank == expect.rank);
 		assert(st.arena[i].flags == expect.flags);
-		assert(st.arena[i].mask_valid);
-		assert(memcmp(st.arena[i].mask, expect.mask,
-				sizeof(expect.mask)) == 0);
+		assert(st.arena[i].cells_valid);
+		assert(memcmp(st.arena[i].cells, expect.cells,
+				sizeof(expect.cells)) == 0);
 		i++;
 	}
 	printf("PASS test_state_arena_round_trips_every_card\n");
 }
 
 /*
-** The mask is the whole point of the card, and it is the one field packed
+** The cells are the whole point of the card, and they are the one field packed
 ** rather than printed: 200 cells into 50 hex characters, four cells to a
 ** character, crossing row boundaries. An off-by-one in either direction would
 ** shear every rival's stack sideways, so the exact cells are asserted rather
 ** than a count of set bits.
 */
-void	test_state_arena_mask_survives_the_wire(void)
+void	test_state_arena_cells_survive_the_wire(void)
 {
 	t_body_state	st;
 	char			body[16384];
@@ -766,34 +767,36 @@ void	test_state_arena_mask_survives_the_wire(void)
 	st.arena_present = true;
 	st.arena_count = 1;
 	fill_card(&st.arena[0], 1, true);
-	memset(st.arena[0].mask, 0, sizeof(st.arena[0].mask));
-	set_mask_bit(&st.arena[0], 0, 0);
-	set_mask_bit(&st.arena[0], 0, 9);
-	set_mask_bit(&st.arena[0], 19, 0);
-	set_mask_bit(&st.arena[0], 19, 9);
-	set_mask_bit(&st.arena[0], 7, 4);
+	memset(st.arena[0].cells, 0, sizeof(st.arena[0].cells));
+	set_card_cell(&st.arena[0], 0, 0, 2);
+	set_card_cell(&st.arena[0], 0, 9, 8);
+	set_card_cell(&st.arena[0], 19, 0, 1);
+	set_card_cell(&st.arena[0], 19, 9, 1);
+	set_card_cell(&st.arena[0], 7, 4, 5);
 	len = body_state_encode(&st, body, sizeof(body));
 	assert(len > 0);
 	memset(&st, 0, sizeof(st));
 	assert(body_state_decode(body, (size_t)len, &st) == 0);
-	assert(mask_bit(&st.arena[0], 0, 0));
-	assert(mask_bit(&st.arena[0], 0, 9));
-	assert(mask_bit(&st.arena[0], 19, 0));
-	assert(mask_bit(&st.arena[0], 19, 9));
-	assert(mask_bit(&st.arena[0], 7, 4));
-	assert(!mask_bit(&st.arena[0], 0, 1));
-	assert(!mask_bit(&st.arena[0], 7, 5));
-	assert(!mask_bit(&st.arena[0], 10, 0));
-	printf("PASS test_state_arena_mask_survives_the_wire\n");
+	/* the code, not merely that something was there: a piece's type and a
+	** row of garbage have to come off the wire as different things */
+	assert(card_cell(&st.arena[0], 0, 0) == 2);
+	assert(card_cell(&st.arena[0], 0, 9) == 8);
+	assert(card_cell(&st.arena[0], 19, 0) == 1);
+	assert(card_cell(&st.arena[0], 19, 9) == 1);
+	assert(card_cell(&st.arena[0], 7, 4) == 5);
+	assert(card_cell(&st.arena[0], 0, 1) == 0);
+	assert(card_cell(&st.arena[0], 7, 5) == 0);
+	assert(card_cell(&st.arena[0], 10, 0) == 0);
+	printf("PASS test_state_arena_cells_survive_the_wire\n");
 }
 
 /*
-** A dead board never changes again, so its card leaves the mask off and the
+** A dead board never changes again, so its card leaves the cells off and the
 ** client keeps the one it holds. The flags say which, per card, on the same
-** line - so one card omitting its mask must not shift the next card's fields,
+** line - so one card omitting them must not shift the next card's fields,
 ** which is the failure this shape risks.
 */
-void	test_state_arena_mask_is_optional_per_card(void)
+void	test_state_arena_cells_are_optional_per_card(void)
 {
 	t_body_state	st;
 	char			body[16384];
@@ -814,12 +817,12 @@ void	test_state_arena_mask_is_optional_per_card(void)
 	memset(&st, 0, sizeof(st));
 	assert(body_state_decode(body, (size_t)len, &st) == 0);
 	assert(st.arena_count == 3);
-	assert(!st.arena[0].mask_valid && !st.arena[2].mask_valid);
-	assert(st.arena[1].mask_valid);
-	/* the card after a mask-less one is still read whole */
+	assert(!st.arena[0].cells_valid && !st.arena[2].cells_valid);
+	assert(st.arena[1].cells_valid);
+	/* the card after a cell-less one is still read whole */
 	assert(st.arena[1].slot == 2 && st.arena[1].ko == 3);
 	assert(st.arena[2].slot == 3 && st.arena[2].lines == 6);
-	printf("PASS test_state_arena_mask_is_optional_per_card\n");
+	printf("PASS test_state_arena_cells_are_optional_per_card\n");
 }
 
 /*
@@ -883,7 +886,7 @@ void	test_state_arena_fits_the_derived_cap(void)
 }
 
 // one card, distinguishable from its neighbours by slot
-static void	fill_card(t_body_arena_slot *card, int slot, bool with_mask)
+static void	fill_card(t_body_arena_slot *card, int slot, bool with_cells)
 {
 	int	row;
 
@@ -895,26 +898,27 @@ static void	fill_card(t_body_arena_slot *card, int slot, bool with_mask)
 	card->pending = slot % 3;
 	card->ko = slot % 3 + 1;
 	card->rank = slot * 2 % 7;
-	if (!with_mask)
+	if (!with_cells)
 		return ;
 	card->flags |= BODY_ARENA_MASK_PRESENT;
 	row = 0;
 	while (row < BODY_BOARD_ROWS)
 	{
 		if ((row + slot) % 3 == 0)
-			set_mask_bit(card, row, (row + slot) % BODY_BOARD_COLS);
+			set_card_cell(card, row, (row + slot) % BODY_BOARD_COLS,
+				2 + (row + slot) % 7);
 		row++;
 	}
 }
 
-static bool	mask_bit(const t_body_arena_slot *card, int row, int col)
+static int	card_cell(const t_body_arena_slot *card, int row, int col)
 {
-	return ((card->mask[row][col / 8] >> (col % 8)) & 1u);
+	return ((int)card->cells[row][col]);
 }
 
-static void	set_mask_bit(t_body_arena_slot *card, int row, int col)
+static void	set_card_cell(t_body_arena_slot *card, int row, int col, int code)
 {
-	card->mask[row][col / 8] |= (unsigned char)(1u << (col % 8));
+	card->cells[row][col] = (unsigned char)code;
 }
 
 /*

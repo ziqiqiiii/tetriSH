@@ -87,7 +87,7 @@
 # define BODY_ARENA_MASK_PRESENT	0x10
 # define BODY_ARENA_FLAGS_MAX		0x1F
 /* 20 rows of 10 bits, 4 bits to the hex char */
-# define BODY_ARENA_MASK_CHARS	((BODY_BOARD_ROWS * BODY_BOARD_COLS) / 4)
+# define BODY_ARENA_CELL_CHARS	(BODY_BOARD_ROWS * BODY_BOARD_COLS)
 /* the longest chat line a room will carry, sender excluded */
 # define BODY_CHAT_TEXT_MAX	256
 /* what t_body_state.hold reads when the player is holding nothing */
@@ -239,15 +239,24 @@ typedef struct s_body_opponent
 ** One card of a Battle Royale arena: what a player can tell about one rival
 ** from a thumbnail, and nothing more.
 **
-** The mask is the board with everything but its silhouette removed - one bit
-** per cell, row 0 first, and within a row the leftmost column in the high bit
-** of the first nibble. Colour and piece type are not carried at all, because a
-** card is a handful of terminal cells and could not draw them.
+** `cells` is the board at one nibble each, row 0 first, leftmost column first:
 **
-** `mask_valid` is not on the wire; it is what the decoder writes after reading
-** the flags, so a caller can tell "this card carried a fresh mask" from "this
-** card left the mask to whatever you already had". A client that keeps its
-** arena slot-indexed simply leaves the old mask in place when it is false.
+**     0        empty
+**     1        garbage
+**     2 + type a piece, in the seven types' own order
+**
+** It was one *bit* per cell until a player pointed out that every block in the
+** mode drew grey. It could not have drawn anything else - the wire carried a
+** silhouette and nothing more - so the client painted every filled cell one
+** colour and garbage was indistinguishable from a piece somebody had placed.
+** A nibble is four times a bit and still a quarter of the two nibbles a full
+** board spends, which keeps the arena an order of magnitude off a board while
+** letting a rival's stack read as a stack.
+**
+** `cells_valid` is not on the wire; it is what the decoder writes after
+** reading the flags, so a caller can tell "this card carried fresh cells" from
+** "this card left them to whatever you already had". A client that keeps its
+** arena slot-indexed simply leaves the old ones in place when it is false.
 **
 ** No score. Nothing at this size draws one, the tiering sorts on placing and
 ** on who is attacking, and as a decimal uint64 it was the single widest field
@@ -262,8 +271,8 @@ typedef struct s_body_arena_slot
 	int			pending;
 	int			ko;
 	int			rank;
-	bool		mask_valid;
-	unsigned char	mask[BODY_BOARD_ROWS][(BODY_BOARD_COLS + 7) / 8];
+	bool		cells_valid;
+	unsigned char	cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
 }	t_body_arena_slot;
 
 /*
@@ -292,7 +301,7 @@ typedef struct s_body_arena_slot
 **                     times)
 **   counts <players> <alive>
 **   arena <full|absent> <n>
-**   a <slot> <pid-hex> <flags> <lines> <pending> <ko> <rank> [mask]
+**   a <slot> <pid-hex> <flags> <lines> <pending> <ko> <rank> [cells]
 **                    (repeated n times; no lines at all when absent)
 **
 ** The arena section is appended after the opponents, so every line that came
@@ -304,10 +313,10 @@ typedef struct s_body_arena_slot
 ** full 0 is "the arena is empty". The first happens on almost every frame,
 ** because the arena rides a slower clock than the board does.
 **
-** A card's `mask` is present only when its flags say so, which is the one place
-** in this body where a field's presence depends on a value earlier on the same
-** line. It is worth the exception: a dead board is finished changing, so
-** re-sending its mask five times a second is the largest avoidable cost in the
+** A card's `cells` are present only when its flags say so, which is the one
+** place in this body where a field's presence depends on a value earlier on
+** the same line. It is worth the exception: a dead board is finished changing,
+** so re-sending it five times a second is the largest avoidable cost in the
 ** mode, and the alternative - sending only the cards that changed - is a delta
 ** this transport cannot support.
 **
@@ -554,11 +563,15 @@ typedef struct s_body_chat
 ** The widest a state body can encode to, derived from the constants that
 ** produce it rather than chosen and hoped for.
 **
-** One arena card, worst case, is 91 bytes: `a ` plus a 2-digit slot, a 16-hex
+** One arena card, worst case, is 241 bytes: `a ` plus a 2-digit slot, a 16-hex
 ** player id, 2-digit flags, 4-digit lines, 3-digit pending, 2-digit ko,
-** 2-digit rank, each with its space, then the 50-char mask and a newline. The
-** mask counts even though it is often elided - a buffer is sized by its worst
-** case, and eliding it saves bandwidth rather than bytes of buffer.
+** 2-digit rank, each with its space, then the 200 cell nibbles and a newline.
+** The cells count even though they are often elided - a buffer is sized by its
+** worst case, and eliding them saves bandwidth rather than bytes of buffer.
+**
+** They were 50 characters while a card was one bit per cell. Four times that
+** is what colour costs, and a full arena is still a quarter of what ninety-
+** eight real boards would be.
 **
 ** BODY_STATE_HEAD_MAX covers everything before the arena: the fixed lines, the
 ** subject's own 20 board rows, one full opponent, and the two count lines. It
@@ -567,7 +580,7 @@ typedef struct s_body_chat
 ** Whoever sizes a buffer for one of these must assert against this, not
 ** against a number that happened to be big enough when it was written.
 */
-# define BODY_ARENA_LINE_MAX	91
+# define BODY_ARENA_LINE_MAX	241
 # define BODY_STATE_HEAD_MAX	2048
 # define BODY_STATE_MAX_BYTES	(BODY_STATE_HEAD_MAX \
 									+ BODY_ARENA_MAX * BODY_ARENA_LINE_MAX)

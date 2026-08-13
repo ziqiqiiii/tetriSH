@@ -10,11 +10,11 @@
 ** The payload is bit-packed. A card is drawn a few terminal cells wide, so what
 ** it can show is the silhouette of a stack and nothing else - one bit per cell
 ** against the two hex nibbles a full board spends on type and colour. Ninety-
-** eight full boards would be 46 KB of body; ninety-eight masks are 4.8 KB.
+** eight full boards would be 46 KB of body; ninety-eight cards are 19 KB.
 **
-** The mask is optional, and its flags say so. A board that has topped out never
-** changes again, so re-sending its mask five times a second is the largest
-** avoidable cost in the mode. A card without one means "keep the mask you
+** The cells are optional, and the flags say so. A board that has topped out
+** never changes again, so re-sending it five times a second is the largest
+** avoidable cost in the mode. A card without them means "keep the ones you
 ** have", which is safe here and only here: the value is known to be frozen, so
 ** a client that misses a push is stale by nothing at all. This is not a delta -
 ** every push is still the complete roster - and the difference matters, because
@@ -28,10 +28,10 @@
 // Static Functions
 static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap,
 				size_t *off);
-static int	encode_mask(const t_body_arena_slot *card, char *out, size_t cap,
+static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap,
 				size_t *off);
 static int	decode_card(const char *line, t_body_arena_slot *out);
-static int	decode_mask(const char *text, t_body_arena_slot *out);
+static int	decode_cells(const char *text, t_body_arena_slot *out);
 static int	validate_card(const t_body_arena_slot *card);
 static int	hex_value(char ch);
 
@@ -141,7 +141,7 @@ int	body_arena_validate(const t_body_state *in)
 }
 
 /**
- * @brief Writes one card, with its mask only when the flags claim one.
+ * @brief Writes one card, with its cells only when the flags claim them.
  *
  * The player id goes out in hex. It is the widest field on the line and the
  * only one with no natural bound - as decimal its worst case is 20 characters
@@ -163,58 +163,54 @@ static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap,
 	if ((card->flags & BODY_ARENA_MASK_PRESENT) != 0)
 	{
 		if (body_append(out, cap, off, " ") != 0
-			|| encode_mask(card, out, cap, off) != 0)
+			|| encode_cells(card, out, cap, off) != 0)
 			return (-1);
 	}
 	return (body_append(out, cap, off, "\n"));
 }
 
 /**
- * @brief Writes a board mask as hex, row 0 first, leftmost column highest bit.
+ * @brief Writes a board as hex, one nibble per cell, row 0 first.
  *
- * @param card The card whose mask is written.
+ * @param card The card whose cells are written.
  * @param out The body buffer.
  * @param cap Size of out.
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_mask(const t_body_arena_slot *card, char *out, size_t cap,
+static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap,
 		size_t *off)
 {
-	unsigned	nibble;
-	int			cell;
-	int			row;
-	int			col;
+	int	row;
+	int	col;
 
-	cell = 0;
-	nibble = 0;
-	while (cell < BODY_BOARD_ROWS * BODY_BOARD_COLS)
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
 	{
-		row = cell / BODY_BOARD_COLS;
-		col = cell % BODY_BOARD_COLS;
-		nibble = (nibble << 1) | ((card->mask[row][col / 8] >> (col % 8)) & 1u);
-		cell++;
-		if (cell % 4 == 0)
+		col = 0;
+		while (col < BODY_BOARD_COLS)
 		{
-			if (body_append(out, cap, off, "%x", nibble) != 0)
+			if (body_append(out, cap, off, "%x",
+					card->cells[row][col] & 0xFu) != 0)
 				return (-1);
-			nibble = 0;
+			col++;
 		}
+		row++;
 	}
 	return (0);
 }
 
 /**
- * @brief Parses one `a` line, with or without its trailing mask.
+ * @brief Parses one `a` line, with or without its trailing cells.
  *
  * @param line The card text, newline already stripped.
  * @param out The card to fill.
- * @return 0 on success, -1 on a malformed line or a mask that disagrees with
- *         the flags that announced it.
+ * @return 0 on success, -1 on a malformed line, or cells that disagree with
+ *         the flags that announced them.
  */
 static int	decode_card(const char *line, t_body_arena_slot *out)
 {
-	char	mask[BODY_LINE_MAX];
+	char	cells[BODY_LINE_MAX];
 	int		head;
 	int		tail;
 
@@ -233,39 +229,40 @@ static int	decode_card(const char *line, t_body_arena_slot *out)
 		return (0);
 	}
 	tail = 0;
-	if (sscanf(line + head, " %1023s%n", mask, &tail) != 1
+	if (sscanf(line + head, " %1023s%n", cells, &tail) != 1
 		|| line[head + tail] != '\0'
-		|| strlen(mask) != (size_t)BODY_ARENA_MASK_CHARS)
+		|| strlen(cells) != (size_t)BODY_ARENA_CELL_CHARS)
 		return (-1);
-	out->mask_valid = true;
-	return (decode_mask(mask, out));
+	out->cells_valid = true;
+	return (decode_cells(cells, out));
 }
 
 /**
- * @brief Unpacks a hex mask back into one bit per cell.
+ * @brief Unpacks the hex back into one code per cell.
  *
- * @param text The mask characters, already length-checked.
- * @param out The card whose mask is filled.
+ * @param text The cell characters, already length-checked.
+ * @param out The card whose cells are filled.
  * @return 0 on success, -1 on a non-hex character.
  */
-static int	decode_mask(const char *text, t_body_arena_slot *out)
+static int	decode_cells(const char *text, t_body_arena_slot *out)
 {
 	int	value;
-	int	cell;
 	int	row;
 	int	col;
 
-	cell = 0;
-	while (cell < BODY_BOARD_ROWS * BODY_BOARD_COLS)
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
 	{
-		value = hex_value(text[cell / 4]);
-		if (value < 0)
-			return (-1);
-		row = cell / BODY_BOARD_COLS;
-		col = cell % BODY_BOARD_COLS;
-		if ((value >> (3 - cell % 4)) & 1)
-			out->mask[row][col / 8] |= (unsigned char)(1u << (col % 8));
-		cell++;
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			value = hex_value(text[row * BODY_BOARD_COLS + col]);
+			if (value < 0)
+				return (-1);
+			out->cells[row][col] = (unsigned char)value;
+			col++;
+		}
+		row++;
 	}
 	return (0);
 }

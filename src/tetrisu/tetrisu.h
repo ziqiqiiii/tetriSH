@@ -1588,6 +1588,14 @@ typedef struct s_mp_rect
 ** verdict are read from the model rather than from what was last drawn.
 */
 # define MP_MATCH_OPPONENT_PRESENT_MS 50
+
+/*
+ * How wide the outer ring on a card is that the local player is either being
+ * attacked by or has singled out. Three pixels of a different colour is not
+ * something anybody picks out of a screen of ninety-eight thumbnails; width is
+ * what carries at that size, and the colour only says which of the two it is.
+ */
+# define MP_MATCH_CARD_MARK_PX 7
 /*
 ** How many rows below the falling piece stay visible under Dark. Enough to
 ** place the piece in your hand and nothing else, which is the ability's whole

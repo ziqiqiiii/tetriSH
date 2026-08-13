@@ -155,7 +155,10 @@
 /*
 ** The widest body this server builds, which is a Battle Royale STATE: 8192 did
 ** not hold one, and a full arena silently failing to encode would have shown
-** up as a client whose rivals stopped moving rather than as an error.
+** up as a client whose rivals stopped moving rather than as an error. 16384
+** did not hold one either, once an arena card went from one bit per cell to
+** one nibble - and the assertion below is what said so, at build time, which
+** is the whole reason it is written that way.
 **
 ** It is the next power of two above BODY_STATE_MAX_BYTES rather than a number
 ** chosen to look sufficient, and the assertion below is what keeps the two in
@@ -163,7 +166,7 @@
 ** it, so a field added to an arena card fails the build here instead of
 ** overrunning this buffer at run time.
 */
-# define TETRISD_BODY_MAX_BYTES					16384
+# define TETRISD_BODY_MAX_BYTES					32768
 # define TETRISD_CONFIG_LINE_MAX				512
 _Static_assert(TETRISD_BODY_MAX_BYTES >= BODY_STATE_MAX_BYTES,
 	"TETRISD_BODY_MAX_BYTES cannot hold the widest state body libstatusbody "

@@ -72,7 +72,7 @@ static void		fill_arena(t_server_room *server_room, int subject,
 					t_body_state *snap);
 static void		fill_card(t_server_room *server_room, int slot, int subject,
 					t_body_arena_slot *out, int tallest);
-static void		fill_mask(const t_game *game, t_body_arena_slot *out);
+static void		fill_cells(const t_game *game, t_body_arena_slot *out);
 static void		count_players(const t_server_room *server_room,
 					t_body_state *snap);
 static int		game_holding(const t_server_room *server_room, t_player_id pid);
@@ -2917,7 +2917,7 @@ static bool	arena_tick(t_server_room *server_room, int elapsed_ms)
  * reading the flags afterwards would find the dirt it had just created and the
  * room would never skip a push at all.
  *
- * Any board changing counts. Nothing finer is worth the bookkeeping: a mask
+ * Any board changing counts. Nothing finer is worth the bookkeeping: a card
  * carries the settled stack and not the falling piece, so most ticks do not
  * actually change a card, but telling those apart would mean asking the game
  * whether the change was a lock - and the answer only saves pushes in a room
@@ -2994,7 +2994,7 @@ static void	fill_arena(t_server_room *server_room, int subject,
 /**
  * @brief Projects one seat onto one card of the arena.
  *
- * The mask is the expensive part and is the part that can be left out. A live
+ * The cells are the expensive part and the part that can be left out. A live
  * board carries one on every push because it is what the card is for. A dead
  * board carries one every fifth push, because it will never change again and
  * the client keeps what it has in between - so a match gets cheaper as it
@@ -3064,16 +3064,22 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
 		|| server_room->arena_push % TETRISD_BR_ARENA_DEAD_EVERY == 0)
 	{
 		out->flags |= BODY_ARENA_MASK_PRESENT;
-		fill_mask(game, out);
+		fill_cells(game, out);
 	}
 }
 
 /**
- * @brief Packs one board into the card's occupancy mask.
+ * @brief Packs one board into the card's cells, a nibble each.
  *
- * Only whether a cell is filled. A card is a handful of terminal cells, so the
- * colour and the piece type a full projection carries are information the
- * screen could not show and the wire would pay sixteen times over for.
+ * 0 for empty, 1 for garbage, and 2 upward for a piece in the seven types'
+ * own order - which is what a stamped cell already carries in its colour,
+ * because piece_stamp writes the type there.
+ *
+ * It was one bit per cell until a player pointed out that every block in the
+ * mode drew grey, and it could not have drawn anything else: the wire carried
+ * a silhouette, so the client painted every filled cell the same colour and a
+ * row of somebody else's garbage looked exactly like a row they had built. A
+ * nibble is four times a bit and still a quarter of what a full board spends.
  *
  * The falling piece is deliberately not stamped in. It is one tetromino out of
  * a stack twenty rows deep, it moves every tick, and stamping it would make
@@ -3081,12 +3087,13 @@ static void	fill_card(t_server_room *server_room, int slot, int subject,
  * which is exactly the comparison the skip-when-unchanged rule depends on.
  *
  * @param game The board to read.
- * @param out Receives the mask.
+ * @param out Receives the cells.
  */
-static void	fill_mask(const t_game *game, t_body_arena_slot *out)
+static void	fill_cells(const t_game *game, t_body_arena_slot *out)
 {
-	int	row;
-	int	col;
+	t_cell	cell;
+	int		row;
+	int		col;
 
 	row = 0;
 	while (row < BODY_BOARD_ROWS)
@@ -3094,9 +3101,11 @@ static void	fill_mask(const t_game *game, t_body_arena_slot *out)
 		col = 0;
 		while (col < BODY_BOARD_COLS)
 		{
-			if (board_get(&game->board, col, row).type != CELL_EMPTY)
-				out->mask[row][col / 8]
-					|= (unsigned char)(1u << (col % 8));
+			cell = board_get(&game->board, col, row);
+			if (cell.type == CELL_GARBAGE)
+				out->cells[row][col] = 1;
+			else if (cell.type != CELL_EMPTY)
+				out->cells[row][col] = (unsigned char)(2 + (cell.color & 7));
 			col++;
 		}
 		row++;

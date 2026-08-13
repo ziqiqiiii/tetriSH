@@ -2512,12 +2512,29 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 {
 	t_mp_rect frame;
 	t_mp_rect title;
+	t_color edge;
 	char label[APP_TEXT_MAX];
 
+	edge = card_edge(opponent);
+	/*
+	 * Two of the three edges are about *this* player - who is attacking them
+	 * and who they have singled out - and at thumbnail size a three-pixel
+	 * outline in a different colour is not a thing anybody notices. So the
+	 * two that matter get a second ring outside the first: the width is what
+	 * carries across a screen of ninety-eight cards, and the colour is only
+	 * what says which of the two it is.
+	 */
+	if (opponent->targeting_local || opponent->targeted_by_local)
+	{
+		frame = (t_mp_rect){rect->x - MP_MATCH_CARD_MARK_PX,
+			rect->y - MP_MATCH_CARD_MARK_PX,
+			rect->width + MP_MATCH_CARD_MARK_PX * 2,
+			rect->height + MP_MATCH_CARD_MARK_PX * 2};
+		mp_match_pixel_draw_panel(pixels, width, height, &frame, edge, 255);
+	}
 	frame = (t_mp_rect){rect->x - 3, rect->y - 3,
 		rect->width + 6, rect->height + 6};
-	mp_match_pixel_draw_panel(pixels, width, height, &frame,
-		card_edge(opponent), 235);
+	mp_match_pixel_draw_panel(pixels, width, height, &frame, edge, 235);
 	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
 	/*
 	 * A dead board is drawn and then knocked back, rather than not drawn. The

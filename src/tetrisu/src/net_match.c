@@ -585,38 +585,50 @@ static void	apply_arena_card(t_mp_match_state *state,
 	 * last one carrying one, so the board already held is still correct and is
 	 * deliberately left standing.
 	 */
-	if (card->mask_valid)
+	if (card->cells_valid)
 		apply_arena_mask(&state->opponents[slot].board, card);
 }
 
 /**
- * @brief Unpacks a card's occupancy mask onto a board.
+ * @brief Turns a card's cells back into a board the renderer can draw.
  *
- * Every filled cell gets the same colour, because that is all the wire carries:
- * a card is a few terminal cells wide, so the colour and the piece type a full
- * board spends two nibbles a cell on are information this can neither show nor
- * afford.
+ * A nibble each: 0 empty, 1 garbage, 2 upward a piece in the seven types' own
+ * order. The type goes into the cell's colour because that is where
+ * piece_stamp puts it, so a rival's stack draws in the same colours the
+ * player's own board does and only garbage is grey - which the tile renderer
+ * already knew how to do, since it has always drawn CELL_GARBAGE differently.
+ *
+ * Every filled cell used to get one colour, because one bit per cell is all
+ * the wire carried. That was the whole of "every block in Battle Royale is
+ * grey".
  *
  * @param board Board to overwrite.
  * @param card The card to read.
  */
 static void	apply_arena_mask(t_board *board, const t_body_arena_slot *card)
 {
-	t_cell	cell;
-	int		row;
-	int		col;
+	t_cell			cell;
+	unsigned char	code;
+	int				row;
+	int				col;
 
 	board_init(board);
-	memset(&cell, 0, sizeof(cell));
-	cell.type = CELL_FILLED;
-	cell.color = MP_ARENA_CARD_COLOR;
 	row = 0;
 	while (row < BOARD_HEIGHT && row < BODY_BOARD_ROWS)
 	{
 		col = 0;
 		while (col < BOARD_WIDTH && col < BODY_BOARD_COLS)
 		{
-			if ((card->mask[row][col / 8] >> (col % 8)) & 1u)
+			code = card->cells[row][col];
+			memset(&cell, 0, sizeof(cell));
+			if (code == 1)
+				cell.type = CELL_GARBAGE;
+			else if (code >= 2)
+			{
+				cell.type = CELL_FILLED;
+				cell.color = (uint8_t)(code - 2);
+			}
+			if (cell.type != CELL_EMPTY)
 				board_set(board, col, row, cell);
 			col++;
 		}
