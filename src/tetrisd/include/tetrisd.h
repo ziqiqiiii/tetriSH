@@ -72,6 +72,7 @@
 # define TETRISD_DEFAULT_KEY_PATH				"certs/server.key"
 # define TETRISD_DEFAULT_CA_PATH				"certs/ca.crt"
 # define TETRISD_DEFAULT_LOG_IPC_PATH			"tmp/tetrisd/tetrislogd.sock"
+# define TETRISD_DEFAULT_CONTROL_PATH			"tmp/tetrisd/tetrisd.ctl"
 # define TETRISD_DEFAULT_PID_PATH				"tmp/tetrisd/tetrisd.pid"
 # define TETRISD_DEFAULT_ERR_PATH				"tmp/tetrisd/tetrisd.err"
 # define TETRISD_DEFAULT_MAX_CLIENTS			64
@@ -158,6 +159,8 @@ typedef enum e_event_source
 	EVENT_LISTENER,
 	EVENT_WAKE,
 	EVENT_TIMER,
+	EVENT_CONTROL_LISTENER,
+	EVENT_CONTROL,
 	EVENT_CLIENT
 }	t_event_source;
 
@@ -183,6 +186,7 @@ typedef struct s_config
 	char			key_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char			ca_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char			log_ipc[TETRISD_FILESYSTEM_PATH_MAX];
+	char			control_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char			pid_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char			err_path[TETRISD_FILESYSTEM_PATH_MAX];
 	char			rc_path[TETRISD_FILESYSTEM_PATH_MAX];

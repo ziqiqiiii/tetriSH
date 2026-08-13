@@ -118,11 +118,11 @@ Config is cold: paths are resolved once at boot and change only by restarting th
 One record is one line, formatted by `logrecord_format_line`:
 
 ```text
-<timestamp_ms> <level>  <component>[<pid>]: <message>
-1743085512034 info    tetrisd[8412]: room S-01 started with 1 player
+<YYYY-MM-DD HH:MM:SS.mmm> <level>  <component>[<pid>]: <message>
+2025-03-27 20:25:12.034 INFO    tetrisd[8412]: room S-01 started with 1 player
 ```
 
-Levels are `debug`, `info`, `warning`, `error`. The logger writes its own records the same way, under the component `tetrislogd`, and they go straight to the sink — a logger that logged to itself over IPC would deadlock against its own receive buffer.
+The stamp is local time, rendered by `logrecord_format_line`; the record still carries milliseconds since the epoch. Levels are `debug`, `info`, `warning`, `error`. The logger writes its own records the same way, under the component `tetrislogd`, and they go straight to the sink — a logger that logged to itself over IPC would deadlock against its own receive buffer.
 
 Counters are reported whenever the sink changes hands or the daemon is asked to account for itself — `boot`, `rotated`, `dump`, `sink recovered`, `sink replaced`, `exit`:
 
