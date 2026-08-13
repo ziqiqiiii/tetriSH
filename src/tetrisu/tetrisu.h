@@ -2307,6 +2307,22 @@ typedef struct
 	int					notification_damage_x;
 	int					notification_damage_rows;
 	int					notification_damage_cols;
+	/*
+	** What the cards last said, and where they last said it.
+	**
+	** The content signature is what the planes were built from - kind, title,
+	** message, percent, and the fade opacity in coarse steps. A refresh whose
+	** content matches the last one has nothing to rebuild, and returning early
+	** is the whole difference between a card sitting on screen for a second
+	** and a second of destroying and re-emitting sixels underneath it.
+	**
+	** The layout signature is only where the planes are. A repaint is owed to
+	** the screens when a card vacates cells - appearing, moving, resizing or
+	** expiring - and not when it merely fades in place, because fading damages
+	** no cell the card was not already covering. Raising the flag for a fade
+	** step is what turned one volume keypress into a screen rebuild per frame.
+	*/
+	uint64_t			notification_content_signature;
 	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
