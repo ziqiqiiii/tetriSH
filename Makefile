@@ -186,21 +186,6 @@ deps-info:
 #                                    PLAY                                      #
 ################################################################################
 
-# Two routes from a fresh clone to a playable client, differing only in where it
-# is built - `play` on this host, `play-image` in a container carrying the
-# toolchain and notcurses. Both install, compile and open kitty on the game;
-# play.sh checks before every step, so re-running either restarts the client.
-#
-# The container never draws: the board is Kitty-graphics escape sequences, bytes
-# on the pty the host terminal renders either way. That is what lets one Linux
-# image serve macOS, where `make` cannot run at all - libcoreipc's mqueue module
-# does not compile on Darwin, and the recursion stops long before tetrisu.
-#
-# Both play on the shared server by default, at DEFAULT_HOST in scripts/play.sh
-# - named there and not here, because the script has to pair it with the
-# matching CA. Neither target starts a server; `play.sh --local` is the one that
-# does.
-#
 # HOST= plays on another server:           make play HOST=tetrish.dev
 # PLAY_ARGS= passes anything else through: make play-image PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))

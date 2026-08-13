@@ -30,6 +30,13 @@
 # image already built is not rebuilt. The second run is fast and the tenth is
 # the normal way to restart the client.
 #
+# One step is allowed to fail without ending the run: the server. Nothing
+# answering - the shared one down, a named one unreachable, a local one that did
+# not come up - launches the client offline rather than refusing, because tetrisu
+# without TETRISU_NET builds its fixture provider and PLAY OFFLINE reaches a
+# playable Solo. Everything tetrisd is authoritative for is what is lost, and
+# go_offline says so. --offline asks for that outcome directly.
+#
 # The three pieces have one owner each:
 #   scripts/container.sh  the engine, the image, and how the client is run
 #   scripts/terminal.sh   which terminal draws, and whether one can be opened
@@ -62,6 +69,11 @@ DO_REBUILD=0
 NATIVE=1
 CLIENT_ONLY=0
 WANT_LOCAL=0
+# No server at all: tetrisu builds its local fixture provider instead of a
+# session, and Solo plays the local rules. This is a fallback as much as a flag -
+# every path that fails to reach a server lands here rather than refusing the
+# run, because a client that cannot sign in is still a client that can play.
+OFFLINE=0
 PORT=""
 # Where the server is. Empty means "not asked for", and that now resolves to the
 # shared server rather than to this machine: playing together is the common
@@ -93,6 +105,9 @@ Usage: bash scripts/play.sh [options]
   --local         play on a server on this machine, starting one if needed,
                   verified against this machine's own certs/ca.crt
   --port N        port to serve and connect on (default: TETRISD_PORT in .tetrishrc)
+  --offline       launch a client with no server: Solo on the local rules, and
+                  the rest of the screens on local preview data. This is also
+                  what every path falls back to when no server answers
   --server-only   bring a local server up and stop, without launching a client
   --client-only   launch a client against a local server that is already up
   --container     build and run the client in a container instead of on this
@@ -108,6 +123,10 @@ and nothing is started here. --local is the old behaviour: a server is started
 on this machine and left running when the client exits, so the next run starts a
 client immediately; `bash scripts/play.sh --stop` takes it down.
 
+No server answering is not a failure: the client is launched offline instead,
+and Solo is playable. Only the server-side halves - the lobby, Double, Battle
+Royale, the store and the leaderboard - need one.
+
 Environment:
   TETRISH_HOST      the shared server used when no --host is given
   TETRISU_TERMINAL  force the terminal: kitty, wezterm, or none (run in place)
@@ -122,6 +141,7 @@ while [ $# -gt 0 ]; do
         --host)        HOST="${2:-}"; shift 2 || die "--host needs an address" ;;
         --host=*)      HOST="${1#*=}"; shift ;;
         --local)       WANT_LOCAL=1; shift ;;
+        --offline)     OFFLINE=1; shift ;;
         --port)        PORT="${2:-}"; shift 2 || die "--port needs a number" ;;
         --port=*)      PORT="${1#*=}"; shift ;;
         --server-only) WANT_CLIENT=0; shift ;;
@@ -138,6 +158,21 @@ done
 
 if [ "$WANT_SERVER" = "0" ] && [ "$WANT_CLIENT" = "0" ]; then
     die "--server-only and --client-only ask for opposite halves; pick one"
+fi
+
+# --offline is about the client having no server, so the flags that are about a
+# server are refused rather than silently dropped: --server-only asks for one to
+# be started and nothing else, which offline would leave with nothing to do.
+# --host and --local name one the client is then told to ignore.
+if [ "$OFFLINE" = "1" ]; then
+    [ "$WANT_CLIENT" = "0" ] \
+        && die "--offline launches a client with no server; --server-only starts a server with no client"
+    [ -n "$HOST" ] \
+        && die "--offline plays with no server at all; --host names one to play on"
+    [ "$WANT_LOCAL" = "1" ] \
+        && die "--offline plays with no server at all; --local starts one here"
+    [ "$DO_STOP" = "0" ] || die "--offline starts nothing, so there is nothing to --stop"
+    WANT_SERVER=0
 fi
 
 # Three ways to name the server and only one of them has anything to start here.
@@ -249,7 +284,31 @@ wait_for_port() {
 
 ensure_certs() {
     say "checking the development certificates..."
-    make certs || die "could not mint certificates (is openssl installed?)"
+    make certs && return 0
+    # A server with no certificate is a server the client would refuse anyway,
+    # so this is the same failure as one that never started - except for
+    # --server-only, which has no client to fall back to.
+    [ "$WANT_CLIENT" = "0" ] \
+        && die "could not mint certificates (is openssl installed?)"
+    warn "could not mint certificates (is openssl installed?)."
+    go_offline
+    return 0
+}
+
+# Every way of not reaching a server ends here rather than at die, because the
+# client does not need one to be worth launching: with TETRISU_NET unset tetrisu
+# builds its fixture provider, PLAY OFFLINE on the sign-in screen is the door in
+# (LOGIN needs a server and stays refused), and Solo runs the local rules from
+# libtetrisbrain. What is lost is what the server is authoritative for - the lobby,
+# Double, Battle Royale, the store, the leaderboard - so it is named here, once,
+# rather than discovered a screen at a time.
+#
+# The caller says what went wrong first; this says what happens because of it.
+go_offline() {
+    OFFLINE=1
+    warn "playing offline instead: Solo only, on this machine's own rules."
+    warn "    the lobby, Double, Battle Royale, the store and the leaderboard"
+    warn "    show local preview data, and nothing is saved anywhere."
 }
 
 start_server_native() {
@@ -258,8 +317,21 @@ start_server_native() {
         return 0
     fi
     say "starting the daemons natively..."
-    make stack || die "the daemons did not come up"
-    wait_for_port || die "tetrisd never answered on $PORT"
+    # A server asked for by name and not delivered is reported, but it does not
+    # take the client down with it - unless the client is not what was asked
+    # for, and --server-only is the one run with nothing left to fall back to.
+    if ! make stack; then
+        [ "$WANT_CLIENT" = "0" ] && die "the daemons did not come up"
+        warn "the daemons did not come up; see the output above."
+        go_offline
+        return 0
+    fi
+    if ! wait_for_port; then
+        [ "$WANT_CLIENT" = "0" ] && die "tetrisd never answered on $PORT"
+        warn "tetrisd never answered on $PORT."
+        go_offline
+        return 0
+    fi
     ok "tetrisd is listening on $HOST:$PORT"
 }
 
@@ -384,6 +456,35 @@ client_ca() {
 # whatever terminal is on the far end.
 launch_client() {
     local ca
+
+    # No session, so no chain to verify and no address to dial: the CA, the
+    # host and the port are all left out rather than set to something the client
+    # will not use. This is also the one launch that needs no certs on disk at
+    # all, which is what makes it the fallback that always works.
+    if [ "$OFFLINE" = "1" ]; then
+        say "launching tetrisu with no server"
+        # The one instruction this screen needs. LOGIN and SIGN UP are refused
+        # without a server - auth_form_validate answers "CHECK SERVER ID FIRST"
+        # - so a player who does not know about PLAY OFFLINE reads a working
+        # offline client as a broken online one.
+        printf '%b\n' \
+            "    press ${BOLD}PLAY OFFLINE${RST} on the sign-in screen, or ${BOLD}O${RST}." \
+            "    ${BOLD}LOGIN${RST} and ${BOLD}SIGN UP${RST} need a server and stay refused, and" \
+            "    ${BOLD}CHECK SERVER${RST} reports offline - both are expected here." \
+            "    ${BOLD}SOLO${RST} then plays on this machine's own rules." \
+            "    with a server: ${BOLD}bash scripts/play.sh --local${RST}" \
+            "    or:            ${BOLD}make play HOST=<address>${RST}"
+        echo
+        export TETRISU_OFFLINE=1
+        unset TETRISU_NET TETRISU_HOST TETRISU_PORT TETRISU_CA_PATH
+        if [ "$NATIVE" = "1" ]; then
+            local offline_client="bin/tetrisu"
+            [ -x "$offline_client" ] || offline_client="src/tetrisu/bin/tetrisu"
+            exec bash scripts/terminal.sh launch -- "$ROOT/$offline_client"
+        fi
+        exec bash scripts/terminal.sh launch -- \
+            bash "$ROOT/scripts/container.sh" run --
+    fi
     ca=$(client_ca)
     # The client verifies the server's certificate chain against this CA and
     # refuses the session without it. --client-only skips the step that mints the
@@ -468,7 +569,10 @@ case "$UNAME_S" in
     Linux)
         if [ "$WANT_SERVER" = "1" ]; then
             ensure_certs
-            start_server_native
+            # Not with `&&`: certificates that could not be minted have already
+            # decided this run is offline, and starting a server the client
+            # cannot verify would only fail later and louder.
+            [ "$OFFLINE" = "1" ] || start_server_native
         fi
         ;;
     *)
@@ -485,28 +589,34 @@ fi
 
 # Checked here rather than left to the client, because a client that cannot
 # reach the server does not say so plainly: Solo falls back to the local rules
-# and plays identically. The advice differs by whose server it is - a local one
-# this script can start, a remote one it can only report on.
+# and plays identically. So the probe is what turns that silent fallback into a
+# stated one - it does not decide whether to launch, only what to say and which
+# half of the game the launch is going to have. The advice differs by whose
+# server it is: a local one this script can start, a remote one it can only
+# report on.
 #
-# Only these two cases name a server that is supposed to be up already. A Mac
+# Only these three cases name a server that is supposed to be up already. A Mac
 # with no --host names nothing yet: the address is about to be typed into
 # SERVER ID, so there is no address here to probe and nothing to warn about.
-if [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ] && ! port_open; then
+if [ "$OFFLINE" = "1" ]; then
+    :
+elif [ "$REMOTE" = "1" ] && [ "$HOST" = "$DEFAULT_HOST" ] && ! port_open; then
     warn "nothing answered the shared server $HOST:$PORT within 5s."
     warn "It is not this machine, so nothing here can bring it up. Either:"
     warn "    play on this machine     ${BOLD}bash scripts/play.sh --local${RST}"
     warn "    name another server      ${BOLD}make play HOST=<address>${RST}"
     warn "    or wait for it to return"
-    die "no server at $HOST:$PORT"
+    go_offline
 elif [ "$REMOTE" = "1" ] && ! port_open; then
     warn "nothing answered $HOST:$PORT within 5s. On that machine, check that:"
     warn "    tetrisd is up            ./bin/tetrisctl status"
     warn "    it listens on all interfaces, not just loopback"
     warn "    its firewall allows $PORT  (Arch: sudo ss -lntp | grep $PORT)"
     warn "    the address is current   ip -4 addr show   (the number before /24)"
-    die "no server at $HOST:$PORT"
+    go_offline
 elif [ "$CLIENT_ONLY" = "1" ] && ! port_open; then
-    die "nothing is serving $HOST:$PORT - drop --client-only to start one"
+    warn "nothing is serving $HOST:$PORT - drop --client-only to start one."
+    go_offline
 fi
 
 if [ "$NATIVE" = "1" ]; then
