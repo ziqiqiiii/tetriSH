@@ -51,8 +51,9 @@ What the targets do not say out loud:
   so `tetrisd`'s shutdown still reaches the log.
 
 `make play` (host build) and `make play-image` (container build) both end in a
-kitty window on the shared server; `README.md` owns the terminal matrix, the
-one-CA-per-run rule, and the flags. Three scripts own one concern each —
+kitty window on the shared server; `README.md` owns setup and the modes,
+`docs/architecture.md` the one-CA-per-run rule, and `src/tetrisu/README.md` the
+terminal matrix and renderer tiers. Three scripts own one concern each —
 `scripts/container.sh` the engine, image and run; `scripts/terminal.sh` which
 terminal draws; `scripts/play.sh` the order.
 
@@ -185,6 +186,8 @@ Non-obvious rules that have each already cost a bug.
 
 - **A domain term you are about to invent** → `docs/CONTEXT.md` first, the
   shared glossary
+- **How the pieces fit — layers, binaries, libraries, HTTTP, `.tetrishrc`,
+  tree** → `docs/architecture.md`; the root `README.md` is setup only
 - **Writing C, a Makefile, or a README** → the auto-invoked skills in
   `.claude/skills/`; `c-style` discloses layout and test conventions,
   `makefile-style` discloses dependency-script rules
