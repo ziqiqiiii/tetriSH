@@ -134,10 +134,22 @@
 ** send their garbage in one pulse, and a pulse of three is what a board cannot
 ** answer; spread out, the same rows arrive as a stream a player can dig
 ** through.
+**
+** Every tier is slower than it was (1700/1300/950), because three of them at
+** once is the case the numbers are actually felt in: what a player reads off
+** an opponent is how often rows arrive, and three bots on the old normal put a
+** row on the board more than twice a second between them.
+**
+** How much slower is bounded, and the bound is the interesting part. The
+** jitter runs to +30%, and test_a_tier_is_a_tempo_as_well_as_a_price refuses a
+** piece slower than one every 2.5 s at either end of it - so the slowest base
+** this file may carry is 1923, and easy sits just under it. A bot placing a
+** piece every three seconds does not read as easy, it reads as broken, which
+** is the same reason that bound exists at all.
 */
-# define BOT_PACE_EASY_MS		1700
-# define BOT_PACE_NORMAL_MS		1300
-# define BOT_PACE_ULTRA_MS		950
+# define BOT_PACE_EASY_MS		1900
+# define BOT_PACE_NORMAL_MS		1400
+# define BOT_PACE_ULTRA_MS		1000
 # define BOT_PACE_JITTER_PCT	30
 
 /*
@@ -148,11 +160,18 @@
 ** the board that had not sped up: gravity is five times what it was, the
 ** player is placing pieces to keep up with it, and the opponent would be
 ** visibly idling. The floor is what stops the curve turning back into the bug
-** this file already paid for - at 45% of base even easy stays inside what a
-** person can do.
+** this file already paid for.
+**
+** The floor is also what keeps the tiers apart, which 45% did not. Easy's
+** floor was 765 ms and ultra's base is 950, so a long game turned easy into
+** something faster than ultra had ever been - the difficulty a player chose
+** stopped meaning anything at exactly the point the game got hard. At 65%
+** every tier keeps its place at every level, and shaving 3% a level rather
+** than 4% reaches the floor later, so the speed-up is something a match grows
+** into rather than something it arrives at.
 */
-# define BOT_PACE_LEVEL_PCT		4
-# define BOT_PACE_FLOOR_PCT		45
+# define BOT_PACE_LEVEL_PCT		3
+# define BOT_PACE_FLOOR_PCT		65
 
 /*
 ** How many idle poll rounds pass before a bot asks the room whether a select

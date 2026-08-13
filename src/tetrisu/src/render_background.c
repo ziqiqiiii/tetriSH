@@ -331,7 +331,17 @@ bool	render_terminal_geometry_changed(const t_render_ctx *ctx)
 		|| terminal.ws_row == 0 || terminal.ws_col == 0)
 		return (false);
 	ncplane_dim_yx(ctx->std, &plane_rows, &plane_cols);
-	return (terminal.ws_row != plane_rows || terminal.ws_col != plane_cols);
+	if (terminal.ws_row == plane_rows && terminal.ws_col == plane_cols)
+		return (false);
+	/*
+	 * Diagnostic, and off unless TETRISU_MATCH_TRACE names a file. Saying true
+	 * here costs a match screen every plane it owns and a full-screen bitmap
+	 * transfer, so when that happens without anybody touching the window the
+	 * two numbers that disagreed are the whole of the evidence.
+	 */
+	render_match_trace_note("geometry tty %ux%u plane %ux%u",
+		terminal.ws_row, terminal.ws_col, plane_rows, plane_cols);
+	return (true);
 }
 
 /**

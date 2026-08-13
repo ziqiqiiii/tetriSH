@@ -9,6 +9,7 @@
 # include <limits.h>
 # include <poll.h>
 # include <stdint.h>
+# include <stdarg.h>
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
@@ -1605,6 +1606,13 @@ typedef struct s_mp_rect
  * what carries at that size, and the colour only says which of the two it is.
  */
 # define MP_MATCH_CARD_MARK_PX 7
+
+/*
+ * How tall the name-and-score strip under a board is. It sits outside the
+ * banded board region on a plane of its own, so a caller asking whether a
+ * board was damaged has to add this to reach it.
+ */
+# define MP_MATCH_CAPTION_PX 66
 /*
 ** How many rows below the falling piece stay visible under Dark. Enough to
 ** place the piece in your hand and nothing else, which is the ability's whole
@@ -2186,6 +2194,14 @@ typedef struct
 	bool				mp_match_opponent_deferred;
 	struct ncplane		*mp_match_left_plane;
 	struct ncplane		*mp_match_right_plane;
+	/*
+	 * The draining bar and the seconds beside it on the character-select
+	 * window, which is the only part of that screen a clock moves. It is a
+	 * region so that a tick redraws a number instead of the screen: the phase
+	 * had no incremental path at all, so every second cost a full rebuild.
+	 */
+	struct ncplane		*mp_match_selection_plane;
+	uint64_t			mp_match_selection_signature;
 	struct ncplane		*mp_match_loadout_plane;
 	struct ncplane		*mp_match_ability_plane;
 	/*
@@ -2231,6 +2247,14 @@ typedef struct
 	t_mp_board_cache	mp_match_boards[MP_MATCH_BOARD_CACHES];
 	uint64_t			mp_match_caption_signature;
 	/*
+	** The cells a notification card wiped, in the canvas' own pixels, waiting
+	** for the frame that will repair them. A match repairs the regions this
+	** rectangle touches instead of rebuilding the screen, which is what a
+	** Battle Royale knockout used to cost.
+	*/
+	t_mp_rect			mp_match_damage;
+	bool				mp_match_damaged;
+	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
 	 * time. The source path is the cache key.
@@ -2270,6 +2294,19 @@ typedef struct
 	** about the terminal's contents, which is what every renderer shares.
 	*/
 	bool				notification_repaint;
+	/*
+	** Which terminal cells the cards took, as one rectangle: where they were
+	** before this change and where they are after it, unioned.
+	**
+	** A screen that can repair part of itself needs to know which part, and
+	** the flag above does not say. The union is reset only once a consumer has
+	** taken the flag, so two changes arriving between one screen and the next
+	** accumulate instead of the second losing the first's cells.
+	*/
+	int					notification_damage_y;
+	int					notification_damage_x;
+	int					notification_damage_rows;
+	int					notification_damage_cols;
 	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
@@ -3086,6 +3123,13 @@ const uint32_t		*render_backdrop_pixels(const t_render_ctx *ctx,
 					int *width, int *height);
 int				render_geometry_refresh(t_render_ctx *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const t_render_ctx *ctx);
+/*
+** Writes one line into the match trace, when TETRISU_MATCH_TRACE names a file.
+** Diagnostic only, and a no-op otherwise. It is public because what is worth
+** tracing is not always in the file that owns the trace: a knockout rebuilding
+** the whole screen is decided by the geometry check in render_background.c.
+*/
+void				render_match_trace_note(const char *format, ...);
 bool				render_pixel_planes_reliable(const t_render_ctx *ctx);
 bool				render_pixels_available(const t_render_ctx *ctx);
 bool				render_plane_geometry_matches(struct ncplane *plane, int y,
@@ -3467,6 +3511,8 @@ void			render_multiplayer_match_destroy(t_render_ctx *ctx);
 bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 					const t_mp_match_state *state, bool rebuild_background);
 void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+bool			render_multiplayer_match_pixel_restage(t_render_ctx *ctx,
+					const t_mp_match_state *state);
 int				render_multiplayer_match_deferred_ms(const t_render_ctx *ctx);
 
 /* MULTIPLAYER_MATCH_MODE.C */

@@ -517,6 +517,15 @@ static bool	handle_match_key(t_match_authority *authority,
 		return (false);
 	if (key == NCKEY_RESIZE || key == 12u)
 	{
+		/*
+		 * Diagnostic, off unless TETRISU_MATCH_TRACE names a file. This branch
+		 * throws the whole screen away, and the geometry check upstream is not
+		 * what reaches it - so what arrived, and whether the terminal called it
+		 * a key press at all, is the evidence.
+		 */
+		render_match_trace_note("resize key %u evtype %d id %u",
+			key, input == NULL ? -1 : (int)input->evtype,
+			input == NULL ? 0u : input->id);
 		if (render_geometry_refresh(ctx, true) < 0)
 			return (true);
 		render_multiplayer_match_destroy(ctx);
