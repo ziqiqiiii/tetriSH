@@ -60,6 +60,7 @@ typedef struct s_bot_scan
 }	t_bot_scan;
 
 static void		scan_rotation(t_bot_scan *scan, int rotation);
+static int		scan_best(t_bot_scan *scan);
 static void		scan_rotation_sloppy(t_bot *bot, t_bot_scan *scan,
 					int rotation);
 static bool		scan_entry(const t_bot_scan *scan, int rotation, int col,
@@ -273,6 +274,11 @@ static int	column_profile(const t_board *board, int heights[BOARD_WIDTH])
  * Easy does not play this game at all - it takes whatever it can get, which is
  * most of what makes it easy.
  *
+ * ULTRA plays the same game at more than twice the stakes, and that is the
+ * whole of the tier: same search, same tempo, same six features, two constants
+ * moved. The danger height is deliberately *not* one of them - see
+ * BOT_W_GARBAGE_ULTRA for what raising it cost.
+ *
  * @param level The tier asking.
  * @param cleared How many rows the placement completed.
  * @param board The board after the clear, for the danger-height gate.
@@ -285,11 +291,15 @@ static int	attack_value(t_bot_level level, int cleared, const t_board *board)
 	if (cleared <= 0 || level == BOT_EASY)
 		return (0);
 	sent = garbage_lines_from_clear(cleared);
+	if (sent > 0 && level == BOT_ULTRA)
+		return (sent * BOT_W_GARBAGE_ULTRA);
 	if (sent > 0)
 		return (sent * BOT_W_GARBAGE);
-	if (tallest_column(board) < BOT_DANGER_HEIGHT)
-		return (-BOT_W_WASTED_CLEAR);
-	return (0);
+	if (tallest_column(board) >= BOT_DANGER_HEIGHT)
+		return (0);
+	if (level == BOT_ULTRA)
+		return (-BOT_W_WASTED_CLEAR_ULTRA);
+	return (-BOT_W_WASTED_CLEAR);
 }
 
 /**
@@ -815,7 +825,6 @@ static void	scan_rotation_sloppy(t_bot *bot, t_bot_scan *scan, int rotation)
 static int	best_reply(t_bot_level level, const t_board *board, int type)
 {
 	t_bot_scan	scan;
-	int			rotation;
 
 	memset(&scan, 0, sizeof(scan));
 	scan.level = level;
@@ -823,15 +832,32 @@ static int	best_reply(t_bot_level level, const t_board *board, int type)
 	scan.type = type;
 	scan.row = piece_spawn((t_piece_type)type).row;
 	scan.next = -1;
+	return (scan_best(&scan));
+}
+
+/**
+ * @brief Walk every rotation of a prepared scan and report the best it found.
+ *
+ * A board nothing fits on is priced as it stands rather than specially: it is
+ * already so tall that surface_value has put it out of contention, and a
+ * sentinel here would have to be a number no real board could reach.
+ *
+ * @param scan The prepared scan; its best and its choice are left in place.
+ * @return The best score reachable, or the board's own if nothing fits.
+ */
+static int	scan_best(t_bot_scan *scan)
+{
+	int	rotation;
+
 	rotation = 0;
 	while (rotation <= 3)
 	{
-		scan_rotation(&scan, rotation);
+		scan_rotation(scan, rotation);
 		rotation++;
 	}
-	if (!scan.found)
-		return (surface_value(board, level));
-	return (scan.best);
+	if (!scan->found)
+		return (surface_value(scan->board, scan->level));
+	return (scan->best);
 }
 
 /**
@@ -907,6 +933,32 @@ bool	bot_plan(t_bot *bot, const t_body_state *snap, bool may_rotate,
 	*rotation = scan.rotation;
 	*col = scan.col;
 	return (scan.found);
+}
+
+/**
+ * @brief Which rivals this bot aims its garbage at.
+ *
+ * Every other tier stays on the mode a participant starts a match in, which is
+ * RANDOM - so their rows land on whoever the room's own draw picks, and being
+ * hit by one says nothing about what you did. ULTRA answers back: ATTACKERS
+ * while anybody is landing rows on it, KO otherwise.
+ *
+ * ATTACKERS and KO both reach *every* rival they match rather than one drawn
+ * from them, which is why this is worth more than the tempo it costs nothing.
+ * A mode that matches nobody falls back to one drawn rival server-side, so
+ * declaring ATTACKERS before anybody has attacked is never a room-wide attack.
+ *
+ * @param bot The bot deciding.
+ * @param attacked Whether any rival is currently landing rows on it.
+ * @return The mode to declare.
+ */
+t_target_mode	bot_target_mode(const t_bot *bot, bool attacked)
+{
+	if (bot == NULL || bot->level != BOT_ULTRA)
+		return (TARGET_RANDOM);
+	if (attacked)
+		return (TARGET_ATTACKERS);
+	return (TARGET_KO);
 }
 
 /**

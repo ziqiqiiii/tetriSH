@@ -53,6 +53,26 @@ typedef struct s_bot_run
 	*/
 	int				report;
 	char			room[NET_ROOM_MAX];
+	/*
+	** What this bot knows about who it is fighting, kept here because the
+	** snapshot cannot carry it between frames: the arena rides a slower clock
+	** than the board does, so most frames say nothing about the rivals at all
+	** and reading `attacked` off the frame in hand would have it flicker off
+	** between arena pushes.
+	**
+	** `declared_target` is the mode the server has been told, or -1 for none,
+	** and it is what stops this being a request per piece - a mode is sent
+	** when the answer changes and not otherwise. It is reset between matches,
+	** because a participant starts every match on RANDOM (room.c) and a bot
+	** that remembered its last declaration would never re-send it.
+	**
+	** `has_arena` is how a Battle Royale is told from a Double without asking
+	** the room: only that mode ever pushes an arena, and TARGET means nothing
+	** in a game with one opponent in it.
+	*/
+	bool			attacked;
+	bool			has_arena;
+	int				declared_target;
 }	t_bot_run;
 
 // Static Functions
@@ -68,6 +88,10 @@ static bool	seat_is_locked(const t_body_room *view, uint64_t player_id);
 static bool	orphaned(const t_bot_run *run);
 static int	pump_once(t_bot_run *run);
 static int	place_piece(t_bot_run *run);
+static int	slide_to(t_bot_run *run, int target);
+static int	await_move(t_bot_run *run, int from);
+static void	note_attackers(t_bot_run *run);
+static int	steer_target(t_bot_run *run);
 static int	act(t_bot_run *run, t_solo_action action);
 static int	settle_after(t_bot_run *run, uint64_t seq, int tries);
 static bool	playable(const t_net_client *net);
@@ -90,6 +114,12 @@ int	main(int argc, char **argv)
 	memset(&run, 0, sizeof(run));
 	run.deadman = -1;
 	run.report = -1;
+	/*
+	** -1 rather than the zero memset left, because zero is TARGET_RANDOM and a
+	** bot that thought it had already declared that would never declare
+	** anything.
+	*/
+	run.declared_target = -1;
 	level = BOT_NORMAL;
 	/*
 	** Loaded before the arguments are read, not after: the environment is the
@@ -315,7 +345,8 @@ static int	run_match(t_bot_run *run)
 			idle = 0;
 			deadline = monotonic_ms() + bot_piece_pace_ms(&run->brain,
 					run->net.state_snapshot.level);
-			if (place_piece(run) < 0)
+			note_attackers(run);
+			if (steer_target(run) < 0 || place_piece(run) < 0)
 				return (-1);
 			if (pace_until(run, deadline) < 0)
 				return (-1);
@@ -363,6 +394,14 @@ static int	answer_select_window(t_bot_run *run)
 		return (0);
 	if (view.select_ms <= 0 || seat_is_locked(&view, run->net.player_id))
 		return (0);
+	/*
+	** A select window is the start of a match, and a match starts every
+	** participant on TARGET_RANDOM (room.c). Forgetting the declaration here is
+	** what makes the next one get sent; remembering it across a rematch would
+	** leave the bot believing it had aimed when the server had reset it.
+	*/
+	run->declared_target = -1;
+	run->attacked = false;
 	return (declare_fighter(run, path));
 }
 
@@ -480,20 +519,174 @@ static int	place_piece(t_bot_run *run)
 		while (steps-- > 0)
 			if (act(run, SOLO_ROTATE_CW) < 0)
 				return (-1);
-		settle_after(run, seq, 200);
+		settle_after(run, seq, BOT_PLAN_SETTLE_TRIES);
 	}
 	if (bot_plan(&run->brain, &run->net.state_snapshot, false, &rotation,
-			&target))
-	{
-		steps = target - run->net.state_snapshot.piece.col;
-		while (steps != 0 && act(run, steps < 0 ? SOLO_MOVE_LEFT
-				: SOLO_MOVE_RIGHT) == 0)
-			steps += (steps < 0) - (steps > 0);
-	}
+			&target)
+		&& slide_to(run, target) < 0)
+		return (-1);
 	seq = run->net.state_snapshot.seq;
 	if (act(run, SOLO_HARD_DROP) < 0)
 		return (-1);
 	settle_after(run, seq, BOT_SETTLE_TRIES);
+	return (0);
+}
+
+/**
+ * @brief Slide the piece to the column the plan named, verifying every step.
+ *
+ * One move at a time, each confirmed against the board that comes back. That
+ * confirmation is the whole point, because a move is fire-and-forget on the
+ * wire: net_send writes it and reads nothing, so the only evidence a move
+ * landed is the snapshot afterwards.
+ *
+ * This was open loop until now. The distance was measured once and that many
+ * moves were fired without looking, and `act` reports whether the *request*
+ * went out and never whether the piece went anywhere - so a move the server
+ * refused was counted as taken, and the rest of the slide was aimed from a
+ * column the piece had never reached. Whatever that left was then hard-dropped:
+ * a placement nothing chose, in the one situation where the choice matters
+ * most, because refusals need something in the way and something in the way
+ * means a tall stack.
+ *
+ * A refusal ends the slide instead of retrying it. Nothing about the board
+ * changes while the bot holds the piece still, so a second attempt is the first
+ * attempt; the piece is dropped from where it actually is, which is the honest
+ * answer and the best one left. It also stops the bot spending its input rate
+ * limit pushing against a wall.
+ *
+ * **How often this fires, measured: never.** Three bots over ~100 pieces each
+ * in a real Battle Royale refused not one move. The reason is the geometry
+ * rather than luck - a slide happens the moment a piece spawns, at the top of
+ * the board, and the stack it could collide with is at the bottom. A refusal
+ * needs the stack to have reached the spawn row, and a bot in that position is
+ * dying regardless of which column this picks. So this is insurance and not a
+ * repair: it is kept because it is correct and costs one server tick per
+ * column out of a budget already spent idling, not because it was losing
+ * placements. It was ranked above the attack weights before it was measured,
+ * and that was the wrong way round.
+ *
+ * @param run The bot.
+ * @param target The column the plan named.
+ * @return 0 when the slide finished or was refused, -1 when the session failed.
+ */
+static int	slide_to(t_bot_run *run, int target)
+{
+	int	col;
+	int	guard;
+	int	moved;
+
+	guard = 0;
+	col = run->net.state_snapshot.piece.col;
+	while (col != target && guard++ < BOT_SLIDE_MAX)
+	{
+		if (act(run, col < target ? SOLO_MOVE_RIGHT : SOLO_MOVE_LEFT) < 0)
+			return (-1);
+		moved = await_move(run, col);
+		if (moved < 0)
+			return (-1);
+		if (moved > 0)
+			return (0);
+		col = run->net.state_snapshot.piece.col;
+	}
+	return (0);
+}
+
+/**
+ * @brief Wait for the board that took a sideways move, and say whether it did.
+ *
+ * The column alone is watched, and not whether a frame arrived. Gravity pushes
+ * a board of its own during the wait - a new row, the same column - so
+ * "something came back" would read a falling piece as a move that landed.
+ *
+ * Silence is a real answer here rather than a timeout to be endured: an input
+ * the server accepts marks the game dirty and the next tick pushes it, and one
+ * it refuses marks nothing at all, so a column that has not moved by the end of
+ * this is a column the piece cannot be in.
+ *
+ * @param run The bot.
+ * @param from The column the piece was in when the move was sent.
+ * @return 0 when the piece moved, 1 when nothing took it, -1 on a lost session.
+ */
+static int	await_move(t_bot_run *run, int from)
+{
+	int	tries;
+
+	tries = 0;
+	while (tries++ < BOT_MOVE_SETTLE_TRIES)
+	{
+		if (orphaned(run) || pump_once(run) < 0)
+			return (-1);
+		if (run->net.state_snapshot.piece.col != from)
+			return (0);
+	}
+	return (1);
+}
+
+/**
+ * @brief Remember whether anybody is landing rows on this bot.
+ *
+ * Read off the arena rather than off the opponents, because the arena is the
+ * only section that says who is attacking *whom* - and only from a frame that
+ * carries one. Most frames do not: the arena rides a slower clock than the
+ * board, so `attacked` is left standing between pushes rather than recomputed
+ * from a frame that says nothing, which would have it flicker off every board
+ * tick and re-declare a mode twice a second.
+ *
+ * Seeing an arena at all is also what tells a Battle Royale from a Double,
+ * which is why has_arena is latched here rather than asked of the room.
+ *
+ * @param run The bot; its attacked and has_arena flags are updated.
+ */
+static void	note_attackers(t_bot_run *run)
+{
+	const t_body_state	*snap;
+	size_t				index;
+
+	snap = &run->net.state_snapshot;
+	if (!run->net.has_state || !snap->arena_present)
+		return ;
+	run->has_arena = true;
+	run->attacked = false;
+	index = 0;
+	while (index < snap->arena_count)
+	{
+		if (snap->arena[index].player_id != run->net.player_id
+			&& (snap->arena[index].flags & BODY_ARENA_ATTACKING_YOU) != 0)
+			run->attacked = true;
+		index++;
+	}
+}
+
+/**
+ * @brief Declare a targeting mode, but only when it is not the one already sent.
+ *
+ * Sent on the change and not on the piece. A bot that re-declared every piece
+ * would put a request per second per bot onto a server that has ninety-eight
+ * other seats to serve, for an answer that is the same one it gave last time.
+ *
+ * A refusal is remembered exactly like an acceptance, and that is deliberate:
+ * what must not happen is a mode the server will not take being re-sent for
+ * the rest of the match. The mode can still change later, which is the only
+ * retry worth having.
+ *
+ * @param run The bot.
+ * @return 0 on success or when there was nothing to send, -1 on a transport
+ *         failure.
+ */
+static int	steer_target(t_bot_run *run)
+{
+	t_net_result	result;
+	t_target_mode	mode;
+
+	if (!run->has_arena)
+		return (0);
+	mode = bot_target_mode(&run->brain, run->attacked);
+	if ((int)mode == run->declared_target)
+		return (0);
+	if (net_match_set_target(&run->net, mode, &result) != 0)
+		return (-1);
+	run->declared_target = (int)mode;
 	return (0);
 }
 

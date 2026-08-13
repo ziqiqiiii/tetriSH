@@ -7,6 +7,7 @@
 
 # include "htttp.h"
 # include "statusbody.h"
+# include "tetrisbrain.h"
 # include "tetrissh.h"
 
 /*
@@ -282,12 +283,21 @@ typedef enum e_solo_action
 }	t_solo_action;
 
 /*
-** The two halves of playing a match that need no screen: taking the seat, and
-** sending an action into it. Everything else in net_match.c speaks in view
-** models and stays in tetrisu.h with the renderer that reads them.
+** The three parts of playing a match that need no screen: taking the seat,
+** sending an action into it, and saying which rivals the garbage is for.
+** Everything else in net_match.c speaks in view models and stays in tetrisu.h
+** with the renderer that reads them.
+**
+** Targeting is here rather than there because it is a decision and not a
+** drawing: the mode is an enum libtetrisbrain owns and the answer is a status
+** code, so a bot declares one exactly as a player does. Its word form comes
+** with it, since the two are the same fact said twice.
 */
 int		net_match_join(t_net_client *net, const char *room);
 int		net_match_send_action(t_net_client *net, t_solo_action action);
+int		net_match_set_target(t_net_client *net, t_target_mode mode,
+			t_net_result *out);
+const char	*net_target_mode_word(t_target_mode mode);
 
 int		net_profile(t_net_client *net, t_body_profile *out);
 int		net_catalogue(t_net_client *net, t_body_catalogue *out);

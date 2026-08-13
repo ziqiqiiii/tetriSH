@@ -16,6 +16,8 @@ static void	test_the_piece_known_to_be_next_changes_the_answer(void);
 static void	test_a_seed_replays_exactly(void);
 static void	test_a_full_board_plans_nothing(void);
 static void	test_a_tier_is_a_tempo_as_well_as_a_price(void);
+static void	test_ultra_pays_more_for_a_clear_that_sends(void);
+static void	test_ultra_aims_at_whoever_is_aiming_at_it(void);
 
 static void	snapshot_init(t_body_state *snap, int type);
 static void	snapshot_board(t_body_state *snap, const t_board *board);
@@ -48,8 +50,84 @@ int	main(void)
 	test_a_seed_replays_exactly();
 	test_a_full_board_plans_nothing();
 	test_a_tier_is_a_tempo_as_well_as_a_price();
+	test_ultra_pays_more_for_a_clear_that_sends();
+	test_ultra_aims_at_whoever_is_aiming_at_it();
 	printf("\nAll bot brain tests passed.\n");
 	return (0);
+}
+
+/**
+ * @brief Ultra wants a sending clear more than normal does, and a wasted one less.
+ *
+ * The whole of the tier, asked as the two questions the constants answer. The
+ * same double is worth more to ultra than to normal, and the same single costs
+ * it more - so where normal takes the row in front of it, ultra waits for the
+ * row that lands on somebody. Measured over 1500 pieces on three seeds under a
+ * garbage row every eight, that is about a quarter more rows sent off the same
+ * number of lines cleared.
+ *
+ * The ceiling is asserted to be shared, and that is the important half. Letting
+ * ultra refuse singles for longer is the obvious next move and it is a trap:
+ * with these weights and a danger height of 15 the bot topped out inside 350
+ * pieces where normal survived all 1500. How much room is left is a fact about
+ * the board, not a taste about the tier.
+ */
+static void	test_ultra_pays_more_for_a_clear_that_sends(void)
+{
+	t_board	sending;
+	t_board	wasting;
+	t_board	holding;
+
+	/* every board is built again before it is scored: bot_placement_score
+	** clears in place, so a board scored twice is not the same board twice */
+	board_init(&sending);
+	row_fill(&sending, BOARD_HEIGHT - 1, -1);
+	row_fill(&sending, BOARD_HEIGHT - 2, -1);
+	wasting = sending;
+	/* a double sends a row, and ultra pays more than normal for it */
+	assert(bot_placement_score(BOT_ULTRA, &sending)
+		> bot_placement_score(BOT_NORMAL, &wasting));
+	board_init(&wasting);
+	board_init(&holding);
+	row_fill(&wasting, BOARD_HEIGHT - 1, -1);
+	row_fill(&holding, BOARD_HEIGHT - 1, 3);
+	/* and it still walks away from a single, which sends nothing, as normal
+	** does - only harder, because the penalty it is charged is larger */
+	assert(bot_placement_score(BOT_ULTRA, &wasting)
+		< bot_placement_score(BOT_ULTRA, &holding));
+	board_init(&wasting);
+	board_init(&sending);
+	row_fill(&wasting, BOARD_HEIGHT - 1, -1);
+	row_fill(&sending, BOARD_HEIGHT - 1, -1);
+	/* a single sends nothing, and ultra is charged more for taking it */
+	assert(bot_placement_score(BOT_ULTRA, &wasting)
+		< bot_placement_score(BOT_NORMAL, &sending));
+	assert(BOT_W_GARBAGE_ULTRA > BOT_W_GARBAGE);
+	assert(BOT_W_WASTED_CLEAR_ULTRA > BOT_W_WASTED_CLEAR);
+	printf("PASS test_ultra_pays_more_for_a_clear_that_sends\n");
+}
+
+/**
+ * @brief Ultra answers its attackers; every other tier stays where it started.
+ *
+ * RANDOM is what a participant starts a match in, so it is also what "this bot
+ * does not steer" has to mean - a tier that returned anything else would be
+ * declaring a mode it had no opinion about.
+ */
+static void	test_ultra_aims_at_whoever_is_aiming_at_it(void)
+{
+	t_bot	bot;
+
+	bot_init(&bot, BOT_ULTRA, 20260814u);
+	assert(bot_target_mode(&bot, true) == TARGET_ATTACKERS);
+	assert(bot_target_mode(&bot, false) == TARGET_KO);
+	bot_init(&bot, BOT_NORMAL, 20260814u);
+	assert(bot_target_mode(&bot, true) == TARGET_RANDOM);
+	assert(bot_target_mode(&bot, false) == TARGET_RANDOM);
+	bot_init(&bot, BOT_EASY, 20260814u);
+	assert(bot_target_mode(&bot, true) == TARGET_RANDOM);
+	assert(bot_target_mode(NULL, true) == TARGET_RANDOM);
+	printf("PASS test_ultra_aims_at_whoever_is_aiming_at_it\n");
 }
 
 /**
@@ -391,9 +469,15 @@ static void	test_a_tier_is_a_tempo_as_well_as_a_price(void)
 	assert(low < high);
 	assert(high - low > BOT_PACE_EASY_MS / 4);
 	bot_init(&bot, BOT_NORMAL, 20260813u);
-	assert(bot_piece_pace_ms(&bot, 1) < BOT_PACE_EASY_MS);
+	low = bot_piece_pace_ms(&bot, 1);
+	assert(low < BOT_PACE_EASY_MS);
+	/* ultra is deliberately not faster than normal: a tier that is harder
+	** because its hands are quicker is a machine rather than an opponent, so
+	** ultra's edge is the hold slot and its Target and it spends the same time
+	** per piece. Same seed, same tier tempo, same number - which also means a
+	** comparison between the two is a comparison of what they decided. */
 	bot_init(&bot, BOT_ULTRA, 20260813u);
-	assert(bot_piece_pace_ms(&bot, 1) < BOT_PACE_NORMAL_MS);
+	assert(bot_piece_pace_ms(&bot, 1) == low);
 	/* the level shortens the tempo, and the floor stops it running away */
 	bot_init(&bot, BOT_NORMAL, 20260813u);
 	low = bot_piece_pace_ms(&bot, 1);

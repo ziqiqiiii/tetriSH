@@ -312,7 +312,7 @@ taste.
 |---|---|---|---|---|
 | `easy` | today's weights | 1 ply, ~25% of pieces placed at random instead | ~0.8 pps | nothing — it clears singles and stacks badly enough to top out |
 | `normal` | garbage-weighted | 1 ply + `next[0]` | ~1.4 pps | Tetrises, because singles now score zero |
-| `ultra` | garbage-weighted | 2 ply + hold as a branch + live `TARGET` | ~2.5 pps | the same per clear, but far more often and aimed |
+| `ultra` | garbage-weighted, at more than twice the price | 1 ply + `next[0]`, same as normal | ~0.7 pps, same as normal | the same per clear, about a quarter more often, and aimed |
 
 Measured over 3000 pieces on a clean board, three seeds:
 
@@ -421,6 +421,36 @@ search branch is about 6k boards per piece at roughly one piece a second: free.
 It buys consistency, which is Tetrises per minute. `TARGET` is the other half —
 switch to Attackers while being hit, KOs to finish somebody. With the fan-out
 landed, Attackers on an ultra bot answers every attacker at once.
+
+> **The search half of that was superseded by measurement.** Both richer
+> searches were built and both were removed; only `TARGET` survived.
+>
+> The hold slot as a branch made the bot **worse at every setting**: holding 27% of its pieces it
+> sent 104 rows where the same tier without a hold slot sent 145, and the
+> penalty large enough to stop it holding was the penalty that stopped it
+> holding at all. Hold gives a survival evaluator more ways to be comfortable,
+> and every one it takes is a piece not spent keeping the Tetris well open —
+> which is the same lesson the free-well exemption above already taught, met
+> from the other side.
+>
+> A third ply is **open, not rejected**. Only its cost was measured — 0.2 / 7 /
+> ~250 ms per plan at depths 1 / 2 / 3 — and the ply the bot already has is
+> worth far too much to write the next one off on cost alone: with lookahead
+> off and all else held still, the same search topped out after 215, 264 and
+> 441 pieces sending 18, 24 and 53 rows, against 1500 pieces and ~200 rows with
+> it. The obstacle is that ~250 ms is blocking work inside a 1400 ms budget
+> `run_match` spends pumping the socket, so it needs a beam or a yield.
+>
+> What `ultra` ships instead is the same search at more than twice the attack
+> price (`BOT_W_GARBAGE_ULTRA` 32000, `BOT_W_WASTED_CLEAR_ULTRA` 12000) plus
+> the live `TARGET` this paragraph called for, at normal's own tempo. Measured
+> over 1500 pieces on three seeds with a garbage row every eight, that is 237,
+> 243 and 262 rows sent against normal's 201, 194 and 198.
+>
+> `BOT_DANGER_HEIGHT` stays shared by all three tiers. Letting ultra refuse
+> singles for longer is the obvious next turn of the same screw and it is a
+> trap: at a danger height of 15 the bot topped out after 185, 328 and 332
+> pieces under a pressure normal survived all 1500 of.
 
 Speed is not a lever. Bots are bound by `TETRISD_INPUT_RATE`, the same limiter
 a person hits.
