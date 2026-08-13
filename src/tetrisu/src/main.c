@@ -2299,9 +2299,16 @@ static void	kick_bot(t_mp_session *session, const t_app_room_view_model *room)
 /**
  * @brief The difficulty a new bot is added at.
  *
- * TETRISU_BOT_LEVEL for now, defaulting to normal. It belongs in Settings -
- * one setting for the room rather than a prompt per bot, because four prompts
- * to add four bots is worse than one choice made once.
+ * TETRISU_BOT_LEVEL for now, defaulting to ultra. It belongs in Settings - one
+ * setting for the room rather than a prompt per bot, because four prompts to
+ * add four bots is worse than one choice made once.
+ *
+ * Ultra rather than normal, and the reason is that the two do not differ in
+ * tempo: ultra places a piece every 1400 ms exactly as normal does, and what
+ * it spends the difference on is the hold slot and its Target. So the default
+ * costs a player nothing in reaction time and gives them an opponent that
+ * actually aims - which is what B is for. Normal is still a word away for
+ * anyone who wants the easier game.
  *
  * @return The level to spawn at.
  */
@@ -2309,7 +2316,7 @@ static t_bot_level	default_bot_level(void)
 {
 	t_bot_level	level;
 
-	level = BOT_NORMAL;
+	level = BOT_ULTRA;
 	bot_level_parse(getenv("TETRISU_BOT_LEVEL"), &level);
 	return (level);
 }

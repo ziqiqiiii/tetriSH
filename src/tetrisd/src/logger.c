@@ -106,6 +106,24 @@ uint64_t	logger_dropped_count(const t_logger *lg)
 }
 
 /**
+ * @brief Reports whether records are reaching the Sink or falling back.
+ *
+ * This is not a count of anything. Dropped, Rejected and Degraded are three
+ * different quantities, and this is none of them - it is only which way this
+ * producer's records are currently going.
+ *
+ * @param lg Logger to query, or NULL.
+ * @return true when records are going to tetrislogd, false when they are
+ *         falling back to this daemon's own stderr; false when lg is NULL.
+ */
+bool	logger_sink_reaching(const t_logger *lg)
+{
+	if (lg == NULL)
+		return (false);
+	return (!atomic_load(&lg->fallback));
+}
+
+/**
  * @brief Stops the shipper, flushes what is left, and releases the ring.
  *
  * The final drain runs on the caller's thread so records emitted during

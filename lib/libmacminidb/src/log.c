@@ -78,3 +78,29 @@ t_db_result	log_fsync(t_dblog *log)
 		return (DB_IO_ERROR);
 	return (DB_OK);
 }
+
+/**
+ * @brief Cut a torn tail off the log, back to the last whole frame.
+ *
+ * Called once at boot with the offset log_replay stopped at. The fd is
+ * O_APPEND, so a torn tail left in place is not overwritten by the next append
+ * — it is buried under a valid frame, and the boot after that meets it mid-file
+ * where a short read is corruption rather than EOF, which fails db_open for
+ * good. A file already ending at clean_end is left alone.
+ *
+ * @param log The open log handle.
+ * @param clean_end Offset just past the last whole frame.
+ * @return DB_OK if the log now ends at clean_end, DB_IO_ERROR on a stat/truncate failure.
+ */
+t_db_result	log_truncate_tail(t_dblog *log, off_t clean_end)
+{
+	struct stat	st;
+
+	if (fstat(log->fd, &st) != 0)
+		return (DB_IO_ERROR);
+	if (clean_end >= st.st_size)
+		return (DB_OK);
+	if (ftruncate(log->fd, clean_end) != 0)
+		return (DB_IO_ERROR);
+	return (DB_OK);
+}

@@ -2,22 +2,25 @@
 
 // Static Variables
 static const char	*g_modes[] = {
-	"single", "double", "battle-royale"
+	"single", 
+	"double", 
+	"battle-royale"
 };
 static const char	*g_statuses[] = {
-	"waiting", "ready", "selecting", "in-game", "finished"
+	"waiting", 
+	"ready", 
+	"selecting", 
+	"in-game", 
+	"finished"
 };
 
 // Static Functions
 static bool	room_valid(const t_body_room *room);
-static int	encode_members(const t_body_room *room, char *out, size_t cap,
-				size_t *offset);
+static int	encode_members(const t_body_room *room, char *out, size_t cap, size_t *offset);
 static int	decode_header(t_body_cursor *cursor, t_body_room *room);
 static int	decode_members(t_body_cursor *cursor, t_body_room *room);
-static int	read_value(t_body_cursor *cursor, const char *key, char *value,
-				size_t cap);
-static int	decode_member(const char *line, t_body_room_member *member,
-				int previous_slot, int slot_count);
+static int	read_value(t_body_cursor *cursor, const char *key, char *value, size_t cap);
+static int	decode_member(const char *line, t_body_room_member *member, int previous_slot, int slot_count);
 
 /**
  * @brief Serialises one authoritative waiting-room snapshot.

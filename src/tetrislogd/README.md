@@ -13,6 +13,7 @@ The standalone logger daemon for tetriSH. Receives log records from `tetrisd` ov
 - [Signals](#signals)
 - [Configuration](#configuration)
 - [Log Format](#log-format)
+- [Rotation](#rotation)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -132,6 +133,29 @@ dump: 14812 written, 3 rejected, 0 degraded
 
 ---
 
+## Rotation
+
+Nothing in the daemon caps the sink — it appends until something else moves the file. At the rate the load generator plays at, one Double game-hour is ~7 MB of access lines, so an uncapped log is a disk-space bug waiting on uptime. `scripts/logrotate.sh` generates the rule, reading the paths out of `.tetrishrc` and making them absolute:
+
+```bash
+scripts/logrotate.sh                      # print the rule
+scripts/logrotate.sh --check              # ask logrotate to parse it
+sudo scripts/logrotate.sh --install       # /etc/logrotate.d/tetrish
+```
+
+`ROTATE_KEEP` (default `14`) and `ROTATE_MAXSIZE` (default `100M`) tune retention.
+
+The two stanzas it writes are not interchangeable:
+
+| Files | Method | Why |
+|---|---|---|
+| `TETRISLOGD_LOG_PATH` | rename, then `SIGHUP` the pidfile | The daemon holds the renamed inode until the signal reaches it; `copytruncate` would lose records written between the copy and the truncate |
+| `TETRISLOGD_ERR_PATH`, `TETRISD_ERR_PATH` | `copytruncate` | Both are stderr with no reopen path — `tetrisd`'s `SIGHUP` re-reads `.tetrishrc` and never touches its stderr |
+
+A stopped daemon is not a rotation failure: the `postrotate` tolerates a stale or missing pidfile, since a non-zero exit there would have `logrotate` report failure on every run once the server is down. Dropping `TETRISD_LOG_LEVEL` from `info` to `warn` removes nearly all the volume, since access lines are INFO.
+
+---
+
 ## Architecture
 
 ### The three fates of a record
@@ -195,6 +219,7 @@ src/tetrislogd/
 │   ├── logd.c            Bring-up, the poll loop, record acceptance, counters
 │   └── signals.c         Handlers: a flag and one byte down the self-pipe
 ├── tests/                harness.c builds each suite's throwaway socket and file
+│   └── integration/      Shell suites: the logrotate rule against real files
 ├── scripts/run_tests.sh
 └── Makefile              → src/tetrislogd/tetrislogd
 ```
@@ -203,12 +228,15 @@ src/tetrislogd/
 
 ## Testing
 
-Four suites, each driving a real daemon in-process over a throwaway socket:
+Four unit suites, each driving a real daemon in-process over a throwaway socket, and one integration suite driving a real `logrotate` against fixture files:
 
 ```bash
-make -C src/tetrislogd test
-make -C src/tetrislogd test FILTER=sink    # only suites matching "sink"
+make -C src/tetrislogd test                # unit + integration
+make -C src/tetrislogd unit FILTER=sink    # only suites matching "sink"
+make -C src/tetrislogd integration         # the rotation rule
 ```
+
+The integration suite skips itself where `logrotate` is not installed.
 
 Suites lower `idle_ms` from its `TETRISLOGD_IDLE_MS` default so the timeout path — `fdatasync` and the sink-reopen retry — runs without a one-second wait per assertion.
 

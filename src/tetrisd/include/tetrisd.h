@@ -317,26 +317,26 @@ typedef struct s_bytes
 
 typedef struct s_config
 {
-	int		port;
-	char	data_dir[TETRISD_FILESYSTEM_PATH_MAX];
-	char	config_dir[TETRISD_FILESYSTEM_PATH_MAX];
-	char	cert_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	key_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	ca_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	log_ipc[TETRISD_FILESYSTEM_PATH_MAX];
-	char	control_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	pid_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	err_path[TETRISD_FILESYSTEM_PATH_MAX];
-	char	rc_path[TETRISD_FILESYSTEM_PATH_MAX];
-	int		log_level;
-	int		max_clients;
-	int		tick_ms;
-	int		br_slots;
-	int		input_burst;
-	int		input_rate;
-	int		handshake_workers;
-	int		handshake_timeout_ms;
-	int		bot_accounts;
+	int				port;
+	char			data_dir[TETRISD_FILESYSTEM_PATH_MAX];
+	char			config_dir[TETRISD_FILESYSTEM_PATH_MAX];
+	char			cert_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			key_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			ca_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			log_ipc[TETRISD_FILESYSTEM_PATH_MAX];
+	char			control_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			pid_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			err_path[TETRISD_FILESYSTEM_PATH_MAX];
+	char			rc_path[TETRISD_FILESYSTEM_PATH_MAX];
+	int				log_level;
+	int				max_clients;
+	int				tick_ms;
+	int				br_slots;
+	int				input_burst;
+	int				input_rate;
+	int				handshake_workers;
+	int				handshake_timeout_ms;
+	int				bot_accounts;
 }	t_config;
 
 typedef struct s_logger
@@ -881,6 +881,7 @@ typedef struct s_control
 	char					path[TETRISD_FILESYSTEM_PATH_MAX];
 	t_control_connection	slots[TETRISD_CONTROL_MAX_CONNECTIONS];
 	char					body[TETRISD_CONTROL_BODY_MAX];
+	size_t					body_len;
 	bool					stop_requested;
 }	t_control;
 
@@ -970,6 +971,7 @@ void				logger_blank(t_logger *lg);
 int					logger_init(t_logger *lg, const t_config *cfg);
 void				logger_emit(t_logger *lg, t_log_level level, const char *fmt, ...);
 uint64_t			logger_dropped_count(const t_logger *lg);
+bool				logger_sink_reaching(const t_logger *lg);
 void				logger_shutdown(t_logger *lg);
 
 /* LISTENER.C */
@@ -1165,6 +1167,7 @@ void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
 void			server_rooms_evict_abandoned(t_server *srv);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
+size_t			server_rooms_list(t_server *srv, t_body_room_row *rows, size_t cap);
 bool			server_room_snapshot(const t_server_room *server_room,
 					t_body_room *out);
 bool			server_room_is_muted(const t_server_room *server_room, t_player_id pid);
@@ -1192,5 +1195,21 @@ bool				signals_take_state_dump(void);
 
 /* DUMP.C */
 void				server_state_dump(t_server *srv);
+void				server_health_assemble(const t_server *srv, t_body_health *out);
+
+/* CONTROL.C */
+int					control_open(t_server *srv);
+void				control_close(t_server *srv);
+void				control_accept_ready(t_server *srv);
+void				control_connection_ready(t_control_connection *conn, uint32_t events);
+
+/* CONTROLIO.C */
+void				control_flush(t_control_connection *conn);
+void				control_hangup(t_control_connection *conn);
+void				control_reply(t_control_connection *conn, unsigned int status, const char *body, size_t body_len, size_t omitted);
+void				control_queue(t_control_connection *conn, unsigned char *bytes, size_t len);
+
+/* HANDLERS_ADMIN.C */
+void				control_handle_frame(t_control_connection *conn, const unsigned char *frame, size_t len);
 
 # endif

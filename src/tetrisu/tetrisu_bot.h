@@ -72,6 +72,49 @@
 # define BOT_W_WASTED_CLEAR		2500
 
 /*
+** The same two numbers for ULTRA, and the whole of what makes that tier hard.
+**
+** Ultra searches no deeper than normal, holds nothing, and places a piece
+** every 1400 ms exactly as normal does. It is harder because it wants the
+** attack more: a sending clear is worth 32000 to it rather than 14000, and a
+** clear that sends nothing costs 12000 rather than 2500. Measured over 1500
+** pieces on three seeds with a garbage row arriving every eight, that is 237,
+** 243 and 262 rows sent against normal's 201, 194 and 198 - about a quarter
+** more - off the same number of lines cleared.
+**
+** BOT_DANGER_HEIGHT is deliberately shared and deliberately not raised. The
+** obvious next turn of the same screw is to let ultra refuse singles for
+** longer, and it is a trap: at a danger height of 15 and these weights the bot
+** topped out after 185, 328 and 332 pieces under the same pressure, against
+** normal's full 1500. Refusing a row is only affordable while there is room to
+** refuse it in, and the height is what says how much room is left - so it is a
+** fact about the board rather than a taste about the tier.
+**
+** The hold slot as a search branch was tried before these and is recorded so
+** it is not tried again: it made the bot worse at every setting. Holding 27% of
+** its pieces it sent 104 rows where the tier without a hold slot sent 145, and
+** the penalty needed to stop it holding was the penalty that stopped it holding
+** at all. Hold gives a survival evaluator more ways to be comfortable, and
+** every one it takes is a piece not spent keeping the well open that the attack
+** is built on.
+**
+** A third ply is a different matter and is *open rather than rejected*. Only
+** its cost has been measured - 0.2 / 7 / ~250 ms per plan at depths 1 / 2 / 3,
+** so 35x per ply - and never its benefit. What is known argues it is worth
+** measuring: the ply this bot already has is not a marginal gain but the whole
+** game. With lookahead switched off and everything else held still, the same
+** search topped out after 215, 264 and 441 pieces and sent 18, 24 and 53 rows;
+** with it, all three seeds survived 1500 pieces and sent about 200. Nothing
+** about that curve says the next ply is free money, but nothing says it is
+** spent either, and it should not be written off on the cost alone. The real
+** obstacle is that ~250 ms is blocking work inside a 1400 ms budget that
+** run_match spends pumping the socket, so a third ply needs a beam or a yield
+** rather than just the patience to wait for it.
+*/
+# define BOT_W_GARBAGE_ULTRA		32000
+# define BOT_W_WASTED_CLEAR_ULTRA	12000
+
+/*
 ** Above this height the wasted-clear penalty stops applying and the bot takes
 ** whatever it can get.
 **
@@ -115,6 +158,40 @@
 # define BOT_POLL_MS			5
 
 /*
+** How long a bot waits for the board that took a rotation or a hold, which is
+** a third of what it gives a drop.
+**
+** Shorter because these are the two waits that can end in nothing arriving at
+** all: a rotation the piece was already in sends no input, and a hold the
+** server refuses pushes no frame. A drop always changes the board, so its
+** wait is only ever as long as the round trip.
+*/
+# define BOT_PLAN_SETTLE_TRIES	200
+
+/*
+** How long a bot waits for the board that took one sideways move, and how many
+** moves one slide may spend.
+**
+** A move the server accepts marks the game dirty and the next room tick pushes
+** the board - TETRISD_DEFAULT_TICK_MS is 12 - so an accepted move shows up
+** within two or three poll rounds. A move it **refuses** marks nothing and
+** pushes nothing: server_room_input sets the dirty flag only when the input
+** succeeded, and the wire carries no answer either way (net_send writes and
+** reads nothing). So silence is the only signal a wall or a stack ever gives,
+** and this wait is what reads it.
+**
+** 40 rounds is generous against a 12 ms tick and is paid at most once per
+** piece, because the first refusal ends the slide.
+**
+** BOT_SLIDE_MAX is the widest an honest slide can be: a plan names a column
+** between -BOT_SCAN_MARGIN and BOARD_WIDTH, so no legal one is longer than the
+** board plus both margins. It is a backstop against a snapshot that has stopped
+** changing, not a rule about the board.
+*/
+# define BOT_MOVE_SETTLE_TRIES	40
+# define BOT_SLIDE_MAX			(BOARD_WIDTH + BOT_SCAN_MARGIN * 2)
+
+/*
 ** How long a bot spends on one piece, per tier, in milliseconds.
 **
 ** This is the difference between an opponent and a machine gun, and it is not
@@ -146,10 +223,20 @@
 ** this file may carry is 1923, and easy sits just under it. A bot placing a
 ** piece every three seconds does not read as easy, it reads as broken, which
 ** is the same reason that bound exists at all.
+**
+** ULTRA is deliberately the same 1400 as NORMAL, which is the whole of how the
+** two are meant to differ. A tier that is harder because its hands are faster
+** is not a better opponent, it is a machine, and 1400 (about 0.7 pieces a
+** second) is the tempo that reads as a person sitting across from you. So
+** ultra's difficulty is entirely in its head: it searches the hold slot as a
+** branch and it aims its garbage, and it does both at a human's speed. That
+** also means the two tiers can be compared honestly - anything ultra wins by
+** it won by thinking, because the pieces cost it exactly what they cost
+** normal.
 */
 # define BOT_PACE_EASY_MS		1900
 # define BOT_PACE_NORMAL_MS		1400
-# define BOT_PACE_ULTRA_MS		1000
+# define BOT_PACE_ULTRA_MS		1400
 # define BOT_PACE_JITTER_PCT	30
 
 /*
@@ -196,7 +283,18 @@
 **
 ** ULTRA cannot hit harder - garbage is flat, and back-to-back and combo feed
 ** the score only, never the attack - so it hits oftener and better aimed
-** instead: it reads one piece further ahead, and it steers its Target.
+** instead. Two things, and neither of them is speed:
+**
+**   - it prices the attack at more than twice what NORMAL does
+**     (BOT_W_GARBAGE_ULTRA), so it waits for the clear that sends where normal
+**     takes the one in front of it. About a quarter more rows sent, off the
+**     same number of lines cleared.
+**   - it steers its Target: ATTACKERS while anybody is landing rows on it, and
+**     KO otherwise, re-declared only when the answer changes.
+**
+** It reads no further ahead than NORMAL, holds nothing, and places a piece at
+** exactly the same tempo. The hold slot was built, measured and removed, and a
+** third ply is open but unbuilt - see BOT_W_GARBAGE_ULTRA for both.
 */
 typedef enum
 {
@@ -317,6 +415,7 @@ int				bot_farm_reap_exited(t_bot_farm *farm);
 void			bot_init(t_bot *bot, t_bot_level level, uint32_t seed);
 void			bot_begin_piece(t_bot *bot);
 int				bot_piece_pace_ms(t_bot *bot, int level);
+t_target_mode	bot_target_mode(const t_bot *bot, bool attacked);
 bool			bot_plan(t_bot *bot, const t_body_state *snap, bool may_rotate,
 					int *rotation, int *col);
 bool			bot_level_parse(const char *name, t_bot_level *out);

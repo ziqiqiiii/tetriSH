@@ -26,10 +26,8 @@
 */
 
 // Static Functions
-static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap,
-				size_t *off);
-static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap,
-				size_t *off);
+static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap, size_t *off);
+static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap, size_t *off);
 static int	decode_card(const char *line, t_body_arena_slot *out);
 static int	decode_cells(const char *text, t_body_arena_slot *out);
 static int	validate_card(const t_body_arena_slot *card);
@@ -153,8 +151,7 @@ int	body_arena_validate(const t_body_state *in)
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap,
-		size_t *off)
+static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap, size_t *off)
 {
 	if (body_append(out, cap, off, "a %d %" PRIx64 " %u %d %d %d %d",
 			card->slot, card->player_id, card->flags, card->lines,
@@ -178,8 +175,7 @@ static int	encode_card(const t_body_arena_slot *card, char *out, size_t cap,
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap,
-		size_t *off)
+static int	encode_cells(const t_body_arena_slot *card, char *out, size_t cap, size_t *off)
 {
 	int	row;
 	int	col;

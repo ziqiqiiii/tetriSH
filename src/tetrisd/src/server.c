@@ -198,6 +198,13 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 	srv->timer_fd = -1;
 	srv->wake[SELFPIPE_READ] = -1;
 	srv->wake[SELFPIPE_WRITE] = -1;
+	/*
+	** Before anything can fail, for the reason logger_blank exists: boot can
+	** fail well before control_open runs, start-up failure and shutdown share
+	** one teardown path, and a zeroed listen_fd is 0 - so control_close would
+	** unlink a path it never bound and close the caller's standard input.
+	*/
+	srv->control.listen_fd = -1;
 	srv->listener_tag.source = EVENT_LISTENER;
 	srv->wake_tag.source = EVENT_WAKE;
 	srv->timer_tag.source = EVENT_TIMER;
@@ -255,7 +262,7 @@ static int	open_reactor(t_server *srv)
 	}
 	if (watch(srv, srv->listen_fd, &srv->listener_tag) != 0
 		|| watch(srv, srv->wake[SELFPIPE_READ], &srv->wake_tag) != 0
-		|| open_timer(srv) != 0)
+		|| open_timer(srv) != 0 || control_open(srv) != 0)
 		return (-1);
 	if (handshake_pool_start(&srv->pool, srv) != 0)
 	{
@@ -324,6 +331,7 @@ static void	destroy(t_server *srv)
 {
 	handshake_pool_destroy(&srv->pool);
 	client_reap(srv);
+	control_close(srv);
 	if (srv->timer_fd >= 0)
 		close(srv->timer_fd);
 	if (srv->epoll_fd >= 0)

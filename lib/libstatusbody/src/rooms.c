@@ -104,8 +104,7 @@ int	body_rooms_decode(const char *buf, size_t len, t_body_room_row *rows, size_t
  * @param off In/out write offset.
  * @return 0 on success, -1 when the buffer is exhausted.
  */
-static int	encode_row(const t_body_room_row *row, char *out, size_t cap,
-		size_t *off)
+static int	encode_row(const t_body_room_row *row, char *out, size_t cap, size_t *off)
 {
 	return (body_append(out, cap, off, "%s %s %d/%d %s %s\n", row->name,
 			g_modes[row->mode], row->players, row->slot_count,

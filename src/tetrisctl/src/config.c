@@ -14,13 +14,14 @@
 ** drift apart silently, which is the failure this table exists to avoid.
 */
 static const t_known_daemon	g_known[] = {
-	{"tetrislogd", "TETRISLOGD_PID_PATH"},
-	{"tetrisd", "TETRISD_PID_PATH"},
-	{NULL, NULL}
+	{"tetrislogd", "TETRISLOGD_PID_PATH", NULL},
+	{"tetrisd", "TETRISD_PID_PATH", "TETRISD_CONTROL_PATH"},
+	{NULL, NULL, NULL}
 };
 
 // Static Functions
 static int			known_index(const char *key);
+static int			control_index(const char *key);
 static int			name_index(const char *name);
 static int			add_daemon(t_ctl *ctl, const char *name);
 static int			set_str(char *dst, size_t cap, const char *value);
@@ -71,9 +72,13 @@ int	config_set(t_ctl *ctl, const char *key, const char *value)
 	if (strcmp(key, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS") == 0)
 		return (set_str(ctl->order, TETRISCTL_CONFIG_LINE_MAX, value));
 	i = known_index(key);
+	if (i >= 0)
+		return (set_str(ctl->paths[i], TETRISCTL_FILESYSTEM_PATH_MAX, value));
+	i = control_index(key);
 	if (i < 0)
 		return (-1);
-	return (set_str(ctl->paths[i], TETRISCTL_FILESYSTEM_PATH_MAX, value));
+	return (set_str(ctl->control_paths[i], TETRISCTL_FILESYSTEM_PATH_MAX,
+			value));
 }
 
 /**
@@ -98,7 +103,8 @@ int	config_parse_line(t_ctl *ctl, const char *line)
 		return (-1);
 	if (split_assignment(line, key, sizeof(key), value, sizeof(value)) != 0)
 		return (0);
-	if (strcmp(key, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS") != 0 && known_index(key) < 0)
+	if (strcmp(key, TETRISCTL_CONFIG_KEY_PREFIX "DAEMONS") != 0
+		&& known_index(key) < 0 && control_index(key) < 0)
 		return (0);
 	return (config_set(ctl, key, value));
 }
@@ -275,6 +281,14 @@ static int	add_daemon(t_ctl *ctl, const char *name)
 	snprintf(ctl->daemons[ctl->count].name, TETRISCTL_NAME_MAX, "%s", name);
 	snprintf(ctl->daemons[ctl->count].pid_path, TETRISCTL_FILESYSTEM_PATH_MAX, "%s",
 		ctl->paths[i]);
+	/*
+	** Deliberately not refused when unset. A daemon with no channel has no key
+	** to set, and a daemon that has one is still perfectly startable and
+	** stoppable by signal - so this stays empty and the verbs that need it say
+	** so, rather than a missing key making the whole roster unloadable.
+	*/
+	snprintf(ctl->daemons[ctl->count].control_path,
+		TETRISCTL_FILESYSTEM_PATH_MAX, "%s", ctl->control_paths[i]);
 	ctl->count++;
 	return (0);
 }
@@ -293,6 +307,30 @@ static int	known_index(const char *key)
 	while (g_known[i].name != NULL)
 	{
 		if (strcmp(key, g_known[i].pid_key) == 0)
+			return (i);
+		i++;
+	}
+	return (-1);
+}
+
+/**
+ * @brief Finds which managed daemon a Control-channel key belongs to.
+ *
+ * Only some daemons have one, so the table's NULL entries are skipped rather
+ * than compared - tetrislogd publishes no channel and has no key.
+ *
+ * @param key Full setting name.
+ * @return Index into g_known, or -1 when the key names no channel.
+ */
+static int	control_index(const char *key)
+{
+	int	i;
+
+	i = 0;
+	while (g_known[i].name != NULL)
+	{
+		if (g_known[i].control_key != NULL
+			&& strcmp(key, g_known[i].control_key) == 0)
 			return (i);
 		i++;
 	}
@@ -437,6 +475,13 @@ static int	apply_env(t_ctl *ctl)
 		if (value != NULL && value[0] != '\0'
 			&& config_set(ctl, g_known[i].pid_key, value) != 0)
 			rc = -1;
+		if (g_known[i].control_key != NULL)
+		{
+			value = getenv(g_known[i].control_key);
+			if (value != NULL && value[0] != '\0'
+				&& config_set(ctl, g_known[i].control_key, value) != 0)
+				rc = -1;
+		}
 		i++;
 	}
 	return (rc);
