@@ -127,7 +127,20 @@ void	control_connection_ready(t_control_connection *conn, uint32_t events)
 	if (conn == NULL || !conn->open)
 		return ;
 	if (events & EPOLLOUT)
+	{
 		control_flush(conn);
+		/*
+		** A request that arrived while the last reply was still going out was
+		** left in the buffer rather than answered, so it has to be picked up
+		** here - nothing else will become readable on its behalf. Only a
+		** pipelining administrator reaches this, tetrisctl sending one request
+		** and waiting, but without it that client waits forever.
+		*/
+		if (conn->open && !drain_frames(conn))
+			return ;
+		if (conn->open)
+			control_flush(conn);
+	}
 	if (conn->open && (events & (EPOLLIN | EPOLLHUP | EPOLLERR)))
 	{
 		while (read_chunk(conn))
