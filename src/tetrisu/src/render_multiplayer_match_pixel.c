@@ -72,8 +72,24 @@ static bool regions_prepare(t_match_regions *pass);
 static int regions_local(t_match_regions *pass);
 static int regions_opponent(t_match_regions *pass);
 static int regions_battle(t_match_regions *pass);
-static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-				const int *cards, int count, struct ncplane **slot);
+static int regions_side(t_match_regions *pass, const t_mp_rect *rect,
+				const int *cards, int count, int side);
+static int arena_bands(int count, const t_mp_rect *rect);
+static uint64_t arena_band_signature(t_match_regions *pass,
+				const t_mp_rect *rect, const int *cards, int count, int index,
+				int bands, t_mp_rect *out);
+static bool arena_band_stage(t_match_regions *pass, const t_mp_rect *rect,
+				const int *cards, int count, int index, int bands,
+				const t_mp_rect *band, int side);
+static void arena_band_cards(int count, const t_mp_rect *rect, int index,
+				int bands, int *first, int *last);
+static void arena_band_bounds(int count, const t_mp_rect *rect, int index,
+				int bands, t_mp_rect *out);
+static void arena_band_release(t_render_ctx *ctx, int side, int index);
+static void draw_opponent_region_range(t_render_ctx *ctx, uint32_t *pixels,
+				int width, int height, const t_mp_rect *rect,
+				const t_mp_match_state *state, const int *cards, int count,
+				int first, int last);
 static int regions_loadout(t_match_regions *pass);
 static int regions_opponent_loadout(t_match_regions *pass);
 static int regions_hud(t_match_regions *pass);
@@ -819,8 +835,8 @@ static void store_signatures(t_match_regions *pass, uint64_t signature)
 	ctx->mp_match_static_signature = 0;
 	ctx->mp_match_local_signature = 0;
 	ctx->mp_match_opponent_signature = 0;
-	ctx->mp_match_left_signature = 0;
-	ctx->mp_match_right_signature = 0;
+	memset(ctx->mp_match_arena_signatures, 0,
+		sizeof(ctx->mp_match_arena_signatures));
 	ctx->mp_match_loadout_signature = 0;
 	ctx->mp_match_opponent_loadout_signature = 0;
 	ctx->mp_match_hud_signature = 0;
@@ -1131,57 +1147,244 @@ static bool regions_opponent_caption(t_match_regions *pass,
 ** rival, not how many players the room has, and the nth card of a side is the
 ** nth occupied seat rather than the nth entry.
 */
+/**
+ * @brief Refreshes the arena, one horizontal strip of cards at a time.
+ *
+ * It was one plane per half, and the signature that guarded each was folded
+ * over every card on that side - so any one rival moving invalidated forty-nine
+ * boards, and at the arena's own cadence that is most of both halves most of
+ * the time. Every one of those was a full software re-draw of half the screen
+ * followed by a bitmap transfer of it. That is the difference a player feels
+ * between this mode and Double, whose boards have been banded since the
+ * input-latency work and re-encode one strip for a moving piece.
+ *
+ * The strips are cut on card-row boundaries, which is what makes them safe: a
+ * card is drawn wholly inside one row of the grid, so no strip can hold half of
+ * one and no strip's redraw can clip a neighbour.
+ *
+ * @param pass The frame's region pass.
+ * @return 1 when anything was re-staged, 0 when nothing moved, -1 on failure.
+ */
 static int regions_battle(t_match_regions *pass)
 {
 	int cards[MP_ARENA_SEATS];
-	uint64_t signature[2];
 	int opponents;
 	int left;
 	int changed;
+	int outcome;
 
 	if (pass->state->mode != APP_GAME_MODE_BATTLE_ROYALE)
 		return (0);
-	opponents = mp_match_collect_cards(pass->state, cards,
-			MP_ARENA_SEATS);
+	opponents = mp_match_collect_cards(pass->state, cards, MP_ARENA_SEATS);
 	left = (opponents + 1) / 2;
-	signature[0] = opponents_signature(pass->state, cards, left);
-	signature[1] = opponents_signature(pass->state, cards + left,
-			opponents - left);
+	changed = regions_side(pass, &pass->layout->left_opponents, cards, left, 0);
+	if (changed < 0)
+		return (-1);
+	outcome = regions_side(pass, &pass->layout->right_opponents, cards + left,
+			opponents - left, 1);
+	if (outcome < 0)
+		return (-1);
+	return (changed | outcome);
+}
+
+/**
+ * @brief Refreshes one half of the arena, band by band.
+ *
+ * @param pass The frame's region pass.
+ * @param rect The half's rectangle.
+ * @param cards The card indices on this side, in draw order.
+ * @param count How many.
+ * @param side 0 for the left half, 1 for the right.
+ * @return 1 when a band was re-staged, 0 when none was, -1 on failure.
+ */
+static int regions_side(t_match_regions *pass, const t_mp_rect *rect,
+	const int *cards, int count, int side)
+{
+	t_mp_rect band;
+	uint64_t signature;
+	int bands;
+	int index;
+	int changed;
+
+	bands = arena_bands(count, rect);
 	changed = 0;
-	if (region_restage(pass, &pass->layout->left_opponents)
-		|| pass->ctx->mp_match_left_signature != signature[0])
+	index = 0;
+	while (index < MP_ARENA_BANDS)
 	{
-		if (!regions_side(pass, &pass->layout->left_opponents, cards, left,
-				&pass->ctx->mp_match_left_plane))
-			return (-1);
-		pass->ctx->mp_match_left_signature = signature[0];
-		changed = 1;
-	}
-	if (region_restage(pass, &pass->layout->right_opponents)
-		|| pass->ctx->mp_match_right_signature != signature[1])
-	{
-		if (!regions_side(pass, &pass->layout->right_opponents, cards + left,
-				opponents - left, &pass->ctx->mp_match_right_plane))
-			return (-1);
-		pass->ctx->mp_match_right_signature = signature[1];
-		changed = 1;
+		if (index >= bands)
+		{
+			arena_band_release(pass->ctx, side, index);
+			index++;
+			continue ;
+		}
+		signature = arena_band_signature(pass, rect, cards, count, index,
+				bands, &band);
+		if (region_restage(pass, &band)
+			|| pass->ctx->mp_match_arena_signatures[side][index] != signature)
+		{
+			if (!arena_band_stage(pass, rect, cards, count, index, bands,
+					&band, side))
+				return (-1);
+			pass->ctx->mp_match_arena_signatures[side][index] = signature;
+			changed = 1;
+		}
+		index++;
 	}
 	return (changed);
 }
 
-static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-	const int *cards, int count, struct ncplane **slot)
+/**
+ * @brief How many strips this half is worth cutting into.
+ *
+ * Never more than the grid has rows: a band with no row boundary in it can
+ * never be the only dirty one, so it would be a plane that costs a transfer
+ * and saves nothing.
+ *
+ * @param count How many cards this half holds.
+ * @param rect The half's rectangle.
+ * @return A band count between 1 and MP_ARENA_BANDS.
+ */
+static int arena_bands(int count, const t_mp_rect *rect)
 {
+	int columns;
+	int rows;
+
+	if (count <= 0 || rect->width <= 0 || rect->height <= 0)
+		return (1);
+	opponent_grid(count, rect, &columns, &rows);
+	if (rows < 1)
+		return (1);
+	return (min_int(rows, MP_ARENA_BANDS));
+}
+
+/**
+ * @brief The rectangle and the content hash of one arena band.
+ *
+ * The bounds are taken in whole grid rows and only then turned into pixels, so
+ * a band edge always falls between two rows of cards rather than through one.
+ * The last band is stretched to the rectangle's own bottom, because the row
+ * height is an integer division and the remainder has to belong to somebody.
+ *
+ * @param pass The frame's region pass.
+ * @param rect The half's rectangle.
+ * @param cards The card indices on this side.
+ * @param count How many.
+ * @param index Which band.
+ * @param bands How many bands this half has.
+ * @param out Receives the band's rectangle.
+ * @return The hash of every card the band holds.
+ */
+static uint64_t arena_band_signature(t_match_regions *pass,
+	const t_mp_rect *rect, const int *cards, int count, int index, int bands,
+	t_mp_rect *out)
+{
+	int first;
+	int last;
+
+	arena_band_cards(count, rect, index, bands, &first, &last);
+	arena_band_bounds(count, rect, index, bands, out);
+	(void)pass;
+	if (last <= first)
+		return (0);
+	return (opponents_signature(pass->state, cards + first, last - first));
+}
+
+/**
+ * @brief Draws one band's cards and cuts its plane.
+ *
+ * @param pass The frame's region pass.
+ * @param rect The half's rectangle.
+ * @param cards The card indices on this side.
+ * @param count How many.
+ * @param index Which band.
+ * @param bands How many bands this half has.
+ * @param band The band's rectangle.
+ * @param side 0 for the left half, 1 for the right.
+ * @return true on success.
+ */
+static bool arena_band_stage(t_match_regions *pass, const t_mp_rect *rect,
+	const int *cards, int count, int index, int bands, const t_mp_rect *band,
+	int side)
+{
+	int first;
+	int last;
+
 	if (!regions_prepare(pass))
 		return (false);
-	if (!region_restage(pass, rect))
+	arena_band_cards(count, rect, index, bands, &first, &last);
+	if (!region_restage(pass, band))
 	{
-		clear_rect(pass->pixels, pass->width, pass->height, rect);
-		draw_opponent_region(pass->ctx, pass->pixels, pass->width,
-			pass->height, rect, pass->state, cards, count);
+		clear_rect(pass->pixels, pass->width, pass->height, band);
+		if (last > first)
+			draw_opponent_region_range(pass->ctx, pass->pixels, pass->width,
+				pass->height, rect, pass->state, cards, count, first, last);
 	}
 	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
-			pass->height, rect, slot));
+			pass->height, band,
+			&pass->ctx->mp_match_arena_planes[side][index]));
+}
+
+/**
+ * @brief Which cards belong to one band, as a half-open index range.
+ */
+static void arena_band_cards(int count, const t_mp_rect *rect, int index,
+	int bands, int *first, int *last)
+{
+	int columns;
+	int rows;
+
+	*first = 0;
+	*last = 0;
+	if (count <= 0 || bands <= 0)
+		return ;
+	opponent_grid(count, rect, &columns, &rows);
+	if (columns < 1 || rows < 1)
+		return ;
+	*first = min_int(count, index * rows / bands * columns);
+	*last = min_int(count, (index + 1) * rows / bands * columns);
+	if (index == bands - 1)
+		*last = count;
+}
+
+/**
+ * @brief One band's pixel rectangle, cut on grid-row boundaries.
+ */
+static void arena_band_bounds(int count, const t_mp_rect *rect, int index,
+	int bands, t_mp_rect *out)
+{
+	int columns;
+	int rows;
+	int height;
+
+	*out = *rect;
+	if (count <= 0 || bands <= 0 || rect->height <= 0)
+		return ;
+	opponent_grid(count, rect, &columns, &rows);
+	if (rows < 1)
+		return ;
+	height = rect->height / rows;
+	out->y = rect->y + index * rows / bands * height;
+	out->height = rect->y + (index + 1) * rows / bands * height - out->y;
+	if (index == bands - 1)
+		out->height = rect->y + rect->height - out->y;
+	if (out->height < 0)
+		out->height = 0;
+}
+
+/**
+ * @brief Lets go of a band this layout no longer has.
+ *
+ * A room empties as it is played, so the grid shrinks and the band count with
+ * it. A plane left behind would keep drawing the cards of a row that is no
+ * longer there.
+ */
+static void arena_band_release(t_render_ctx *ctx, int side, int index)
+{
+	if (ctx->mp_match_arena_planes[side][index] == NULL)
+		return ;
+	ncplane_destroy(ctx->mp_match_arena_planes[side][index]);
+	ctx->mp_match_arena_planes[side][index] = NULL;
+	ctx->mp_match_arena_signatures[side][index] = 0;
 }
 
 /**
@@ -1788,8 +1991,8 @@ void render_multiplayer_match_pixel_destroy(t_render_ctx *ctx)
 	ctx->mp_match_static_signature = 0;
 	ctx->mp_match_local_signature = 0;
 	ctx->mp_match_opponent_signature = 0;
-	ctx->mp_match_left_signature = 0;
-	ctx->mp_match_right_signature = 0;
+	memset(ctx->mp_match_arena_signatures, 0,
+		sizeof(ctx->mp_match_arena_signatures));
 	ctx->mp_match_loadout_signature = 0;
 	ctx->mp_match_opponent_loadout_signature = 0;
 	ctx->mp_match_hud_signature = 0;
@@ -1915,23 +2118,21 @@ static bool create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
 
 static void destroy_region_planes(t_render_ctx *ctx)
 {
-	struct ncplane **planes[10];
+	struct ncplane **planes[8];
 	int index;
 
 	if (ctx == NULL)
 		return ;
 	planes[0] = &ctx->mp_match_opponent_plane;
-	planes[1] = &ctx->mp_match_left_plane;
-	planes[2] = &ctx->mp_match_right_plane;
-	planes[3] = &ctx->mp_match_loadout_plane;
-	planes[4] = &ctx->mp_match_hud_plane;
-	planes[5] = &ctx->mp_match_ability_plane;
-	planes[6] = &ctx->mp_match_caption_plane;
-	planes[7] = &ctx->mp_match_opponent_loadout_plane;
-	planes[8] = &ctx->mp_match_opponent_ability_plane;
-	planes[9] = &ctx->mp_match_selection_plane;
+	planes[1] = &ctx->mp_match_loadout_plane;
+	planes[2] = &ctx->mp_match_hud_plane;
+	planes[3] = &ctx->mp_match_ability_plane;
+	planes[4] = &ctx->mp_match_caption_plane;
+	planes[5] = &ctx->mp_match_opponent_loadout_plane;
+	planes[6] = &ctx->mp_match_opponent_ability_plane;
+	planes[7] = &ctx->mp_match_selection_plane;
 	index = 0;
-	while (index < 10)
+	while (index < 8)
 	{
 		if (*planes[index] != NULL)
 			ncplane_destroy(*planes[index]);
@@ -1949,6 +2150,13 @@ static void destroy_region_planes(t_render_ctx *ctx)
 			ncplane_destroy(ctx->mp_match_opponent_bands[index]);
 		ctx->mp_match_opponent_bands[index] = NULL;
 		ctx->mp_match_opponent_band_signatures[index] = 0;
+		index++;
+	}
+	index = 0;
+	while (index < MP_ARENA_BANDS)
+	{
+		arena_band_release(ctx, 0, index);
+		arena_band_release(ctx, 1, index);
 		index++;
 	}
 	ctx->mp_match_selection_signature = 0;
@@ -3398,6 +3606,34 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_rect *rect,
 	const t_mp_match_state *state, const int *cards, int count)
 {
+	draw_opponent_region_range(ctx, pixels, width, height, rect, state, cards,
+		count, 0, count);
+}
+
+/**
+ * @brief Draws a half-open range of one half's cards, and no others.
+ *
+ * The grid is measured from the whole half rather than from the range, so a
+ * band draws its own cards exactly where drawing all of them would have put
+ * them. That is what lets one strip be redrawn without the ones above and
+ * below it moving.
+ *
+ * @param ctx Render context.
+ * @param pixels The canvas.
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param rect The whole half's rectangle, which sets the grid.
+ * @param state Match state, for the cards.
+ * @param cards The card indices on this side.
+ * @param count How many there are in total on this side.
+ * @param first First card to draw.
+ * @param last One past the last card to draw.
+ */
+static void draw_opponent_region_range(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_rect *rect,
+	const t_mp_match_state *state, const int *cards, int count, int first,
+	int last)
+{
 	t_mp_rect board;
 	int columns;
 	int rows;
@@ -3414,8 +3650,8 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 	tile = min_int((slot_width - 12) / BOARD_WIDTH,
 		(slot_height - 28) / BOARD_HEIGHT);
 	tile = max_int(1, tile);
-	index = 0;
-	while (index < count)
+	index = max_int(0, first);
+	while (index < min_int(count, last))
 	{
 		board.width = tile * BOARD_WIDTH;
 		board.height = tile * BOARD_HEIGHT;
@@ -3484,17 +3720,8 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 			state->target_mode == modes[index] ? 225 : 150);
 		box.x += 6;
 		box.width -= 12;
-		/*
-		 * Only the selected mode carries its count, and Randoms never does:
-		 * its set is everybody, so a number beside it would be the head count
-		 * written twice.
-		 */
-		if (state->target_mode == modes[index]
-			&& modes[index] != TARGET_RANDOM)
-			snprintf(label, sizeof(label), "%s (%d)", labels[index],
-				mp_match_target_candidates(state));
-		else
-			snprintf(label, sizeof(label), "%s", labels[index]);
+		mp_match_target_label(state, modes[index], labels[index], label,
+			sizeof(label));
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
 			13, state->target_mode == modes[index] ? g_gold : g_lavender,
 			true);

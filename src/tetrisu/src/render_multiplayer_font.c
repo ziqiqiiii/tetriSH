@@ -828,6 +828,14 @@ static int	compose_room_regions(t_render_ctx *ctx,
 	base = room_players_signature(room, ctx->mp_static_signature);
 	signature = mp_hash(&state->roster_offset, sizeof(state->roster_offset),
 			base);
+	/*
+	 * The pointer as well as the window. Moving the pointer inside a window
+	 * that does not scroll changes which row is drawn gold and nothing else,
+	 * so leaving it out of the signature makes the arrows look broken on every
+	 * roster short enough to fit.
+	 */
+	signature = mp_hash(&state->roster_cursor, sizeof(state->roster_cursor),
+			signature);
 	changed = 0;
 	if (ctx->mp_slots_plane == NULL || signature != ctx->mp_slots_signature)
 	{
@@ -1259,8 +1267,8 @@ static bool	compose_slots(t_render_ctx *ctx, const t_app_room_view_model *room,
 		waiting_room_slot_label(room, slot, line, sizeof(line));
 		draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 			font, line, ROOM_REF_SLOTS_X + 12, y, ROOM_REF_SLOT_BADGE_X - 24,
-			ROOM_REF_ROW_GLYPH, slot < room->player_count
-			? g_mp_cream : g_mp_disabled, false);
+			ROOM_REF_ROW_GLYPH, slot == state->roster_cursor ? g_mp_gold
+			: slot < room->player_count ? g_mp_cream : g_mp_disabled, false);
 		badge = waiting_room_badge_text(room, slot);
 		if (badge[0] != '\0')
 			draw_text_ref(pixels, layout->pixel_width, layout->pixel_height,

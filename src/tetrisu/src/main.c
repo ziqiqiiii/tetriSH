@@ -54,7 +54,8 @@ static bool	toggle_ready(const t_app_data_provider *provider,
 				t_app_room_view_model *room, t_mp_session *session);
 static bool	add_bot(t_mp_session *session, int ceiling);
 static void	fill_bots(t_mp_session *session);
-static void	kick_bot(t_mp_session *session);
+static void	kick_bot(t_mp_session *session,
+				const t_app_room_view_model *room);
 static t_bot_level	default_bot_level(void);
 static t_room_feedback	start_blocker_for(t_mp_session *session,
 					const t_app_room_view_model *room);
@@ -2227,23 +2228,67 @@ static int	pending_bots(const t_mp_session *session)
  */
 static void	reap_lost_bots(t_mp_session *session)
 {
+	/*
+	 * The accounts first, because a bot that has just logged in is the same
+	 * event from the other end as a seat appearing, and this runs on the
+	 * roster's cadence. A name read here is what makes that seat kickable.
+	 */
+	bot_farm_collect_names(&session->bots);
 	if (bot_farm_reap_exited(&session->bots) > 0)
 		session->room_state.feedback = ROOM_FEEDBACK_BOT_LOST;
 }
 
 /**
- * @brief Kick the most recently added bot, and never anybody else.
+ * @brief Kick the bot the roster pointer is on, and never anybody else.
  *
  * There is no authorisation question and no route, because a bot is this
  * client's own child: kicking is a signal, and a client can only signal the
- * processes it started. A room with people in it and no bots answers that
- * there is nothing to kick rather than doing something to a person.
+ * processes it started. A seat holding a person answers that rather than doing
+ * something to them.
  *
  * @param session The multiplayer session, whose farm and feedback are set.
  */
-static void	kick_bot(t_mp_session *session)
+/**
+ * @brief K: let go of the bot the roster pointer is on.
+ *
+ * It used to drop whichever bot was added last, because that was the only one
+ * the farm could name: the parent forks a child and the child walks the
+ * server's pool for the first free BOT_ account, so which name it ends up
+ * under is not decidable here. The report pipe closed that gap, and this is
+ * what it was for - the roster line the player is pointing at names an
+ * account, and the farm can now be asked for the child holding it.
+ *
+ * Only this client's own children can go. Kicking is a signal to a process and
+ * not a request to the server, so a person, or a bot another client started,
+ * is refused rather than silently turned into "the last one added" - which is
+ * exactly the behaviour this replaces.
+ *
+ * @param session The multiplayer session, for its farm, cursor and feedback.
+ * @param room The room snapshot the pointer indexes.
+ */
+static void	kick_bot(t_mp_session *session, const t_app_room_view_model *room)
 {
-	if (bot_farm_drop(&session->bots) != 0)
+	const char	*username;
+
+	username = waiting_room_seat_username(room,
+			session->room_state.roster_cursor);
+	if (username == NULL)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NONE;
+		return ;
+	}
+	if (!waiting_room_seat_is_bot(room, session->room_state.roster_cursor))
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NOT_MINE;
+		return ;
+	}
+	if (!bot_farm_holds(&session->bots, username))
+	{
+		session->room_state.feedback = session->bots.count > 0
+			? ROOM_FEEDBACK_BOT_NOT_READY : ROOM_FEEDBACK_BOT_NOT_MINE;
+		return ;
+	}
+	if (bot_farm_drop_named(&session->bots, username) != 0)
 	{
 		session->room_state.feedback = ROOM_FEEDBACK_BOT_NONE;
 		return ;
@@ -2360,7 +2405,7 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		else if (action == ROOM_ACTION_FILL_BOTS)
 			fill_bots(session);
 		else
-			kick_bot(session);
+			kick_bot(session, room);
 		return (true);
 	}
 	if (action == ROOM_ACTION_SEND_CHAT)

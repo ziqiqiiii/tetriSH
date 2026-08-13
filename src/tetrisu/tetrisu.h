@@ -1520,7 +1520,17 @@ typedef enum e_room_feedback
 	 * refusal, so how many actually started is the only useful thing to say.
 	 * A stress tool, not a feature - see BOT_FARM_MAX.
 	 */
-	ROOM_FEEDBACK_BOT_FILLED
+	ROOM_FEEDBACK_BOT_FILLED,
+	/*
+	 * K's two refusals, and they are different problems. _BOT_NOT_MINE is a
+	 * seat holding a person, or a bot some other client started: kicking is a
+	 * signal to a child process, so only this client's own children can be
+	 * kicked, whatever the roster shows. _BOT_NOT_READY is one of this
+	 * client's bots that has not reported its account yet - it exists, it is
+	 * simply not identifiable for the second or two before it logs in.
+	 */
+	ROOM_FEEDBACK_BOT_NOT_MINE,
+	ROOM_FEEDBACK_BOT_NOT_READY
 }	t_room_feedback;
 
 typedef enum e_room_action
@@ -1576,6 +1586,15 @@ typedef struct s_waiting_room_state
 	char			character_name[APP_TEXT_MAX];
 	bool			counting_down;
 	int				countdown;
+	/*
+	 * Where the roster's pointer is, and where the visible window starts.
+	 *
+	 * They are two numbers because up and down move the first and the second
+	 * only follows. It used to be one: the arrows scrolled the window and
+	 * nothing was ever pointed at, so K could only mean "the last bot added"
+	 * - which is not a thing anybody is looking at when they press it.
+	 */
+	int				roster_cursor;
 	int				roster_offset;
 	t_room_feedback	feedback;
 	int				feedback_value;
@@ -1599,6 +1618,22 @@ typedef struct s_mp_rect
 ** large enough that the per-plane overhead stays negligible.
 */
 # define MP_MATCH_BOARD_BANDS 5
+
+/*
+** How many horizontal strips each half of the arena is cut into.
+**
+** The arena used to be two planes, one per half, each invalidated by a
+** signature folded over every card on that side - so one rival moving one
+** piece re-drew and re-encoded forty-nine boards. At a Battle Royale's arena
+** cadence that is most of both halves, most of the time, and it is the whole
+** of why the mode felt heavy next to Double: Double's boards have been banded
+** since the input-latency work and a moving piece there re-encodes one strip.
+**
+** Six because the bands are cut on card-row boundaries and a full room lays
+** out around ten rows a side; fewer than the rows is fine and more is waste,
+** since a band that contains no row boundary can never be the only one dirty.
+*/
+# define MP_ARENA_BANDS 6
 /*
 ** The floor under how often the opponent's region is re-presented, in
 ** milliseconds. 50 is 20 Hz, which is faster than a piece falls at any level
@@ -2204,8 +2239,12 @@ typedef struct
 	 */
 	uint64_t			mp_match_opponent_due_ms;
 	bool				mp_match_opponent_deferred;
-	struct ncplane		*mp_match_left_plane;
-	struct ncplane		*mp_match_right_plane;
+	/*
+	 * The arena, as horizontal strips per half rather than one plane per half.
+	 * [0] is the left column of cards, [1] the right. See MP_ARENA_BANDS.
+	 */
+	struct ncplane		*mp_match_arena_planes[2][MP_ARENA_BANDS];
+	uint64_t			mp_match_arena_signatures[2][MP_ARENA_BANDS];
 	/*
 	 * The draining bar and the seconds beside it on the character-select
 	 * window, which is the only part of that screen a clock moves. It is a
@@ -2429,8 +2468,7 @@ typedef struct
 	uint64_t			mp_match_static_signature;
 	uint64_t			mp_match_local_signature;
 	uint64_t			mp_match_opponent_signature;
-	uint64_t			mp_match_left_signature;
-	uint64_t			mp_match_right_signature;
+
 	uint64_t			mp_match_loadout_signature;
 	uint64_t			mp_match_opponent_loadout_signature;
 	uint64_t			mp_match_hud_signature;
@@ -3453,6 +3491,8 @@ bool			waiting_room_seat_ready(const t_app_room_view_model *room,
 bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
 					int position);
 int				waiting_room_bot_seat_count(const t_app_room_view_model *room);
+const char		*waiting_room_seat_username(const t_app_room_view_model *room,
+					int position);
 int				waiting_room_free_seats(const t_app_room_view_model *room);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,
 					int position, char *out, size_t size);
@@ -3507,6 +3547,9 @@ void			mp_match_apply_room(t_mp_match_state *state,
 int				mp_match_collect_cards(const t_mp_match_state *state,
 					int *slots, int cap);
 int				mp_match_target_candidates(const t_mp_match_state *state);
+void			mp_match_target_label(const t_mp_match_state *state,
+					t_target_mode mode, const char *name, char *out,
+					size_t size);
 /*
 ** The bands the arena is drawn in, nearest first. They are an order and not a
 ** layout: which column a card lands in is the renderer's, and which seat it

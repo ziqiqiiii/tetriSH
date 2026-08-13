@@ -526,11 +526,14 @@ static void	draw_waiting_room(struct ncplane *plane,
 	while (index < visible && row < rows - 7)
 	{
 		slot = start + index;
-		if (slot < room->player_count)
+		if (slot == state->roster_cursor)
+			set_colour(plane, MP_GOLD_R, MP_GOLD_G, MP_GOLD_B);
+		else if (slot < room->player_count)
 			set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 		else
 			set_colour(plane, MP_DISABLED_R, MP_DISABLED_G, MP_DISABLED_B);
 		waiting_room_slot_label(room, slot, line, sizeof(line));
+		put_line(plane, row, 1, 2, slot == state->roster_cursor ? ">" : " ");
 		put_line(plane, row, 3, 30, line);
 		if (slot < room->player_count)
 		{

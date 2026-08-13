@@ -30,6 +30,7 @@ void	waiting_room_state_init(t_waiting_room_state *state)
 	state->chatting = false;
 	state->counting_down = false;
 	state->countdown = 0;
+	state->roster_cursor = 0;
 	state->roster_offset = 0;
 	state->feedback = ROOM_FEEDBACK_NONE;
 	state->compose[0] = '\0';
@@ -76,6 +77,7 @@ bool	waiting_room_state_view_changed(const t_waiting_room_state *before,
 	return (before->chatting != after->chatting
 		|| before->counting_down != after->counting_down
 		|| before->countdown != after->countdown
+		|| before->roster_cursor != after->roster_cursor
 		|| before->roster_offset != after->roster_offset
 		|| before->feedback != after->feedback
 		|| before->feedback_value != after->feedback_value
@@ -720,6 +722,32 @@ bool	waiting_room_seat_is_bot(const t_app_room_view_model *room,
 }
 
 /**
+ * @brief The account sitting on one roster line, or NULL for an empty seat.
+ *
+ * The roster is what the player is pointing at and the seat array is what the
+ * room is made of, and the two are not the same index - waiting_room_seat_index
+ * is the map between them. Everything that acts on "the one I am pointing at"
+ * has to go through here rather than indexing players[] with a screen row.
+ *
+ * @param room Room snapshot to read.
+ * @param position Line of the roster, from the top.
+ * @return The username, or NULL when that line has nobody on it.
+ */
+const char	*waiting_room_seat_username(const t_app_room_view_model *room,
+		int position)
+{
+	int	seat;
+
+	seat = waiting_room_seat_index(room, position);
+	if (room == NULL || seat < 0 || position >= room->player_count
+		|| seat >= APP_ROOM_MAX_PLAYERS)
+		return (NULL);
+	if (room->players[seat].username[0] == '\0')
+		return (NULL);
+	return (room->players[seat].username);
+}
+
+/**
  * @brief How many of this room's seats are held by bots right now.
  *
  * Asked of the roster rather than of the farm, because the two answer different
@@ -875,6 +903,10 @@ static void	bot_feedback_text(t_room_feedback feedback, int value,
 		snprintf(out, size, "NO BOT COULD BE STARTED");
 	else if (feedback == ROOM_FEEDBACK_BOT_LOST)
 		snprintf(out, size, "A BOT STOPPED - SEE " BOT_LOG_NAME);
+	else if (feedback == ROOM_FEEDBACK_BOT_NOT_MINE)
+		snprintf(out, size, "THAT SEAT IS NOT ONE OF YOUR BOTS");
+	else if (feedback == ROOM_FEEDBACK_BOT_NOT_READY)
+		snprintf(out, size, "THAT BOT HAS NOT SIGNED IN YET");
 	else if (feedback == ROOM_FEEDBACK_BOT_FILLED)
 		snprintf(out, size, "FILLED WITH %d BOT%s", value,
 			value == 1 ? "" : "S");
@@ -974,20 +1006,42 @@ static t_room_action	handle_room_key(t_waiting_room_state *state,
 	return (ROOM_ACTION_NONE);
 }
 
+/**
+ * @brief Moves the roster pointer, and scrolls only as far as it has to.
+ *
+ * The pointer is what moves; the window follows it. It was the other way
+ * round - the arrows moved the window and nothing was ever pointed at - which
+ * is why K could only ever mean "the bot added last", and why kicking one of
+ * several was impossible however carefully the player scrolled.
+ *
+ * The pointer is bounded by the seats, not the players: a room's empty seats
+ * are drawn as rows and skipping over them would make the pointer jump.
+ *
+ * @param state Waiting-room state whose cursor and offset move.
+ * @param room Current snapshot, for the seat and window counts.
+ * @param delta How far to move, in rows.
+ */
 static void	move_roster(t_waiting_room_state *state,
 	const t_app_room_view_model *room, int delta)
 {
-	int	maximum;
+	int	seats;
+	int	visible;
 
-	maximum = waiting_room_slot_count(room)
-		- waiting_room_visible_slot_count(room);
-	if (maximum < 0)
-		maximum = 0;
-	state->roster_offset += delta;
+	seats = waiting_room_slot_count(room);
+	visible = waiting_room_visible_slot_count(room);
+	if (seats <= 0)
+		return ;
+	state->roster_cursor += delta;
+	if (state->roster_cursor < 0)
+		state->roster_cursor = 0;
+	if (state->roster_cursor > seats - 1)
+		state->roster_cursor = seats - 1;
+	if (state->roster_cursor < state->roster_offset)
+		state->roster_offset = state->roster_cursor;
+	if (visible > 0 && state->roster_cursor > state->roster_offset + visible - 1)
+		state->roster_offset = state->roster_cursor - visible + 1;
 	if (state->roster_offset < 0)
 		state->roster_offset = 0;
-	if (state->roster_offset > maximum)
-		state->roster_offset = maximum;
 }
 
 /**

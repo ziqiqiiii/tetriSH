@@ -468,18 +468,8 @@ static void	draw_targeting(struct ncplane *plane,
 			? MATCH_GOLD_G : MATCH_LAVENDER_G,
 			state->target_mode == modes[index]
 			? MATCH_GOLD_B : MATCH_LAVENDER_B);
-		/*
-		 * The count rides with the selected mode only. A mode with an empty
-		 * set falls back to Randoms rather than dropping the attack, and
-		 * without the number that fallback is invisible - the player sees a
-		 * mode they chose and garbage that goes somewhere else.
-		 */
-		if (state->target_mode == modes[index]
-			&& modes[index] != TARGET_RANDOM)
-			snprintf(label, sizeof(label), "%s (%d)", labels[index],
-				mp_match_target_candidates(state));
-		else
-			snprintf(label, sizeof(label), "%s", labels[index]);
+		mp_match_target_label(state, modes[index], labels[index], label,
+			sizeof(label));
 		put_clipped(plane, positions[index][0], positions[index][1],
 			16, label);
 		index++;
