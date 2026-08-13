@@ -405,7 +405,16 @@ static void	test_battle_royale_capacity_and_roster_bounds(void)
 }
 
 /**
- * @brief The eight-row window can reach every seat in a 99-player room.
+ * @brief The arrows move a pointer, and the window only follows it.
+ *
+ * The pointer is the whole point. It used to be the window that moved and
+ * nothing was ever pointed at, which is why K could only mean "the bot added
+ * last" - there was no other answer available to it. So the first assertion
+ * here is the one that changed: a step down inside a window that already shows
+ * that row scrolls nothing.
+ *
+ * The eight-row window still has to reach every seat of a 99-player room, and
+ * the pointer still has to stop at both ends rather than running past them.
  */
 static void	test_roster_pagination(void)
 {
@@ -419,25 +428,34 @@ static void	test_roster_pagination(void)
 	before = state;
 	assert(waiting_room_handle_key(&state, &room, NCKEY_DOWN)
 		== ROOM_ACTION_NONE);
-	assert(state.roster_offset == 1);
+	assert(state.roster_cursor == 1);
+	assert(state.roster_offset == 0);
 	assert(waiting_room_state_view_changed(&before, &state));
-	(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
-	assert(state.roster_offset == 9);
+	/* Down to the last visible row still scrolls nothing. */
+	step = state.roster_cursor;
+	while (step++ < WAITING_ROOM_VISIBLE_PLAYERS - 1)
+		(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
+	assert(state.roster_cursor == WAITING_ROOM_VISIBLE_PLAYERS - 1);
+	assert(state.roster_offset == 0);
+	/* One past it scrolls by exactly one, and the pointer stays visible. */
+	(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
+	assert(state.roster_cursor == WAITING_ROOM_VISIBLE_PLAYERS);
+	assert(state.roster_offset == 1);
 	step = 0;
-	while (step++ < 20)
+	while (step++ < 40)
 		(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
+	assert(state.roster_cursor == APP_ROOM_MAX_PLAYERS - 1);
 	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
 		- WAITING_ROOM_VISIBLE_PLAYERS);
-	(void)waiting_room_handle_key(&state, &room, NCKEY_UP);
-	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
-		- WAITING_ROOM_VISIBLE_PLAYERS - 1);
-	(void)waiting_room_handle_key(&state, &room, NCKEY_PGUP);
-	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
-		- WAITING_ROOM_VISIBLE_PLAYERS * 2 - 1);
+	step = 0;
+	while (step++ < 40)
+		(void)waiting_room_handle_key(&state, &room, NCKEY_PGUP);
+	assert(state.roster_cursor == 0);
+	assert(state.roster_offset == 0);
 	(void)waiting_room_handle_key(&state, &room, 'c');
 	before = state;
 	(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
-	assert(state.roster_offset == before.roster_offset);
+	assert(state.roster_cursor == before.roster_cursor);
 	printf("PASS test_roster_pagination\n");
 }
 

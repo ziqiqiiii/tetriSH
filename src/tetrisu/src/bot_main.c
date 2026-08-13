@@ -42,6 +42,16 @@ typedef struct s_bot_run
 	t_net_client	net;
 	t_bot			brain;
 	int				deadman;
+	/*
+	** The write end of the pipe the parent reads the claimed account off.
+	**
+	** It is written once, right after the login that succeeds, and closed.
+	** The parent forks long before there is an account to report and cannot
+	** work out which one this bot got - the pool is walked for the first free
+	** name and who else is connected decides where that lands - so the only
+	** party that knows is this process.
+	*/
+	int				report;
 	char			room[NET_ROOM_MAX];
 }	t_bot_run;
 
@@ -49,6 +59,7 @@ typedef struct s_bot_run
 static int	parse_args(int argc, char **argv, t_bot_run *run,
 				t_bot_level *level, t_net_config *cfg);
 static int	claim_account(t_net_client *net);
+static void	report_account(t_bot_run *run);
 static int	join_and_ready(t_bot_run *run);
 static int	declare_fighter(t_bot_run *run, const char *path);
 static int	run_match(t_bot_run *run);
@@ -78,6 +89,7 @@ int	main(int argc, char **argv)
 
 	memset(&run, 0, sizeof(run));
 	run.deadman = -1;
+	run.report = -1;
 	level = BOT_NORMAL;
 	/*
 	** Loaded before the arguments are read, not after: the environment is the
@@ -89,7 +101,8 @@ int	main(int argc, char **argv)
 	net_config_load(&cfg);
 	if (parse_args(argc, argv, &run, &level, &cfg) != 0)
 		return (fprintf(stderr, "usage: %s --room NAME [--level easy|normal|"
-				"ultra] [--deadman FD] [--host H] [--port P] [--ca PATH]\n",
+				"ultra] [--deadman FD] [--report FD] [--host H] [--port P] "
+				"[--ca PATH]\n",
 				argv[0]), 1);
 	bot_init(&run.brain, level, (uint32_t)getpid());
 	if (net_connect(&run.net, &cfg) != 0)
@@ -98,6 +111,7 @@ int	main(int argc, char **argv)
 	if (claim_account(&run.net) != 0)
 		return (fprintf(stderr, "bot: the account pool is full\n"),
 			net_disconnect(&run.net), 1);
+	report_account(&run);
 	if (join_and_ready(&run) != 0)
 		return (fprintf(stderr, "bot: could not join %s\n", run.room),
 			net_disconnect(&run.net), 1);
@@ -130,6 +144,8 @@ static int	parse_args(int argc, char **argv, t_bot_run *run,
 			bot_level_parse(argv[index + 1], level);
 		else if (strcmp(argv[index], "--deadman") == 0)
 			run->deadman = atoi(argv[index + 1]);
+		else if (strcmp(argv[index], "--report") == 0)
+			run->report = atoi(argv[index + 1]);
 		else if (strcmp(argv[index], "--host") == 0)
 			snprintf(cfg->host, sizeof(cfg->host), "%s", argv[index + 1]);
 		else if (strcmp(argv[index], "--port") == 0)
@@ -180,6 +196,36 @@ static int	claim_account(t_net_client *net)
 		index++;
 	}
 	return (-1);
+}
+
+/**
+ * @brief Tells the parent which account this bot ended up with.
+ *
+ * One short write and then the pipe is closed, so the parent sees the name
+ * followed by EOF and never has to guess whether more is coming. A parent that
+ * has already gone makes the write fail, which is not worth acting on here -
+ * the deadman is what ends this process in that case.
+ *
+ * Written after the login rather than before, because before it there is
+ * nothing true to say: the pool is walked for the first free name, and which
+ * one that is depends on who else is connected. That is the whole reason this
+ * pipe exists - the parent forks the child and cannot work out its account
+ * from anything it holds, so kicking could only ever mean "the one added last".
+ *
+ * @param run The bot, for its report descriptor and its account.
+ */
+static void	report_account(t_bot_run *run)
+{
+	char	line[BOT_NAME_MAX];
+	int		length;
+
+	if (run->report < 0)
+		return ;
+	length = snprintf(line, sizeof(line), "%s\n", run->net.username);
+	if (length > 0 && write(run->report, line, (size_t)length) < 0)
+		fprintf(stderr, "bot: could not report %s\n", run->net.username);
+	close(run->report);
+	run->report = -1;
 }
 
 /**

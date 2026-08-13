@@ -226,11 +226,24 @@ typedef struct s_bot
 }	t_bot;
 
 /*
-** How many bots one player may add to one room. Four is enough to reach a
+** Two limits, because there are two reasons to add a bot.
+**
+** BOT_FARM_HAND_MAX is the one a player meets: four is enough to reach a
 ** Battle Royale's minimum of four from a single person, and one is enough for
-** a Double.
+** a Double. It is what B offers and what B refuses past.
+**
+** BOT_FARM_MAX is the array, and it is fifty because filling a room to see
+** what fifty boards cost is a thing worth doing and nothing else in the client
+** can do it. It is not reachable from B - only F1 goes past the first limit -
+** so a player cannot walk into fifty processes by holding a key down.
+**
+** Fifty rather than the ninety-nine a Battle Royale seats: every bot is a
+** process of this client's own, and the server's account pool is the other
+** ceiling (TETRISD_BOT_ACCOUNTS, 64 by default), so the number that fits is
+** smaller than the number of seats and always will be.
 */
-# define BOT_FARM_MAX			4
+# define BOT_FARM_HAND_MAX		4
+# define BOT_FARM_MAX			50
 # define BOT_PATH_MAX			4096
 
 /*
@@ -239,7 +252,8 @@ typedef struct s_bot
 ** argv budget is the seven fixed arguments, six for the server, and NULL.
 */
 # define BOT_HOST_MAX			256
-# define BOT_ARGV_MAX			16
+# define BOT_NAME_MAX			32
+# define BOT_ARGV_MAX			18
 # define BOT_BINARY_NAME		"tetrisu-bot"
 # define BOT_LOG_NAME			"tetrisu-bot.log"
 # define BOT_LOG_DEFAULT		"tmp/" BOT_LOG_NAME
@@ -258,6 +272,23 @@ typedef struct s_bot_handle
 {
 	int			pid;
 	int			deadman;
+	/*
+	** The other pipe, and it runs the other way: the child writes the account
+	** it managed to claim and the parent reads it.
+	**
+	** Without it the parent knows a pid and the roster knows a name, and there
+	** is nothing joining the two - which is why kicking could only ever drop
+	** the bot added last. Which account a bot gets is not decidable here: it
+	** walks the pool and takes the first one free, and who else is connected
+	** decides where that lands.
+	**
+	** `report` is the parent's *read* end, non-blocking, and FD_CLOEXEC for
+	** the reason the deadman's write end is - a later child must not inherit
+	** an earlier one's. `username` is empty until the child has logged in,
+	** which is a state the kick path has to handle rather than wait out.
+	*/
+	int			report;
+	char		username[BOT_NAME_MAX];
 	t_bot_level	level;
 }	t_bot_handle;
 
@@ -276,6 +307,9 @@ int				bot_farm_binary(char *out, size_t cap);
 int				bot_farm_add(t_bot_farm *farm, const char *room,
 					t_bot_level level);
 int				bot_farm_drop(t_bot_farm *farm);
+int				bot_farm_drop_named(t_bot_farm *farm, const char *username);
+void			bot_farm_collect_names(t_bot_farm *farm);
+bool			bot_farm_holds(const t_bot_farm *farm, const char *username);
 void			bot_farm_clear(t_bot_farm *farm);
 int				bot_farm_reap_exited(t_bot_farm *farm);
 

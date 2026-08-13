@@ -1336,6 +1336,12 @@ static void	draw_buttons(uint32_t *pixels, int width, int height,
 
 /**
  * @brief Writes the second Buy-button line: what pressing it would do now.
+ *
+ * A free item is named before affordability is asked, exactly as the shelf tile
+ * and the compatibility line already do. Without it a price of nothing reads as
+ * "0 P" here while the tile beside it says FREE, which is two answers to one
+ * question - and the affordability branch is the wrong one to leave it to,
+ * since it is true of a free item and says so in points.
  */
 static void	button_caption(const t_app_marketplace_view_model *market,
 	const t_marketplace_state *state, char *out, size_t size)
@@ -1349,6 +1355,8 @@ static void	button_caption(const t_app_marketplace_view_model *market,
 		snprintf(out, size, "EQUIPPED");
 	else if (item->owned)
 		snprintf(out, size, "OWNED");
+	else if (item->price <= 0)
+		snprintf(out, size, "FREE");
 	else if (marketplace_can_afford(market, item))
 		snprintf(out, size, "%d P", item->price);
 	else

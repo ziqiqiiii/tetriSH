@@ -39,9 +39,10 @@ static int	beside(const char *anchor, char *out, size_t cap);
 static int	self_path(char *out, size_t cap);
 static int	from_path_env(char *out, size_t cap);
 static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
-				int deadman);
+				int deadman, int report);
+static int	open_report(int *report);
 static void	child_exec(const char *binary, const char *room,
-				t_bot_level level, int deadman);
+				t_bot_level level, int deadman, int report);
 static int	server_args(char **args, char *port_text);
 static void	child_stdio(void);
 static int	reap(pid_t pid, int deadman);
@@ -352,6 +353,7 @@ int	bot_farm_add(t_bot_farm *farm, const char *room, t_bot_level level)
 {
 	char	binary[BOT_PATH_MAX];
 	int		pipes[2];
+	int		report[2];
 
 	if (farm == NULL || room == NULL || farm->count >= BOT_FARM_MAX)
 		return (-1);
@@ -375,17 +377,152 @@ int	bot_farm_add(t_bot_farm *farm, const char *room, t_bot_level level)
 		close(pipes[1]);
 		return (note("no close-on-exec for the deadman", strerror(errno)));
 	}
-	farm->bots[farm->count].pid = spawn_bot(binary, room, level, pipes[0]);
+	if (open_report(report) != 0)
+	{
+		close(pipes[0]);
+		close(pipes[1]);
+		return (-1);
+	}
+	farm->bots[farm->count].pid = spawn_bot(binary, room, level, pipes[0],
+			report[1]);
 	close(pipes[0]);
+	close(report[1]);
 	if (farm->bots[farm->count].pid <= 0)
 	{
 		close(pipes[1]);
+		close(report[0]);
 		return (note("could not fork a bot", strerror(errno)));
 	}
 	farm->bots[farm->count].deadman = pipes[1];
+	farm->bots[farm->count].report = report[0];
+	farm->bots[farm->count].username[0] = '\0';
 	farm->bots[farm->count].level = level;
 	farm->count++;
 	return (0);
+}
+
+/**
+ * @brief Opens the pipe a child reports its claimed account back on.
+ *
+ * The ends go opposite ways to the deadman's, because the traffic does: the
+ * child writes and the parent reads. So it is the parent's *read* end that
+ * must not survive an exec - a later bot inheriting an earlier one's would
+ * hold it open, and a farm that never sees EOF is a farm that cannot tell a
+ * bot which never logged in from one still trying. The child's write end is
+ * deliberately inheritable and crosses by number, as --report.
+ *
+ * The read end is non-blocking because it is polled from the roster's refresh,
+ * which must not stop for a bot that is still handshaking.
+ *
+ * @param report Receives {read end, write end}.
+ * @return 0 on success, -1 with a note written.
+ */
+static int	open_report(int *report)
+{
+	if (pipe(report) != 0)
+		return (note("no pipe for the bot report", strerror(errno)));
+	if (fcntl(report[0], F_SETFD, FD_CLOEXEC) != 0
+		|| fcntl(report[0], F_SETFL, O_NONBLOCK) != 0)
+	{
+		close(report[0]);
+		close(report[1]);
+		return (note("could not set up the bot report", strerror(errno)));
+	}
+	return (0);
+}
+
+/**
+ * @brief Reads whatever accounts the children have claimed since last asked.
+ *
+ * One short read per bot, non-blocking, from the roster's own refresh. A bot
+ * that has not logged in yet simply has nothing to say and keeps an empty
+ * name, which every caller has to handle anyway - the child is forked long
+ * before it has an account, and it may never get one.
+ *
+ * @param farm The farm whose children are asked.
+ */
+void	bot_farm_collect_names(t_bot_farm *farm)
+{
+	char	buffer[BOT_NAME_MAX];
+	ssize_t	got;
+	int		index;
+
+	if (farm == NULL)
+		return ;
+	index = 0;
+	while (index < farm->count)
+	{
+		if (farm->bots[index].report >= 0
+			&& farm->bots[index].username[0] == '\0')
+		{
+			got = read(farm->bots[index].report, buffer, sizeof(buffer) - 1);
+			if (got > 0)
+			{
+				buffer[got] = '\0';
+				buffer[strcspn(buffer, "\n")] = '\0';
+				snprintf(farm->bots[index].username,
+					sizeof(farm->bots[index].username), "%s", buffer);
+			}
+		}
+		index++;
+	}
+}
+
+/**
+ * @brief Whether this farm started the bot sitting under a given name.
+ *
+ * The roster names everybody; only some of them are this client's children,
+ * and only a child can be kicked - kicking is a signal to a process, not a
+ * request to the server.
+ *
+ * @param farm The farm.
+ * @param username The account to look for.
+ * @return true when one of these bots claimed it.
+ */
+bool	bot_farm_holds(const t_bot_farm *farm, const char *username)
+{
+	int	index;
+
+	if (farm == NULL || username == NULL || username[0] == '\0')
+		return (false);
+	index = 0;
+	while (index < farm->count)
+	{
+		if (strcmp(farm->bots[index].username, username) == 0)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Let the bot sitting under one account go.
+ *
+ * @param farm The farm.
+ * @param username The account to release.
+ * @return 0 when one was released, -1 when this farm has no such bot.
+ */
+int	bot_farm_drop_named(t_bot_farm *farm, const char *username)
+{
+	int	index;
+
+	if (farm == NULL || username == NULL || username[0] == '\0')
+		return (-1);
+	index = 0;
+	while (index < farm->count)
+	{
+		if (strcmp(farm->bots[index].username, username) == 0)
+		{
+			reap(farm->bots[index].pid, farm->bots[index].deadman);
+			close(farm->bots[index].report);
+			farm->bots[index] = farm->bots[farm->count - 1];
+			memset(&farm->bots[farm->count - 1], 0, sizeof(*farm->bots));
+			farm->count--;
+			return (0);
+		}
+		index++;
+	}
+	return (-1);
 }
 
 /**
@@ -398,7 +535,7 @@ int	bot_farm_add(t_bot_farm *farm, const char *room, t_bot_level level)
  * @return The child's pid, or -1 on failure.
  */
 static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
-			int deadman)
+			int deadman, int report)
 {
 	pid_t	pid;
 
@@ -407,7 +544,7 @@ static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
 		return (-1);
 	if (pid == 0)
 	{
-		child_exec(binary, room, level, deadman);
+		child_exec(binary, room, level, deadman, report);
 		_exit(127);
 	}
 	return ((int)pid);
@@ -422,15 +559,17 @@ static int	spawn_bot(const char *binary, const char *room, t_bot_level level,
  * @param deadman Read end of the deadman pipe.
  */
 static void	child_exec(const char *binary, const char *room,
-			t_bot_level level, int deadman)
+			t_bot_level level, int deadman, int report)
 {
 	char	*args[BOT_ARGV_MAX];
 	char	fd_text[16];
+	char	report_text[16];
 	char	port_text[16];
 	int		count;
 
 	child_stdio();
 	snprintf(fd_text, sizeof(fd_text), "%d", deadman);
+	snprintf(report_text, sizeof(report_text), "%d", report);
 	snprintf(port_text, sizeof(port_text), "%d", g_server_port);
 	count = 0;
 	args[count++] = (char *)binary;
@@ -440,6 +579,8 @@ static void	child_exec(const char *binary, const char *room,
 	args[count++] = (char *)bot_level_word(level);
 	args[count++] = (char *)"--deadman";
 	args[count++] = fd_text;
+	args[count++] = (char *)"--report";
+	args[count++] = report_text;
 	count += server_args(args + count, port_text);
 	args[count] = NULL;
 	execv(binary, args);
@@ -524,6 +665,7 @@ int	bot_farm_drop(t_bot_farm *farm)
 		return (-1);
 	farm->count--;
 	reap(farm->bots[farm->count].pid, farm->bots[farm->count].deadman);
+	close(farm->bots[farm->count].report);
 	memset(&farm->bots[farm->count], 0, sizeof(farm->bots[farm->count]));
 	return (0);
 }
@@ -595,6 +737,7 @@ int	bot_farm_reap_exited(t_bot_farm *farm)
 		if (waitpid(farm->bots[index].pid, NULL, WNOHANG) > 0)
 		{
 			close(farm->bots[index].deadman);
+			close(farm->bots[index].report);
 			farm->bots[index] = farm->bots[farm->count - 1];
 			memset(&farm->bots[farm->count - 1], 0, sizeof(*farm->bots));
 			farm->count--;

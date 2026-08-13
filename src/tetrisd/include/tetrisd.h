@@ -95,9 +95,15 @@
 ** The pool is sized rather than fixed at four because a player holds at most
 ** one connection and so does a bot: four names would be four bots for the
 ** whole server, and the fifth would displace the first out of a match in
-** progress. Thirty-two is eight full Battle Royale rooms' worth.
+** progress.
+**
+** Sixty-four because the client's F1 fills a room with up to BOT_FARM_MAX (50)
+** of them to measure what a crowded Battle Royale costs, and thirty-two would
+** have refused the second half of one such room - a refusal that arrives as a
+** bot exiting after its JOIN, which reads as a broken bot rather than as a
+** pool that ran out.
 */
-# define TETRISD_DEFAULT_BOT_ACCOUNTS			32
+# define TETRISD_DEFAULT_BOT_ACCOUNTS			64
 /*
 ** The pool's shared credentials. Exactly DB_SALT_LEN characters of salt,
 ** because the store keeps a salt as a fixed-width blob rather than a string.

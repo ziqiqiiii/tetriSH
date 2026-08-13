@@ -9,6 +9,7 @@ static void	test_match_layouts_follow_wireframes(void);
 static void	test_room_roster_controls_opponent_count(void);
 static void	test_pixel_ability_targets_follow_layout(void);
 static void	test_the_arena_puts_what_matters_in_the_near_columns(void);
+static void	test_a_mode_that_matches_nobody_says_ANY(void);
 static void	test_multiplayer_movement_matches_solo_at_wall(void);
 
 int	main(void)
@@ -21,6 +22,7 @@ int	main(void)
 	test_pixel_ability_targets_follow_layout();
 	test_multiplayer_movement_matches_solo_at_wall();
 	test_the_arena_puts_what_matters_in_the_near_columns();
+	test_a_mode_that_matches_nobody_says_ANY();
 	return (0);
 }
 
@@ -400,4 +402,47 @@ static void	test_the_arena_puts_what_matters_in_the_near_columns(void)
 	assert(state.opponents[3].targeting_local);
 	assert(state.opponents[5].local);
 	printf("PASS test_the_arena_puts_what_matters_in_the_near_columns\n");
+}
+
+/*
+** A declared mode with nothing matching it reads ANY, not (0).
+**
+** The server does not drop an attack whose mode matched nobody - it falls back
+** to one drawn live rival, which is what Randoms does. (0) says the opposite,
+** and it was read that way: a player declared Attackers before anybody had
+** attacked, saw a zero and no marked cards, and reported that targeting had
+** stopped working. Nothing had; the legend was describing an empty match set
+** as an empty outcome.
+**
+** Randoms never carries a number at all, matched or not: its set is everybody,
+** so a count beside it would be the head count written twice.
+*/
+static void	test_a_mode_that_matches_nobody_says_ANY(void)
+{
+	t_mp_match_state	state;
+	char				label[APP_TEXT_MAX];
+
+	memset(&state, 0, sizeof(state));
+	state.mode = APP_GAME_MODE_BATTLE_ROYALE;
+	state.target_mode = TARGET_ATTACKERS;
+	mp_match_target_label(&state, TARGET_ATTACKERS, "S ATTACKERS", label,
+		sizeof(label));
+	assert(strcmp(label, "S ATTACKERS (ANY)") == 0);
+	/* an unselected mode carries nothing, whatever is on the board */
+	mp_match_target_label(&state, TARGET_KO, "W KOs", label, sizeof(label));
+	assert(strcmp(label, "W KOs") == 0);
+	/* and once somebody matches, the count is the count */
+	state.opponents[2].present = true;
+	state.opponents[2].targeted_by_local = true;
+	state.opponents[6].present = true;
+	state.opponents[6].targeted_by_local = true;
+	mp_match_target_label(&state, TARGET_ATTACKERS, "S ATTACKERS", label,
+		sizeof(label));
+	assert(strcmp(label, "S ATTACKERS (2)") == 0);
+	/* Randoms is selected and still bare */
+	state.target_mode = TARGET_RANDOM;
+	mp_match_target_label(&state, TARGET_RANDOM, "A RANDOMS", label,
+		sizeof(label));
+	assert(strcmp(label, "A RANDOMS") == 0);
+	printf("PASS test_a_mode_that_matches_nobody_says_ANY\n");
 }

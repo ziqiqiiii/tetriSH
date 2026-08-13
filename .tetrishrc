@@ -72,9 +72,10 @@ export TETRISD_HANDSHAKE_TIMEOUT_MS=5000
 #
 # Sized rather than fixed at four because a bot holds one connection like
 # anybody else: four names would be four bots for the whole server, and the
-# fifth would displace the first out of a match in progress. 32 is eight full
-# Battle Royale rooms' worth. Set it to 0 for a server that hands out no bots.
-export TETRISD_BOT_ACCOUNTS=32
+# fifth would displace the first out of a match in progress. 64 leaves room for
+# the client's F1 to fill one room with fifty bots and still serve others. Set
+# it to 0 for a server that hands out no bots.
+export TETRISD_BOT_ACCOUNTS=64
 
 ################################################################################
 #                            tetrislogd settings                               #

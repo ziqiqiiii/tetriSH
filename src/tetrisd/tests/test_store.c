@@ -213,7 +213,11 @@ static void	test_an_unaffordable_purchase_costs_nothing(void)
 
 	assert(fx_start(&fx) == 0);
 	assert(player(&fx, &hc, "amber") == 0);
-	item_path(path, sizeof(path), "character", 2);
+	/*
+	 * Character 3, not 2: Mirurun is free, and a free item is affordable to an
+	 * empty wallet by design. Asking this question of it tests nothing.
+	 */
+	item_path(path, sizeof(path), "character", 3);
 	assert(hc_request(&hc, "BUY", path, NULL, &resp) == 0);
 	assert(resp.status_code == 403);
 	assert(body_says(&resp, "insufficient-funds"));
@@ -227,9 +231,11 @@ static void	test_an_unaffordable_purchase_costs_nothing(void)
 }
 
 /*
-** The price is the catalogue's. A character costs a flat 10, so a wallet
+** The price is the catalogue's. A paid character costs a flat 10, so a wallet
 ** credited with 25 comes back holding 15 - the client never says what
-** anything costs, and could not make it cheaper by claiming otherwise.
+** anything costs, and could not make it cheaper by claiming otherwise. A free
+** one goes through the same route and moves the wallet by nothing, which is a
+** different assertion from "it was affordable".
 */
 static void	test_a_credited_wallet_is_debited_by_the_price(void)
 {
@@ -241,15 +247,21 @@ static void	test_a_credited_wallet_is_debited_by_the_price(void)
 	assert(fx_start(&fx) == 0);
 	assert(player(&fx, &hc, "amber") == 0);
 	credit(&fx, hc.player_id, 25);
-	item_path(path, sizeof(path), "character", 2);
+	item_path(path, sizeof(path), "character", 3);
 	assert(store_request(&hc, "BUY", path, &profile) == 200);
 	assert(profile.wallet == 15);
-	assert(owns(profile.owned_characters, profile.owned_character_count, 2));
+	assert(owns(profile.owned_characters, profile.owned_character_count, 3));
 	/* Buying it twice is a no-op the profile already describes, not a
 	** second debit. */
 	assert(store_request(&hc, "BUY", path, &profile) == 200);
 	assert(profile.wallet == 15);
 	assert(profile.owned_character_count == 2);
+	/* A free character is bought the same way and leaves the wallet alone. */
+	item_path(path, sizeof(path), "character", 2);
+	assert(store_request(&hc, "BUY", path, &profile) == 200);
+	assert(profile.wallet == 15);
+	assert(owns(profile.owned_characters, profile.owned_character_count, 2));
+	assert(profile.owned_character_count == 3);
 	hc_close(&hc);
 	fx_stop(&fx);
 	printf("PASS test_a_credited_wallet_is_debited_by_the_price\n");

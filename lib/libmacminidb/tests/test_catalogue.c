@@ -21,12 +21,15 @@ void	test_loads_full_roster(void)
 	printf("PASS test_loads_full_roster\n");
 }
 
-// Halloween is id 1 and, like every character, costs a flat 10 points and
-// offers all four ability levels (bitfield 0xF), matching characters.cfg.
+// Halloween is id 1, costs 10, and offers all four ability levels (bitfield
+// 0xF), matching characters.cfg. Mirurun is id 2 and costs nothing: a price of
+// zero has to survive the parser as a price rather than as a missing field,
+// which is the one thing about a free item that can silently go wrong here.
 void	test_character_lookup(void)
 {
 	t_catalogue			*c;
 	const t_character	*halloween;
+	const t_character	*mirurun;
 	const t_character	*wolfman;
 
 	c = catalogue_load(CFG_DIR);
@@ -36,6 +39,10 @@ void	test_character_lookup(void)
 	assert(strcmp(halloween->name, "Halloween") == 0);
 	assert(halloween->cost_points == 10);
 	assert(halloween->abilities == 0xF);
+	mirurun = catalogue_character(c, 2);
+	assert(mirurun != NULL && strcmp(mirurun->name, "Mirurun") == 0);
+	assert(mirurun->cost_points == 0);
+	assert(mirurun->abilities == 0xF);
 	wolfman = catalogue_character(c, 4);
 	assert(wolfman != NULL && strcmp(wolfman->name, "Wolf-man") == 0);
 	assert(wolfman->cost_points == 10);

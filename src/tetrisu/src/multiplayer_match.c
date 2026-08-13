@@ -440,6 +440,53 @@ const char	*mp_match_target_name(t_target_mode mode)
 	return ("Randoms");
 }
 
+/**
+ * @brief Writes one targeting-legend label: the key, the mode, and its set.
+ *
+ * The count rides with the selected mode only, and Randoms never carries one -
+ * its set is everybody, so a number beside it would be the head count written
+ * twice.
+ *
+ * An empty set reads ANY rather than (0), and that is the whole point of this
+ * function existing. A mode that matches nobody does not drop the attack: the
+ * server falls back to one drawn live rival, which is what Randoms does. (0)
+ * says the opposite - it reads as a mode doing nothing, which is exactly how
+ * it was reported, with a player watching Attackers show zero before anybody
+ * had attacked and concluding their garbage was going nowhere.
+ *
+ * Both renderers call this so the bitmap legend and the compatibility one
+ * cannot drift into describing the same rule two ways.
+ *
+ * @param state Match state, for the marked-card count.
+ * @param mode The mode this label is for.
+ * @param name The label's fixed text, key included.
+ * @param out Buffer receiving the label.
+ * @param size Size of out.
+ */
+void	mp_match_target_label(const t_mp_match_state *state,
+		t_target_mode mode, const char *name, char *out, size_t size)
+{
+	int	count;
+
+	if (out == NULL || size == 0)
+		return ;
+	if (state == NULL || name == NULL)
+	{
+		out[0] = '\0';
+		return ;
+	}
+	if (state->target_mode != mode || mode == TARGET_RANDOM)
+	{
+		snprintf(out, size, "%s", name);
+		return ;
+	}
+	count = mp_match_target_candidates(state);
+	if (count <= 0)
+		snprintf(out, size, "%s (ANY)", name);
+	else
+		snprintf(out, size, "%s (%d)", name, count);
+}
+
 void	mp_match_finish(t_mp_match_state *state, bool won, int rank)
 {
 	if (state == NULL)
