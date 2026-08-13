@@ -1144,6 +1144,14 @@ struct s_server
 	unsigned char	*scratch;
 	t_client		**sweep;
 	bool			sweep_due;
+	/*
+	** Armed when somebody has left a room, so the loop asks once whether any
+	** room is now holding nothing but bots. Armed rather than checked every
+	** batch for the same reason sweep is: the answer can only have changed
+	** when a seat was released, and asking otherwise walks the registry for
+	** nothing.
+	*/
+	bool			bot_rooms_due;
 	pthread_t		loop;
 	bool			loop_started;
 	atomic_bool		running;
@@ -1387,6 +1395,7 @@ t_game			*server_room_target_game(t_server_room *server_room,
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
+void			server_rooms_evict_abandoned(t_server *srv);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
 bool			server_room_snapshot(const t_server_room *server_room,
 					t_body_room *out);

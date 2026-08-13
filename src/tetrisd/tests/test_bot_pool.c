@@ -25,6 +25,9 @@ static void	test_a_person_cannot_sign_up_as_a_bot(void);
 static void	test_a_taken_account_is_refused_not_displaced(void);
 static void	test_a_person_is_still_displaced(void);
 static void	test_a_bot_never_reaches_the_leaderboard(void);
+static void	test_a_room_left_to_bots_is_closed(void);
+static int	status_of(t_harness *hc, const char *method, const char *path);
+static void	nap(int ms);
 
 static void		bot_password(int index, char *out, size_t cap);
 static int		bot_login(t_harness *hc, int index);
@@ -40,7 +43,90 @@ int	main(void)
 	test_a_taken_account_is_refused_not_displaced();
 	test_a_person_is_still_displaced();
 	test_a_bot_never_reaches_the_leaderboard();
+	test_a_room_left_to_bots_is_closed();
 	return (0);
+}
+
+/*
+** Bots are a convenience the person who added them filled empty seats with,
+** and once that person has gone there is nobody left for them to be a
+** convenience for. Left alone they played on: the room stayed in the lobby
+** with every seat taken, and each bot held one of the pool's accounts against
+** the next player who wanted bots of their own.
+**
+** They are ended rather than unseated, so the seat is released by the same
+** path every dropped connection takes and the room closes itself on the last
+** one out.
+*/
+static void	test_a_room_left_to_bots_is_closed(void)
+{
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	first;
+	t_harness	second;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(hc_connect(&amber, &fx) == 0);
+	assert(hc_signup(&amber, "amber", "hunter2") == 201);
+	assert(hc_login(&amber, "amber", "hunter2") == 200);
+	assert(hc_join_new(&amber, "br", room, sizeof(room)) == 201);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	assert(hc_connect(&first, &fx) == 0);
+	assert(bot_login(&first, 0) == 200);
+	assert(status_of(&first, "JOIN", path) == 200);
+	assert(hc_connect(&second, &fx) == 0);
+	assert(bot_login(&second, 1) == 200);
+	assert(status_of(&second, "JOIN", path) == 200);
+	/* both bots are alive while a person is still sitting with them */
+	assert(still_authed(&first) && still_authed(&second));
+	assert(status_of(&amber, "LEAVE", path) == 200);
+	/* the loop asks after the batch that released the seat, not during it */
+	nap(200);
+	assert(!still_authed(&first));
+	assert(!still_authed(&second));
+	/* and the room went with the last of them */
+	assert(status_of(&amber, "LIST", path) == 404);
+	hc_close(&second);
+	hc_close(&first);
+	hc_close(&amber);
+	fx_stop(&fx);
+	printf("PASS test_a_room_left_to_bots_is_closed\n");
+}
+
+/**
+ * @brief Sends one request and answers with its status alone.
+ *
+ * @param hc The client to send from.
+ * @param method The HTTTP method.
+ * @param path The route.
+ * @return The status code, or 0 when nothing came back.
+ */
+static int	status_of(t_harness *hc, const char *method, const char *path)
+{
+	t_htttp_message	resp;
+	int				status;
+
+	if (hc_request(hc, method, path, NULL, &resp) != 0)
+		return (0);
+	status = resp.status_code;
+	htttp_message_free(&resp);
+	return (status);
+}
+
+/**
+ * @brief Sleeps for a while.
+ *
+ * @param ms How long, in milliseconds.
+ */
+static void	nap(int ms)
+{
+	struct timespec	ts;
+
+	ts.tv_sec = ms / 1000;
+	ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+	nanosleep(&ts, NULL);
 }
 
 /*

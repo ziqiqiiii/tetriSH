@@ -2,6 +2,8 @@
 
 // Static Functions
 static void		room_close(t_server_room *server_room);
+static bool		name_is_bot(const char *username);
+static bool		room_holds_only_bots(const t_server_room *server_room);
 static void		room_blank(t_server_room *server_room);
 static void		bind_client(t_client *cli, t_server_room *server_room, int slot);
 static bool		room_probe(void *ctx, t_player_id pid);
@@ -928,6 +930,102 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	if (server_room != NULL)
 		room_close(server_room);
 	server_room_unbind(cli);
+	/*
+	 * A seat has just been released, so a room may now be holding nothing but
+	 * bots. Asking here would mean killing a client from inside the path a
+	 * client is killed by, and each of those kills would land in this function
+	 * again, on a room this frame is still holding - which is how a room
+	 * outlives itself. The loop asks instead, once, after the batch.
+	 */
+	srv->bot_rooms_due = true;
+}
+
+/**
+ * @brief Ends every room that has nothing left in it but bots.
+ *
+ * Bots are a convenience the room's players filled empty seats with, and they
+ * have nobody to be a convenience for once the last person has gone. Left
+ * alone they play on: the room stays in the lobby, the seats stay taken, and
+ * each of them holds one of the pool's accounts against the next person who
+ * wants bots of their own.
+ *
+ * Killed rather than unseated, because a bot's seat is released by exactly the
+ * path every dropped connection takes, and inventing a second way to vacate a
+ * seat is inventing a second way for the two halves of a Room to disagree.
+ * Closing the room is then room_close's own business, on the last one out.
+ *
+ * The registry is snapshotted first and the kills happen against the snapshot,
+ * so no room is walked while the lobby is destroying it.
+ *
+ * @param srv Server whose rooms are examined.
+ */
+void	server_rooms_evict_abandoned(t_server *srv)
+{
+	t_client	*cli;
+	size_t		count;
+	size_t		index;
+
+	if (srv == NULL || !srv->bot_rooms_due)
+		return ;
+	srv->bot_rooms_due = false;
+	count = registry_snapshot(&srv->reg, srv->sweep,
+			(size_t)srv->cfg.max_clients);
+	index = 0;
+	while (index < count)
+	{
+		cli = srv->sweep[index++];
+		if (cli->dead || !name_is_bot(cli->username))
+			continue ;
+		if (room_holds_only_bots(server_room_resolve(srv, cli, NULL)))
+			client_kill(cli);
+	}
+}
+
+/**
+ * @brief Reports whether a username belongs to one of the pool's accounts.
+ *
+ * The name is the whole of the test, because the store's reserved prefix is
+ * the only thing separating an account nobody can sign up for from a person's
+ * - db_signup refuses the prefix, so no player can ever answer true here by
+ * choosing a username.
+ *
+ * @param username Name to examine.
+ * @return true when it names a bot.
+ */
+static bool	name_is_bot(const char *username)
+{
+	return (username != NULL && strncmp(username, DB_RESERVED_PREFIX,
+			strlen(DB_RESERVED_PREFIX)) == 0);
+}
+
+/**
+ * @brief Reports whether every occupant of a room is a bot.
+ *
+ * Asked of the seats rather than of the registry, because a Slot already
+ * carries the username it was seated with and that is the same fact one
+ * lookup further away.
+ *
+ * An empty room answers false: it has no bots to evict, and room_close has
+ * already taken it.
+ *
+ * @param server_room Room to examine, which may be NULL.
+ * @return true when the room has occupants and none of them is a person.
+ */
+static bool	room_holds_only_bots(const t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room->number_of_players == 0)
+		return (false);
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& !name_is_bot(server_room->room->slots[slot].membership.username))
+			return (false);
+		slot++;
+	}
+	return (true);
 }
 
 /**
