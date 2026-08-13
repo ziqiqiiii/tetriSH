@@ -21,8 +21,7 @@ static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
 static void		spread_dirty(t_server_room *server_room);
 static void		settle_garbage(t_server_room *server_room);
-static int		slot_of_player(const t_server_room *server_room,
-					t_player_id pid);
+static int		slot_of_player(const t_server_room *server_room, t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
