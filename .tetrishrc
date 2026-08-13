@@ -36,6 +36,13 @@ export TETRISD_LOG_LEVEL=info
 # and staleness test in one.
 export TETRISD_PID_PATH=tmp/tetrisd/tetrisd.pid
 
+# The Control channel: the local, Administrator-only way in, separate from the
+# port players connect to. tetrisctl reads this same line, so the socket is
+# named once and the two ends cannot end up bound to different paths.
+# Authorisation is the 0600 mode on it — reachability is the credential — so
+# keep it in a directory only the server's user can write.
+export TETRISD_CONTROL_PATH=tmp/tetrisd/tetrisd.ctl
+
 # stderr after boot succeeds — last-resort copy of records the logger refused.
 # A failed boot still prints to the terminal.
 export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err

@@ -138,6 +138,42 @@ HTTTP over an authenticated, encrypted session. `Player-Id` is required on every
 | `TARGET` | `/room/<name>` | Body `mode random\|ko\|attackers\|badges`; **Battle Royale only**. Every mode narrows the live opponents and the room still draws from what is left, so a player chooses a kind of rival and never a person. `400` on a word that is not a mode, `404` not seated there, `409` `not-battle-royale` or `not-playing`, `429` rate-limited on the chat bucket — it is a key pressed a few times a match, and spending an input token on it would cost a piece movement |
 | `STATE` | `/room/<name>/player/<pid>` | **Server-originated** — one player's board, pushed on tick, carrying the room's countdown and, when the match ends, that player's result || `CHAT` | `/room/<name>` | **Server-originated** — one line of the room's feed, pushed to every seat |
 
+### The Control channel
+
+A second, local way in, served on an `AF_UNIX` socket at `TETRISD_CONTROL_PATH`
+(mode `0600`) rather than on the public game port. It lives in the reactor's own
+epoll set, so every answer below is read straight out of the lobby, the registry
+and the logger by the thread that owns all three — no lock, and no snapshot
+anybody had to coordinate.
+
+Authorisation is filesystem permission on the socket: the reachability *is* the
+credential. Nothing arriving here names a Player, so there is no session, no
+handshake and no `Player-Id` — the frame is plaintext HTTTP behind the same
+4-byte length prefix the game path uses, and the bodies are `libstatusbody`'s.
+Every exchange writes one Access line with the sender rendered `(admin)`.
+
+| Method | Path | Answers |
+|---|---|---|
+| `STATUS` | `/admin` | Health — pid, uptime, connections, rooms, the **configured** tick interval, and whether records are reaching the Sink |
+| `ROOMS` | `/admin` | The live room directory, in `LIST /rooms`' own rows and codec |
+| `PLAYERS` | `/admin` | One row per connection — id, username or `(anonymous)`, room or `-` |
+| `DROPPED` | `/admin` | The producer-side Dropped counter, the records the ring buffer never sent |
+
+An empty listing is `200` with an empty body, not an error. A listing longer than
+its cap carries the first N rows and an `Omitted: <n>` header, and the status
+stays `200` — a capped listing is a complete answer to what was asked.
+
+Health is assembled once and rendered twice: `SIGUSR1` writes it as a log line
+and `STATUS` encodes it as a body, from one assembler, so the two cannot
+disagree about what the server is doing. The tick interval is the one the server
+is **configured** for and says so on the wire — nothing here measures an
+observed rate.
+
+`KICK` and `SHUTDOWN` are specified (UC-23, UC-24) and not yet served; both
+answer `404` today. `tetrisctl stop` reaches this daemon by `SIGTERM`, and the
+pidfile lock — which comes free as the daemon's last act — is what makes a
+returning `stop` mean gone rather than signalled.
+
 Statuses in use: `200`, `201`, `400`, `401`, `403`, `404`, `409`, `413`, `429`, `500`, `501`. A refusal the domain has a reason for carries it — `full`, `in-game`, `not-owner`, `too-few-players`, `already-started`, `already-in-room`, `lobby-full`, `input-blocked`, `not-single`, `no-target`, `no-charge`, `ability-blocked`, `ability-unavailable`, `ability-invalid`, `insufficient-funds`, `inventory-full`, `not-owned`, `muted`, `bad-text` — so a player can tell a full room from one already playing.
 
 Input is refused `409` whenever nothing is falling: through the match countdown, and through a clear. A piece that touches down keeps `LOCKDOWN_DELAY_MS` (500 ms), refreshed by every accepted `MOVE` or `ROTATE` up to `LOCKDOWN_MAX_RESETS` (15) times and refilled whenever it falls past its lowest row — the Guideline's Extended Placement. `DROP HARD` is exempt and locks at once; `DROP SOFT` on the floor is refused and keeps the delay ([post-mortem](../../docs/bugs/the_piece_locked_the_moment_it_landed.md)). A lock that completes rows holds them for `clear_duration_ms(level)` — still filled, nothing scored, no piece dealt — and every tick of that hold is a `STATE` carrying `phase clearing` ([post-mortem](../../docs/bugs/the_line_clear_never_reached_the_client.md)).
@@ -208,6 +244,7 @@ TETRISD_MAX_CLIENTS           up to 4096
 TETRISD_INPUT_BURST/RATE      1-10000
 TETRISD_HANDSHAKE_WORKERS     up to 64
 TETRISD_HANDSHAKE_TIMEOUT_MS  100-60000
+TETRISD_CONTROL_PATH          the Control channel socket; tetrisctl reads it too
 ```
 
 An unknown `TETRISD_*` key or an out-of-range value fails the boot, so a setting documented but never wired up cannot silently do nothing. A missing rc file is fine — the defaults work — but missing certificates are fatal. `TETRISD_LOG_IPC` must equal `TETRISLOGD_SOCKET_PATH`: one socket, named twice.

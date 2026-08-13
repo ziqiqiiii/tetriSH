@@ -109,6 +109,25 @@ int	status_command(const t_ctl *ctl, const char *only)
 		i++;
 	}
 	daemon_report_footer("running", running);
+	/*
+	** Health comes after the pidfile lines, never instead of them. The lock is
+	** the question that needs no running server, so it is asked first and its
+	** answer stands however the second question goes - a stopped daemon is a
+	** successful report, and an unreachable channel does not retract it.
+	**
+	** It is asked only when something is actually up, since "not running" has
+	** already been said and saying it twice in different words is worse than
+	** saying it once.
+	*/
+	/*
+	** Flushed first because the rows go to stdout and any failure below goes
+	** to stderr. Piped, stdout is block-buffered and stderr is not, so without
+	** this an unreachable-channel message lands above the table it is meant to
+	** follow.
+	*/
+	fflush(stdout);
+	if (running > 0 && health_report(ctl, only) != 0)
+		rc = -1;
 	return (rc);
 }
 

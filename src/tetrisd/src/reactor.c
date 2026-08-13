@@ -107,6 +107,10 @@ static void	dispatch(t_server *srv, struct epoll_event *event)
 		return (wake_ready(srv));
 	if (tag->source == EVENT_TIMER)
 		return (timer_ready(srv));
+	if (tag->source == EVENT_CONTROL_LISTENER)
+		return (control_accept_ready(srv));
+	if (tag->source == EVENT_CONTROL)
+		return (control_connection_ready(event->data.ptr, event->events));
 	cli = event->data.ptr;
 	if (cli->dead)
 		return ;

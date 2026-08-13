@@ -128,6 +128,7 @@ void	fx_stop(t_fixture *fx)
 static int	fixture_boot(t_fixture *fx, int level, bool capture_log)
 {
 	char	path[192];
+	char	control[192];
 
 	memset(fx, 0, sizeof(*fx));
 	fx->log_fd = -1;
@@ -155,6 +156,19 @@ static int	fixture_boot(t_fixture *fx, int level, bool capture_log)
 		if (fx->log_fd < 0)
 			return (-1);
 	}
+	/*
+	** Its own control socket, for the reason it gets its own log socket: the
+	** default path is one path, and suites run several servers at once, so a
+	** shared one would have each new fixture unlink the socket the last one is
+	** still listening on.
+	**
+	** Set after the capture block, not with the other paths: `path` is one
+	** reused buffer and unixsock_dgram_bind above binds whatever it holds, so
+	** writing the control path into it earlier bound the log socket under the
+	** control socket's name and sent every record to stderr instead.
+	*/
+	snprintf(control, sizeof(control), "%s/control.sock", fx->dir);
+	snprintf(fx->cfg.control_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", control);
 	return (server_start(&fx->cfg, &fx->srv));
 }
 

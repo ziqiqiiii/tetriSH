@@ -27,7 +27,7 @@ on its scope and API.
 | `src/tetrish` | Implemented — REPL, builtins, `.tetrishrc`, system programs under `bin/` |
 | `src/tetrisd` | Implemented — Single and Double end to end; Battle Royale designed and unbuilt (Linux only) |
 | `src/tetrislogd` | Implemented — receives, validates, writes, rotates on `SIGHUP` |
-| `src/tetrisctl` | Partial — `start`/`status`/`stop`/`restart` by pidfile and signal; control socket is a later step |
+| `src/tetrisctl` | Partial — `start`/`status`/`stop`/`restart` by pidfile and signal, plus the read-only Control-channel verbs (`status` Health, `rooms`, `players`, `dropped-logs`); `KICK` and `SHUTDOWN` are a later step |
 | `src/tetrisu` | Playable — Solo, Double, Battle Royale; Battle Royale's rivals still modelled in-process |
 
 ---

@@ -15,6 +15,9 @@ void	test_all_decoders_reject_empty_buffer(void)
 	t_body_chat		chat;
 	t_body_room_row	rooms[2];
 	t_body_leaderboard_row		lb[2];
+	t_body_player_row	players[2];
+	t_body_health		health;
+	t_body_dropped		dropped;
 	size_t			count;
 
 	assert(body_state_decode("", 0, &st) == -1);
@@ -29,6 +32,13 @@ void	test_all_decoders_reject_empty_buffer(void)
 	assert(count == 0);
 	assert(body_leaderboard_decode("", 0, lb, 2, &count) == 0);
 	assert(count == 0);
+	assert(body_health_decode("", 0, &health) == -1);
+	assert(errno == EBADMSG);
+	assert(body_dropped_decode("", 0, &dropped) == -1);
+	assert(errno == EBADMSG);
+	/* a listing, so like rooms and the leaderboard an empty body is no rows */
+	assert(body_players_decode("", 0, players, 2, &count) == 0);
+	assert(count == 0);
 	printf("PASS test_all_decoders_reject_empty_buffer\n");
 }
 
@@ -40,6 +50,9 @@ void	test_all_codecs_reject_null_arguments(void)
 	t_body_chat		chat;
 	t_body_room_row	rooms[2];
 	t_body_leaderboard_row		lb[2];
+	t_body_player_row	players[2];
+	t_body_health		health;
+	t_body_dropped		dropped;
 	size_t			count;
 	char			out[256];
 
@@ -85,6 +98,28 @@ void	test_all_codecs_reject_null_arguments(void)
 	assert(errno == EINVAL);
 	assert(body_leaderboard_decode("x", 1, NULL, 2, &count) == -1);
 	assert(errno == EINVAL);
+	assert(body_health_encode(NULL, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_health_encode(&health, NULL, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_health_decode(NULL, 1, &health) == -1);
+	assert(errno == EINVAL);
+	assert(body_health_decode("x", 1, NULL) == -1);
+	assert(errno == EINVAL);
+	assert(body_players_encode(players, 2, NULL, 64) == -1);
+	assert(errno == EINVAL);
+	assert(body_players_decode("x", 1, NULL, 2, &count) == -1);
+	assert(errno == EINVAL);
+	assert(body_players_decode("x", 1, players, 2, NULL) == -1);
+	assert(errno == EINVAL);
+	assert(body_dropped_encode(NULL, out, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_dropped_encode(&dropped, NULL, sizeof(out)) == -1);
+	assert(errno == EINVAL);
+	assert(body_dropped_decode(NULL, 1, &dropped) == -1);
+	assert(errno == EINVAL);
+	assert(body_dropped_decode("x", 1, NULL) == -1);
+	assert(errno == EINVAL);
 	printf("PASS test_all_codecs_reject_null_arguments\n");
 }
 
@@ -95,6 +130,7 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 	static t_body_room		room;
 	static t_body_room_row	rooms[99];
 	static t_body_leaderboard_row		lb[10];
+	static t_body_player_row	players[BODY_PLAYERS_MAX];
 	int						row;
 	int						col;
 	int						i;
@@ -178,6 +214,24 @@ void	test_worst_case_encodes_fit_frame_cap(void)
 	}
 	n = body_leaderboard_encode(lb, 10, g_out, sizeof(g_out));
 	assert(n > 0 && n < 65536);
+	i = 0;
+	while (i < BODY_PLAYERS_MAX)
+	{
+		memset(&players[i], 0, sizeof(players[i]));
+		players[i].connection = UINT64_MAX;
+		players[i].authenticated = true;
+		memset(players[i].username, 'u', BODY_USER_MAX - 1);
+		memset(players[i].room, 'r', BODY_NAME_MAX - 1);
+		i++;
+	}
+	n = body_players_encode(players, BODY_PLAYERS_MAX, g_out, sizeof(g_out));
+	/*
+	** 32768 is TETRISD_CONTROL_BODY_MAX, which this library must not name.
+	** The bound is what makes BODY_PLAYERS_MAX's stated reasoning checkable
+	** rather than asserted: a full listing at the widest possible row still
+	** fits one control body.
+	*/
+	assert(n > 0 && n < 32768);
 	printf("PASS test_worst_case_encodes_fit_frame_cap\n");
 }
 
@@ -189,6 +243,9 @@ void	test_decode_is_bounded_on_hostile_input(void)
 	t_body_chat		chat;
 	t_body_room_row	rooms[4];
 	t_body_leaderboard_row		lb[4];
+	t_body_player_row	players[4];
+	t_body_health		health;
+	t_body_dropped		dropped;
 	size_t			count;
 
 	memset(g_big, 'A', sizeof(g_big)); // 64 KiB+, no newline, no NUL
@@ -198,6 +255,9 @@ void	test_decode_is_bounded_on_hostile_input(void)
 	assert(body_chat_decode(g_big, 65536, &chat) == -1);
 	assert(body_rooms_decode(g_big, 65536, rooms, 4, &count) == -1);
 	assert(body_leaderboard_decode(g_big, 65536, lb, 4, &count) == -1);
+	assert(body_health_decode(g_big, 65536, &health) == -1);
+	assert(body_dropped_decode(g_big, 65536, &dropped) == -1);
+	assert(body_players_decode(g_big, 65536, players, 4, &count) == -1);
 	memset(g_big, 0, 64); // a line of NULs
 	assert(body_state_decode(g_big, 64, &st) == -1);
 	assert(body_profile_decode(g_big, 64, &pr) == -1);
