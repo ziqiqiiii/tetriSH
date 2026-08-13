@@ -37,7 +37,10 @@ gcc ... lib/libX/libX.a -I lib/libX/include        # to link one
 What the targets do not say out loud:
 
 - `make reset` stops the daemons, then `fclean`s **and wipes their runtime
-  state** — `tmp/`, `archive/`, `bin/`.
+  state** — `tmp/`, `archive/`, `bin/` — but stashes the player store
+  (`TETRISD_DATA_DIR/players.log`) across the wipe and puts it back, so a
+  rebuild never costs the accounts people signed up with. `make del-db` is the
+  only target that deletes it.
 - `AUTO_INSTALL_DEPS=0` makes the dependency step check-only (CI).
 - **macOS runs the client only.** `tetrisd` is built on `epoll_create1`/
   `timerfd` and `libcoreipc` on POSIX `mq_open`; Darwin ships none of them, so

@@ -154,18 +154,23 @@ void	test_level_names_and_parse_round_trip(void)
 	printf("PASS test_level_names_and_parse_round_trip\n");
 }
 
+// The stamp is rendered in local time, so the case pins TZ before comparing -
+// otherwise the expected text is whatever zone the machine happens to be in.
 void	test_format_line_renders_expected_layout(void)
 {
 	t_log_record	rec;
 	char			line[512];
 	int				n;
 
+	setenv("TZ", "UTC", 1);
+	tzset();
 	assert(logrecord_make(&rec, COREIPC_LOG_INFO, 1700000000123ULL, 42,
 			"tetrisd", "room R-01 created") == 0);
 	n = logrecord_format_line(&rec, line, sizeof(line));
 	assert(n > 0 && n == (int)strlen(line));
 	assert(strcmp(line,
-			"1700000000123 INFO    tetrisd[42]: room R-01 created\n") == 0);
+			"2023-11-14 22:13:20.123 INFO    tetrisd[42]: room R-01 created\n")
+		== 0);
 	printf("PASS test_format_line_renders_expected_layout\n");
 }
 

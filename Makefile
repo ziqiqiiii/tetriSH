@@ -19,6 +19,8 @@
 #   make test         build, then run every available component test suite
 #   make clean        recurse `clean` into every component
 #   make fclean       recurse `fclean` and drop ./bin
+#   make reset        fclean + wipe runtime state, keeping the player store
+#   make del-db       drop the player store (the one target that deletes it)
 #   make re           fclean + all
 #
 #   make play         install + compile on this host, then play in kitty
@@ -45,12 +47,8 @@ CYAN		:= \033[1;36m
 
 UNAME_S		:= $(shell uname -s)
 
-# Source-built deps put their pkg-config metadata under /usr/local: keep it
-# ahead of the distro/Homebrew paths.
 export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
 
-# Homebrew keeps these keg-only on some macOS releases; exporting their metadata
-# keeps every recursive build on the same headers and libraries.
 ifeq ($(UNAME_S), Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
@@ -66,9 +64,12 @@ SHELL_DIR	:= src/tetrish
 SHELL_BIN	:= $(SHELL_DIR)/macmini_shell
 BIN			:= bin
 CERT_DIR	:= certs
+TETRISHRC	:= .tetrishrc
 
-# Build only the components that exist yet. Matching Makefiles rather than
-# directories keeps ignored build artefacts from being taken for components.
+DB_DIR_RC	:= $(shell sed -n 's/^export TETRISD_DATA_DIR=//p' $(TETRISHRC) 2>/dev/null | tail -n 1)
+DB_DIR		:= $(if $(DB_DIR_RC),$(DB_DIR_RC),tmp/tetrisd)
+DB_LOG		:= $(DB_DIR)/players.log
+
 LIB_MAKEFILES		:= $(wildcard lib/lib*/Makefile)
 LIB_DIRS			:= $(patsubst %/,%,$(dir $(LIB_MAKEFILES)))
 
@@ -114,14 +115,9 @@ bin-link: shell daemons
 		done; \
 	done
 
-# .tetrishrc ends in `tetrisctl start`, so the daemons come up before the first
-# prompt - which boots tetrisd, for which missing certificates are fatal. certs/
-# is git-ignored, so on a fresh clone `certs` decides whether there is a server.
 run: all bin-link certs
 	@ TETRISHRC=$(CURDIR)/.tetrishrc ./$(SHELL_BIN)
 
-# Development credentials for the secure session, which tetrisd refuses to boot
-# without. A no-op while the certificate is still valid.
 certs:
 	@ bash ./scripts/generate_certs.sh $(CERT_DIR)
 
@@ -186,25 +182,13 @@ deps-info:
 #                                    PLAY                                      #
 ################################################################################
 
-# Two routes from a fresh clone to a playable client, differing only in where it
-# is built - `play` on this host, `play-image` in a container carrying the
-# toolchain and notcurses. Both install, compile and open kitty on the game;
-# play.sh checks before every step, so re-running either restarts the client.
-#
-# The container never draws: the board is Kitty-graphics escape sequences, bytes
-# on the pty the host terminal renders either way. That is what lets one Linux
-# image serve macOS, where `make` cannot run at all - libcoreipc's mqueue module
-# does not compile on Darwin, and the recursion stops long before tetrisu.
-#
-# Both play on the shared server by default, at DEFAULT_HOST in scripts/play.sh
-# - named there and not here, because the script has to pair it with the
-# matching CA. Neither target starts a server; `play.sh --local` is the one that
-# does.
-#
+
 # HOST= plays on another server:           make play HOST=tetrish.dev
 # PLAY_ARGS= passes anything else through: make play-image PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 
+# run the game locally (local server)
+# make play PLAY_ARGS=--local
 play:
 	@ bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
 
@@ -230,25 +214,33 @@ fclean:
 	@ $(RM) $(BIN)
 	@ echo "$(RED)Deleted $(BLUE)component binaries$(CLR_RMV) ✔️"
 
-# fclean plus daemon runtime state: stops what is running, delegates to the
-# shell's own `reset` (its tmp/ and archive/), then clears bin/ and tmp/.
-#
-# Stopping comes first because tetrisctl blocks until each daemon has torn down,
-# so the wipe cannot delete tmp/ under a logger still writing into it. Reversing
-# these lines is the wound tetrislogd's sink reclaim was written to survive -
-# reclaim stays for hand-rotated logs, but is not a patch for this.
-reset:
+daemons-stop:
 	@ if [ -x $(BIN)/tetrisctl ]; then \
-		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/.tetrishrc \
+		PATH=$(CURDIR)/$(BIN):$$PATH TETRISHRC=$(CURDIR)/$(TETRISHRC) \
 			$(BIN)/tetrisctl stop >/dev/null 2>&1 || true; \
 	fi
 	@ bash $(SHELL_DIR)/daemons_killer.sh >/dev/null 2>&1 || true
+
+# fclean + kill deamons
+reset: daemons-stop
 	@ $(MAKE) $(MAKE_FLAGS) -C $(SHELL_DIR) reset >/dev/null 2>&1 || true
 	@ for d in $(LIB_DIRS) $(DAEMON_DIRS); do \
 		$(MAKE) $(MAKE_FLAGS) -C $$d fclean >/dev/null 2>&1 || true; \
 	done
-	@ $(RM) $(BIN) tmp
+	@ set -e; \
+	stash=""; \
+	if [ -f $(DB_LOG) ]; then stash=`mktemp`; cp -p $(DB_LOG) $$stash; fi; \
+	$(RM) $(BIN) tmp; \
+	if [ -n "$$stash" ]; then \
+		mkdir -p $(DB_DIR); cp -p $$stash $(DB_LOG); $(RM) $$stash; \
+		echo "$(GREEN)Kept $(BLUE)$(DB_LOG)$(CLR_RMV) ✔️"; \
+	fi
 	@ echo "$(RED)Reset $(BLUE)project state$(CLR_RMV) ✔️"
+
+# delete db data
+del-db: daemons-stop
+	@ $(RM) $(DB_LOG)
+	@ echo "$(RED)Deleted $(BLUE)$(DB_LOG)$(CLR_RMV) ✔️"
 
 re: fclean all
 
@@ -258,4 +250,4 @@ re: fclean all
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
 			bin-link run certs stack test play play-local play-image \
-			clean fclean reset re
+			clean fclean daemons-stop reset del-db re

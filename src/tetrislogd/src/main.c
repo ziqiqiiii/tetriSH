@@ -7,12 +7,10 @@ static int	run(t_logd *lg);
 /**
  * @brief Entry point: detach, claim the pidfile, then loop until stopped.
  *
- * The fork lives here, never behind logd_start(), so the test suites can
- * boot the daemon in-process without forking.
- *
- * Boot owns the terminal: everything up to daemon_ready reports failure on
- * stderr and exits non-zero, so the operator who typed the command sees it.
- * stderr only moves to the error file once the daemon is listening.
+ * The fork lives here, not in logd_start(), so suites can boot in-process.
+ * Boot owns the terminal: failures up to daemon_ready hit stderr and exit
+ * non-zero; stderr moves to the error file only once the daemon is listening.
+ * tzset() resolves $TZ once, before the first record is stamped.
  *
  * @param argc Number of command-line arguments.
  * @param argv Optional argv[1]: the .tetrishrc to read.
@@ -26,6 +24,7 @@ int	main(int argc, char **argv)
 	int			ready;
 	int			status;
 
+	tzset();
 	if (config_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
 	{
 		fprintf(stderr, "%s: cannot load configuration: %s\n",
@@ -59,11 +58,10 @@ int	main(int argc, char **argv)
 /**
  * @brief Detaches into the background and claims the pidfile.
  *
- * The order is the whole single-instance guard. Claiming comes after the
- * fork, because the pid written has to be the detached process's; it comes
- * before logd_start, because unixsock_dgram_bind unlinks its socket path
- * unconditionally, so a second instance has to lose the race and leave
- * before it can steal a running logger's socket.
+ * The order is the whole single-instance guard: after the fork, so the pid
+ * written is the detached process's; before logd_start, because
+ * unixsock_dgram_bind unlinks its socket path unconditionally, so a loser
+ * must leave before it can steal a running logger's socket.
  *
  * @param cfg Configuration supplying the pidfile path.
  * @param pf Pidfile to claim.

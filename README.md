@@ -88,7 +88,8 @@ Components are matched by their `Makefile`, so the ones that have not landed yet
 | `make test` | Build, then run every available component test suite |
 | `make clean` | Remove object files from every component |
 | `make fclean` | Remove object files, binaries, and `./bin` |
-| `make reset` | Stop any running daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) |
+| `make reset` | Stop any running daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) — the player store survives |
+| `make del-db` | Stop the daemons, then delete the player store (`TETRISD_DATA_DIR/players.log`) |
 | `make re` | `fclean` + `all` |
 
 Every library builds, tests, and links on its own:
@@ -135,12 +136,15 @@ With no display there is no window to open, so the client runs in the terminal y
 ```bash
 make play HOST=tetrish.dev             # against another server, checked first
 make play-image REBUILD=1              # rebuild the client image first
+make play PLAY_ARGS=--offline          # no server at all: Solo on local rules
 bash scripts/play.sh --local           # start a server here and play on it
 bash scripts/play.sh --client-only     # against a local server already up
 bash scripts/play.sh --stop            # take the local server down (Linux)
 ```
 
 The shared server's address is `DEFAULT_HOST` in [`scripts/play.sh`](scripts/play.sh), overridden by `TETRISH_HOST=` or `HOST=`.
+
+**No server answering is not a failed run.** Whichever server was named — the shared one, a `HOST=`, a local one that did not come up — nothing answering it launches the client offline rather than refusing: press **PLAY OFFLINE** on the sign-in screen (or `O`) and Solo plays on this machine's own rules. **LOGIN** and **SIGN UP** stay refused and **CHECK SERVER** reports offline, because both need one; so do the lobby, Double, Battle Royale, the store and the leaderboard, which show local preview data that is saved nowhere. `PLAY_ARGS=--offline` asks for that outcome without probing first, and is the one route that needs no certificates at all.
 
 `--local` plus `--container` is the one combination where *whose* Docker daemon it is matters. Under Docker Desktop on WSL the daemon lives in another VM, so `--network host` is not this distro's namespace and `127.0.0.1` reaches nothing; [`scripts/container.sh`](scripts/container.sh) detects that from `docker info` and dials the distro's own address instead. A `docker.io` installed inside WSL shares the namespace and needs none of it.
 

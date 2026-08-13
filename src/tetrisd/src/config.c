@@ -30,6 +30,7 @@ void	config_defaults(t_config *cfg)
 	snprintf(cfg->key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_KEY_PATH);
 	snprintf(cfg->ca_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_CA_PATH);
 	snprintf(cfg->log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_LOG_IPC_PATH);
+	snprintf(cfg->control_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_CONTROL_PATH);
 	snprintf(cfg->pid_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_PID_PATH);
 	snprintf(cfg->err_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", TETRISD_DEFAULT_ERR_PATH);
 	cfg->log_level = COREIPC_LOG_INFO;
@@ -101,6 +102,8 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 		return (set_str(cfg->ca_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "LOG_IPC") == 0)
 		return (set_str(cfg->log_ipc, TETRISD_FILESYSTEM_PATH_MAX, value));
+	if (strcmp(key, "CONTROL_PATH") == 0)
+		return (set_str(cfg->control_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "PID_PATH") == 0)
 		return (set_str(cfg->pid_path, TETRISD_FILESYSTEM_PATH_MAX, value));
 	if (strcmp(key, "ERR_PATH") == 0)
@@ -370,7 +373,8 @@ static int	apply_env(t_config *cfg)
 		"TETRISD_CERT_PATH", 
 		"TETRISD_KEY_PATH",
 		"TETRISD_CA_PATH", 
-		"TETRISD_LOG_IPC", 
+		"TETRISD_LOG_IPC",
+		"TETRISD_CONTROL_PATH",
 		"TETRISD_LOG_LEVEL",
 		"TETRISD_PID_PATH", 
 		"TETRISD_ERR_PATH",

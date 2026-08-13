@@ -12,9 +12,8 @@ static int			list_room(t_request_context *ctx);
 /**
  * @brief Checks that the request really comes from the player it claims.
  *
- * libtetrissh authenticates the server and the bytes, not the client's
- * claimed identity, so Player-Id is compared against the player bound to this
- * connection at LOGIN - a forged header buys nothing.
+ * libtetrissh authenticates the bytes, not the claimed identity, so Player-Id
+ * is compared against the player bound to this connection at LOGIN.
  *
  * @param ctx Request context.
  * @return true when the connection is authenticated and the header matches.
@@ -40,13 +39,9 @@ bool	request_is_authorised(t_request_context *ctx)
 /**
  * @brief LIST /rooms - the lobby as the client displays it, or LIST /store.
  *
- * Every room is listed, in-game ones included: the status field is what tells
- * a player whether they can join, and hiding rooms would only make the lobby
- * look emptier than it is.
- *
- * The store front answers here rather than under a method of its own, because
- * "list the collection at this path" is what LIST already means; the two
- * collections differ in what they hold, not in what is being asked.
+ * Every room is listed, in-game ones included: the status field tells a player
+ * whether they can join. The store front answers here rather than under a
+ * method of its own, because listing a collection is what LIST already means.
  *
  * @param msg The request (unused).
  * @param context The request context.
@@ -113,20 +108,13 @@ static int	list_room(t_request_context *ctx)
  * @brief JOIN - takes a slot in a room, creating one when none is named.
  *
  * `JOIN /rooms` with a mode creates a room and seats the requester as its
- * owner; `JOIN /room/<name>` joins an existing one. Rooms cannot be named by
- * clients - the lobby assigns S-01, D-02, BR-03 - so creation has no name to
- * address and uses the collection instead.
+ * owner; `JOIN /room/<name>` joins an existing one. Clients cannot name rooms,
+ * so creation addresses the collection instead.
  *
- * This is where a binding that no longer holds is thrown away, and the only
- * place: a player whose last game ended is asking for another room, so the
- * repair belongs to the request that wants it rather than to whichever
- * predicate happened to notice.
- *
- * Being in a room refuses this request; being in *this* room does not. A room
- * now outlives the match played in it, so the client coming back from a
- * results screen names the room it is still sitting in, and answering that
- * with already-in-room sent both players to the lobby to find each other
- * again. Naming any other room is still the mistake it always was.
+ * This is the only place a binding that no longer holds is thrown away. Being
+ * in a room refuses this request; being in *this* room does not - a room
+ * outlives the match played in it, so a client returning from a results screen
+ * names the room it is still sitting in.
  *
  * @param msg The request (unused).
  * @param context The request context.
@@ -185,8 +173,8 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 		return (401);
 	if (addressed_room(ctx, &name) == NULL)
 		return (404);
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s left %s",
-		ctx->cli->username, name);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u %s left %s",
+		ctx->cli->conn_id, ctx->cli->username, name);
 	server_room_forfeit(ctx->srv, ctx->cli);
 	outbox_drop_room_pushes(&ctx->cli->outbox);
 	request_body_printf(ctx, "room %s\nstatus left\n", name);
@@ -196,14 +184,10 @@ int	leave_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief START /room/<name> - the owner begins the game.
  *
- * The room decides the verdict; this handler only turns it into a status and,
- * when accepted, deals every seated player a board and marks the room playing.
- *
- * What "accepted" leaves behind depends on the mode, so the answer names the
- * status rather than asserting one: a Single room is playing by the time this
- * returns, and any room with an opponent in it is choosing its fighters. A
- * client that read `in-game` from here would draw a match a second before
- * there was one.
+ * The room decides the verdict; this handler only turns it into a status. What
+ * "accepted" leaves behind depends on the mode, so the answer names it: a
+ * Single room is playing by the time this returns, and any room with an
+ * opponent in it is still choosing its fighters.
  *
  * @param msg The request (unused).
  * @param context The request context.
@@ -226,7 +210,8 @@ int	start_handler(const t_htttp_message *msg, void *context)
 	verdict = server_room_start(server_room, ctx->cli);
 	if (verdict != START_ACCEPTED)
 		return (start_status(ctx, verdict));
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "game started in %s", name);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u started the game in %s",
+		ctx->cli->conn_id, name);
 	request_body_printf(ctx, "room %s\nstatus %s\n", name,
 		server_room_is_solo(server_room) ? "in-game" : "selecting");
 	return (200);
@@ -246,8 +231,8 @@ static int	create_room(t_request_context *ctx, t_game_mode mode)
 	slot = server_room_open(ctx->srv, ctx->cli, mode);
 	if (slot < 0)
 		return (request_refuse(ctx, "lobby-full"));
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s created room %s",
-		ctx->cli->username, ctx->cli->binding.room_name);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u %s created room %s",
+		ctx->cli->conn_id, ctx->cli->username, ctx->cli->binding.room_name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole owner\n", ctx->cli->binding.room_name, slot);
 	return (201);
 }
@@ -275,8 +260,8 @@ static int	join_room(t_request_context *ctx, const char *name)
 		return (request_refuse(ctx, "in-game"));
 	if (slot < 0)
 		return (request_refuse(ctx, "seat-refused"));
-	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "%s joined %s",
-		ctx->cli->username, name);
+	logger_emit(&ctx->srv->log, COREIPC_LOG_INFO, "conn %u %s joined %s",
+		ctx->cli->conn_id, ctx->cli->username, name);
 	request_body_printf(ctx, "room %s\nslot %d\nrole player\n", ctx->cli->binding.room_name,
 		slot);
 	return (200);
@@ -314,10 +299,6 @@ static int	read_mode(t_request_context *ctx, t_game_mode *out)
 /**
  * @brief Turns a start verdict into a status and a reason the player can read.
  *
- * A bare refusal tells a player nothing: the room domain already knows *why*
- * it said no, so the reason travels with the status rather than being thrown
- * away at the boundary.
- *
  * @param ctx Request context, whose body receives the reason.
  * @param verdict Verdict from the room domain.
  * @return 403 for a non-owner, 409 for too few players or a running game.
@@ -337,11 +318,9 @@ static int	start_status(t_request_context *ctx, t_start_verdict verdict)
 /**
  * @brief Resolves the room a request addresses to the one the caller sits in.
  *
- * The path must name the room the player holds a slot in, so this is one
- * question rather than two: a binding left over from a finished game names a
- * room the player is no longer a member of, and resolves to nothing. Nothing
- * is repaired here - LEAVE and START have nothing to gain from clearing a
- * binding they have just refused to act on.
+ * The path must name the room the player holds a slot in, so a binding left
+ * over from a finished game resolves to nothing. Nothing is repaired here;
+ * JOIN owns that.
  *
  * @param ctx Request context holding the path.
  * @param name Receives the room name from the path, for the answer body.
@@ -360,8 +339,7 @@ static t_server_room	*addressed_room(t_request_context *ctx,
 /**
  * @brief Projects the lobby onto wire-facing room rows.
  *
- * Rooms nobody is sitting in are skipped: they have no owner to name, and an
- * empty room is not something a player can meaningfully join.
+ * Rooms nobody is sitting in are skipped: they have no owner to name.
  *
  * @param srv Server whose lobby is listed.
  * @param rows Receives up to LOBBY_MAX_ROOMS rows.

@@ -11,10 +11,11 @@
 #include "harness.h"
 
 // Static Functions
-static int	generate_certs(t_fixture *fx);
-static int	connect_tcp(int port);
-static int	send_message(t_harness *hc, t_htttp_message *msg);
-static int	body_field(const t_htttp_message *msg, const char *key, char *out, size_t cap);
+static int			fixture_boot(t_fixture *fx, int level, bool capture_log);
+static int			generate_certs(t_fixture *fx);
+static int			connect_tcp(int port);
+static int			send_message(t_harness *hc, t_htttp_message *msg);
+static int			body_field(const t_htttp_message *msg, const char *key, char *out, size_t cap);
 static t_item_id	owned_character(t_fixture *fx, t_player_id pid);
 
 /**
@@ -25,28 +26,72 @@ static t_item_id	owned_character(t_fixture *fx, t_player_id pid);
  */
 int	fx_start(t_fixture *fx)
 {
-	char	path[192];
+	return (fixture_boot(fx, COREIPC_LOG_ERROR, false));
+}
 
-	memset(fx, 0, sizeof(*fx));
-	snprintf(fx->dir, sizeof(fx->dir), "tests/tmp/srvXXXXXX");
-	if (daemon_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
+/**
+ * @brief Starts the same server with a socket standing in for tetrislogd.
+ *
+ * The level is the caller's: fx_start's error-only default throws away exactly
+ * the records such a suite is reading for.
+ *
+ * @param fx Fixture to fill.
+ * @param level Lowest level the server should emit.
+ * @return 0 on success, -1 when the socket or the server would not start.
+ */
+int	fx_start_logged(t_fixture *fx, int level)
+{
+	return (fixture_boot(fx, level, true));
+}
+
+/**
+ * @brief Waits for a log record whose message contains a given fragment.
+ *
+ * Records that do not match are discarded rather than pushed back, and the
+ * match is on a fragment so an unrelated new field does not rewrite a suite.
+ *
+ * @param fx Fixture started with fx_start_logged.
+ * @param needle Text the record's message must contain.
+ * @param out Receives the matching record; may be NULL.
+ * @param timeout_ms How long to wait in total.
+ * @return 0 when a matching record arrived, -1 on timeout.
+ */
+int	fx_log_wait(t_fixture *fx, const char *needle, t_log_record *out, int timeout_ms)
+{
+	struct pollfd	pfd;
+	t_log_record	rec;
+	struct timespec	start;
+	int				left;
+	int				ready;
+
+	if (fx->log_fd < 0)
 		return (-1);
-	if (generate_certs(fx) != 0)
-		return (-1);
-	config_defaults(&fx->cfg);
-	fx->cfg.port = 0;
-	fx->cfg.log_level = COREIPC_LOG_ERROR;
-	snprintf(path, sizeof(path), "%s/data", fx->dir);
-	snprintf(fx->cfg.data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", "../../lib/libmacminidb/config");
-	snprintf(path, sizeof(path), "%s/certs/server.crt", fx->dir);
-	snprintf(fx->cfg.cert_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
-	snprintf(path, sizeof(path), "%s/certs/server.key", fx->dir);
-	snprintf(fx->cfg.key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
-	snprintf(fx->cfg.ca_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", fx->ca_path);
-	snprintf(path, sizeof(path), "%s/log.sock", fx->dir);
-	snprintf(fx->cfg.log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
-	return (server_start(&fx->cfg, &fx->srv));
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	left = timeout_ms;
+	while (left > 0)
+	{
+		pfd.fd = fx->log_fd;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		ready = poll(&pfd, 1, left);
+		/*
+		** A fixture runs a reactor, a shipper and up to four handshake
+		** workers, so a signal reaching this thread is ordinary. Only a real
+		** timeout ends the wait; EINTR resumes it on the time that is left.
+		*/
+		if (ready == 0 || (ready < 0 && errno != EINTR))
+			return (-1);
+		if (ready > 0
+			&& unixsock_dgram_recv(fx->log_fd, &rec, sizeof(rec)) == (ssize_t)sizeof(rec)
+			&& strstr(rec.msg, needle) != NULL)
+		{
+			if (out != NULL)
+				*out = rec;
+			return (0);
+		}
+		left -= clock_elapsed_ms(&start);
+	}
+	return (-1);
 }
 
 /**
@@ -61,12 +106,56 @@ void	fx_stop(t_fixture *fx)
 	if (fx->srv != NULL)
 		server_stop(fx->srv);
 	fx->srv = NULL;
+	if (fx->log_fd >= 0)
+		close(fx->log_fd);
+	fx->log_fd = -1;
 	if (fx->dir[0] != '\0')
 	{
 		snprintf(cmd, sizeof(cmd), "rm -rf %s", fx->dir);
 		if (system(cmd) != 0)
 			fprintf(stderr, "harness: could not remove %s\n", fx->dir);
 	}
+}
+
+/**
+ * @brief Builds the fixture's directory, certificates and config, then starts.
+ *
+ * @param fx Fixture to fill.
+ * @param level Lowest level the server should emit.
+ * @param capture_log true to bind a datagram socket where tetrislogd would be.
+ * @return 0 on success, -1 on any failure.
+ */
+static int	fixture_boot(t_fixture *fx, int level, bool capture_log)
+{
+	char	path[192];
+
+	memset(fx, 0, sizeof(*fx));
+	fx->log_fd = -1;
+	snprintf(fx->dir, sizeof(fx->dir), "tests/tmp/srvXXXXXX");
+	if (daemon_mkdir_p("tests/tmp") != 0 || mkdtemp(fx->dir) == NULL)
+		return (-1);
+	if (generate_certs(fx) != 0)
+		return (-1);
+	config_defaults(&fx->cfg);
+	fx->cfg.port = 0;
+	fx->cfg.log_level = level;
+	snprintf(path, sizeof(path), "%s/data", fx->dir);
+	snprintf(fx->cfg.data_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.config_dir, TETRISD_FILESYSTEM_PATH_MAX, "%s", "../../lib/libmacminidb/config");
+	snprintf(path, sizeof(path), "%s/certs/server.crt", fx->dir);
+	snprintf(fx->cfg.cert_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	snprintf(path, sizeof(path), "%s/certs/server.key", fx->dir);
+	snprintf(fx->cfg.key_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	snprintf(fx->cfg.ca_path, TETRISD_FILESYSTEM_PATH_MAX, "%s", fx->ca_path);
+	snprintf(path, sizeof(path), "%s/log.sock", fx->dir);
+	snprintf(fx->cfg.log_ipc, TETRISD_FILESYSTEM_PATH_MAX, "%s", path);
+	if (capture_log)
+	{
+		fx->log_fd = unixsock_dgram_bind(path, 0600);
+		if (fx->log_fd < 0)
+			return (-1);
+	}
+	return (server_start(&fx->cfg, &fx->srv));
 }
 
 /**
@@ -109,9 +198,8 @@ void	hc_close(t_harness *hc)
 /**
  * @brief Sends one request and returns the matching response.
  *
- * STATE pushes that arrive while waiting are kept as the latest snapshot
- * rather than dropped: a client's read loop cannot assume one request means
- * the next message is its request_reply, and a renderer would route them onward.
+ * STATE pushes arriving while waiting are kept as the latest snapshot rather
+ * than dropped: the next message after a request is not always its response.
  *
  * @param hc Connected client.
  * @param method HTTTP method.
@@ -217,8 +305,7 @@ int	hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms)
  * @brief Waits for the next pushed CHAT and decodes the feed line in it.
  *
  * Anything else that arrives first is discarded, exactly as hc_wait_state
- * discards chat: a test that is waiting for one kind of push has already
- * asserted whatever it cared about in the others.
+ * discards chat.
  *
  * @param hc Connected client.
  * @param out Receives the decoded message.
@@ -325,16 +412,10 @@ int	hc_join_new(t_harness *hc, const char *mode, char *room_out, size_t cap)
 /**
  * @brief Declares ready and locks a fighter in, in one request.
  *
- * A room with an opponent in it no longer deals itself from READY or from
- * START - both open the character-select window instead, and the boards are
- * dealt when every seat has named a fighter. So a test that wants a match is
- * a test that has to choose one, and this is that step: every suite that
- * plays a Double game needs it, and none of them care which fighter it picks.
- *
- * The id is read out of the store rather than written down here, because
- * hard-coding one would be a guess about config/characters.cfg. A player who
- * owns none sends a bare declaration, which is still a ready seat - it just
- * is not a locked one, and the room will wait out its clock.
+ * A room with an opponent deals its boards only once every seat has named a
+ * fighter, so a test that wants a match has to choose one. The id is read out
+ * of the store rather than hard-coded, and a player who owns no character
+ * sends a bare declaration - a ready seat, just not a locked one.
  *
  * @param hc Connected, authenticated client that is seated in the room.
  * @param fx Running fixture, whose store is reopened read-only.

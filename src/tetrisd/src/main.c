@@ -6,14 +6,12 @@ static int	go_background(const t_config *cfg, t_pidfile *pf, int *ready);
 /**
  * @brief Runs tetrisd: read .tetrishrc, detach, start the server, stop cleanly.
  *
- * The fork lives here, never behind server_start(), so the test suites can
- * boot a real server in-process without forking.
- *
- * Boot owns the terminal: everything up to daemon_ready reports failure on
- * stderr and exits non-zero, so the operator who typed the command sees it.
- * stderr only moves to the error file once nothing is left to fail - which
- * costs one window, where a record from the already-running log shipper
- * lands on the terminal. Redirecting earlier would hide boot failures.
+ * The fork lives here, not in server_start(), so suites can boot a real
+ * server in-process. Boot owns the terminal: failures up to daemon_ready hit
+ * stderr and exit non-zero; stderr moves to the error file only once nothing
+ * is left to fail. That costs one window in which a record from the running
+ * log shipper lands on the terminal - redirecting earlier would hide boot
+ * failures. tzset() resolves $TZ once, before anything can log.
  *
  * @param argc Number of command-line arguments.
  * @param argv Arguments; argv[1] optionally overrides the rc file path.
@@ -26,6 +24,7 @@ int	main(int argc, char **argv)
 	t_config	cfg;
 	int			ready;
 
+	tzset();
 	if (config_load(&cfg, argc > 1 ? argv[1] : NULL) != 0)
 	{
 		fprintf(stderr, "tetrisd: %s holds an invalid setting\n", cfg.rc_path);
@@ -70,8 +69,8 @@ int	main(int argc, char **argv)
 /**
  * @brief Detaches into the background and claims the pidfile.
  *
- * Claiming comes after the fork: the pid written has to be the detached
- * process's, and the lock has to be held by the process that stays around.
+ * Claiming comes after the fork: the pid written and the lock held both have
+ * to belong to the process that stays around.
  *
  * @param cfg Configuration supplying the pidfile path.
  * @param pf Pidfile to claim.

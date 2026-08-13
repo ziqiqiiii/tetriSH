@@ -15,6 +15,7 @@
 #
 # Environment:
 #   TETRISU_IMAGE      image tag (default tetrish/tetrisu)
+#   TETRISU_OFFLINE    1 to run the client with no server at all
 #   AUTO_INSTALL_DEPS  1 to install a missing engine, 0 to only report
 
 set -euo pipefail
@@ -387,28 +388,56 @@ audio_args() {
     fi
 }
 
+# Which server the client talks to, or that it talks to none.
+#
+# TETRISU_NET is what tetrisu reads to decide between opening a session and
+# building its local fixture provider, so offline is expressed by leaving it
+# out rather than by pointing it somewhere unreachable - an unreachable address
+# is a client stuck on the sign-in screen, not a client playing. With no session
+# there is no chain to verify either, so the CA is neither required nor mounted:
+# that is what lets the container play on a machine with no certs at all.
+#
+# Emitted as an array of `docker run` flags, like audio_args.
+session_args() {
+    local host port ca
+
+    if [ "${TETRISU_OFFLINE:-0}" = "1" ]; then
+        SESSION_FLAGS=(-e TETRISU_OFFLINE=1)
+        return 0
+    fi
+    host="$(resolve_host "${TETRISU_HOST:-127.0.0.1}")"
+    port="${TETRISU_PORT:-4242}"
+    ca="${TETRISU_CA_PATH:-$ROOT/certs/demo-ca.crt}"
+    [ -s "$ca" ] || die "CA file '$ca' is missing or empty"
+    SESSION_FLAGS=(
+        -e TETRISU_NET=1
+        -e TETRISU_HOST="$host"
+        -e TETRISU_PORT="$port"
+        -e TETRISU_CA_PATH=/tetrish/certs/ca-bundle.crt
+        -v "$ca:/tetrish/certs/ca-bundle.crt:ro"
+    )
+}
+
 # The client verifies the server's chain against a CA on the host, and reads
 # its artwork from the host's checkout. Both are bind mounted read-only at the
 # paths the binary already names: certs/ because credentials are never baked
 # into an image, assets/ because 183 MB of artwork in a layer would be a copy
 # of what is already on disk.
 run_client() {
-    local engine host port ca net
+    local engine net
     engine="$(ensure_engine)"
 
     # Before anything asks how to reach the host, because that answer depends
     # on which daemon accepted the connection rather than on this OS.
     detect_desktop_in_wsl "$engine"
 
-    host="$(resolve_host "${TETRISU_HOST:-127.0.0.1}")"
-    port="${TETRISU_PORT:-4242}"
-    ca="${TETRISU_CA_PATH:-$ROOT/certs/demo-ca.crt}"
     net="$(network_args)"
 
     AUDIO_FLAGS=()
     audio_args
+    SESSION_FLAGS=()
+    session_args
 
-    [ -s "$ca" ] || die "CA file '$ca' is missing or empty"
     [ -d "$ROOT/src/tetrisu/assets" ] \
         || die "src/tetrisu/assets is missing from this checkout"
 
@@ -433,14 +462,10 @@ run_client() {
     exec "$engine" run --rm -it --init \
         $net \
         ${AUDIO_FLAGS[@]+"${AUDIO_FLAGS[@]}"} \
+        ${SESSION_FLAGS[@]+"${SESSION_FLAGS[@]}"} \
         -e TERM="${TERM:-xterm-kitty}" \
         -e COLORTERM="${COLORTERM:-truecolor}" \
-        -e TETRISU_NET=1 \
-        -e TETRISU_HOST="$host" \
-        -e TETRISU_PORT="$port" \
-        -e TETRISU_CA_PATH=/tetrish/certs/ca-bundle.crt \
         -e TETRISU_RENDERER="${TETRISU_RENDERER:-}" \
-        -v "$ca:/tetrish/certs/ca-bundle.crt:ro" \
         -v "$ROOT/src/tetrisu/assets:/tetrish/src/tetrisu/assets:ro" \
         "$IMAGE" "$@"
 }
