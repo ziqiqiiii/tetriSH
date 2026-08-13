@@ -88,7 +88,8 @@ Components are matched by their `Makefile`, so the ones that have not landed yet
 | `make test` | Build, then run every available component test suite |
 | `make clean` | Remove object files from every component |
 | `make fclean` | Remove object files, binaries, and `./bin` |
-| `make reset` | Stop any running daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) |
+| `make reset` | Stop any running daemons, then `fclean` plus their runtime state (`tmp/`, `archive/`, `bin/`) — the player store survives |
+| `make del-db` | Stop the daemons, then delete the player store (`TETRISD_DATA_DIR/players.log`) |
 | `make re` | `fclean` + `all` |
 
 Every library builds, tests, and links on its own:
