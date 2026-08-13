@@ -177,6 +177,5 @@ static void	timestamp_text(uint64_t timestamp_ms, char *out, size_t cap)
 		snprintf(out, cap, "%" PRIu64, timestamp_ms);
 		return ;
 	}
-	snprintf(out + len, cap - len, ".%03u",
-		(unsigned int)(timestamp_ms % 1000));
+	snprintf(out + len, cap - len, ".%03u", (unsigned int)(timestamp_ms % 1000));
 }
