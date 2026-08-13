@@ -111,7 +111,7 @@ make play-image    # client built in a container instead
 Either installs what is missing, compiles it, opens a kitty window and starts the game in it. Every step checks before it acts, so re-running is how you restart.
 
 <p align="center">
-  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="75%"></a>
+  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="62%"></a>
 </p>
 
 ---
