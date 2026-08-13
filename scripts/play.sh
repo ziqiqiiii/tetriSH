@@ -379,6 +379,25 @@ ensure_deps() {
         || die "dependencies are missing; see the output above"
 }
 
+# Always ask make, never guess from the filesystem. This used to return early
+# when a tetrisu binary existed at all, which is not the same question: after a
+# `git pull` the binary exists and is *stale*, so the script reported "tetrisu
+# is built" and launched the old one. That is how a fix for bots on macOS was
+# pulled, never compiled, and reported as still broken - the client was the one
+# from before it. make already knows which objects are older than their sources;
+# this only has to let it answer.
+ensure_client() {
+    say "building tetrisu (this installs notcurses if it is missing)..."
+    make -C src/tetrisu || die "tetrisu did not build"
+    make bin-link >/dev/null 2>&1 || true
+    # Not fatal: the client plays without it, and only bots break. But it is
+    # worth saying out loud, because the failure it causes surfaces four
+    # screens later as a room that will not fill.
+    if [ ! -x bin/tetrisu-bot ] && [ ! -x src/tetrisu/bin/tetrisu-bot ]; then
+        warn "tetrisu-bot is missing - [B] in a waiting room will refuse"
+    fi
+}
+
 # Done before the image, not with it: installing a terminal is quick and can
 # fail in a way the user has to act on (WezTerm has to be installed on the
 # Windows side by hand), and finding that out after a ten-minute first image

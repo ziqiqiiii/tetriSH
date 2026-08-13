@@ -64,7 +64,7 @@ int	ready_handler(const t_htttp_message *msg, void *context)
 	if (server_room_all_locked(server_room))
 		(void)server_room_autostart(server_room);
 	else if (server_room_all_ready(server_room)
-		&& !server_room_is_solo(server_room))
+		&& server_room_starts_on_ready(server_room))
 		(void)server_room_begin_selection(server_room);
 	if (!server_room_snapshot(server_room, &snapshot))
 		return (500);

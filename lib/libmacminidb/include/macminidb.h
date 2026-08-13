@@ -6,6 +6,13 @@
 # include <stdint.h>
 
 # define DB_MAX_USERNAME	32
+/*
+** The prefix that marks an account as the store's own rather than a person's.
+** It is public because the server names its bot accounts with it, and matched
+** case-insensitively so that `bot_01` cannot sit beside `BOT_01` in a seat
+** list. See db_username_is_reserved.
+*/
+# define DB_RESERVED_PREFIX	"BOT_"
 # define DB_HASH_LEN		64
 # define DB_SALT_LEN		32
 # define DB_MAX_OWNED		64
@@ -104,14 +111,39 @@ void				db_close(t_db *db);
 t_db_result			db_signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id);
 
 /*
+** Create an account the store owns rather than a person: the bots a player
+** fills a room with. Same player in every respect but one - it is never put
+** on the leaderboard, not by this call, not by db_record_game, and not by a
+** replay of the log.
+**
+** Exclusion happens here, at the three writes, and not in db_leaderboard and
+** db_rank. Filtering the two readers is the same rule written twice in two
+** shapes - skiplist_rank counts nodes as it walks while a top-N emits them -
+** and when they drift the symptom is a player told they are 14th on a board
+** whose ten rows they can count. Keeping reserved accounts out of the
+** structure leaves both readers exactly as they were: whatever is in the
+** list is rankable.
+**
+** The name must be reserved (DB_INVALID otherwise), which is the other half
+** of db_signup refusing one: between them there is no way to end up with a
+** person on a bot's account or a bot on the board.
+*/
+t_db_result			db_signup_reserved(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id);
+
+/*
 ** USERNAME.C
 **
 ** What a username may contain, asked without a handle. db_signup applies it
 ** itself, so a caller never has to; it is public so a server can refuse a
 ** name at the edge with a reason of its own rather than reading DB_INVALID
 ** and guessing which field was wrong.
+**
+** The second question is a different kind: db_username_valid is the format's
+** rule, and db_username_is_reserved is a policy about who a name belongs to.
+** A reserved name is valid - it is simply not a person's to take.
 */
 bool				db_username_valid(const char *username);
+bool				db_username_is_reserved(const char *username);
 t_db_result			db_buy_character(t_db *db, t_player_id id, t_item_id cid);
 t_db_result			db_buy_theme(t_db *db, t_player_id id, t_item_id tid);
 t_db_result			db_equip_character(t_db *db, t_player_id id, t_item_id cid);

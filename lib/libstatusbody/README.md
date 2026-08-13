@@ -139,6 +139,29 @@ opp 2 7 1 clearing 4200 9 3 4 2 6 3 8 3 rival
 | `board` | `BODY_BOARD_ROWS` (20) lines × `BODY_BOARD_COLS` (10) hex-pair cells: nibble `type` (0–2), nibble `color` (0–15) |
 | `opponents` | `<n>`, 0–`BODY_OPPONENTS_MAX`; each followed by an `opp` line and that opponent's board block |
 | `opp` | `<slot> <pid> <alive> <phase> <score> <lines> <pending> <ptype> <protation> <pcol> <prow> <charge> <character> <username>` — `charge` is the same 0–10 meter the frame's own subject carries, and `character` the catalogue id of the fighter they took into this match (`0` when they named none). Both are here so a client can draw the rival's column beside their board rather than guessing at it; `username` stays last because it runs to end of line |
+| `counts` | `<players> <alive>` — the room's own head count. It rides every frame, arena or not, because the HUD's `ALIVE 34/40` cannot be counted from a section that is usually absent |
+| `arena` | `<full\|absent> <n>` — `absent 0` means "nothing about the arena this frame, keep what you have" and is what Single and Double always send. `full <n>` is the **complete** occupied roster, so the card list is also the roster: a seat that does not appear is a seat nobody is in, never a player who was knocked out |
+| `a` | `<slot> <pid-hex> <flags> <lines> <pending> <ko> <rank> [mask]` — one Battle Royale card, repeated `<n>` times |
+
+`slot` is the seat number the room handed out, so it runs **1–`BODY_ARENA_MAX`**
+and there is no seat 0. `pid` is hex, which is what keeps the worst-case line
+16 bytes shorter than decimal. `flags` is a bitfield: alive, attacking-you,
+targeted-by-you, in-clear, mask-present. `rank` is `0` while the player is
+still in the match and their placing once they are out — it is sent the moment
+the placing is taken rather than at the end, which is what lets a card be drawn
+dead and numbered in the same push.
+
+`mask` is 50 hex characters — 20 rows of 10 bits, one per cell, `1` occupied —
+and it is **optional**, present only when the mask-present flag says so. A dead
+board never changes again, so its card carries a mask on every fifth push and
+the client keeps the one it holds in between. That is bounded staleness and not
+a delta: a client that misses one is correct again within a second, with
+nothing acknowledged and nothing tracked per connection.
+
+Cell type and colour are deliberately not carried. A card is a thumbnail a few
+terminal cells wide; colour per cell is information the screen cannot show and
+the wire cannot afford — 1/16th the bytes, and nothing a player could see is
+lost.
 
 `phase` reads `active`, `clearing`, `paused`, `topout`, or `countdown`.
 `countdown` is a dealt board being held still before a match starts — it is

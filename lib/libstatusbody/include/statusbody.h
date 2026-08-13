@@ -55,6 +55,39 @@
 ** rather than collecting first.
 */
 # define BODY_OPPONENTS_MAX	1
+/*
+** How many cards one STATE snapshot's arena carries: every seat of the largest
+** room the domain allows.
+**
+** This is the other half of the cap above, and it is affordable for exactly
+** the reason that one is not. A t_body_opponent is a whole board at full
+** fidelity - 496 bytes - because Double draws the rival at nearly the size of
+** your own. An arena card is a thumbnail, so it carries a 1-bit-per-cell
+** occupancy mask instead: the shape of the stack, and nothing about colour or
+** piece type that a card that size could show anyway. 40 bytes against 496.
+**
+** So the arena is a second detail level rather than a wider opponents section.
+** Ninety-nine cards cost ~4 KB inside t_body_state; ninety-nine opponents would
+** have cost 48 KB, which is most of the frame cap before anything else is said.
+*/
+# define BODY_ARENA_MAX		99
+/*
+** Bits of an arena card's `flags` field.
+**
+** MASK_PRESENT is the one that is not about the player. A dead board never
+** changes again, so its card carries the mask only occasionally and the client
+** keeps the last one it holds; this bit is how a decoder knows whether the
+** field is on the line at all, rather than inferring it from ALIVE and having
+** the two disagree.
+*/
+# define BODY_ARENA_ALIVE			0x01
+# define BODY_ARENA_ATTACKING_YOU	0x02
+# define BODY_ARENA_TARGETED_BY_YOU	0x04
+# define BODY_ARENA_CLEARING		0x08
+# define BODY_ARENA_MASK_PRESENT	0x10
+# define BODY_ARENA_FLAGS_MAX		0x1F
+/* 20 rows of 10 bits, 4 bits to the hex char */
+# define BODY_ARENA_CELL_CHARS	(BODY_BOARD_ROWS * BODY_BOARD_COLS)
 /* the longest chat line a room will carry, sender excluded */
 # define BODY_CHAT_TEXT_MAX	256
 /* what t_body_state.hold reads when the player is holding nothing */
@@ -203,6 +236,46 @@ typedef struct s_body_opponent
 }	t_body_opponent;
 
 /*
+** One card of a Battle Royale arena: what a player can tell about one rival
+** from a thumbnail, and nothing more.
+**
+** `cells` is the board at one nibble each, row 0 first, leftmost column first:
+**
+**     0        empty
+**     1        garbage
+**     2 + type a piece, in the seven types' own order
+**
+** It was one *bit* per cell until a player pointed out that every block in the
+** mode drew grey. It could not have drawn anything else - the wire carried a
+** silhouette and nothing more - so the client painted every filled cell one
+** colour and garbage was indistinguishable from a piece somebody had placed.
+** A nibble is four times a bit and still a quarter of the two nibbles a full
+** board spends, which keeps the arena an order of magnitude off a board while
+** letting a rival's stack read as a stack.
+**
+** `cells_valid` is not on the wire; it is what the decoder writes after
+** reading the flags, so a caller can tell "this card carried fresh cells" from
+** "this card left them to whatever you already had". A client that keeps its
+** arena slot-indexed simply leaves the old ones in place when it is false.
+**
+** No score. Nothing at this size draws one, the tiering sorts on placing and
+** on who is attacking, and as a decimal uint64 it was the single widest field
+** on the line.
+*/
+typedef struct s_body_arena_slot
+{
+	int			slot;
+	uint64_t	player_id;
+	unsigned	flags;
+	int			lines;
+	int			pending;
+	int			ko;
+	int			rank;
+	bool		cells_valid;
+	unsigned char	cells[BODY_BOARD_ROWS][BODY_BOARD_COLS];
+}	t_body_arena_slot;
+
+/*
 ** application/tetris-state body, in encode order:
 **   seq <u64>
 **   phase <active|clearing|paused|topout|countdown>
@@ -226,6 +299,26 @@ typedef struct s_body_opponent
 **       <ptype> <protation> <pcol> <prow> <username>
 **                    (then that opponent's 20 board lines; both repeated n
 **                     times)
+**   counts <players> <alive>
+**   arena <full|absent> <n>
+**   a <slot> <pid-hex> <flags> <lines> <pending> <ko> <rank> [cells]
+**                    (repeated n times; no lines at all when absent)
+**
+** The arena section is appended after the opponents, so every line that came
+** before it keeps its position and Double's frame is unchanged in every field
+** it reads. Single and Double send `arena absent 0`.
+**
+** `arena absent` and `arena full 0` are different answers and a decoder must
+** not collapse them: absent is "this frame says nothing about the arena", and
+** full 0 is "the arena is empty". The first happens on almost every frame,
+** because the arena rides a slower clock than the board does.
+**
+** A card's `cells` are present only when its flags say so, which is the one
+** place in this body where a field's presence depends on a value earlier on
+** the same line. It is worth the exception: a dead board is finished changing,
+** so re-sending it five times a second is the largest avoidable cost in the
+** mode, and the alternative - sending only the cards that changed - is a delta
+** this transport cannot support.
 **
 ** `hold` is BODY_HOLD_EMPTY until the player has held something. Its second
 ** field says the hold has already been spent on the falling piece, which is
@@ -305,6 +398,26 @@ typedef struct s_body_state
 	t_body_clear_label	last_clear;
 	size_t				opponent_count;
 	t_body_opponent		opponents[BODY_OPPONENTS_MAX];
+	/*
+	** How many players are in this match and how many are still in it. Both are
+	** the room's own counts and neither can be derived from the arena, which is
+	** the point: the arena rides its own clock, so most frames carry no cards at
+	** all, and a HUD that counted them would read ALIVE 0/0 between pushes.
+	**
+	** Always written. Single sends 1 1 and Double 2 2.
+	*/
+	int					players;
+	int					alive;
+	/*
+	** The arena, and whether this frame is carrying one. `arena_present` false
+	** means "nothing about the arena this frame, keep what you have" - it is not
+	** the same as a count of 0, which would mean "the room is empty" and would
+	** have every client clear a screen full of live cards on every frame between
+	** pushes.
+	*/
+	bool				arena_present;
+	size_t				arena_count;
+	t_body_arena_slot	arena[BODY_ARENA_MAX];
 }	t_body_state;
 
 /* one LIST /rooms line: <name> <mode> <players>/<slots> <status> <owner> */
@@ -445,6 +558,32 @@ typedef struct s_body_chat
 	char		sender[BODY_USER_MAX];
 	char		text[BODY_CHAT_TEXT_MAX];
 }	t_body_chat;
+
+/*
+** The widest a state body can encode to, derived from the constants that
+** produce it rather than chosen and hoped for.
+**
+** One arena card, worst case, is 241 bytes: `a ` plus a 2-digit slot, a 16-hex
+** player id, 2-digit flags, 4-digit lines, 3-digit pending, 2-digit ko,
+** 2-digit rank, each with its space, then the 200 cell nibbles and a newline.
+** The cells count even though they are often elided - a buffer is sized by its
+** worst case, and eliding them saves bandwidth rather than bytes of buffer.
+**
+** They were 50 characters while a card was one bit per cell. Four times that
+** is what colour costs, and a full arena is still a quarter of what ninety-
+** eight real boards would be.
+**
+** BODY_STATE_HEAD_MAX covers everything before the arena: the fixed lines, the
+** subject's own 20 board rows, one full opponent, and the two count lines. It
+** is rounded up generously because it is not the term that grows.
+**
+** Whoever sizes a buffer for one of these must assert against this, not
+** against a number that happened to be big enough when it was written.
+*/
+# define BODY_ARENA_LINE_MAX	241
+# define BODY_STATE_HEAD_MAX	2048
+# define BODY_STATE_MAX_BYTES	(BODY_STATE_HEAD_MAX \
+									+ BODY_ARENA_MAX * BODY_ARENA_LINE_MAX)
 
 /* STATE.C */
 int	body_state_encode(const t_body_state *in, char *out, size_t cap);

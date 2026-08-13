@@ -8,6 +8,7 @@ static void	test_result_copy_includes_battle_rank(void);
 static void	test_match_layouts_follow_wireframes(void);
 static void	test_room_roster_controls_opponent_count(void);
 static void	test_pixel_ability_targets_follow_layout(void);
+static void	test_the_arena_puts_what_matters_in_the_near_columns(void);
 static void	test_multiplayer_movement_matches_solo_at_wall(void);
 
 int	main(void)
@@ -19,6 +20,7 @@ int	main(void)
 	test_room_roster_controls_opponent_count();
 	test_pixel_ability_targets_follow_layout();
 	test_multiplayer_movement_matches_solo_at_wall();
+	test_the_arena_puts_what_matters_in_the_near_columns();
 	return (0);
 }
 
@@ -236,7 +238,7 @@ static void	test_targeting_uses_wasd_diamond(void)
 	assert(mp_match_target_handle_key(&state, 's'));
 	assert(state.target_mode == TARGET_ATTACKERS);
 	assert(mp_match_target_handle_key(&state, 'd'));
-	assert(state.target_mode == TARGET_TOP_SCORE);
+	assert(state.target_mode == TARGET_BADGES);
 	assert(strcmp(mp_match_target_name(state.target_mode), "Badges") == 0);
 	state.mode = APP_GAME_MODE_DOUBLE;
 	assert(!mp_match_target_handle_key(&state, 'w'));
@@ -285,7 +287,23 @@ static void	test_match_layouts_follow_wireframes(void)
 	assert(layout.local_board.x + layout.local_board.width
 		< layout.right_opponents.x);
 	assert(layout.targeting.y < layout.local_board.y);
+	/*
+	 * The arena gives way before the screen does. 132x36 is comfortable and
+	 * was the minimum; a terminal one row short got a refusal and a blank
+	 * screen. Now both side columns go, then one, then the board and the head
+	 * count stand alone - and only a terminal too small for the board itself
+	 * is refused.
+	 */
+	mp_match_layout_build(APP_GAME_MODE_BATTLE_ROYALE, 30, 100, &layout);
+	assert(layout.valid);
+	assert(layout.left_opponents.width > 0);
+	assert(layout.right_opponents.width == 0);
 	mp_match_layout_build(APP_GAME_MODE_BATTLE_ROYALE, 24, 80, &layout);
+	assert(layout.valid);
+	assert(layout.left_opponents.width == 0);
+	assert(layout.right_opponents.width == 0);
+	assert(layout.local_board.x + layout.local_board.width <= 80);
+	mp_match_layout_build(APP_GAME_MODE_BATTLE_ROYALE, 23, 79, &layout);
 	assert(!layout.valid);
 	printf("PASS test_match_layouts_follow_wireframes\n");
 }
@@ -315,20 +333,71 @@ static void	test_room_roster_controls_opponent_count(void)
 		sizeof(room.players[room.local_slot].username), "%s", profile.username);
 	mp_match_state_init(&state, APP_GAME_MODE_BATTLE_ROYALE, "arena",
 		&profile, &characters, 9u);
-	mp_match_apply_room(&state, &room, 99);
+	mp_match_apply_room(&state, &room, 99, true);
 	assert(state.players_total == 4);
 	present = 0;
 	index = 0;
-	while (index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < MP_ARENA_SEATS)
 	{
 		present += state.opponents[index].present;
 		index++;
 	}
 	assert(present == 3);
-	assert(strcmp(state.opponents[0].name, "roster-0") == 0);
-	assert(strcmp(state.opponents[1].name, "roster-2") == 0);
-	mp_match_apply_room(&state, NULL, 99);
+	/*
+	 * From seat 1, because a Battle Royale's cards are filed by seat and a
+	 * room numbers its seats from 1. The fixture lays itself out the way the
+	 * server's arena does, or the preview labels every card as the seat next
+	 * door to the one it draws.
+	 */
+	assert(strcmp(state.opponents[1].name, "roster-0") == 0);
+	assert(strcmp(state.opponents[2].name, "roster-2") == 0);
+	assert(!state.opponents[0].present);
+	mp_match_apply_room(&state, NULL, 99, true);
 	assert(state.players_total == 99);
-	assert(state.opponents[97].present);
+	assert(state.opponents[98].present);
 	printf("PASS test_room_roster_controls_opponent_count\n");
+}
+
+/*
+** Ninety-eight thumbnails is a crowd, not a list, and a player cannot search
+** it while a piece is falling. So the order is what they need in the order
+** they need it: whoever is attacking them, then whoever their mode has
+** singled out, then everybody still playing, then the dead.
+**
+** It is an order over an index list and never over the cards. A card keeps
+** the seat it was filed under whatever tier it is drawn in - which is what
+** stops a rival changing tier from losing the board being held for them - and
+** the sort is stable on the seat, so a card only moves when its tier does.
+*/
+static void	test_the_arena_puts_what_matters_in_the_near_columns(void)
+{
+	t_mp_match_state	state;
+	int					cards[MP_ARENA_SEATS];
+	int					count;
+
+	memset(&state, 0, sizeof(state));
+	state.mode = APP_GAME_MODE_BATTLE_ROYALE;
+	state.opponents[1].present = true;
+	state.opponents[1].alive = true;
+	state.opponents[2].present = true;
+	state.opponents[2].alive = false;
+	state.opponents[3].present = true;
+	state.opponents[3].alive = true;
+	state.opponents[3].targeting_local = true;
+	state.opponents[4].present = true;
+	state.opponents[4].alive = true;
+	state.opponents[4].targeted_by_local = true;
+	state.opponents[5].present = true;
+	state.opponents[5].local = true;
+	count = mp_match_collect_cards(&state, cards, MP_ARENA_SEATS);
+	/* four rivals; the local card is drawn full size elsewhere */
+	assert(count == 4);
+	assert(cards[0] == 3);
+	assert(cards[1] == 4);
+	assert(cards[2] == 1);
+	assert(cards[3] == 2);
+	/* and the seats themselves have not moved */
+	assert(state.opponents[3].targeting_local);
+	assert(state.opponents[5].local);
+	printf("PASS test_the_arena_puts_what_matters_in_the_near_columns\n");
 }

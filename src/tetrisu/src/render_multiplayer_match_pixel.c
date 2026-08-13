@@ -22,6 +22,12 @@ static const t_color g_panel_light = {39, 20, 58};
  * The canvas is composed lazily: a frame in which nothing moved never
  * allocates one. force says the canvas already holds the finished artwork, so
  * a region only has to be cut out of it, not drawn again.
+ *
+ * damage says the same thing about part of the screen rather than all of it:
+ * a notification card wiped the cells under this rectangle, the canvas still
+ * holds what belonged there, and the regions it overlaps owe the terminal a
+ * plane. force is the whole screen's version of damage, which is why one
+ * predicate answers both.
  */
 typedef struct s_match_regions
 {
@@ -31,10 +37,27 @@ typedef struct s_match_regions
 	int								height;
 	const t_mp_match_pixel_layout	*layout;
 	const t_mp_match_state			*state;
+	t_mp_rect						damage;
+	bool							damaged;
 	bool							force;
 	bool							changed;
 }	t_match_regions;
 
+static bool region_restage(const t_match_regions *pass,
+				const t_mp_rect *rect);
+static bool region_restage_pair(const t_match_regions *pass,
+				const t_mp_rect *first, const t_mp_rect *second);
+static void match_trace(const char *path, long micros, bool forced);
+static FILE *match_trace_stream(void);
+static long match_trace_now(void);
+static bool match_is_regioned(t_mp_match_phase phase);
+static void selection_stage(int width, int height, t_mp_rect *stage);
+static void selection_timer_rect(int width, int height, t_mp_rect *out);
+static void draw_selection_panel(uint32_t *pixels, int width, int height,
+				const t_mp_rect *strip);
+static void draw_selection_timer(t_render_ctx *ctx, uint32_t *pixels,
+				int width, int height, const t_mp_match_state *state);
+static int regions_selection(t_match_regions *pass);
 static bool load_assets(t_render_ctx *ctx);
 static bool load_tile_atlas(t_render_ctx *ctx);
 static bool refresh_background(t_render_ctx *ctx, bool rebuild);
@@ -49,7 +72,7 @@ static int regions_local(t_match_regions *pass);
 static int regions_opponent(t_match_regions *pass);
 static int regions_battle(t_match_regions *pass);
 static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-				int first, int count, struct ncplane **slot);
+				const int *cards, int count, struct ncplane **slot);
 static int regions_loadout(t_match_regions *pass);
 static int regions_opponent_loadout(t_match_regions *pass);
 static int regions_hud(t_match_regions *pass);
@@ -82,7 +105,9 @@ static uint64_t loadout_signature(const t_mp_match_state *state);
 static uint64_t opponent_loadout_signature(const t_mp_match_state *state);
 static uint64_t hud_signature(const t_mp_match_state *state);
 static uint64_t opponents_signature(const t_mp_match_state *state,
-				int first, int count);
+				const int *cards, int count);
+static uint64_t card_signature(uint64_t hash,
+				const struct s_mp_opponent_snapshot *card);
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size);
 static uint32_t *new_canvas(t_render_ctx *ctx, int width, int height);
 static uint32_t *canvas_keep(t_render_ctx *ctx, int width, int height);
@@ -152,6 +177,10 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *rect,
 				const struct s_mp_opponent_snapshot *opponent, int player,
 				bool compact);
+static void draw_card_mark(t_render_ctx *ctx, uint32_t *pixels, int width,
+				int height, const t_mp_rect *rect,
+				const struct s_mp_opponent_snapshot *opponent);
+static t_color card_edge(const struct s_mp_opponent_snapshot *opponent);
 static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
 				int height, const t_mp_rect *rect, const t_board *board,
 				const t_piece *active, const t_piece *ghost);
@@ -175,7 +204,7 @@ static t_color danger_backing(int step);
 static t_color danger_frame(int step, bool local);
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 				int width, int height, const t_mp_rect *rect,
-				const t_mp_match_state *state, int first, int count);
+				const t_mp_match_state *state, const int *cards, int count);
 static void opponent_grid(int count, const t_mp_rect *rect,
 				int *columns, int *rows);
 static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -212,8 +241,10 @@ bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 	t_match_regions pass;
 	uint64_t signature;
 	t_mp_match_pixel_layout layout;
+	long started;
 	int width;
 	int height;
+	bool outcome;
 
 	if (ctx == NULL || state == NULL || render_compatibility_mode(ctx)
 		|| !render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc))
@@ -229,21 +260,83 @@ bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 		return (false);
 	snap_layout_to_cells(ctx, &layout);
 	signature = match_signature(state, width, height);
-	if (state->phase != MP_MATCH_PLAYING && !rebuild_background
+	if (!match_is_regioned(state->phase) && !rebuild_background
 		&& ctx->screen_plane != NULL && ctx->mp_match_signature == signature)
-		return (true);
+		return (match_trace("still", 0, false), true);
 	memset(&pass, 0, sizeof(pass));
 	pass.ctx = ctx;
 	pass.width = width;
 	pass.height = height;
 	pass.layout = &layout;
 	pass.state = state;
-	if (state->phase == MP_MATCH_PLAYING && !rebuild_background
+	pass.damage = ctx->mp_match_damage;
+	pass.damaged = ctx->mp_match_damaged;
+	ctx->mp_match_damaged = false;
+	started = match_trace_now();
+	if (match_is_regioned(state->phase) && !rebuild_background
 		&& ctx->screen_plane != NULL
 		&& ctx->mp_match_static_signature == static_signature(state,
 			width, height))
-		return (match_incremental(&pass));
-	return (match_rebuild(&pass, signature));
+	{
+		outcome = match_incremental(&pass);
+		match_trace(pass.changed ? "incremental" : "idle",
+			match_trace_now() - started, false);
+		return (outcome);
+	}
+	outcome = match_rebuild(&pass, signature);
+	match_trace("REBUILD", match_trace_now() - started, rebuild_background);
+	return (outcome);
+}
+
+/**
+ * @brief Marks every region stale after a notification card covered them.
+ *
+ * A card is a bitmap and so are the regions it lands on, and notcurses does not
+ * compose two sprixels - it wipes the cells of the one underneath. The regions
+ * are cached by signature, so once the card expires nothing considers them
+ * stale and the holes stay. Something has to put them back, and until now the
+ * whole screen did: a card appearing or going away asked for a full rebuild.
+ * In a Battle Royale the card is a K.O., they arrive in twos, and the rebuild
+ * measured 170 to 237 ms of every board on screen going away and coming back -
+ * which is the flicker a player reports, and the reason it happens on a
+ * knockout and at no other time.
+ *
+ * What the card actually damages is bitmaps, over the cells it covered and no
+ * others. The chrome beneath it is cells, which notcurses repaints itself, and
+ * the canvas in this process was never touched at all - so the repair a card
+ * owes is the transfer of the regions it overlapped, and nothing else.
+ *
+ * Restaging every region instead was measured and is not the answer: in a
+ * Battle Royale the regions are the screen, so re-emitting all of them cost
+ * 182 to 242 ms, which is the rebuild it replaced. The rectangle is the fix.
+ *
+ * @param ctx Render context.
+ * @param state The match being drawn.
+ * @return true when the repaint was absorbed here, false when the caller still
+ *         owes a full rebuild.
+ */
+bool render_multiplayer_match_pixel_restage(t_render_ctx *ctx,
+	const t_mp_match_state *state)
+{
+	if (ctx == NULL || state == NULL || ctx->screen_plane == NULL
+		|| render_compatibility_mode(ctx) || !render_pixels_available(ctx)
+		|| !match_is_regioned(state->phase) || ctx->cell_px_x <= 0
+		|| ctx->cell_px_y <= 0 || ctx->notification_damage_rows <= 0
+		|| ctx->notification_damage_cols <= 0)
+		return (false);
+	ctx->mp_match_damage.x = (ctx->notification_damage_x - ctx->bg_col)
+		* ctx->cell_px_x;
+	ctx->mp_match_damage.y = (ctx->notification_damage_y - ctx->bg_row)
+		* ctx->cell_px_y;
+	ctx->mp_match_damage.width = ctx->notification_damage_cols
+		* ctx->cell_px_x;
+	ctx->mp_match_damage.height = ctx->notification_damage_rows
+		* ctx->cell_px_y;
+	ctx->mp_match_damaged = true;
+	render_match_trace_note("restage %d %d %dx%d", ctx->mp_match_damage.x,
+		ctx->mp_match_damage.y, ctx->mp_match_damage.width,
+		ctx->mp_match_damage.height);
+	return (true);
 }
 
 /**
@@ -278,7 +371,7 @@ static bool match_rebuild(t_match_regions *pass, uint64_t signature)
 	bool playing;
 
 	ctx = pass->ctx;
-	playing = pass->state->phase == MP_MATCH_PLAYING;
+	playing = match_is_regioned(pass->state->phase);
 	destroy_region_planes(ctx);
 	pass->pixels = new_canvas(ctx, pass->width, pass->height);
 	if (pass->pixels == NULL)
@@ -493,12 +586,12 @@ static bool board_region_sync(t_match_regions *pass, int slot,
 
 	cache = &pass->ctx->mp_match_boards[slot];
 	with_piece = true;
-	if (pass->force)
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	if (region_restage(pass, &region))
 		return (true);
 	if (repaint_changed_cells(pass, slot, board, game, with_piece))
 		return (true);
-	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
-		board->height + 16};
 	clear_rect(pass->pixels, pass->width, pass->height, &region);
 	draw_game_board(pass->ctx, pass->pixels, pass->width, pass->height, board,
 		game, slot == 0 ? (pass->state->mode == APP_GAME_MODE_BATTLE_ROYALE
@@ -594,7 +687,7 @@ static bool blit_board_bands(t_match_regions *pass, const t_mp_rect *region,
 				(strip.y - region->y - 8) / tile_size,
 				(strip.y + strip.height - region->y - 8 + tile_size - 1)
 				/ tile_size);
-		if (strip.height > 0 && (pass->force
+		if (strip.height > 0 && (region_restage(pass, &strip)
 				|| signatures[band] != signature))
 		{
 			if (!create_region_plane(ctx, pass->pixels, pass->width,
@@ -666,9 +759,9 @@ static bool regions_caption(t_match_regions *pass, const t_mp_rect *board)
 
 	strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
 		board->width + 16, 66};
-	if (pass->force || caption_stale(pass))
+	if (region_restage(pass, &strip) || caption_stale(pass))
 	{
-		if (!pass->force)
+		if (!region_restage(pass, &strip))
 		{
 			clear_rect(pass->pixels, pass->width, pass->height, &strip);
 			draw_double_caption(pass->ctx, pass->pixels, pass->width,
@@ -846,14 +939,14 @@ static void snap_rect_to_cells(t_mp_rect *rect, int cell_x, int cell_y)
 
 static int refresh_regions(t_match_regions *pass)
 {
-	static int (*const steps[6])(t_match_regions *) = {regions_local,
-		regions_opponent, regions_battle, regions_loadout,
+	static int (*const steps[7])(t_match_regions *) = {regions_local,
+		regions_opponent, regions_battle, regions_selection, regions_loadout,
 		regions_opponent_loadout, regions_hud};
 	int index;
 	int result;
 
 	index = 0;
-	while (index < 6)
+	while (index < 7)
 	{
 		result = steps[index](pass);
 		if (result < 0)
@@ -883,6 +976,7 @@ static int regions_local(t_match_regions *pass)
 	const t_mp_match_state *state;
 	const t_mp_rect *board;
 	t_mp_rect region;
+	t_mp_rect probe;
 	uint64_t signature;
 	bool doubles;
 
@@ -890,12 +984,18 @@ static int regions_local(t_match_regions *pass)
 	board = &pass->layout->local_board;
 	doubles = state->mode == APP_GAME_MODE_DOUBLE;
 	signature = local_board_signature(&state->local_game, doubles);
-	if (!pass->force && pass->ctx->mp_match_local_signature == signature)
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	/* The caption sits just outside the banded region and is restaged from
+	 * inside this one, so the early return has to see its strip too. */
+	probe = region;
+	if (doubles)
+		probe.height += MP_MATCH_CAPTION_PX;
+	if (!region_restage(pass, &probe)
+		&& pass->ctx->mp_match_local_signature == signature)
 		return (0);
 	if (!regions_prepare(pass))
 		return (-1);
-	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
-		board->height + 16};
 	if (!board_region_sync(pass, 0, board, &state->local_game))
 		return (-1);
 	if (!blit_board_bands(pass, &region, 0, pass->ctx->mp_match_local_bands,
@@ -926,6 +1026,7 @@ static int regions_opponent(t_match_regions *pass)
 	const t_mp_match_state *state;
 	const t_mp_rect *board;
 	t_mp_rect region;
+	t_mp_rect probe;
 	uint64_t signature;
 
 	state = pass->state;
@@ -933,9 +1034,14 @@ static int regions_opponent(t_match_regions *pass)
 		return (0);
 	board = &pass->layout->opponent_board;
 	signature = game_signature(&state->opponent_game);
-	if (!pass->force && pass->ctx->mp_match_opponent_signature == signature)
+	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
+		board->height + 16};
+	probe = region;
+	probe.height += MP_MATCH_CAPTION_PX;
+	if (!region_restage(pass, &probe)
+		&& pass->ctx->mp_match_opponent_signature == signature)
 		return (0);
-	if (!pass->force
+	if (!region_restage(pass, &probe)
 		&& ui_notification_now_ms() < pass->ctx->mp_match_opponent_due_ms)
 	{
 		pass->ctx->mp_match_opponent_deferred = true;
@@ -945,8 +1051,6 @@ static int regions_opponent(t_match_regions *pass)
 		return (-1);
 	if (!board_region_sync(pass, 1, board, &state->opponent_game))
 		return (-1);
-	region = (t_mp_rect){board->x - 8, board->y - 8, board->width + 16,
-		board->height + 16};
 	if (!blit_board_bands(pass, &region, 1,
 			pass->ctx->mp_match_opponent_bands,
 			pass->ctx->mp_match_opponent_band_signatures))
@@ -1005,7 +1109,7 @@ static bool regions_opponent_caption(t_match_regions *pass,
 	state = pass->state;
 	strip = (t_mp_rect){board->x - 8, board->y + board->height + 8,
 		board->width + 16, 66};
-	if (!pass->force)
+	if (!region_restage(pass, &strip))
 	{
 		clear_rect(pass->pixels, pass->width, pass->height, &strip);
 		draw_double_caption(pass->ctx, pass->pixels, pass->width, pass->height,
@@ -1016,54 +1120,319 @@ static bool regions_opponent_caption(t_match_regions *pass,
 			pass->height, &strip, &pass->ctx->mp_match_opponent_plane));
 }
 
+/*
+** The cards are gathered before either half is measured, because the array is
+** indexed by seat and is therefore sparse: the count is how many seats hold a
+** rival, not how many players the room has, and the nth card of a side is the
+** nth occupied seat rather than the nth entry.
+*/
 static int regions_battle(t_match_regions *pass)
 {
-	uint64_t left_signature;
-	uint64_t right_signature;
+	int cards[MP_ARENA_SEATS];
+	uint64_t signature[2];
 	int opponents;
 	int left;
 	int changed;
 
 	if (pass->state->mode != APP_GAME_MODE_BATTLE_ROYALE)
 		return (0);
-	opponents = clamp_int(pass->state->players_total - 1, 0,
-			APP_ROOM_MAX_PLAYERS - 1);
+	opponents = mp_match_collect_cards(pass->state, cards,
+			MP_ARENA_SEATS);
 	left = (opponents + 1) / 2;
-	left_signature = opponents_signature(pass->state, 0, left);
-	right_signature = opponents_signature(pass->state, left, opponents - left);
+	signature[0] = opponents_signature(pass->state, cards, left);
+	signature[1] = opponents_signature(pass->state, cards + left,
+			opponents - left);
 	changed = 0;
-	if (pass->force || pass->ctx->mp_match_left_signature != left_signature)
+	if (region_restage(pass, &pass->layout->left_opponents)
+		|| pass->ctx->mp_match_left_signature != signature[0])
 	{
-		if (!regions_side(pass, &pass->layout->left_opponents, 0, left,
+		if (!regions_side(pass, &pass->layout->left_opponents, cards, left,
 				&pass->ctx->mp_match_left_plane))
 			return (-1);
-		pass->ctx->mp_match_left_signature = left_signature;
+		pass->ctx->mp_match_left_signature = signature[0];
 		changed = 1;
 	}
-	if (pass->force || pass->ctx->mp_match_right_signature != right_signature)
+	if (region_restage(pass, &pass->layout->right_opponents)
+		|| pass->ctx->mp_match_right_signature != signature[1])
 	{
-		if (!regions_side(pass, &pass->layout->right_opponents, left,
+		if (!regions_side(pass, &pass->layout->right_opponents, cards + left,
 				opponents - left, &pass->ctx->mp_match_right_plane))
 			return (-1);
-		pass->ctx->mp_match_right_signature = right_signature;
+		pass->ctx->mp_match_right_signature = signature[1];
 		changed = 1;
 	}
 	return (changed);
 }
 
 static bool regions_side(t_match_regions *pass, const t_mp_rect *rect,
-	int first, int count, struct ncplane **slot)
+	const int *cards, int count, struct ncplane **slot)
 {
 	if (!regions_prepare(pass))
 		return (false);
-	if (!pass->force)
+	if (!region_restage(pass, rect))
 	{
 		clear_rect(pass->pixels, pass->width, pass->height, rect);
 		draw_opponent_region(pass->ctx, pass->pixels, pass->width,
-			pass->height, rect, pass->state, first, count);
+			pass->height, rect, pass->state, cards, count);
 	}
 	return (create_region_plane(pass->ctx, pass->pixels, pass->width,
 			pass->height, rect, slot));
+}
+
+/**
+ * @brief Appends one line per frame to TETRISU_MATCH_TRACE, when it is set.
+ *
+ * Diagnostic only, and off unless the variable names a file. A rebuild
+ * destroys every region plane and re-transfers a full screen of bitmap, so how
+ * often one happens and what it costs is the question a flicker report asks -
+ * and it is not answerable by reading the code, because the trigger can be the
+ * terminal's own geometry rather than anything in the match.
+ *
+ * Never stdout: that is the screen notcurses is drawing.
+ *
+ * @param path Which way the frame went.
+ * @param micros How long it took, 0 when nothing was drawn.
+ * @param forced true when the caller demanded the rebuild.
+ */
+static void match_trace(const char *path, long micros, bool forced)
+{
+	FILE	*stream;
+
+	stream = match_trace_stream();
+	if (stream == NULL)
+		return ;
+	fprintf(stream, "%ld %s %ld%s\n", match_trace_now(), path, micros,
+		forced ? " forced" : "");
+	fflush(stream);
+}
+
+/**
+ * @brief The trace file, opened once, or NULL when tracing is off.
+ *
+ * @return The stream, or NULL.
+ */
+static FILE	*match_trace_stream(void)
+{
+	static FILE	*stream = NULL;
+	static int	looked = 0;
+	const char	*name;
+
+	if (looked == 0)
+	{
+		looked = 1;
+		name = getenv("TETRISU_MATCH_TRACE");
+		if (name != NULL && name[0] != '\0')
+			stream = fopen(name, "we");
+	}
+	return (stream);
+}
+
+/**
+ * @brief Writes one formatted diagnostic line into the same trace.
+ *
+ * Public because what is worth tracing is not always in this file: a knockout
+ * rebuilding the whole screen is decided by the terminal geometry check in
+ * render_background.c, and the numbers that decided it live there.
+ *
+ * @param format printf format for the line.
+ */
+void	render_match_trace_note(const char *format, ...)
+{
+	va_list	args;
+	FILE	*stream;
+
+	stream = match_trace_stream();
+	if (stream == NULL || format == NULL)
+		return ;
+	fprintf(stream, "%ld note ", match_trace_now());
+	va_start(args, format);
+	vfprintf(stream, format, args);
+	va_end(args);
+	fprintf(stream, "\n");
+	fflush(stream);
+}
+
+/**
+ * @brief Monotonic microseconds, for measuring one frame.
+ *
+ * @return Microseconds since an arbitrary fixed point.
+ */
+static long	match_trace_now(void)
+{
+	struct timespec	now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return (0);
+	return ((long)now.tv_sec * 1000000 + now.tv_nsec / 1000);
+}
+
+/**
+ * @brief Does this phase draw itself as cells with region planes on top?
+ *
+ * Playing always did. Character select did not, and that was the flicker
+ * before a match: its clock ticks once a second, and a phase with no
+ * incremental path answers every tick with a full rebuild - destroy every
+ * plane, recompose, re-transfer the screen. Measured at 142 ms, sixteen times,
+ * before a match had even dealt.
+ *
+ * The finished screen is deliberately still one bitmap. Nothing on it moves,
+ * so it never pays twice, and it keeps the authored resolution.
+ *
+ * @param phase The phase being drawn.
+ * @return true when the phase owns region planes.
+ */
+static bool match_is_regioned(t_mp_match_phase phase)
+{
+	return (phase == MP_MATCH_PLAYING || phase == MP_MATCH_CHARACTER_SELECT);
+}
+
+/**
+ * @brief Where the character-select panel sits, asked from one place.
+ *
+ * A pure function of the screen, so the composer and the region that redraws
+ * the clock inside it cannot disagree about where the panel is.
+ *
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param stage Receives the panel rectangle.
+ */
+static void selection_stage(int width, int height, t_mp_rect *stage)
+{
+	stage->width = min_int(width * 78 / 100, 1320);
+	stage->height = min_int(height * 64 / 100, 760);
+	stage->x = (width - stage->width) / 2;
+	stage->y = (height - stage->height) / 2 + 28;
+}
+
+/**
+ * @brief The strip of the select screen that the clock moves.
+ *
+ * The draining bar and the seconds beside it, and nothing else: the portrait,
+ * the fighter's name and its four abilities hold still for the whole window.
+ *
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param out Receives the strip.
+ */
+static void selection_timer_rect(int width, int height, t_mp_rect *out)
+{
+	t_mp_rect	stage;
+
+	selection_stage(width, height, &stage);
+	out->x = stage.x;
+	out->width = stage.width;
+	out->y = stage.y - 30;
+	out->height = 140;
+}
+
+/**
+ * @brief Repaints the panel behind the strip the clock owns.
+ *
+ * That strip is cut out of the panel, so clearing it alone would leave a
+ * transparent hole with the backdrop showing through the card. The fill and
+ * the outline are the composer's own, clipped to the strip.
+ *
+ * @param pixels Canvas to draw into.
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param strip The strip being repainted.
+ */
+static void draw_selection_panel(uint32_t *pixels, int width, int height,
+	const t_mp_rect *strip)
+{
+	t_mp_rect	stage;
+	t_mp_rect	piece;
+	int			bottom;
+
+	selection_stage(width, height, &stage);
+	bottom = min_int(strip->y + strip->height, stage.y + stage.height);
+	if (bottom <= stage.y)
+		return ;
+	piece = (t_mp_rect){stage.x, stage.y, stage.width, bottom - stage.y};
+	mp_match_pixel_fill_rect(pixels, width, height, &piece, g_panel, 220);
+	piece = (t_mp_rect){stage.x, stage.y, stage.width, 4};
+	mp_match_pixel_fill_rect(pixels, width, height, &piece, g_pink, 220);
+	piece = (t_mp_rect){stage.x, stage.y, 4, bottom - stage.y};
+	mp_match_pixel_fill_rect(pixels, width, height, &piece, g_pink, 220);
+	piece = (t_mp_rect){stage.x + stage.width - 4, stage.y, 4,
+		bottom - stage.y};
+	mp_match_pixel_fill_rect(pixels, width, height, &piece, g_pink, 220);
+}
+
+/**
+ * @brief Draws the select window's countdown bar and its seconds.
+ *
+ * @param ctx Render context, for the font.
+ * @param pixels Canvas to draw into.
+ * @param width Canvas width.
+ * @param height Canvas height.
+ * @param state Match state holding the remaining time and the lock.
+ */
+static void draw_selection_timer(t_render_ctx *ctx, uint32_t *pixels,
+	int width, int height, const t_mp_match_state *state)
+{
+	t_mp_rect	stage;
+	t_mp_rect	bar;
+	t_mp_rect	text;
+	char		line[APP_ABILITY_TEXT_MAX];
+	int			seconds;
+
+	seconds = mp_match_character_seconds(state);
+	selection_stage(width, height, &stage);
+	bar = (t_mp_rect){stage.x, stage.y - 25,
+		stage.width * state->selection.remaining_ms / MP_CHARACTER_SELECT_MS,
+		9};
+	mp_match_pixel_fill_rect(pixels, width, height, &bar,
+		seconds <= 5 ? g_red : g_gold, 255);
+	text = (t_mp_rect){stage.x + stage.width * 50 / 100, stage.y + 34,
+		stage.width * 45 / 100, 72};
+	snprintf(line, sizeof(line),
+		state->selection.locked ? "LOCKED   %02d" : "%02d", seconds);
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 42,
+		seconds <= 5 ? g_red : g_gold, true);
+}
+
+/**
+ * @brief Keeps the select window's clock moving without redrawing the screen.
+ *
+ * Only the strip the clock owns is redrawn. Browsing to another fighter still
+ * rebuilds, and should: that changes the portrait, the name and four abilities
+ * at once, and it happens on a keypress rather than once a second forever.
+ *
+ * @param pass The frame in progress.
+ * @return 1 when the strip was redrawn, 0 when it was already right, -1 on
+ *         failure.
+ */
+static int regions_selection(t_match_regions *pass)
+{
+	t_mp_rect	strip;
+	uint64_t	signature;
+
+	if (pass->state->phase != MP_MATCH_CHARACTER_SELECT)
+		return (0);
+	signature = hash_bytes(1469598103934665603ULL,
+			&pass->state->selection.remaining_ms,
+			sizeof(pass->state->selection.remaining_ms));
+	signature = hash_bytes(signature, &pass->state->selection.locked,
+			sizeof(pass->state->selection.locked));
+	selection_timer_rect(pass->width, pass->height, &strip);
+	if (!region_restage(pass, &strip)
+		&& pass->ctx->mp_match_selection_signature == signature)
+		return (0);
+	if (!regions_prepare(pass))
+		return (-1);
+	if (!region_restage(pass, &strip))
+	{
+		clear_rect(pass->pixels, pass->width, pass->height, &strip);
+		draw_selection_panel(pass->pixels, pass->width, pass->height, &strip);
+		draw_selection_timer(pass->ctx, pass->pixels, pass->width,
+			pass->height, pass->state);
+	}
+	if (!create_region_plane(pass->ctx, pass->pixels, pass->width,
+			pass->height, &strip, &pass->ctx->mp_match_selection_plane))
+		return (-1);
+	pass->ctx->mp_match_selection_signature = signature;
+	return (1);
 }
 
 static int regions_loadout(t_match_regions *pass)
@@ -1074,11 +1443,14 @@ static int regions_loadout(t_match_regions *pass)
 	int										hovered;
 
 	signature = loadout_signature(pass->state);
-	if (!pass->force && pass->ctx->mp_match_loadout_signature == signature)
+	if (!region_restage_pair(pass, &pass->layout->loadout,
+			&pass->layout->ability_bar)
+		&& pass->ctx->mp_match_loadout_signature == signature)
 		return (0);
 	if (!regions_prepare(pass))
 		return (-1);
-	if (!pass->force)
+	if (!region_restage_pair(pass, &pass->layout->loadout,
+			&pass->layout->ability_bar))
 	{
 		clear_rect(pass->pixels, pass->width, pass->height,
 			&pass->layout->loadout);
@@ -1126,12 +1498,14 @@ static int regions_opponent_loadout(t_match_regions *pass)
 		|| pass->layout->opponent_loadout.width <= 0)
 		return (0);
 	signature = opponent_loadout_signature(pass->state);
-	if (!pass->force
+	if (!region_restage_pair(pass, &pass->layout->opponent_loadout,
+			&pass->layout->opponent_ability_bar)
 		&& pass->ctx->mp_match_opponent_loadout_signature == signature)
 		return (0);
 	if (!regions_prepare(pass))
 		return (-1);
-	if (!pass->force)
+	if (!region_restage_pair(pass, &pass->layout->opponent_loadout,
+			&pass->layout->opponent_ability_bar))
 	{
 		clear_rect(pass->pixels, pass->width, pass->height,
 			&pass->layout->opponent_loadout);
@@ -1318,11 +1692,12 @@ static int regions_hud(t_match_regions *pass)
 	uint64_t signature;
 
 	signature = hud_signature(pass->state);
-	if (!pass->force && pass->ctx->mp_match_hud_signature == signature)
+	if (!region_restage(pass, &pass->layout->hud)
+		&& pass->ctx->mp_match_hud_signature == signature)
 		return (0);
 	if (!regions_prepare(pass))
 		return (-1);
-	if (!pass->force)
+	if (!region_restage(pass, &pass->layout->hud))
 	{
 		clear_rect(pass->pixels, pass->width, pass->height,
 			&pass->layout->hud);
@@ -1507,7 +1882,7 @@ static bool create_region_plane(t_render_ctx *ctx, uint32_t *pixels,
 
 static void destroy_region_planes(t_render_ctx *ctx)
 {
-	struct ncplane **planes[9];
+	struct ncplane **planes[10];
 	int index;
 
 	if (ctx == NULL)
@@ -1521,8 +1896,9 @@ static void destroy_region_planes(t_render_ctx *ctx)
 	planes[6] = &ctx->mp_match_caption_plane;
 	planes[7] = &ctx->mp_match_opponent_loadout_plane;
 	planes[8] = &ctx->mp_match_opponent_ability_plane;
+	planes[9] = &ctx->mp_match_selection_plane;
 	index = 0;
-	while (index < 9)
+	while (index < 10)
 	{
 		if (*planes[index] != NULL)
 			ncplane_destroy(*planes[index]);
@@ -1542,13 +1918,43 @@ static void destroy_region_planes(t_render_ctx *ctx)
 		ctx->mp_match_opponent_band_signatures[index] = 0;
 		index++;
 	}
+	ctx->mp_match_selection_signature = 0;
 	ctx->mp_match_opponent_due_ms = 0;
 }
+
+/*
+** Whether this region owes the terminal a plane although its content stands.
+**
+** A rebuild owes every one of them; a notification card owes the ones it
+** overlapped. Both mean the canvas is already right and only the transfer is
+** missing, so both answer here and every region asks one question.
+*/
+static bool region_restage(const t_match_regions *pass, const t_mp_rect *rect)
+{
+	if (pass->force)
+		return (true);
+	if (!pass->damaged || rect == NULL)
+		return (false);
+	return (pass->damage.x < rect->x + rect->width
+		&& rect->x < pass->damage.x + pass->damage.width
+		&& pass->damage.y < rect->y + rect->height
+		&& rect->y < pass->damage.y + pass->damage.height);
+}
+
+/* For the two regions drawn as one and cut into two planes. */
+static bool region_restage_pair(const t_match_regions *pass,
+	const t_mp_rect *first, const t_mp_rect *second)
+{
+	return (region_restage(pass, first) || region_restage(pass, second));
+}
+
 
 static uint64_t match_signature(const t_mp_match_state *state,
 	int width, int height)
 {
+	int cards[MP_ARENA_SEATS];
 	uint64_t hash;
+	uint64_t arena;
 	int opponents;
 	int seconds;
 
@@ -1566,6 +1972,7 @@ static uint64_t match_signature(const t_mp_match_state *state,
 	hash = hash_bytes(hash, &state->target_mode, sizeof(state->target_mode));
 	hash = hash_bytes(hash, &state->players_total,
 		sizeof(state->players_total) * 5);
+	hash = hash_bytes(hash, &state->local_rank, sizeof(state->local_rank));
 	hash = hash_bytes(hash, &state->local_game.board,
 		sizeof(state->local_game.board));
 	hash = hash_bytes(hash, &state->local_game.active,
@@ -1584,10 +1991,15 @@ static uint64_t match_signature(const t_mp_match_state *state,
 		sizeof(state->opponent_game.phase));
 	hash = hash_bytes(hash, &state->opponent_game.scoring,
 		sizeof(state->opponent_game.scoring));
-	opponents = clamp_int(state->players_total - 1, 0,
-		APP_ROOM_MAX_PLAYERS - 1);
-	hash = hash_bytes(hash, state->opponents,
-		(size_t)opponents * sizeof(state->opponents[0]));
+	/*
+	 * The occupied seats, not the first players_total of them: the array is
+	 * indexed by seat and the seats a room hands out start at 1, so a prefix
+	 * of it is holes at one end and unread cards at the other - and a rival
+	 * whose card changed in one of those would never dirty the frame.
+	 */
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
+	arena = opponents_signature(state, cards, opponents);
+	hash = hash_bytes(hash, &arena, sizeof(arena));
 	return (hash_bytes(hash, state->status, strlen(state->status)));
 }
 
@@ -1736,6 +2148,7 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 	hash = hash_bytes(hash, &state->players_alive,
 		sizeof(state->players_alive));
 	hash = hash_bytes(hash, &state->ko_count, sizeof(state->ko_count));
+	hash = hash_bytes(hash, &state->local_rank, sizeof(state->local_rank));
 	hash = hash_bytes(hash, &state->incoming_attackers,
 		sizeof(state->incoming_attackers));
 	/* The standing effect line lives in this region, so it dirties it. */
@@ -1745,18 +2158,55 @@ static uint64_t hud_signature(const t_mp_match_state *state)
 			sizeof(state->local_game.scoring.total)));
 }
 
+/*
+** Over the cards this side draws, in the order it draws them - so a card that
+** moved between the sides changes both signatures, and a seat that emptied
+** changes the one that held it. Hashing a byte range of the array cannot say
+** either now that the array is indexed by seat: the range is mostly holes.
+**
+** Field by field, and never the struct's bytes. A struct has padding in it,
+** and padding is not a value: two identical arenas can differ in it, which
+** would redraw a side that had not changed, and the compiler is free to leave
+** it holding whatever was there before.
+*/
 static uint64_t opponents_signature(const t_mp_match_state *state,
-	int first, int count)
+	const int *cards, int count)
 {
 	uint64_t hash;
+	int index;
 
 	hash = 1469598103934665603ULL;
-	if (count <= 0 || first < 0 || first >= APP_ROOM_MAX_PLAYERS - 1)
-		return (hash);
-	if (first + count > APP_ROOM_MAX_PLAYERS - 1)
-		count = APP_ROOM_MAX_PLAYERS - 1 - first;
-	return (hash_bytes(hash, &state->opponents[first],
-			(size_t)count * sizeof(state->opponents[0])));
+	index = 0;
+	while (index < count)
+	{
+		hash = hash_bytes(hash, &cards[index], sizeof(cards[index]));
+		hash = card_signature(hash, &state->opponents[cards[index]]);
+		index++;
+	}
+	return (hash);
+}
+
+/*
+** One card, in the fields that decide how it is drawn: the board, whether it
+** is alive, whether it is outlined, and the three numbers written on it. The
+** name is hashed as the string it is rather than as the buffer that holds it.
+*/
+static uint64_t card_signature(uint64_t hash,
+	const struct s_mp_opponent_snapshot *card)
+{
+	hash = hash_bytes(hash, &card->board, sizeof(card->board));
+	hash = hash_bytes(hash, &card->present, sizeof(card->present));
+	hash = hash_bytes(hash, &card->alive, sizeof(card->alive));
+	hash = hash_bytes(hash, &card->targeting_local,
+			sizeof(card->targeting_local));
+	hash = hash_bytes(hash, &card->targeted_by_local,
+			sizeof(card->targeted_by_local));
+	hash = hash_bytes(hash, &card->garbage_pending,
+			sizeof(card->garbage_pending));
+	hash = hash_bytes(hash, &card->ko, sizeof(card->ko));
+	hash = hash_bytes(hash, &card->rank, sizeof(card->rank));
+	hash = hash_bytes(hash, &card->lines, sizeof(card->lines));
+	return (hash_bytes(hash, card->name, strlen(card->name)));
 }
 
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size)
@@ -1865,23 +2315,15 @@ static void compose_selection(t_render_ctx *ctx, uint32_t *pixels,
 	char line[APP_ABILITY_TEXT_MAX];
 	int index;
 	int y;
-	int seconds;
 
-	seconds = mp_match_character_seconds(state);
-	stage.width = min_int(width * 78 / 100, 1320);
-	stage.height = min_int(height * 64 / 100, 760);
-	stage.x = (width - stage.width) / 2;
-	stage.y = (height - stage.height) / 2 + 28;
+	selection_stage(width, height, &stage);
 	mp_match_pixel_fill_rect(pixels, width, height, &stage, g_panel, 220);
 	mp_match_pixel_outline_rect(pixels, width, height, &stage, 4, g_pink, 220);
 	text = (t_mp_rect){stage.x, max_int(28, stage.y - 104),
 		stage.width, 58};
 	mp_match_pixel_draw_text_box(ctx, pixels, width, height, "CHOOSE YOUR CHARACTER",
 		&text, 31, g_pink, true);
-	bar = (t_mp_rect){stage.x, stage.y - 25,
-		stage.width * state->selection.remaining_ms / MP_CHARACTER_SELECT_MS, 9};
-	mp_match_pixel_fill_rect(pixels, width, height, &bar,
-		seconds <= 5 ? g_red : g_gold, 255);
+	draw_selection_timer(ctx, pixels, width, height, state);
 	portrait.width = stage.width * 43 / 100;
 	portrait.height = stage.height - 70;
 	portrait.x = stage.x + 35;
@@ -1894,12 +2336,6 @@ static void compose_selection(t_render_ctx *ctx, uint32_t *pixels,
 			portrait.width - 24, portrait.height - 24};
 		mp_match_pixel_draw_portrait(ctx, 0, pixels, width, height, &image);
 	}
-	text = (t_mp_rect){stage.x + stage.width * 50 / 100, stage.y + 34,
-		stage.width * 45 / 100, 72};
-	snprintf(line, sizeof(line), state->selection.locked ? "LOCKED   %02d" : "%02d",
-		seconds);
-	mp_match_pixel_draw_text_box(ctx, pixels, width, height, line, &text, 42,
-		seconds <= 5 ? g_red : g_gold, true);
 	if (character != NULL)
 	{
 		text = (t_mp_rect){stage.x + stage.width * 50 / 100,
@@ -1960,6 +2396,7 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_match_state *state)
 {
 	t_mp_match_pixel_layout layout;
+	int cards[MP_ARENA_SEATS];
 	int opponents;
 	int left_count;
 
@@ -1969,13 +2406,12 @@ static void compose_battle(t_render_ctx *ctx, uint32_t *pixels,
 	draw_ability_bar(ctx, pixels, width, height, &layout, state);
 	draw_game_board(ctx, pixels, width, height, &layout.local_board,
 		&state->local_game, "", true);
-	opponents = clamp_int(state->players_total - 1, 0,
-		APP_ROOM_MAX_PLAYERS - 1);
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
 	left_count = (opponents + 1) / 2;
 	draw_opponent_region(ctx, pixels, width, height, &layout.left_opponents,
-		state, 0, left_count);
+		state, cards, left_count);
 	draw_opponent_region(ctx, pixels, width, height, &layout.right_opponents,
-		state, left_count, opponents - left_count);
+		state, cards + left_count, opponents - left_count);
 }
 
 static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -1996,9 +2432,22 @@ static void draw_match_hud(t_render_ctx *ctx, uint32_t *pixels, int width,
 	{
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "BATTLE ROYALE",
 			&text, 29, g_pink, true);
-		snprintf(line, sizeof(line), "SCORE %010" PRIu64
-			"     ALIVE %d/%d     K.O. %02d", state->local_game.scoring.total,
-			state->players_alive, state->players_total, state->ko_count);
+		/*
+		 * Out of the match and still in the room. The placing is a fact from
+		 * the moment it is taken, so it is drawn then rather than held back
+		 * for the result screen - a dead board with a live score counter on
+		 * it was the screen saying nothing at all.
+		 */
+		if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+			snprintf(line, sizeof(line),
+				"SPECTATING  #%d     ALIVE %d/%d     K.O. %02d",
+				state->local_rank, state->players_alive, state->players_total,
+				state->ko_count);
+		else
+			snprintf(line, sizeof(line), "SCORE %010" PRIu64
+				"     ALIVE %d/%d     K.O. %02d",
+				state->local_game.scoring.total,
+				state->players_alive, state->players_total, state->ko_count);
 		text.y += 48;
 		score_backdrop.width = min_int(text.width, max_int(620, width * 42 / 100));
 		score_backdrop.x = (width - score_backdrop.width) / 2;
@@ -2440,32 +2889,107 @@ static void draw_snapshot_board(t_render_ctx *ctx, uint32_t *pixels,
 {
 	t_mp_rect frame;
 	t_mp_rect title;
+	t_color edge;
 	char label[APP_TEXT_MAX];
 
+	edge = card_edge(opponent);
+	/*
+	 * Two of the three edges are about *this* player - who is attacking them
+	 * and who they have singled out - and at thumbnail size a three-pixel
+	 * outline in a different colour is not a thing anybody notices. So the
+	 * two that matter get a second ring outside the first: the width is what
+	 * carries across a screen of ninety-eight cards, and the colour is only
+	 * what says which of the two it is.
+	 */
+	if (opponent->targeting_local || opponent->targeted_by_local)
+	{
+		frame = (t_mp_rect){rect->x - MP_MATCH_CARD_MARK_PX,
+			rect->y - MP_MATCH_CARD_MARK_PX,
+			rect->width + MP_MATCH_CARD_MARK_PX * 2,
+			rect->height + MP_MATCH_CARD_MARK_PX * 2};
+		mp_match_pixel_draw_panel(pixels, width, height, &frame, edge, 255);
+	}
 	frame = (t_mp_rect){rect->x - 3, rect->y - 3,
 		rect->width + 6, rect->height + 6};
-	mp_match_pixel_draw_panel(pixels, width, height, &frame,
-		opponent->targeting_local ? g_red : g_lavender, 235);
+	mp_match_pixel_draw_panel(pixels, width, height, &frame, edge, 235);
 	mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 255);
-	if (opponent->alive)
-		draw_board_cells(ctx, pixels, width, height, rect,
-			&opponent->board, NULL, NULL);
+	/*
+	 * A dead board is drawn and then knocked back, rather than not drawn. The
+	 * silhouette is how a player reads the room they are surviving - who was
+	 * buried and how far they got - and a blank square says only that
+	 * somebody used to be there.
+	 */
+	draw_board_cells(ctx, pixels, width, height, rect,
+		&opponent->board, NULL, NULL);
+	if (!opponent->alive)
+		mp_match_pixel_fill_rect(pixels, width, height, rect, g_dark, 170);
 	if (!compact || rect->width >= 55)
 	{
-		snprintf(label, sizeof(label), opponent->alive ? "#%02d" : "#%02d KO",
-			player);
+		snprintf(label, sizeof(label), "#%02d", player);
 		title = (t_mp_rect){rect->x - 4, rect->y - 22,
 			rect->width + 8, 18};
 		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &title,
 			10, opponent->alive ? g_green : g_red, true);
 	}
+	draw_card_mark(ctx, pixels, width, height, rect, opponent);
+}
+
+/*
+** The one number a card is worth writing on, and which one it is depends on
+** whether the board is still being played.
+**
+** A live card owes rows and shows them: the pending count is the only thing on
+** a thumbnail that changes what the player does next. A dead one cannot owe
+** anything, so the same place carries its placing - and the placing arrives
+** the moment it is taken rather than at the end of the match, so a card can be
+** drawn dead and numbered in the same push.
+**
+** The badge goes over the board rather than beside it. A thumbnail has no
+** beside, this is the one place in the arena where legibility beats fidelity,
+** and the board underneath has finished changing anyway.
+*/
+static void draw_card_mark(t_render_ctx *ctx, uint32_t *pixels, int width,
+	int height, const t_mp_rect *rect,
+	const struct s_mp_opponent_snapshot *opponent)
+{
+	t_mp_rect box;
+	char label[APP_TEXT_MAX];
+
 	if (!opponent->alive)
 	{
-		title = (t_mp_rect){rect->x, rect->y + rect->height / 2 - 12,
+		box = (t_mp_rect){rect->x, rect->y + rect->height / 2 - 12,
 			rect->width, 24};
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "KO", &title,
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, "K.O.", &box,
 			14, g_red, true);
+		if (opponent->rank <= 0 || rect->width < 40)
+			return ;
+		snprintf(label, sizeof(label), "#%d", opponent->rank);
+		box = (t_mp_rect){rect->x, rect->y + rect->height - 18,
+			rect->width, 16};
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
+			10, g_lavender, true);
+		return ;
 	}
+	if (opponent->garbage_pending <= 0 || rect->width < 40)
+		return ;
+	snprintf(label, sizeof(label), "+%d", opponent->garbage_pending);
+	box = (t_mp_rect){rect->x, rect->y + rect->height - 18, rect->width, 16};
+	mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
+		10, g_red, true);
+}
+
+/*
+** Red for a rival attacking you, gold for one your mode has singled out, and
+** the ordinary lavender for everybody else. The two that are about you are the
+** two the arena is per-recipient for.
+*/
+static t_color card_edge(const struct s_mp_opponent_snapshot *opponent)
+{
+	if (opponent->targeting_local)
+		return (g_red);
+	if (opponent->targeted_by_local)
+		return (g_gold);
+	return (g_lavender);
 }
 
 static void draw_board_cells(t_render_ctx *ctx, uint32_t *pixels, int width,
@@ -2839,7 +3363,7 @@ static bool load_tile_atlas(t_render_ctx *ctx)
 
 static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 	int width, int height, const t_mp_rect *rect,
-	const t_mp_match_state *state, int first, int count)
+	const t_mp_match_state *state, const int *cards, int count)
 {
 	t_mp_rect board;
 	int columns;
@@ -2858,7 +3382,7 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 		(slot_height - 28) / BOARD_HEIGHT);
 	tile = max_int(1, tile);
 	index = 0;
-	while (index < count && first + index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < count)
 	{
 		board.width = tile * BOARD_WIDTH;
 		board.height = tile * BOARD_HEIGHT;
@@ -2867,7 +3391,7 @@ static void draw_opponent_region(t_render_ctx *ctx, uint32_t *pixels,
 		board.y = rect->y + (index / columns) * slot_height
 			+ max_int(22, (slot_height - board.height) / 2);
 		draw_snapshot_board(ctx, pixels, width, height, &board,
-			&state->opponents[first + index], first + index + 2,
+			&state->opponents[cards[index]], cards[index],
 			tile <= 2);
 		index++;
 	}
@@ -2905,8 +3429,9 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 {
 	const char *labels[4] = {"W KOs", "A RANDOMS", "S ATTACKERS", "D BADGES"};
 	t_target_mode modes[4] = {TARGET_KO, TARGET_RANDOM,
-		TARGET_ATTACKERS, TARGET_TOP_SCORE};
+		TARGET_ATTACKERS, TARGET_BADGES};
 	t_mp_rect box;
+	char label[APP_TEXT_MAX];
 	int box_width;
 	int index;
 
@@ -2926,7 +3451,18 @@ static void draw_targeting(t_render_ctx *ctx, uint32_t *pixels, int width,
 			state->target_mode == modes[index] ? 225 : 150);
 		box.x += 6;
 		box.width -= 12;
-		mp_match_pixel_draw_text_box(ctx, pixels, width, height, labels[index], &box,
+		/*
+		 * Only the selected mode carries its count, and Randoms never does:
+		 * its set is everybody, so a number beside it would be the head count
+		 * written twice.
+		 */
+		if (state->target_mode == modes[index]
+			&& modes[index] != TARGET_RANDOM)
+			snprintf(label, sizeof(label), "%s (%d)", labels[index],
+				mp_match_target_candidates(state));
+		else
+			snprintf(label, sizeof(label), "%s", labels[index]);
+		mp_match_pixel_draw_text_box(ctx, pixels, width, height, label, &box,
 			13, state->target_mode == modes[index] ? g_gold : g_lavender,
 			true);
 		index++;

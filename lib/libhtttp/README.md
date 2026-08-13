@@ -142,6 +142,7 @@ client-initiated request/response. Auth means a non-empty `Player-Id` header.
 | `START` | `/room/<id>` | ✓ | Owner starts the game |
 | `READY` | `/room/<id>` | ✓ | Declare or withdraw readiness for a match, and name the fighter to play it with |
 | `CHAT` | `/room/<id>` | ✓ | Broadcast a room message |
+| `TARGET` | `/room/<id>` | ✓ | Battle Royale — declare which kind of rival this player's garbage goes to (`mode random\|ko\|attackers\|badges`) |
 | `MOVE` | `/room/<id>/player/<pid>` | ✓ | Translate the falling piece |
 | `ROTATE` | `/room/<id>/player/<pid>` | ✓ | Rotate the falling piece |
 | `DROP` | `/room/<id>/player/<pid>` | ✓ | Soft or hard drop |

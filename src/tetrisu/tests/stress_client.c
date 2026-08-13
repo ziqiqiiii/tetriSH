@@ -42,7 +42,8 @@ static void		play_until(const t_stress_plan *plan, t_net_client *bots,
 					int count, t_stress_report *report, uint64_t deadline);
 static void		one_action(t_net_client *net, t_stress_report *report,
 					uint32_t *seed);
-static bool		match_is_over(const t_net_client *bots, int count);
+static bool		match_is_over(const t_net_client *bots, int count,
+					t_stress_mode mode);
 static void		record(t_stress_report *report, uint64_t started_us);
 static void		fail(t_stress_report *report, const char *what);
 static void		merge(t_stress_report *total, const t_stress_report *one);
@@ -106,6 +107,44 @@ int	main(int argc, char **argv)
  * @param plan Receives the run to perform.
  * @return 0 on success, -1 when an argument was not understood.
  */
+/**
+ * @brief How many bots one worker process holds.
+ *
+ * Double is a room of two and Single is a room of one, so a fleet of those is
+ * many small rooms and one process each. A Battle Royale is the opposite
+ * shape: its cost is that every seat is sent every other seat, so spreading
+ * the players over rooms would measure a load the mode never puts on anything.
+ * The whole fleet goes in one room, which makes it one worker.
+ *
+ * @param plan The run being performed.
+ * @return Seats per worker.
+ */
+static int	plan_seats(const t_stress_plan *plan)
+{
+	if (plan->mode == STRESS_MODE_BATTLE_ROYALE)
+	{
+		if (plan->players > STRESS_MAX_SEATS)
+			return (STRESS_MAX_SEATS);
+		return (plan->players);
+	}
+	return (1 + (plan->mode == STRESS_MODE_DOUBLE));
+}
+
+/**
+ * @brief Names a mode for the report.
+ *
+ * @param mode The mode to name.
+ * @return Its name.
+ */
+static const char	*plan_mode_name(t_stress_mode mode)
+{
+	if (mode == STRESS_MODE_SINGLE)
+		return ("single");
+	if (mode == STRESS_MODE_BATTLE_ROYALE)
+		return ("battle royale");
+	return ("double");
+}
+
 static int	parse_plan(int argc, char **argv, t_stress_plan *plan)
 {
 	int	index;
@@ -119,8 +158,15 @@ static int	parse_plan(int argc, char **argv, t_stress_plan *plan)
 	while (index < argc)
 	{
 		if (strcmp(argv[index], "--mode") == 0 && index + 1 < argc)
-			plan->mode = (strcmp(argv[++index], "single") == 0)
-				? STRESS_MODE_SINGLE : STRESS_MODE_DOUBLE;
+		{
+			index++;
+			if (strcmp(argv[index], "single") == 0)
+				plan->mode = STRESS_MODE_SINGLE;
+			else if (strcmp(argv[index], "br") == 0)
+				plan->mode = STRESS_MODE_BATTLE_ROYALE;
+			else
+				plan->mode = STRESS_MODE_DOUBLE;
+		}
 		else if (strcmp(argv[index], "--players") == 0 && index + 1 < argc)
 			plan->players = atoi(argv[++index]);
 		else if (strcmp(argv[index], "--seconds") == 0 && index + 1 < argc)
@@ -146,11 +192,13 @@ static int	parse_plan(int argc, char **argv, t_stress_plan *plan)
  */
 static void	usage(const char *program)
 {
-	printf("usage: %s [--mode double|single] [--players N] [--seconds S]\n",
-		program);
+	printf("usage: %s [--mode double|single|br] [--players N] "
+		"[--seconds S]\n", program);
 	printf("       [--rate ACTIONS_PER_SECOND] [--ramp-ms MS]\n\n");
 	printf("  double  two bots per process, one Double room each\n");
 	printf("  single  one bot per process - N simultaneous handshakes\n");
+	printf("  br      every bot in one Battle Royale room, which is the "
+		"only\n          shape that costs what the arena costs\n");
 	printf("  the server's address comes from TETRISU_HOST / TETRISU_PORT\n");
 }
 
@@ -173,7 +221,7 @@ static int	run_workers(const t_stress_plan *plan, t_stress_report *total)
 	int		index;
 	pid_t	pid;
 
-	seats = 1 + (plan->mode == STRESS_MODE_DOUBLE);
+	seats = plan_seats(plan);
 	workers = (plan->players + seats - 1) / seats;
 	if (pipe(fds) != 0)
 		return (perror("pipe"), 1);
@@ -252,7 +300,7 @@ static void	worker(const t_stress_plan *plan, int index, int out_fd)
 	int				seats;
 	int				seat;
 
-	seats = 1 + (plan->mode == STRESS_MODE_DOUBLE);
+	seats = plan_seats(plan);
 	memset(bots, 0, sizeof(bots));
 	memset(&report, 0, sizeof(report));
 	report.bots = (uint32_t)seats;
@@ -348,7 +396,9 @@ static int	bots_seat(const t_stress_plan *plan, t_net_client *bots,
 		report->seated++;
 		return (0);
 	}
-	if (net_request(&bots[0], "JOIN", TETRISU_ROUTE_ROOMS, "mode double\n",
+	if (net_request(&bots[0], "JOIN", TETRISU_ROUTE_ROOMS,
+			plan->mode == STRESS_MODE_BATTLE_ROYALE
+			? "mode br\n" : "mode double\n",
 			&result) != 0 || result.status != 201
 		|| net_result_field(&result, "room", room, sizeof(room)) == NULL)
 		return (fail(report, "open room"), -1);
@@ -433,6 +483,7 @@ static int	deal_double(t_net_client *bots, int count, t_stress_report *report)
 {
 	t_net_result	result;
 	char			path[NET_PATH_MAX];
+	char			note[STRESS_NOTE_MAX];
 	int				index;
 
 	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, bots[0].room);
@@ -446,9 +497,29 @@ static int	deal_double(t_net_client *bots, int count, t_stress_report *report)
 			return (fail(report, "rejoin"), -1);
 		index++;
 	}
-	if (net_request(&bots[0], "START", path, NULL, &result) != 0
-		|| result.status != 200)
-		return (fail(report, "start"), -1);
+	/*
+	 * Retried, because the verdict reaches the client before the room is
+	 * ready to be started again. advance_and_push sends the frame carrying
+	 * the result and record_and_reset returns the seats on the same tick but
+	 * after it - so a bot that starts the moment it sees the verdict is
+	 * asking a room that is still IN_GAME, and is told 409 already-started.
+	 * Waiting for a tick to pass is the bot's problem and not the server's.
+	 */
+	index = 0;
+	while (index < STRESS_START_TRIES)
+	{
+		if (net_request(&bots[0], "START", path, NULL, &result) == 0
+			&& result.status == 200)
+			break ;
+		nap_us(60000);
+		index++;
+	}
+	if (index == STRESS_START_TRIES)
+	{
+		snprintf(note, sizeof(note), "start %d %.24s", result.status,
+			result.reason);
+		return (fail(report, note), -1);
+	}
 	index = 0;
 	while (index < count)
 		if (lock_in(&bots[index++]) != 0)
@@ -543,12 +614,16 @@ static void	play_until(const t_stress_plan *plan, t_net_client *bots,
 				return ;
 			}
 			if (bots[index].last_seq > seen[index])
+			{
 				report->frames += (uint32_t)(bots[index].last_seq
 						- seen[index]);
+				if (bots[index].state_snapshot.arena_present)
+					report->arenas++;
+			}
 			seen[index] = bots[index].last_seq;
 			index++;
 		}
-		if (match_is_over(bots, count))
+		if (match_is_over(bots, count, plan->mode))
 		{
 			report->matches++;
 			memset(seen, 0, sizeof(seen));
@@ -613,7 +688,8 @@ static void	one_action(t_net_client *net, t_stress_report *report,
  * @param count How many of them.
  * @return true when a verdict or a top-out has arrived, false otherwise.
  */
-static bool	match_is_over(const t_net_client *bots, int count)
+static bool	match_is_over(const t_net_client *bots, int count,
+			t_stress_mode mode)
 {
 	int	index;
 
@@ -621,8 +697,21 @@ static bool	match_is_over(const t_net_client *bots, int count)
 	while (index < count)
 	{
 		if (bots[index].has_state
-			&& (bots[index].state_snapshot.result != BODY_RESULT_NONE
-				|| bots[index].state_snapshot.phase == BODY_PHASE_TOP_OUT))
+			&& bots[index].state_snapshot.result != BODY_RESULT_NONE)
+			return (true);
+		/*
+		 * A topped-out board is the end of a Double match and is not the end
+		 * of a Battle Royale - the player watches the rest of it, which is the
+		 * whole of D10. Reading it as the end had the fleet ask for a new
+		 * match the moment the first of twenty-four bots died, and be told 409
+		 * already-started for as long as the real match lasted.
+		 *
+		 * The verdict above is the only answer that means the match is over,
+		 * in every mode: it is a fact about who else is left and nothing on
+		 * the board says it.
+		 */
+		if (mode != STRESS_MODE_BATTLE_ROYALE && bots[index].has_state
+			&& bots[index].state_snapshot.phase == BODY_PHASE_TOP_OUT)
 			return (true);
 		index++;
 	}
@@ -689,6 +778,7 @@ static void	merge(t_stress_report *total, const t_stress_report *one)
 	total->refused += one->refused;
 	total->errors += one->errors;
 	total->frames += one->frames;
+	total->arenas += one->arenas;
 	total->connect_ms_total += one->connect_ms_total;
 	total->latency_us_total += one->latency_us_total;
 	if (one->connect_ms_max > total->connect_ms_max)
@@ -721,7 +811,7 @@ static void	print_report(const t_stress_plan *plan,
 
 	seconds = (double)wall_ms / 1000.0;
 	printf("\n%d players, %s, %d s at %d actions/s each\n\n", plan->players,
-		plan->mode == STRESS_MODE_SINGLE ? "single" : "double",
+		plan_mode_name(plan->mode),
 		plan->seconds, plan->actions_per_second);
 	printf("  connected     %u/%u   handshake avg %.0f ms   max %u ms\n",
 		total->connected, total->bots, total->connected == 0 ? 0.0
@@ -741,6 +831,10 @@ static void	print_report(const t_stress_plan *plan,
 		percentile_us(total, 990) / 1000.0, total->latency_us_max / 1000.0);
 	printf("  state frames  %u   %.0f/s\n", total->frames,
 		seconds > 0.0 ? total->frames / seconds : 0.0);
+	if (plan->mode == STRESS_MODE_BATTLE_ROYALE)
+		printf("  arena pushes  %u   %.1f/s per client   %u cards each\n",
+			total->arenas, seconds > 0.0 && total->bots > 0
+			? total->arenas / seconds / total->bots : 0.0, total->bots);
 	printf("  errors        %u%s%s\n\n", total->errors,
 		total->note[0] != '\0' ? "   first: " : "", total->note);
 }

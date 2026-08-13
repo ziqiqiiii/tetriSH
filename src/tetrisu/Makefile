@@ -11,6 +11,7 @@
 # `make -C src/tetrisu [test|run]` works without the umbrella.
 
 NAME		:= tetrisu
+BOT_NAME	:= tetrisu-bot
 CC			:= gcc
 BASE_FLAGS	:= -std=c11 -Wall -Wextra -Werror -pedantic -D_POSIX_C_SOURCE=200809L
 RM			:= rm -rf
@@ -38,10 +39,13 @@ UNAME		:= $(shell uname -s)
 export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:$(PKG_CONFIG_PATH)
 
 # Homebrew keeps each formula's pkg-config metadata under its own opt/ prefix.
+# openssl is keg-only there — its libraries are not on the linker's default
+# search path at all — so its .pc file is what turns -lssl into a -L that
+# resolves.
 ifeq ($(UNAME), Darwin)
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ifneq ($(BREW_PREFIX),)
-export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(PKG_CONFIG_PATH)
+export PKG_CONFIG_PATH := $(BREW_PREFIX)/opt/notcurses/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2/lib/pkgconfig:$(BREW_PREFIX)/opt/sdl2_mixer/lib/pkgconfig:$(BREW_PREFIX)/opt/ncurses/lib/pkgconfig:$(BREW_PREFIX)/opt/openssl@3/lib/pkgconfig:$(BREW_PREFIX)/opt/openssl/lib/pkgconfig:$(PKG_CONFIG_PATH)
 endif
 endif
 
@@ -53,9 +57,11 @@ SRC_DIR		:= src
 OBJ_DIR		:= obj
 BIN_DIR		:= bin
 NAME_PATH	:= $(BIN_DIR)/$(NAME)
+BOT_PATH	:= $(BIN_DIR)/$(BOT_NAME)
 
 HEADER		:= tetrisu.h
 NET_HEADER	:= tetrisu_net.h
+BOT_HEADER	:= tetrisu_bot.h
 ASSET_DIR	:= $(CURDIR)/assets
 
 # libtetrisbrain is local prediction and the shared piece/board types; the
@@ -82,19 +88,32 @@ AUDIO_CFLAGS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; th
 AUDIO_LIBS		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then $(PKG_CONFIG) --libs $(AUDIO_DEPS); fi)
 AUDIO_DEFINE		 = $(shell if $(PKG_CONFIG) --exists $(AUDIO_DEPS) 2>/dev/null; then printf '%s' -DTETRISU_ENABLE_AUDIO=1; else printf '%s' -DTETRISU_ENABLE_AUDIO=0; fi)
 
-# DEPFLAGS records each object's real includes, so a CoreStack header changing
-# a struct rebuilds every object holding one instead of leaving stale ones.
+# OpenSSL the same way libtetrissh asks for it: pkg-config first, bare -l flags
+# as the fallback on a distribution that keeps it on the default paths. Asking
+# pkg-config is not decoration — on Homebrew the library lives under a keg the
+# linker does not search, and the bare flags alone fail with `library 'ssl' not
+# found`.
+OPENSSL_LIBS		 = $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null || printf '%s' "-lssl -lcrypto")
+
+# Header search path + generated defines shared by every target.
+# DEPFLAGS makes each object record the headers it actually included, so a
+# CoreStack header that changes the shape of a struct rebuilds every object
+# holding one instead of leaving stale ones to be linked against fresh code.
 INC			:= -I. $(LIB_INC)
 DEPFLAGS	:= -MMD -MP
 FLAGS		 = $(BASE_FLAGS) $(INC) $(NOTCURSES_CFLAGS) $(AUDIO_CFLAGS) $(AUDIO_DEFINE) -DASSET_DIR=\"$(ASSET_DIR)\" -DTETRISU_BIN_PATH=\"$(NAME_PATH)\"
-LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) -lssl -lcrypto -lpthread
+LDLIBS		 = $(NOTCURSES_LIBS) $(AUDIO_LIBS) $(OPENSSL_LIBS) -lpthread
 
 ################################################################################
 #                                  SOURCES                                     #
 ################################################################################
 
 # Binary : every .c under src/            -> bin/tetrisu
-SRC			:= $(wildcard $(SRC_DIR)/*.c)
+#
+# bot_main.c is the one exception: it carries a main() of its own, so leaving
+# it in would link two into tetrisu. It is the entry point of the second
+# binary below.
+SRC			:= $(filter-out $(SRC_DIR)/bot_main.c, $(wildcard $(SRC_DIR)/*.c))
 OBJ			:= $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 DEP			:= $(OBJ:.o=.d)
 
@@ -116,7 +135,7 @@ LOGIC_LIB	:= $(OBJ_DIR)/logic.a
 #                                   BUILD                                      #
 ################################################################################
 
-all: check-dependencies libs $(NAME_PATH)
+all: check-dependencies libs $(NAME_PATH) $(BOT_PATH)
 
 # A standalone build asks root for shared deps, then handles render/audio here.
 # Root passes DEPS_READY=1 to avoid recursion.
@@ -151,6 +170,28 @@ $(NAME_PATH): $(OBJ) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $(OBJ) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo
 	@ echo "$(GREEN)[Success] $(BLUE)$(NAME)$(CLR_RMV) built ✔️"
+
+# --- tetrisu-bot binary -----------------------------------------------------
+# The opponent a player adds to their own room, as its own process. It links
+# the logic archive and the CoreStack libraries and deliberately not
+# NOTCURSES_LIBS or AUDIO_LIBS: a bot has no screen, and a binary that pulled
+# in a terminal library would be one more thing to install on a machine that
+# only ever wanted to fill a seat.
+#
+# BOT_LDLIBS is therefore LDLIBS without the two render/audio groups. The
+# archive is the same one the unit tests link, so nothing here is a second
+# copy of the network layer.
+#
+# It has to name $(OPENSSL_LIBS) rather than -lssl -lcrypto: dropping the audio
+# group drops the -L that formerly carried OpenSSL in by accident on macOS.
+# Lazily expanded for the same reason the groups above are.
+BOT_LDLIBS	 = $(OPENSSL_LIBS) -lpthread
+
+$(BOT_PATH): $(SRC_DIR)/bot_main.c $(LOGIC_LIB) $(LIB_ARCS) $(BOT_HEADER) $(NET_HEADER)
+	@ mkdir -p $(BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(BOT_LDLIBS) -o $@
+	@ echo "ok"
 
 run: $(NAME_PATH)
 	@ ./$(NAME_PATH)
@@ -217,7 +258,7 @@ $(LOGIC_LIB): $(LOGIC_OBJ)
 	@ ar rcs $@ $(LOGIC_OBJ)
 
 # --- unit test binaries -----------------------------------------------------
-$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER)
+$(TEST_BIN_DIR)/%: $(TESTS_DIR)/%.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(BOT_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
@@ -275,10 +316,32 @@ $(TEST_BIN_DIR)/match_smoke: $(TESTS_DIR)/match_smoke.c $(LOGIC_LIB) $(LIB_ARCS)
 	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
 	@ echo "ok"
 
-# The load generator, deliberately outside `integration`: it reports what the
-# server cost rather than whether it was right, and a fleet of fifty is too
-# slow and too machine-dependent for `make test`. ../../scripts/stress.sh
-# starts a server and drives this against it.
+# Four clients in one Battle Royale. Separate from match_smoke because what it
+# proves is a different channel: Double's rival rides the opponents section at
+# full fidelity, and ninety-eight rivals cannot ride it at all - they ride an
+# arena of thumbnails on a clock of its own, and the things that have to be
+# true of that are about the roster, the filing and the cadence rather than
+# about one board.
+$(TEST_BIN_DIR)/arena_smoke: $(TESTS_DIR)/arena_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# One person and three bots in a Battle Royale, against a live tetrisd. It
+# spawns processes as well as talking to a server, which is why it is a client
+# binary and not a unit test: what it proves is that bot_proc.c's children
+# really do reach a seat, play, and leave when they are let go.
+$(TEST_BIN_DIR)/bots_smoke: $(TESTS_DIR)/bots_smoke.c $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER) $(BOT_HEADER) $(BOT_PATH)
+	@ mkdir -p $(TEST_BIN_DIR)
+	@ printf "$(YELLOW)$<$(CLR_RMV)... "
+	@ $(CC) $(FLAGS) $< $(LOGIC_LIB) $(LIB_ARCS) $(LDLIBS) -o $@
+	@ echo "ok"
+
+# The load generator. Not a test and deliberately not in `integration`: it
+# reports what the server cost rather than whether it was right, and a fleet
+# of fifty is far too slow and far too machine-dependent to sit in `make test`.
+# ../../scripts/stress.sh starts a server and drives this against it.
 $(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.h $(LOGIC_LIB) $(LIB_ARCS) $(HEADER) $(NET_HEADER)
 	@ mkdir -p $(TEST_BIN_DIR)
 	@ printf "$(YELLOW)$<$(CLR_RMV)... "
@@ -287,10 +350,16 @@ $(TEST_BIN_DIR)/stress_client: $(TESTS_DIR)/stress_client.c $(TESTS_DIR)/stress.
 
 stress: $(TEST_BIN_DIR)/stress_client
 
-# The renderer has no automated test: notcurses probes the terminal for
-# capabilities and blocks indefinitely for replies a scripted pty never sends,
-# with no option to skip the probe. `make run` is its verification path. The
-# network layer needs no terminal, so tests/integration/ covers it.
+bot: $(BOT_PATH)
+
+# The renderer has no automated test: notcurses queries the terminal for
+# capabilities (palette, pixel size, Kitty/Sixel support, ...) and blocks
+# indefinitely waiting for replies. A real terminal answers these instantly;
+# a scripted pty (forkpty) does not, and there is no notcurses option to
+# skip the probe. Manual check via `make run` is the verification path.
+#
+# The network layer is a different matter, and is covered: it needs no
+# terminal, so tests/integration/ drives it against a real tetrisd.
 test: unit integration
 
 unit: $(UNIT_BINS)
@@ -300,7 +369,8 @@ unit: $(UNIT_BINS)
 integration: $(TEST_BIN_DIR)/net_smoke $(TEST_BIN_DIR)/net_provider_smoke \
 			 $(TEST_BIN_DIR)/solo_authority_smoke $(TEST_BIN_DIR)/store_smoke \
 			 $(TEST_BIN_DIR)/chat_smoke $(TEST_BIN_DIR)/session_smoke \
-			 $(TEST_BIN_DIR)/match_smoke
+			 $(TEST_BIN_DIR)/match_smoke $(TEST_BIN_DIR)/arena_smoke \
+			 $(TEST_BIN_DIR)/bots_smoke
 	@ echo "\n$(CYAN)==> Running integration tests$(CLR_RMV)"
 	@ $(TEST_RUNNER) integration $(INTEGRATION_SRC)
 
@@ -324,6 +394,6 @@ re: fclean all
 
 .PHONY:		all run deps install-deps install-notcurses-from-source brain libs \
 			check-dependencies check-tetrisu-deps test unit integration \
-			stress clean fclean re FORCE
+			stress bot clean fclean re FORCE
 
 .PRECIOUS:	$(OBJ_DIR)/%.o

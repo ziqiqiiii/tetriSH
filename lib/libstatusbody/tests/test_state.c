@@ -21,6 +21,8 @@ static const char	*g_head = \
 	"clear tetris\n" \
 	"clearing 2 350 18 19\n" \
 	"countdown 0\n" \
+	"pending 0\n" \
+	"effects 0 0 0 0 0 0 0 0\n" \
 	"result none 0\n";
 
 // Static Functions
@@ -28,6 +30,18 @@ static void	make_state(t_body_state *st);
 static void	build_body(char *dst, const char *head, int zero_rows,
 				const char *tail);
 static void	fill_opponent(t_body_opponent *opponent);
+void		test_state_build_body_is_valid(void);
+void		test_state_absent_arena_is_not_an_empty_one(void);
+void		test_state_arena_round_trips_every_card(void);
+void		test_state_arena_cells_survive_the_wire(void);
+void		test_state_arena_cells_are_optional_per_card(void);
+void		test_state_decode_rejects_arena_count_mismatch(void);
+void		test_state_arena_fits_the_derived_cap(void);
+void		test_state_arena_seats_are_numbered_from_one(void);
+static void	fill_card(t_body_arena_slot *card, int slot, bool with_cells);
+static int	card_cell(const t_body_arena_slot *card, int row, int col);
+static void	set_card_cell(t_body_arena_slot *card, int row, int col,
+				int code);
 
 // a full, valid frame matching g_head with an all-empty board
 static void	make_state(t_body_state *st)
@@ -74,6 +88,16 @@ static void	build_body(char *dst, const char *head, int zero_rows,
 		i++;
 	}
 	strcat(dst, "opponents 0\n");
+	/*
+	 * The counts and the arena close every body, so they belong in the helper
+	 * rather than in each caller. Leaving them out would not have shown up as
+	 * a failure: every test built this way is a negative one, so the bodies
+	 * would still have been rejected - for the missing lines rather than for
+	 * the defect the test is named after. test_state_build_body_is_valid is
+	 * what stops that happening again.
+	 */
+	strcat(dst, "counts 1 1\n");
+	strcat(dst, "arena absent 0\n");
 	if (tail)
 		strcat(dst, tail);
 }
@@ -601,5 +625,343 @@ int	main(void)
 	test_state_opponent_board_is_not_the_local_board();
 	test_state_decode_rejects_opponent_count_mismatch();
 	test_state_encode_rejects_unusable_opponent_username();
+	test_state_build_body_is_valid();
+	test_state_absent_arena_is_not_an_empty_one();
+	test_state_arena_seats_are_numbered_from_one();
+	test_state_arena_round_trips_every_card();
+	test_state_arena_cells_survive_the_wire();
+	test_state_arena_cells_are_optional_per_card();
+	test_state_decode_rejects_arena_count_mismatch();
+	test_state_arena_fits_the_derived_cap();
 	return (0);
+}
+
+/*
+** The helper every negative decode test is built on, checked once.
+**
+** Without this, build_body producing an incomplete body is invisible: every
+** test that uses it expects a rejection, so an omission there turns those
+** tests into assertions that a truncated body is rejected - which is true,
+** uninteresting, and not what any of them is named after. This is the only
+** test that asks the helper to succeed.
+*/
+void	test_state_build_body_is_valid(void)
+{
+	t_body_state	st;
+	char			body[8192];
+
+	build_body(body, g_head, BODY_BOARD_ROWS, NULL);
+	assert(body_state_decode(body, strlen(body), &st) == 0);
+	assert(st.seq == 42);
+	assert(st.opponent_count == 0);
+	assert(!st.arena_present);
+	printf("PASS test_state_build_body_is_valid\n");
+}
+
+/*
+** `arena absent` and `arena full 0` are different answers.
+**
+** Absent means the frame says nothing about the arena, which is what almost
+** every frame says, because the arena rides a slower clock than the board.
+** Full 0 means the room is empty. A decoder that collapsed them would have
+** every client wipe a screen full of live cards between pushes.
+*/
+void	test_state_absent_arena_is_not_an_empty_one(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.arena_present = false;
+	st.arena_count = 0;
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	assert(strstr(body, "arena absent 0\n") != NULL);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(!st.arena_present);
+	make_state(&st);
+	st.arena_present = true;
+	st.arena_count = 0;
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	assert(strstr(body, "arena full 0\n") != NULL);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(st.arena_present && st.arena_count == 0);
+	printf("PASS test_state_absent_arena_is_not_an_empty_one\n");
+}
+
+/*
+** A full arena is the complete roster, so every card has to survive intact:
+** the card list *is* the roster (there is no separate one), and a field that
+** did not round-trip would be a rival misdescribed rather than a line missing.
+*/
+void	test_state_arena_round_trips_every_card(void)
+{
+	t_body_arena_slot	expect;
+	t_body_state		st;
+	char				body[16384];
+	int					len;
+	int					i;
+
+	make_state(&st);
+	st.players = 40;
+	st.alive = 12;
+	st.arena_present = true;
+	st.arena_count = 3;
+	i = 0;
+	while (i < 3)
+	{
+		fill_card(&st.arena[i], i * 7 + 1, true);
+		i++;
+	}
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(st.players == 40 && st.alive == 12);
+	assert(st.arena_present && st.arena_count == 3);
+	i = 0;
+	while (i < 3)
+	{
+		/*
+		 * Compared against a freshly built card rather than against the
+		 * numbers fill_card happens to produce: restating its arithmetic here
+		 * is how an assertion ends up agreeing with itself instead of with the
+		 * codec.
+		 */
+		fill_card(&expect, i * 7 + 1, true);
+		assert(st.arena[i].slot == expect.slot);
+		assert(st.arena[i].player_id == expect.player_id);
+		assert(st.arena[i].lines == expect.lines);
+		assert(st.arena[i].pending == expect.pending);
+		assert(st.arena[i].ko == expect.ko);
+		assert(st.arena[i].rank == expect.rank);
+		assert(st.arena[i].flags == expect.flags);
+		assert(st.arena[i].cells_valid);
+		assert(memcmp(st.arena[i].cells, expect.cells,
+				sizeof(expect.cells)) == 0);
+		i++;
+	}
+	printf("PASS test_state_arena_round_trips_every_card\n");
+}
+
+/*
+** The cells are the whole point of the card, and they are the one field packed
+** rather than printed: 200 cells into 50 hex characters, four cells to a
+** character, crossing row boundaries. An off-by-one in either direction would
+** shear every rival's stack sideways, so the exact cells are asserted rather
+** than a count of set bits.
+*/
+void	test_state_arena_cells_survive_the_wire(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.players = 2;
+	st.alive = 2;
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], 1, true);
+	memset(st.arena[0].cells, 0, sizeof(st.arena[0].cells));
+	set_card_cell(&st.arena[0], 0, 0, 2);
+	set_card_cell(&st.arena[0], 0, 9, 8);
+	set_card_cell(&st.arena[0], 19, 0, 1);
+	set_card_cell(&st.arena[0], 19, 9, 1);
+	set_card_cell(&st.arena[0], 7, 4, 5);
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	/* the code, not merely that something was there: a piece's type and a
+	** row of garbage have to come off the wire as different things */
+	assert(card_cell(&st.arena[0], 0, 0) == 2);
+	assert(card_cell(&st.arena[0], 0, 9) == 8);
+	assert(card_cell(&st.arena[0], 19, 0) == 1);
+	assert(card_cell(&st.arena[0], 19, 9) == 1);
+	assert(card_cell(&st.arena[0], 7, 4) == 5);
+	assert(card_cell(&st.arena[0], 0, 1) == 0);
+	assert(card_cell(&st.arena[0], 7, 5) == 0);
+	assert(card_cell(&st.arena[0], 10, 0) == 0);
+	printf("PASS test_state_arena_cells_survive_the_wire\n");
+}
+
+/*
+** A dead board never changes again, so its card leaves the cells off and the
+** client keeps the one it holds. The flags say which, per card, on the same
+** line - so one card omitting them must not shift the next card's fields,
+** which is the failure this shape risks.
+*/
+void	test_state_arena_cells_are_optional_per_card(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.players = 3;
+	st.alive = 1;
+	st.arena_present = true;
+	st.arena_count = 3;
+	fill_card(&st.arena[0], 1, false);
+	fill_card(&st.arena[1], 2, true);
+	fill_card(&st.arena[2], 3, false);
+	st.arena[0].flags = 0;
+	st.arena[2].flags = 0;
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(st.arena_count == 3);
+	assert(!st.arena[0].cells_valid && !st.arena[2].cells_valid);
+	assert(st.arena[1].cells_valid);
+	/* the card after a cell-less one is still read whole */
+	assert(st.arena[1].slot == 2 && st.arena[1].ko == 3);
+	assert(st.arena[2].slot == 3 && st.arena[2].lines == 6);
+	printf("PASS test_state_arena_cells_are_optional_per_card\n");
+}
+
+/*
+** The count says how many cards follow, and a body claiming more than it
+** carries has to be refused rather than half-read - the same rule the
+** opponents section already answers to.
+*/
+void	test_state_decode_rejects_arena_count_mismatch(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], 1, true);
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	strcpy(strstr(body, "arena full 1\n"), "arena full 2\n");
+	assert(body_state_decode(body, strlen(body), &st) == -1);
+	assert(errno == EBADMSG);
+	printf("PASS test_state_decode_rejects_arena_count_mismatch\n");
+}
+
+/*
+** BODY_STATE_MAX_BYTES is derived from the constants that produce it so that
+** a field added to a card cannot silently overrun the buffer carrying it.
+** This is the arithmetic being checked against a real encode of the widest
+** arena there can be, rather than against the table it was computed from.
+*/
+void	test_state_arena_fits_the_derived_cap(void)
+{
+	static t_body_state	st;
+	static char			body[BODY_STATE_MAX_BYTES];
+	int					len;
+	int					i;
+
+	make_state(&st);
+	st.players = BODY_ARENA_MAX;
+	st.alive = BODY_ARENA_MAX;
+	st.arena_present = true;
+	st.arena_count = BODY_ARENA_MAX;
+	i = 0;
+	while (i < BODY_ARENA_MAX)
+	{
+		fill_card(&st.arena[i], i + 1, true);
+		st.arena[i].player_id = UINT64_MAX;
+		st.arena[i].lines = 9999;
+		st.arena[i].pending = 999;
+		st.arena[i].ko = 98;
+		st.arena[i].rank = 99;
+		st.arena[i].flags = BODY_ARENA_FLAGS_MAX;
+		i++;
+	}
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	assert((size_t)len <= sizeof(body));
+	printf("PASS test_state_arena_fits_the_derived_cap (%d of %d bytes)\n",
+		len, (int)sizeof(body));
+}
+
+// one card, distinguishable from its neighbours by slot
+static void	fill_card(t_body_arena_slot *card, int slot, bool with_cells)
+{
+	int	row;
+
+	memset(card, 0, sizeof(*card));
+	card->slot = slot;
+	card->player_id = (uint64_t)slot + 1000;
+	card->flags = BODY_ARENA_ALIVE;
+	card->lines = slot + 3;
+	card->pending = slot % 3;
+	card->ko = slot % 3 + 1;
+	card->rank = slot * 2 % 7;
+	if (!with_cells)
+		return ;
+	card->flags |= BODY_ARENA_MASK_PRESENT;
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		if ((row + slot) % 3 == 0)
+			set_card_cell(card, row, (row + slot) % BODY_BOARD_COLS,
+				2 + (row + slot) % 7);
+		row++;
+	}
+}
+
+static int	card_cell(const t_body_arena_slot *card, int row, int col)
+{
+	return ((int)card->cells[row][col]);
+}
+
+static void	set_card_cell(t_body_arena_slot *card, int row, int col, int code)
+{
+	card->cells[row][col] = (unsigned char)code;
+}
+
+/*
+** A slot is the seat number a room hands out, and a room numbers its seats
+** from 1 - so the last seat of a full room is BODY_ARENA_MAX itself, and
+** there is no seat 0.
+**
+** Read as a 0-based index into an array of that size, seat 99 failed to
+** validate; and because one bad card fails the whole body, a full
+** ninety-nine player room encoded no arena at all. Nothing said so: the
+** encoder returned -1, the push was dropped, and every client in the biggest
+** room the mode supports drew an empty grid for the whole match. It is the
+** last seat that is the assertion here, because it is the only one that was
+** ever wrong.
+*/
+void	test_state_arena_seats_are_numbered_from_one(void)
+{
+	t_body_state	st;
+	char			body[16384];
+	int				len;
+
+	make_state(&st);
+	st.players = BODY_ARENA_MAX;
+	st.alive = BODY_ARENA_MAX;
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], BODY_ARENA_MAX, true);
+	len = body_state_encode(&st, body, sizeof(body));
+	assert(len > 0);
+	memset(&st, 0, sizeof(st));
+	assert(body_state_decode(body, (size_t)len, &st) == 0);
+	assert(st.arena_count == 1 && st.arena[0].slot == BODY_ARENA_MAX);
+	/* and neither end of the range beyond it is a seat */
+	make_state(&st);
+	st.players = 1;
+	st.alive = 1;
+	st.arena_present = true;
+	st.arena_count = 1;
+	fill_card(&st.arena[0], 0, true);
+	assert(body_state_encode(&st, body, sizeof(body)) == -1);
+	assert(errno == EINVAL);
+	fill_card(&st.arena[0], BODY_ARENA_MAX + 1, true);
+	assert(body_state_encode(&st, body, sizeof(body)) == -1);
+	assert(errno == EINVAL);
+	printf("PASS test_state_arena_seats_are_numbered_from_one\n");
 }

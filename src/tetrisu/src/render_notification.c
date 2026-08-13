@@ -116,6 +116,9 @@ static void	set_color(struct ncplane *plane, unsigned r, unsigned g,
 						unsigned b, int opacity);
 static unsigned	fade_component(unsigned component, int opacity);
 static void	destroy_notification_planes(t_render_ctx *ctx);
+static void	reset_damage(t_render_ctx *ctx);
+static void	accumulate_damage(t_render_ctx *ctx);
+static void	widen_damage(t_render_ctx *ctx, struct ncplane *plane);
 static void	raise_planes(t_render_ctx *ctx);
 static bool	can_refresh_stationary_in_place(const t_render_ctx *ctx,
 						bool content_changed);
@@ -358,7 +361,16 @@ static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 	int		x;
 	bool	content_embedded;
 
+	/*
+	 * The union is reset only once a screen has taken the flag. Two changes
+	 * between one repaint and the next - a card expiring, then another
+	 * appearing somewhere else - would otherwise leave the first one's cells
+	 * out of the rectangle, and nothing else is ever going to repair them.
+	 */
+	if (!ctx->notification_repaint)
+		reset_damage(ctx);
 	ctx->notification_repaint = true;
+	accumulate_damage(ctx);
 	destroy_notification_planes(ctx);
 	cols = art_columns(ctx);
 	index = 0;
@@ -386,7 +398,73 @@ static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 		}
 		index++;
 	}
+	accumulate_damage(ctx);
 	raise_planes(ctx);
+}
+
+/*
+** Where the cards are, in terminal cells, unioned into one rectangle.
+**
+** Called twice per change - once on the planes about to be destroyed and once
+** on the ones just made - because a card going away damages the cells it is
+** leaving quite as much as a card arriving damages the ones it lands on.
+**
+** The planes are asked for their own geometry rather than the layout being
+** recomputed, so a card whose art plane and text plane sit at different widths
+** contributes both without this having to know which it made.
+*/
+static void	reset_damage(t_render_ctx *ctx)
+{
+	ctx->notification_damage_rows = 0;
+	ctx->notification_damage_cols = 0;
+}
+
+static void	accumulate_damage(t_render_ctx *ctx)
+{
+	int	index;
+
+	index = 0;
+	while (index < UI_NOTIFICATION_STACK_MAX)
+	{
+		widen_damage(ctx, ctx->notification_art_planes[index]);
+		widen_damage(ctx, ctx->notification_planes[index]);
+		index++;
+	}
+}
+
+static void	widen_damage(t_render_ctx *ctx, struct ncplane *plane)
+{
+	unsigned	rows;
+	unsigned	cols;
+	int			y;
+	int			x;
+	int			edge;
+
+	if (plane == NULL)
+		return ;
+	ncplane_abs_yx(plane, &y, &x);
+	ncplane_dim_yx(plane, &rows, &cols);
+	if (ctx->notification_damage_rows <= 0
+		|| ctx->notification_damage_cols <= 0)
+	{
+		ctx->notification_damage_y = y;
+		ctx->notification_damage_x = x;
+		ctx->notification_damage_rows = (int)rows;
+		ctx->notification_damage_cols = (int)cols;
+		return ;
+	}
+	edge = ctx->notification_damage_y + ctx->notification_damage_rows;
+	if (edge < y + (int)rows)
+		edge = y + (int)rows;
+	if (y < ctx->notification_damage_y)
+		ctx->notification_damage_y = y;
+	ctx->notification_damage_rows = edge - ctx->notification_damage_y;
+	edge = ctx->notification_damage_x + ctx->notification_damage_cols;
+	if (edge < x + (int)cols)
+		edge = x + (int)cols;
+	if (x < ctx->notification_damage_x)
+		ctx->notification_damage_x = x;
+	ctx->notification_damage_cols = edge - ctx->notification_damage_x;
 }
 
 /**

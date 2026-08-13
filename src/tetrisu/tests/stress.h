@@ -27,7 +27,14 @@
 ** server can hold, not how well it keeps a secret.
 */
 # define STRESS_PASSWORD		"stress0"
-# define STRESS_MAX_SEATS		2
+/*
+** Seats one worker process can hold. Double needs two; a Battle Royale is one
+** room of up to ninety-nine, and its whole cost is that every seat is sent
+** every other seat - so a fleet spread across processes, one room each, would
+** measure nothing the mode is about. The room has to be crowded, and the
+** crowd has to be in one room.
+*/
+# define STRESS_MAX_SEATS		99
 # define STRESS_DEFAULT_PLAYERS	20
 # define STRESS_DEFAULT_SECONDS	20
 # define STRESS_DEFAULT_RATE	20
@@ -47,6 +54,12 @@
 */
 # define STRESS_ABILITY_EVERY	32
 # define STRESS_NOTE_MAX		64
+/*
+** How many times a bot re-asks for a match after one ends. The room needs a
+** tick to come back: the frame carrying the verdict is sent before the seats
+** are returned, so the first ask is answered 409 already-started.
+*/
+# define STRESS_START_TRIES		20
 
 /*
 ** Double seats two bots per worker process and is what the server does under
@@ -56,7 +69,8 @@
 typedef enum e_stress_mode
 {
 	STRESS_MODE_DOUBLE,
-	STRESS_MODE_SINGLE
+	STRESS_MODE_SINGLE,
+	STRESS_MODE_BATTLE_ROYALE
 }	t_stress_mode;
 
 typedef struct s_stress_plan
@@ -88,6 +102,13 @@ typedef struct s_stress_report
 	uint32_t	refused;
 	uint32_t	errors;
 	uint32_t	frames;
+	/*
+	** Frames that carried an arena. The arena rides a clock of its own and
+	** every client is sent every card, so this is the number the whole mode is
+	** sized against - and the one that says whether the cadence survived the
+	** load or the server quietly stopped keeping it.
+	*/
+	uint32_t	arenas;
 	uint32_t	connect_ms_max;
 	uint32_t	latency_us_max;
 	uint64_t	connect_ms_total;

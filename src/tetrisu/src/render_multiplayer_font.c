@@ -665,7 +665,7 @@ static void	draw_room_chrome(uint32_t *pixels, int width, int height,
 		ROOM_REF_CONTROLS_Y - 16, MULTIPLAYER_REFERENCE_WIDTH
 		- 2 * ROOM_REF_CONTENT_X, g_mp_lavender);
 	draw_text_ref(pixels, width, height, layout, font,
-		"[LEFT/RIGHT] FIGHTER   [R] READY   [S] START   [C] CHAT   [L] LEAVE",
+		waiting_room_legend(0),
 		ROOM_REF_CONTENT_X, ROOM_REF_CONTROLS_Y,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * ROOM_REF_CONTENT_X, 13, g_mp_cream,
 		true);
@@ -1251,7 +1251,8 @@ static bool	compose_slots(t_render_ctx *ctx, const t_app_room_view_model *room,
 		slot = start + index;
 		y = ROOM_REF_SLOTS_Y + ROOM_REF_SLOT_FIRST_Y
 			+ index * ROOM_REF_SLOT_STEP_Y;
-		if (slot == room->local_slot && slot < room->player_count)
+		if (waiting_room_seat_index(room, slot) == room->local_slot
+			&& slot < room->player_count)
 			fill_ref_rect(pixels, layout->pixel_width, layout->pixel_height,
 				layout, ROOM_REF_SLOTS_X - 8, y - 8, ROOM_REF_SLOTS_WIDTH,
 				ROOM_REF_SLOT_HEIGHT, g_mp_focus_plate, 220u);
@@ -1265,7 +1266,7 @@ static bool	compose_slots(t_render_ctx *ctx, const t_app_room_view_model *room,
 			draw_text_ref(pixels, layout->pixel_width, layout->pixel_height,
 				layout, font, badge, ROOM_REF_SLOTS_X + ROOM_REF_SLOT_BADGE_X,
 				y, ROOM_REF_SLOTS_WIDTH - ROOM_REF_SLOT_BADGE_X - 12,
-				ROOM_REF_ROW_GLYPH, room->players[slot].ready
+				ROOM_REF_ROW_GLYPH, waiting_room_seat_ready(room, slot)
 				? g_mp_green : g_mp_amber, false);
 		index++;
 	}

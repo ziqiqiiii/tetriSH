@@ -34,4 +34,18 @@ int		body_parse_u64(const char *s, uint64_t *out);
 int		body_parse_int(const char *s, int *out, int min, int max);
 int		body_word_index(const char *word, const char *const *table, size_t n);
 
+/*
+** ARENA.C - the Battle Royale arena section of a state body.
+**
+** It is part of t_body_state and is encoded and decoded as part of one, but it
+** lives in its own file: it is the only section with a variable-length line, a
+** field whose presence depends on another field, and a bit-packed payload, and
+** none of that belongs in the middle of the file that reads the ordinary
+** fixed-shape lines.
+*/
+int		body_arena_encode(const t_body_state *in, char *out, size_t cap,
+			size_t *off);
+int		body_arena_decode(t_body_cursor *c, t_body_state *out);
+int		body_arena_validate(const t_body_state *in);
+
 #endif

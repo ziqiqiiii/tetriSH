@@ -101,6 +101,19 @@ static int	check_signup_and_login(t_app_net_session *session,
 	if (provider->sign_up(session, name, "hunter2", "127.0.0.1", &view)
 		!= APP_PROVIDER_OK)
 		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->sign_up(session, name, "hunter2", "127.0.0.1", &view)
+		!= APP_PROVIDER_INVALID)
+		return (0);
+	if (strcmp(view.message, "USERNAME ALREADY EXISTS") != 0)
+		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->login(session, name, "wrong-password", "127.0.0.1", &view)
+		!= APP_PROVIDER_INVALID)
+		return (0);
+	if (strcmp(view.message, "WRONG USERNAME OR PASSWORD") != 0)
+		return (0);
+	memset(&view, 0, sizeof(view));
 	if (provider->login(session, name, "hunter2", "127.0.0.1", &view)
 		!= APP_PROVIDER_OK)
 		return (0);

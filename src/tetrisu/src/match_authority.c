@@ -145,6 +145,79 @@ bool	match_authority_action(t_match_authority *authority,
 }
 
 /**
+ * @brief Takes the next knockout the room has narrated, if there is one.
+ *
+ * The feed is the KO announcement's source rather than a second channel of its
+ * own, because the server already narrates every knockout there - and it does
+ * so on a lane built for exactly this: a room announcing ninety-eight of them
+ * must not be able to fill a response FIFO and close a slow connection.
+ *
+ * One line per call, so a burst of eliminations is announced one card at a
+ * time rather than as a stack of overlapping ones.
+ *
+ * @param authority Authority in charge.
+ * @param out Receives the line's text.
+ * @param size Size of out.
+ * @return true when a knockout was taken, false when the feed has none new.
+ */
+bool	match_authority_knockout(t_match_authority *authority, char *out,
+			size_t size)
+{
+	const t_body_chat	*line;
+	size_t				index;
+
+	if (!authority->online || authority->lost || authority->net == NULL)
+		return (false);
+	index = 0;
+	while (index < net_chat_held(authority->net))
+	{
+		line = net_chat_at(authority->net, index);
+		if (line != NULL && line->seq > authority->feed_seen
+			&& line->system && strstr(line->text, "knocked out") != NULL)
+		{
+			authority->feed_seen = line->seq;
+			snprintf(out, size, "%s", line->text);
+			return (true);
+		}
+		if (line != NULL && line->seq > authority->feed_seen)
+			authority->feed_seen = line->seq;
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Declares a targeting mode to whoever owns the boards.
+ *
+ * Offline there is nobody to tell and the fixture has no targeting, so the
+ * mode is simply the screen's - which is what it has always been, and is now
+ * the only place it still is.
+ *
+ * Online it is send-and-report: the request is made, and a refusal leaves the
+ * client's own mode where it was rather than pretending. What confirms the
+ * mode took is the next arena, where the rivals it singles out arrive marked.
+ *
+ * @param authority Authority in charge.
+ * @param state Match model holding the mode.
+ * @param mode The mode the player selected.
+ * @return true when the mode stands, false when the server refused it.
+ */
+bool	match_authority_target(t_match_authority *authority,
+		t_mp_match_state *state, t_target_mode mode)
+{
+	t_net_result	result;
+
+	if (authority->lost || !authority->online)
+		return (true);
+	if (net_match_set_target(authority->net, mode, &result) != 0)
+	{
+		fall_offline(authority, state);
+		return (true);
+	}
+	return (result.status == 200);
+}
+
+/**
  * @brief Spends charge on one ability through whoever owns the boards.
  *
  * @param authority Authority in charge.

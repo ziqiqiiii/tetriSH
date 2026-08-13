@@ -560,6 +560,18 @@ static void	drain_garbage(t_game *g)
 	int	ordinary;
 
 	ordinary = g->pending_garbage;
+	/*
+	 * The landing is what credits an attacker, not the sending. Rows queued
+	 * against a player who clears them away first were never a knockout, and
+	 * rows that arrive after their sender has left the room still are one.
+	 * Pals is deliberately not an exception: it turns the rows around, but
+	 * they landed, and the flag it feeds is "somebody is attacking you".
+	 */
+	if (ordinary > 0 || g->pending_ability_garbage > 0)
+	{
+		g->landed_from = g->garbage_from;
+		g->garbage_from = 0;
+	}
 	g->pending_garbage = 0;
 	/*
 	 * Pals turns the ordinary kind upside down: rows that would have raised
@@ -627,13 +639,20 @@ static void	age_server_effects(t_game *g)
  * Only room.c calls this: a game does not know it has an opponent. A game that
  * is over takes nothing.
  *
+ * The sender is carried rather than used. A board does not know who it is
+ * playing and does not start now: the id is held until the lock that lands
+ * the rows and handed back to room.c there, which is the only module that
+ * knows what a player is.
+ *
  * @param g Game the rows are owed to.
  * @param lines How many rows; zero or fewer is a no-op.
+ * @param from The player who sent them.
  */
-void	game_queue_garbage(t_game *g, int lines)
+void	game_queue_garbage(t_game *g, int lines, t_player_id from)
 {
 	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
 		return ;
+	g->garbage_from = from;
 	g->pending_garbage += lines;
 	if (g->pending_garbage > BOARD_HEIGHT)
 		g->pending_garbage = BOARD_HEIGHT;
@@ -648,14 +667,36 @@ void	game_queue_garbage(t_game *g, int lines)
  *
  * @param g Game the rows are owed to.
  * @param lines How many rows; zero or fewer is a no-op.
+ * @param from The player who sent them.
  */
-void	game_queue_ability_garbage(t_game *g, int lines)
+void	game_queue_ability_garbage(t_game *g, int lines, t_player_id from)
 {
 	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
 		return ;
+	g->garbage_from = from;
 	g->pending_ability_garbage += lines;
 	if (g->pending_ability_garbage > BOARD_HEIGHT)
 		g->pending_ability_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Takes the id of whoever last landed rows on this board.
+ *
+ * Taken rather than read: it is a one-shot report of something that happened
+ * at the last lock, and a second reader would file the same attack twice.
+ *
+ * @param g Game to take from.
+ * @return The player who sent the rows that landed, or 0 when none did.
+ */
+t_player_id	game_take_attacker(t_game *g)
+{
+	t_player_id	from;
+
+	if (g == NULL)
+		return (0);
+	from = g->landed_from;
+	g->landed_from = 0;
+	return (from);
 }
 
 /**
