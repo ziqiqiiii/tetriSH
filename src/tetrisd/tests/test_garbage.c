@@ -25,6 +25,7 @@ static void	test_queued_garbage_does_not_touch_the_board(void);
 static void	test_garbage_lands_at_the_next_lock(void);
 static void	test_garbage_waits_out_a_held_clear(void);
 static void	test_the_hole_walks_between_rows(void);
+static void	test_the_holes_are_not_a_diagonal(void);
 static void	test_a_finished_game_takes_nothing(void);
 static void	test_the_pending_count_reaches_the_wire(void);
 static void	test_cleared_lines_are_taken_once(void);
@@ -53,6 +54,7 @@ int	main(void)
 	test_garbage_lands_at_the_next_lock();
 	test_garbage_waits_out_a_held_clear();
 	test_the_hole_walks_between_rows();
+	test_the_holes_are_not_a_diagonal();
 	test_a_finished_game_takes_nothing();
 	test_the_pending_count_reaches_the_wire();
 	test_cleared_lines_are_taken_once();
@@ -294,9 +296,9 @@ static void	test_garbage_waits_out_a_held_clear(void)
 ** one hole is a wall rather than a handicap: nothing but an I piece on end
 ** could ever answer it, and the receiver would be dead on arrival.
 **
-** The column walks from a counter rather than being drawn, because
-** libtetrisbrain is pure by contract and a random number generator inside it
-** would make a board unreproducible.
+** The column is drawn from the game's own seeded state rather than the C
+** library, because libtetrisbrain is pure by contract and a board has to
+** replay the same way twice.
 */
 static void	test_the_hole_walks_between_rows(void)
 {
@@ -309,6 +311,62 @@ static void	test_the_hole_walks_between_rows(void)
 	assert(row_hole(&g, BOARD_HEIGHT - 2) >= 0);
 	assert(row_hole(&g, BOARD_HEIGHT - 1) != row_hole(&g, BOARD_HEIGHT - 2));
 	printf("PASS test_the_hole_walks_between_rows\n");
+}
+
+/*
+** The holes do not march. "Adjacent rows differ" is what the test above
+** asserts and it is not enough: the column used to be a counter taken modulo
+** BOARD_WIDTH, so every row differed from the one below it by exactly one and
+** a player taking a Battle Royale's worth of garbage got a clean diagonal
+** across the whole board. Every neighbouring pair passed the old assertion
+** while the shape was as legible as a shape gets.
+**
+** So this asks the stronger question the eye was actually asking: over a full
+** board of rows, the step from one hole to the next must not be the same
+** number every time. Any draw passes; only a march fails.
+**
+** The step is taken modulo BOARD_WIDTH, and that is not a detail. A plain
+** subtraction reads the march's wrap from column 9 back to column 0 as a step
+** of -9 and calls that variety, which is how the first version of this test
+** passed against the very code it was written to catch. Around the cylinder
+** the columns actually live on, a march is one step repeated and nothing else.
+**
+** Sixteen rows arrive as one batch at one lock, and only those sixteen are
+** read. The piece that locked is stamped before the rows are injected, so it
+** is pushed up out of the way and the bottom sixteen rows are nothing but the
+** sixteen draws - which is what makes each row's single empty cell the hole
+** rather than something the piece happened to leave.
+*/
+static void	test_the_holes_are_not_a_diagonal(void)
+{
+	t_game	g;
+	int		holes[16];
+	int		index;
+	int		step;
+	bool	varies;
+
+	game_start(&g, 1, 20260813u);
+	game_queue_garbage(&g, 16, 7);
+	assert(game_drop(&g, true));
+	index = 0;
+	while (index < 16)
+	{
+		holes[index] = row_hole(&g, BOARD_HEIGHT - 16 + index);
+		assert(holes[index] >= 0);
+		index++;
+	}
+	step = (holes[1] - holes[0] + BOARD_WIDTH) % BOARD_WIDTH;
+	varies = false;
+	index = 2;
+	while (index < 16)
+	{
+		if ((holes[index] - holes[index - 1] + BOARD_WIDTH) % BOARD_WIDTH
+			!= step)
+			varies = true;
+		index++;
+	}
+	assert(varies);
+	printf("PASS test_the_holes_are_not_a_diagonal\n");
 }
 
 /*

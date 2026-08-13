@@ -166,12 +166,12 @@ void	test_seat_first_player_creates_owner_in_slot_one(void)
 	make_room(&r, MODE_DOUBLE, 0);
 	assert(room_seat(&r, 17, "alice", NULL, NULL) == 1);
 	assert(r.slots[0].occupied == true);
-	/* seated is not ready: taking a seat says nothing about declaring */
-	assert(r.slots[0].status == SLOT_WAITING);
-	assert(room_set_ready(&r, 17, true) == 0);
+	/* seated is ready: joining and holding the connection is the declaration */
 	assert(r.slots[0].status == SLOT_READY);
 	assert(room_set_ready(&r, 17, false) == 0);
 	assert(r.slots[0].status == SLOT_WAITING);
+	assert(room_set_ready(&r, 17, true) == 0);
+	assert(r.slots[0].status == SLOT_READY);
 	assert(room_set_ready(&r, 99, true) == -1);
 	assert(r.slots[0].membership.player_id == 17);
 	assert(r.slots[0].membership.role == ROLE_OWNER);

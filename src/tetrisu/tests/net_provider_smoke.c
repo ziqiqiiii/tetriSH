@@ -247,8 +247,9 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 		return (0);
 	if (created.id[0] == '\0' || created.mode != APP_GAME_MODE_DOUBLE)
 		return (0);
+	/* seated is ready: joining and holding the connection is the declaration */
 	if (created.player_count != 1 || !created.players[0].owner
-		|| created.players[0].ready)
+		|| !created.players[0].ready)
 		return (0);
 	memset(&joined, 0, sizeof(joined));
 	if (provider->load_room(session, created.id, &joined) != APP_PROVIDER_OK)

@@ -359,6 +359,22 @@ int	bot_farm_add(t_bot_farm *farm, const char *room, t_bot_level level)
 		return (-1);
 	if (pipe(pipes) != 0)
 		return (note("no pipe for the deadman", strerror(errno)));
+	/*
+	 * The write end must not survive an exec, and the reason is the whole of
+	 * why the deadman works at all. A child inherits every descriptor its
+	 * parent holds: without this it keeps the write end of its own pipe, so
+	 * the read end it is polling can never reach EOF, and it also inherits
+	 * the write ends of every bot spawned before it, so none of theirs can
+	 * either. Orphaned bots then play on forever, holding a BOT_ account each.
+	 * The read end is deliberately left inheritable - it is passed to the
+	 * child by number, across the exec, as --deadman.
+	 */
+	if (fcntl(pipes[1], F_SETFD, FD_CLOEXEC) != 0)
+	{
+		close(pipes[0]);
+		close(pipes[1]);
+		return (note("no close-on-exec for the deadman", strerror(errno)));
+	}
 	farm->bots[farm->count].pid = spawn_bot(binary, room, level, pipes[0]);
 	close(pipes[0]);
 	if (farm->bots[farm->count].pid <= 0)

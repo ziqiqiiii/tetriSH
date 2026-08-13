@@ -48,6 +48,7 @@ static bool region_restage(const t_match_regions *pass,
 static bool region_restage_pair(const t_match_regions *pass,
 				const t_mp_rect *first, const t_mp_rect *second);
 static void match_trace(const char *path, long micros, bool forced);
+static bool match_pixel_refused(const char *why);
 static FILE *match_trace_stream(void);
 static long match_trace_now(void);
 static bool match_is_regioned(t_mp_match_phase phase);
@@ -246,18 +247,22 @@ bool render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 	int height;
 	bool outcome;
 
-	if (ctx == NULL || state == NULL || render_compatibility_mode(ctx)
-		|| !render_pixels_available(ctx) || !notcurses_canpixel(ctx->nc))
+	if (ctx == NULL || state == NULL)
 		return (false);
-	if (!refresh_background(ctx, rebuild_background) || !load_assets(ctx))
-		return (false);
+	if (render_compatibility_mode(ctx) || !render_pixels_available(ctx)
+		|| !notcurses_canpixel(ctx->nc))
+		return (match_pixel_refused("no bitmaps"));
+	if (!refresh_background(ctx, rebuild_background))
+		return (match_pixel_refused("background"));
+	if (!load_assets(ctx))
+		return (match_pixel_refused("assets"));
 	width = ctx->bg_cols * ctx->cell_px_x;
 	height = ctx->bg_rows * ctx->cell_px_y;
 	if (width <= 0 || height <= 0)
-		return (false);
+		return (match_pixel_refused("geometry"));
 	mp_match_pixel_layout_build(state->mode, width, height, &layout);
 	if (!layout.valid)
-		return (false);
+		return (match_pixel_refused("layout"));
 	snap_layout_to_cells(ctx, &layout);
 	signature = match_signature(state, width, height);
 	if (!match_is_regioned(state->phase) && !rebuild_background
@@ -1204,6 +1209,34 @@ static void match_trace(const char *path, long micros, bool forced)
 	fprintf(stream, "%ld %s %ld%s\n", match_trace_now(), path, micros,
 		forced ? " forced" : "");
 	fflush(stream);
+}
+
+/**
+ * @brief Notes which guard turned the pixel match renderer away.
+ *
+ * Every guard at the top of render_multiplayer_match_pixel_show() returns
+ * before the first match_trace() call, so a match that silently falls back to
+ * the cell renderer leaves no trace file at all - which reads as "tracing was
+ * off" rather than "the bitmap path never ran". Two live Battle Royale
+ * sessions were spent on that ambiguity.
+ *
+ * Only a change of reason is written. These guards refuse on every frame, and
+ * a line per frame would bury everything else in the trace. The comparison is
+ * on the pointer because every caller passes a distinct string literal.
+ *
+ * @param why Which guard refused, as a literal.
+ * @return false always, so a caller can return this directly.
+ */
+static bool match_pixel_refused(const char *why)
+{
+	static const char *last = NULL;
+
+	if (why != last)
+	{
+		render_match_trace_note("refused %s", why);
+		last = why;
+	}
+	return (false);
 }
 
 /**

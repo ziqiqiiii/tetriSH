@@ -48,6 +48,7 @@ void	reactor_run(t_server *srv)
 			dispatch(srv, &events[i++]);
 		if (srv->sweep_due)
 			sweep(srv);
+		server_rooms_evict_abandoned(srv);
 		client_reap(srv);
 	}
 	wind_down(srv);

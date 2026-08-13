@@ -1,8 +1,18 @@
 # Bug Note — A knockout rebuilt the whole screen
 
-**Status: fixed, not yet verified on screen.** The measurement that closes this
-is described in [Verifying it](#verifying-it) at the end. Read that first if you
-are picking this up to test.
+**Status: fixed and confirmed on screen.** The player who reported it played a
+Battle Royale against the deployed server and reported the flicker gone. That is
+the check [Verifying it](#verifying-it) asks for, and it is the only one that
+could close this: the failure mode of a wrong damage rectangle is visual, and no
+suite can see a hole in a terminal.
+
+One thing landed after this note was written and belongs to the same defect.
+`refresh_notifications` raised the repaint flag on *every* call, so the fade was
+still asking for a rebuild per step — the rectangle made each one cheap rather
+than stopping it. Gating the flag on a layout signature is what removed the
+rest, and it is why changing the volume used to flicker too: a fade step redraws
+the same rectangle at a different opacity and damages nothing under it. See
+`fix(tetrisu): stop a fade step claiming the screen is stale`.
 
 ## What the bug was
 
@@ -143,11 +153,16 @@ if (render_notification_take_repaint(ctx)
 
 ## Verifying it
 
-**This is the part that is outstanding.** The fix builds clean and the suites
-pass (30 unit, 9 integration), but neither of those can see a hole in a
-terminal, and the failure mode of a damage rectangle that is computed wrongly is
-*visual*: too small or misplaced, and a card leaves a hole where it used to be;
-too large, and it costs what it always did.
+**This was the outstanding part, and it has been done — the reporter played a
+Battle Royale on the deployed server and the flicker was gone.** What follows is
+kept as the procedure, because it is how this would be re-checked after any
+change to the notification or region paths, and because none of it is obvious
+from the code.
+
+The fix builds clean and the suites pass, but neither of those can see a hole in
+a terminal, and the failure mode of a damage rectangle that is computed wrongly
+is *visual*: too small or misplaced, and a card leaves a hole where it used to
+be; too large, and it costs what it always did.
 
 Run a real Battle Royale against the deployed server — the fixtures do not
 exercise this, since `TETRISU_MATCH_PREVIEW=battle` never raises a K.O. card:

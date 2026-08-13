@@ -31,34 +31,39 @@ The server-authoritative game daemon for tetriSH. Accepts encrypted client sessi
 - Chat and system narration are one feed on their own outbox lane: best-effort, drop-oldest, never a reason to close a connection
 - Detaches itself, holds a locked pidfile, reports its boot over a readiness pipe
 
-| Mode | Status |
-|---|---|
-| Single | End to end — hold, pause/resume, restart, the self-affecting abilities |
-| Double | End to end — select window, countdown, rival board in every snapshot, garbage, every ability, `won`/`lost` recorded once, `room_rematch` without a lobby trip ([plan](double-mode-plan.md)) |
-| Battle Royale | Designed, unbuilt ([plan](battle_royale_plan.md)) |
-
 Double is complete: both seats declare readiness with `READY`, which commits the room and opens a `SELECTING` window of `TETRISD_MATCH_SELECT_MS` rather than dealing — the owner's `START` opens the same window, so a match is reached one way whichever route asked for it. Opening it clears every seat's declared character, so a seat is locked in exactly when it names one and that fact belongs to this match; the room deals itself the moment every seat has, or when the clock runs out on whatever they have equipped. The boards are then dealt and held for `TETRISD_MATCH_COUNTDOWN_MS`, every snapshot carries the other player's board beside its own — with their meter and their fighter, so a client can draw the rival's column without guessing at it, a clear on one board becomes garbage on the other, every ability in the catalogue resolves — including the eleven that need a Target — and the match ends when one player is left standing rather than when the last one stops, the survivor recorded `won` and the player who topped out `lost`, each exactly once. A finished match does not finish the room: `room_rematch` withdraws readiness and leaves both players in the seats they never left, so the next match is one `READY` away rather than a trip through the lobby to find each other again. Battle Royale is built on the same match: a room of 4-99 seats that only its owner may start, a select window that survives a departure, and an **arena** of one-bit board masks on a cadence of its own (`TETRISD_BR_ARENA_MS`) so ninety-eight rivals cost what a thumbnail costs rather than what a board does. A placing is taken the moment a player goes out - everybody eliminated on one tick shares it, and the next skips the numbers they took - and a knockout is credited to whoever's garbage last *landed*, narrated on the chat lane. `TARGET /room/<name>` declares one of four targeting modes; see `settle_garbage` above for which of them reach one rival and which reach all of them.
 
-Garbage crosses at one place, `settle_garbage` in `room.c`, because it is the only module holding both halves of a Room: how many rows a clear is worth is `libtetrisbrain`'s (`garbage_lines_from_clear`, N−1) and who owes them to whom is the seating's. It runs after every game is advanced and before any snapshot is taken, so the frame that shows a clear is the frame that shows the `pending` count it caused. `server_room_targets_of` answers *which* seats — plural, because two of Battle Royale's four targeting modes hit everyone they matched rather than one drawn from them. Attackers and KOs fan out; Randoms and Badges draw one, because both match a crowd. The fan-out is over the *matched* set only: a mode that matched nobody falls back to every live opponent, and that fallback is drawn from, since it means "no preference applies". Every Target is queued the whole amount. `server_room_target_of` survives as the single-seat answer the pair-shaped tests ask for.
 ### Garbage and targeting
 
 Garbage crosses at one place — `settle_garbage` in `room.c`, the only module holding both halves of a Room. `libtetrisbrain` decides how many rows a clear is worth (`garbage_lines_from_clear`, N−1) and the seating decides who owes them, answered by `server_room_target_of`. It runs after every game advances and before any snapshot, so the frame showing a clear shows the `pending` it caused. Garbage never crosses rooms.
 
-**Rows land at the Target's next piece lock, never on arrival** — injecting under a falling piece can produce a board `piece_is_valid` rejects. The drain sits after the clear resolves and before `spawn_next`, so the rows are part of the board the next piece is validated against and a failed spawn is a top-out. Targeted abilities wait on the same lock: an effect counted in pieces would otherwise be a piece short before it began.
+The character a match is played with is declared rather than inferred. `READY` carries an optional `character <id>`; `server_room_set_ready` stores it against the seat, `deal_games` copies it onto the game, and `ability_handler` resolves `(character, level)` against *that* — falling back to the account's equipped character when none was named, which is every Single game. Declaring rather than reading the account is what makes the choice per match: `EQUIP` is an account-wide change, and making one in order to play one game is the wrong scope, so a purchase or an equip made mid-match cannot change which four abilities a level selects from. Ownership is checked with `db_player_owns_character`, which answers a `t_db_bool` and is therefore tested against `DB_TRUE` — `DB_FALSE` is a successful read meaning "does not own it".
+
+**Rows land at the Target's next piece lock, never on arrival.** That is a game rule and not a scheduling convenience: injecting garbage raises the stack under whatever is falling and can produce a board `piece_is_valid` would reject, and there is no correct thing to do with a piece already in the air on a board that is no longer legal. The drain sits after the clear resolves — so a player never takes rows in the middle of watching their own go — and before `spawn_next`, so the rows are part of the board the next piece is validated against. A spawn that then fails is a top-out, which is the right outcome of being buried. Targeted abilities wait on the same lock and for a second reason of their own: a status effect counted in pieces that took hold mid-piece would be a piece short before it began.
+
+### Abilities that need a Target
+
+The catalogue's eleven targeted abilities divide on which board *changes*, not on which board is read:
 
 | Lands on | Abilities | When |
 |---|---|---|
-| The caster | Mirror, Pals, Vampire, Copy | At once — they read the Target but write the caster, so nothing needs deferring |
-| The Target | Dark, Bomb, Inversion, Pentaris, Sirtet, Paralysis, Nue | Queued to the Target's next piece lock |
+| The caster | Mirror, Pals, Vampire, Copy | At once, like the self-affecting four |
+| The Target | Dark, Bomb, Inversion, Pentaris, Sirtet, Paralysis, Nue | Queued, applied at the Target's next piece lock |
 
-- **Mirror** is checked when an ability is *aimed*, not when it lands, since a queued effect can be several behind by then. Reflecting is not refusing — the sender still paid, and it still happens, to them
-- **Fry** puts rows on the sender's own floor to burn at their next lock, then sends them whole (not through N−1) to the Target, on the ability lane so Pals cannot absorb them
-- **Pals** makes incoming garbage take rows *off* the floor, ability garbage excepted — which is why `t_game` counts `pending_garbage` and `pending_ability_garbage` separately
-- **Dark and Pals** are the two effects `libtetrisbrain` refuses to time: `t_game` carries `dark_pieces` / `pals_pieces` and `age_server_effects` runs them down on the holder's locks. Dark's count is armed where it *lands*, so the delivering lock does not spend one
-- **Dark** is the one effect the server cannot carry out — it rides the wire as a count and `tetrisu` blanks the drawn grid, not the board, so hidden rows still collide
+Vampire and Copy *read* the Target but write the caster, and a read cannot leave anybody's piece inside their stack — so they need no deferral. They still need a Target to exist: there is nothing to steal, nothing to copy, and no incoming garbage in a room of one, which is what `needs_target` means for them and for Mirror and Pals. Copy keeps the "try it on a copy of the board and keep it only if the falling piece survives" discipline `apply_self` uses, because it is the one ability that replaces the caster's board out of somebody else's.
 
-Bomb's scatter and garbage's hole column walk from the game's own counters, `libtetrisbrain` owning no RNG by contract — unpredictable to a player without being unreproducible to a test.
+**Mirror is checked when an ability is aimed, not when it lands.** It steals *the next ability activated against* its holder, and a queued effect can be several effects behind by the time it arrives — checking at the landing would steal the wrong one. Reflecting is not refusing: the sender still paid, and it still happens, to them.
 
+Two of the eleven need something beyond a queue entry:
+
+- **Fry** is two halves. The rows go onto the sender's *own* floor and burn at their next lock — and are then sent to the Target, whole rather than through `garbage_lines_from_clear`'s N−1, because they are not a clear being converted but rows a player deliberately buried themselves under in order to hand over. They ride the ability lane, so Pals does not absorb them.
+- **Pals** turns the ordinary kind upside down: incoming garbage takes rows *off* the floor instead of putting them on. Ability garbage is excluded by the ability text, which is why `t_game` counts `pending_garbage` and `pending_ability_garbage` separately — one counter could not tell Pentaris from a tetris, so Pals would absorb both or neither.
+
+**Dark and Pals are the two effects `libtetrisbrain` refuses to time.** Its comment says the server decides when they end, so `t_game` carries `dark_pieces` and `pals_pieces` and `age_server_effects` runs them down on the holder's own locks. Without that, "for a limited time" is forever and one Dark ends the game. Dark's count is armed where it *lands* rather than where it was sent, so the lock that delivers it does not spend one of its pieces.
+
+**Dark is also the one ability a server cannot carry out.** Every other effect is a rule about what a player may *do*, enforced by refusing the input; Dark is a rule about what they may *see*. So it rides the wire as a count and `tetrisu` blanks the cells outside a window under the falling piece — applied to the drawn grid and not to the board, so the hidden rows still collide. The player is blinded, not helped.
+
+Bomb's scatter and garbage's hole column both come from the game's own seeded state rather than from a random source. `libtetrisbrain` owns no RNG by contract, and a game seeded once has to replay the same way twice or no test could assert where anything landed. The hole was a plain counter taken modulo `BOARD_WIDTH` until it was found drawing a diagonal straight across the board — see `docs/bugs/the_garbage_holes_marched_in_a_line.md`.
 ---
 
 ## Prerequisites

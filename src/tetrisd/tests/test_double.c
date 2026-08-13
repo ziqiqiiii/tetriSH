@@ -16,7 +16,7 @@
 
 // Static Functions
 static void	test_readiness_is_the_rooms_and_survives_a_refresh(void);
-static void	test_both_declaring_ready_opens_the_select_window(void);
+static void	test_the_owners_start_opens_the_select_window(void);
 static void	test_withdrawing_in_the_window_does_not_deal_the_match(void);
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
@@ -52,7 +52,7 @@ static int		recorded(t_fixture *fx, t_player_id pid, bool won);
 int	main(void)
 {
 	test_readiness_is_the_rooms_and_survives_a_refresh();
-	test_both_declaring_ready_opens_the_select_window();
+	test_the_owners_start_opens_the_select_window();
 	test_withdrawing_in_the_window_does_not_deal_the_match();
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
@@ -86,7 +86,11 @@ static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
 	assert(list_room(&amber, path, &snapshot) == 200);
-	assert(!snapshot.members[0].ready && !snapshot.members[1].ready);
+	/* seated is ready: joining and holding the connection is the declaration */
+	assert(snapshot.members[0].ready && snapshot.members[1].ready);
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready);
 	assert(simple(&amber, "READY", path, "ready 1") == 200);
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.members[0].ready);
@@ -103,17 +107,19 @@ static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
 }
 
 /*
-** Both seats declaring is what commits a Double room, and the player who
-** declares last is as often the joiner as the owner - so the start cannot be
-** the owner's request. Nobody sends START here.
+** The owner's START is what commits a Double room. Declaring used to be the
+** other route in, back when a seat arrived not ready and saying so was a
+** deliberate act; a seat arrives ready now, so every seat being ready is true
+** from the moment the room fills and says nothing about whether anybody wants
+** to play yet.
 **
-** What declaring no longer does is deal the boards. It opens the
-** character-select window instead, and the boards are dealt when both seats
-** have named a fighter - which is the same READY route carrying one. Locking
-** in early is what ends the window early: neither player waits out the clock
-** once there is nothing left to decide.
+** What starting does not do is deal the boards. It opens the character-select
+** window instead, and the boards are dealt when both seats have named a
+** fighter - which is the READY route carrying one. Locking in early is what
+** ends the window early: neither player waits out the clock once there is
+** nothing left to decide.
 */
-static void	test_both_declaring_ready_opens_the_select_window(void)
+static void	test_the_owners_start_opens_the_select_window(void)
 {
 	t_body_state	state;
 	t_body_room		snapshot;
@@ -128,9 +134,11 @@ static void	test_both_declaring_ready_opens_the_select_window(void)
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1") == 200);
-	assert(hc_wait_state(&amber, &state, 300) != 0);
-	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	/* both seats are ready on arrival, so nothing here declares it */
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[0].ready && snapshot.members[1].ready);
+	assert(snapshot.status != BODY_ROOM_SELECTING);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	/* committed, holding a clock, and no board dealt to either of them */
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.status == BODY_ROOM_SELECTING);
@@ -156,7 +164,7 @@ static void	test_both_declaring_ready_opens_the_select_window(void)
 	hc_close(&amber);
 	hc_close(&blake);
 	fx_stop(&fx);
-	printf("PASS test_both_declaring_ready_opens_the_select_window\n");
+	printf("PASS test_the_owners_start_opens_the_select_window\n");
 }
 
 /*
@@ -182,8 +190,7 @@ static void	test_withdrawing_in_the_window_does_not_deal_the_match(void)
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1") == 200);
-	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.status == BODY_ROOM_SELECTING);
 	pick = starter_character(&fx, amber.player_id);
@@ -746,6 +753,9 @@ static void	test_an_unowned_fighter_is_refused(void)
 	stranger = unowned_character(&fx, amber.player_id);
 	assert(stranger != 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
+	/* Withdrawn first, so the refusal below has something to fail to change:
+	 * a seat arrives ready, and "still ready" would prove nothing. */
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
 	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n",
 		(unsigned)stranger);
 	assert(simple(&amber, "READY", path, body) == 403);
@@ -787,8 +797,7 @@ static void	test_a_declared_fighter_is_the_matchs(void)
 	owned = starter_character(&fx, amber.player_id);
 	assert(owned != 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1\n") == 200);
-	assert(simple(&blake, "READY", path, "ready 1\n") == 200);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
 	assert(simple(&amber, "READY", path, body) == 200);
 	owned = starter_character(&fx, blake.player_id);

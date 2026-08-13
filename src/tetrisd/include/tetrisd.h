@@ -409,12 +409,30 @@ typedef struct s_game
 	int					clearing_rows[BODY_CLEARING_MAX];
 	int					clearing_count;
 	int					clearing_ms;
-	int					pending_garbage;
-	int					pending_ability_garbage;
-	int					fry_owed;
-	int					dark_pieces;
-	int					pals_pieces;
+	int				pending_garbage;
+	int				pending_ability_garbage;
+	int				fry_owed;
+	int				dark_pieces;
+	int				pals_pieces;
+	/*
+	** Where the holes in this game's garbage go: an LCG state seeded from the
+	** game's own seed, and the column the last row left open.
+	**
+	** `garbage_seq` was a plain counter and the column was `garbage_seq %
+	** BOARD_WIDTH`, which put the holes on 0, 1, 2, 3 in order - a diagonal
+	** across the board rather than the scatter it was meant to be. It is a
+	** state now and next_garbage_hole draws from it, excluding only the
+	** previous column, which is all "a run of rows with the hole in one place
+	** would be a wall" ever asked for.
+	**
+	** Seeded rather than drawn from the C library because a match replayed
+	** from one seed has to land the same rows in the same places, and because
+	** no randomness enters libtetrisbrain - the column crosses as an argument.
+	** `garbage_hole` is -1 until the first row lands, so that draw is uniform
+	** over every column instead of over nine of them.
+	*/
 	uint32_t			garbage_seq;
+	int					garbage_hole;
 	/*
 	** Who sent the rows waiting in the two queues, and who sent the rows that
 	** landed at the last lock.
@@ -883,6 +901,14 @@ struct s_server
 	unsigned char	*scratch;
 	t_client		**sweep;
 	bool			sweep_due;
+	/*
+	** Armed when somebody has left a room, so the loop asks once whether any
+	** room is now holding nothing but bots. Armed rather than checked every
+	** batch for the same reason sweep is: the answer can only have changed
+	** when a seat was released, and asking otherwise walks the registry for
+	** nothing.
+	*/
+	bool			bot_rooms_due;
 	pthread_t		loop;
 	bool			loop_started;
 	atomic_bool		running;
@@ -1131,6 +1157,7 @@ t_game			*server_room_target_game(t_server_room *server_room,
 t_game			*server_room_game_of(t_server_room *server_room, const t_client *cli);
 void			server_room_mark_dirty(t_server_room *server_room, const t_client *cli);
 void			server_room_forfeit(t_server *srv, t_client *cli);
+void			server_rooms_evict_abandoned(t_server *srv);
 bool			server_room_describe(const t_server_room *server_room, t_server_room_view *out);
 bool			server_room_snapshot(const t_server_room *server_room,
 					t_body_room *out);

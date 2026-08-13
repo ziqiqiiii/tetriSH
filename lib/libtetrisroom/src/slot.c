@@ -17,15 +17,20 @@ void	slot_init(t_slot *s, int index)
 }
 
 /**
- * @brief Stores a membership in a JOINING slot, seated but not yet ready.
+ * @brief Stores a membership in a JOINING slot, seated and ready.
  *
- * Occupying a seat used to mark it READY, which made readiness mean "somebody
- * is sitting here" and left the room with no way to express the other answer.
- * A player who pressed the ready key to withdraw it saw their own client agree
- * for half a second and then be overruled by the next refresh, because the
- * server had never had an opinion to change.
+ * Ready is the state a seat starts in, because arriving in a room is already
+ * the answer to the question readiness asks. Only room_seat reaches here, and
+ * only once its probe has said the player is still connected, so a seat is
+ * ready exactly when somebody has joined and the connection held.
  *
- * Readiness is now its own fact, moved only by room_set_ready.
+ * That is not the same thing as readiness meaning "somebody is sitting here",
+ * which is what this used to do and what broke: readiness was derived from
+ * occupancy, so a player who pressed the ready key to withdraw it saw their
+ * own client agree for half a second and then be overruled by the next
+ * refresh, the server having never had an opinion to change. Readiness is its
+ * own stored fact now and room_set_ready still moves it either way - this
+ * only decides which way it starts.
  *
  * @param s The slot to occupy.
  * @param m The membership to store.
@@ -37,7 +42,7 @@ int	slot_occupy(t_slot *s, t_membership m)
 		return (-1);
 	s->membership = m;
 	s->occupied = true;
-	s->status = SLOT_WAITING;
+	s->status = SLOT_READY;
 	return (0);
 }
 

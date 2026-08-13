@@ -31,6 +31,14 @@
 # define VOLUME_BOX_HEIGHT		550
 # define NOTIFICATION_BAND		46
 # define NOTIFICATION_BAND_GAP	8
+/*
+** How many opacity steps a fade is asked to be, for change detection only.
+** The ramp itself stays continuous; this is the resolution at which a fade is
+** considered to have changed, and so how many times a fade can rebuild the
+** card planes. Raising it buys smoothness on the movable tier and costs
+** sixel retransmissions on the stationary one.
+*/
+# define NOTIFICATION_FADE_STEPS	8
 
 typedef struct s_notif_box
 {
@@ -45,7 +53,14 @@ static const t_color	g_notification_cream = {255, 244, 250};
 static const t_color	g_notification_filled = {255, 94, 167};
 static const t_color	g_notification_empty = {116, 76, 142};
 
-static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms);
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms,
+						bool force);
+static uint64_t	notification_content_signature(const t_render_ctx *ctx,
+						uint64_t now_ms);
+static uint64_t	notification_layout_signature(const t_render_ctx *ctx);
+static uint64_t	notification_plane_hash(uint64_t hash, struct ncplane *plane);
+static uint64_t	notification_hash(uint64_t hash, const void *data,
+						size_t size);
 static int	art_columns(const t_render_ctx *ctx);
 static bool	notification_position(t_render_ctx *ctx, int index, int cols,
 						int *y, int *x);
@@ -159,7 +174,7 @@ void	render_notification_queue_volume(t_render_ctx *ctx, int volume)
 		raise_planes(ctx);
 		return ;
 	}
-	refresh_notifications(ctx, now_ms);
+	refresh_notifications(ctx, now_ms, false);
 }
 
 /**
@@ -187,7 +202,7 @@ void	render_notification_show_effect(t_render_ctx *ctx, const char *title,
 	now_ms = ui_notification_now_ms();
 	(void)ui_notification_show_effect(&ctx->notifications, title, message,
 		now_ms);
-	refresh_notifications(ctx, now_ms);
+	refresh_notifications(ctx, now_ms, false);
 }
 
 void	render_notification_queue_ownership(t_render_ctx *ctx)
@@ -205,7 +220,7 @@ void	render_notification_queue_ownership(t_render_ctx *ctx)
 		raise_planes(ctx);
 		return ;
 	}
-	refresh_notifications(ctx, now_ms);
+	refresh_notifications(ctx, now_ms, false);
 }
 
 /**
@@ -224,7 +239,7 @@ void	render_notification_tick(t_render_ctx *ctx)
 	changed = ui_notification_update(&ctx->notifications, now_ms);
 	if (ctx->pixels == TETRISU_PIXELS_STATIONARY && !changed)
 		return ;
-	refresh_notifications(ctx, now_ms);
+	refresh_notifications(ctx, now_ms, false);
 	(void)notcurses_render(ctx->nc);
 }
 
@@ -254,7 +269,7 @@ void	render_notification_reflow(t_render_ctx *ctx)
 {
 	if (ctx == NULL || ctx->nc == NULL || ctx->notifications.count == 0)
 		return ;
-	refresh_notifications(ctx, ui_notification_now_ms());
+	refresh_notifications(ctx, ui_notification_now_ms(), true);
 	(void)notcurses_render(ctx->nc);
 }
 
@@ -270,7 +285,7 @@ void	render_notification_raise(t_render_ctx *ctx)
 	if (ctx->notifications.count > 0
 		&& tetrisu_pixel_policy_notification_needs_reemit(ctx->pixels))
 	{
-		refresh_notifications(ctx, ui_notification_now_ms());
+		refresh_notifications(ctx, ui_notification_now_ms(), true);
 		return ;
 	}
 	raise_planes(ctx);
@@ -311,6 +326,9 @@ void	render_notification_destroy(t_render_ctx *ctx)
 	destroy_notification_planes(ctx);
 	render_font_mask_free(&ctx->notification_font);
 	ui_notification_stack_init(&ctx->notifications);
+	/* The planes are gone, so the next refresh must build rather than
+	 * recognise its own last answer and do nothing. */
+	ctx->notification_content_signature = 0;
 }
 
 /**
@@ -352,15 +370,30 @@ bool	render_notification_take_repaint(t_render_ctx *ctx)
 ** considers those panels stale and they never come back. Changing the volume
 ** left a room with a background, a title, a footer and no panels.
 */
-static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
+static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms,
+	bool force)
 {
-	int		index;
-	int		opacity;
-	int		cols;
-	int		y;
-	int		x;
-	bool	content_embedded;
+	uint64_t	content;
+	uint64_t	layout;
+	int			index;
+	int			opacity;
+	int			cols;
+	int			y;
+	int			x;
+	bool		content_embedded;
 
+	/*
+	 * Nothing the planes were built from has changed, so there is nothing to
+	 * rebuild. Forced callers are the exception and mean it: a resize has
+	 * moved the cards, or a full-screen bitmap has just annihilated the cells
+	 * they were drawn on, and in both cases the planes have to be made again
+	 * however identical their content is.
+	 */
+	content = notification_content_signature(ctx, now_ms);
+	if (!force && content == ctx->notification_content_signature)
+		return ;
+	ctx->notification_content_signature = content;
+	layout = notification_layout_signature(ctx);
 	/*
 	 * The union is reset only once a screen has taken the flag. Two changes
 	 * between one repaint and the next - a card expiring, then another
@@ -369,7 +402,6 @@ static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 	 */
 	if (!ctx->notification_repaint)
 		reset_damage(ctx);
-	ctx->notification_repaint = true;
 	accumulate_damage(ctx);
 	destroy_notification_planes(ctx);
 	cols = art_columns(ctx);
@@ -399,7 +431,129 @@ static void	refresh_notifications(t_render_ctx *ctx, uint64_t now_ms)
 		index++;
 	}
 	accumulate_damage(ctx);
+	/*
+	 * Only a card that vacated cells owes the screens a repaint. A fade step
+	 * redraws the same rectangle at a different opacity and damages nothing
+	 * underneath, so flagging it made every frame of every fade a full-screen
+	 * bitmap rebuild on every screen that consumes the flag.
+	 */
+	if (force || layout != notification_layout_signature(ctx))
+		ctx->notification_repaint = true;
 	raise_planes(ctx);
+}
+
+/**
+ * @brief Hashes what the cards say, so an unchanged refresh can do nothing.
+ *
+ * The opacity is folded in at NOTIFICATION_FADE_STEPS resolution rather than
+ * per unit: a fade is a continuous ramp, and hashing it exactly would make
+ * every tick a change and defeat the point of asking.
+ *
+ * @param ctx Active render context.
+ * @param now_ms Current monotonic timestamp.
+ * @return A non-zero hash of the visible card content.
+ */
+static uint64_t	notification_content_signature(const t_render_ctx *ctx,
+	uint64_t now_ms)
+{
+	uint64_t	hash;
+	int			index;
+	int			opacity;
+
+	hash = notification_hash(1469598103934665603ULL, &ctx->notifications.count,
+			sizeof(ctx->notifications.count));
+	index = 0;
+	while (index < ctx->notifications.count)
+	{
+		opacity = ui_notification_opacity(&ctx->notifications.items[index],
+				now_ms) * NOTIFICATION_FADE_STEPS / 256;
+		hash = notification_hash(hash, &ctx->notifications.items[index].kind,
+				sizeof(ctx->notifications.items[index].kind));
+		hash = notification_hash(hash, ctx->notifications.items[index].title,
+				strlen(ctx->notifications.items[index].title));
+		hash = notification_hash(hash, ctx->notifications.items[index].message,
+				strlen(ctx->notifications.items[index].message));
+		hash = notification_hash(hash,
+				&ctx->notifications.items[index].percent,
+				sizeof(ctx->notifications.items[index].percent));
+		hash = notification_hash(hash, &opacity, sizeof(opacity));
+		index++;
+	}
+	if (hash == 0)
+		hash = 1;
+	return (hash);
+}
+
+/**
+ * @brief Hashes where the card planes are, ignoring what they show.
+ *
+ * @param ctx Active render context.
+ * @return A hash of every live card plane's absolute cell rectangle.
+ */
+static uint64_t	notification_layout_signature(const t_render_ctx *ctx)
+{
+	uint64_t	hash;
+	int			index;
+
+	hash = 1469598103934665603ULL;
+	index = 0;
+	while (index < UI_NOTIFICATION_STACK_MAX)
+	{
+		hash = notification_plane_hash(hash,
+				ctx->notification_art_planes[index]);
+		hash = notification_plane_hash(hash, ctx->notification_planes[index]);
+		index++;
+	}
+	return (hash);
+}
+
+/**
+ * @brief Folds one plane's absolute cell rectangle into a hash.
+ *
+ * @param hash Hash so far.
+ * @param plane Plane to fold in, which may be NULL.
+ * @return The hash with this plane's geometry, or its absence, folded in.
+ */
+static uint64_t	notification_plane_hash(uint64_t hash, struct ncplane *plane)
+{
+	unsigned	rows;
+	unsigned	cols;
+	int			box[4];
+
+	if (plane == NULL)
+	{
+		memset(box, 0, sizeof(box));
+		return (notification_hash(hash, box, sizeof(box)));
+	}
+	ncplane_abs_yx(plane, &box[0], &box[1]);
+	ncplane_dim_yx(plane, &rows, &cols);
+	box[2] = (int)rows;
+	box[3] = (int)cols;
+	return (notification_hash(hash, box, sizeof(box)));
+}
+
+/**
+ * @brief FNV-1a over a byte range.
+ *
+ * @param hash Hash so far.
+ * @param data Bytes to fold in.
+ * @param size How many.
+ * @return The extended hash.
+ */
+static uint64_t	notification_hash(uint64_t hash, const void *data, size_t size)
+{
+	const unsigned char	*bytes;
+	size_t				index;
+
+	bytes = (const unsigned char *)data;
+	index = 0;
+	while (index < size)
+	{
+		hash ^= bytes[index];
+		hash *= 1099511628211ULL;
+		index++;
+	}
+	return (hash);
 }
 
 /*
