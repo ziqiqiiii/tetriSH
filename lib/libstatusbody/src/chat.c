@@ -10,8 +10,7 @@ static bool	chat_valid(const t_body_chat *chat);
 static bool	printable_line(const char *text);
 static int	decode_head(t_body_cursor *cursor, t_body_chat *chat);
 static int	decode_author(t_body_cursor *cursor, t_body_chat *chat);
-static int	read_value(t_body_cursor *cursor, const char *key, char *value,
-				size_t cap);
+static int	read_value(t_body_cursor *cursor, const char *key, char *value, size_t cap);
 
 /**
  * @brief Serialises one line of a room's feed.
@@ -162,8 +161,7 @@ static int	decode_author(t_body_cursor *cursor, t_body_chat *chat)
  * @param cap Size of value.
  * @return 0 on success, -1 on a missing or malformed line.
  */
-static int	read_value(t_body_cursor *cursor, const char *key, char *value,
-	size_t cap)
+static int	read_value(t_body_cursor *cursor, const char *key, char *value, size_t cap)
 {
 	char	line[BODY_LINE_MAX];
 	size_t	key_len;

@@ -2,9 +2,9 @@
 
 // Static Functions
 static int	encode_section(const char *key, const t_body_catalogue_item *items,
-				size_t count, char *out, size_t cap, size_t *off);
+		size_t count, char *out, size_t cap, size_t *off);
 static int	decode_section(t_body_cursor *c, const char *key,
-				t_body_catalogue_item *items, size_t *out_count);
+		t_body_catalogue_item *items, size_t *out_count);
 static int	decode_count(const char *line, const char *key, size_t *out);
 static int	decode_item(const char *line, t_body_catalogue_item *item);
 
