@@ -159,14 +159,6 @@
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
 # define AUTH_OVERLAY_PLANE_MAX	16
-/*
- * Six covers Home, auth, Settings, Leaderboard, Marketplace and the duel hall
- * - every backdrop reachable without passing through one that clears the cache
- * - so the common navigation never evicts. Each retained entry costs its bitmap
- * twice, once in this process and once in the terminal, which is what caps it.
- */
-# define BACKDROP_CACHE_MAX		6
-# define BACKDROP_PATH_MAX		256
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
@@ -2069,32 +2061,6 @@ typedef struct s_theme_assets
 	char	wolfman[APP_ASSET_PATH_MAX];
 }	t_theme_assets;
 
-/*
- * One retained backdrop. Transferring a full-screen bitmap is the dominant
- * cost of a screen change - tens of seconds through a macOS pty at a large
- * window - so each backdrop's plane is kept and restacked on revisit. Entries
- * are keyed by the artwork and the construction that produced it, and are only
- * reused while the plane still occupies the geometry the caller wants.
- */
-typedef struct s_backdrop_cache
-{
-	char				path[BACKDROP_PATH_MAX];
-	bool				exact;
-	bool				stretch;
-	struct ncplane		*plane;
-	uint32_t			*pixels;
-	int					pixels_width;
-	int					pixels_height;
-	/*
-	 * The geometry the plane is for, not the geometry it currently sits at:
-	 * an idle backdrop is parked off-screen rather than left stacked under the
-	 * live one, so its own coordinates say nothing about whether it still fits.
-	 */
-	int					rows;
-	int					cols;
-	uint64_t			used;
-}	t_backdrop_cache;
-
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
 // follow the art even when notcurses scales it to different terminals.
@@ -2102,15 +2068,13 @@ typedef struct
 {
 	struct notcurses	*nc;
 	struct ncplane		*std;
-	struct ncplane		*bg_plane;
 	/*
-	 * Backdrops outlive the screens drawn over them. A sprixel is bound to its
-	 * plane until that plane is re-blitted, resized or destroyed, so destroying
-	 * one is what forces its whole bitmap back down the pty; keeping it lets a
-	 * revisit cost a restack instead of a retransfer.
+	 * The one backdrop that exists. A retained-plane cache was tried and
+	 * reverted after macOS Kitty transitions left parked sprixels on the glass
+	 * and failed to restore the one moved back. Screen changes therefore replace
+	 * and destroy one backdrop atomically; see docs/adding-a-screen.md.
 	 */
-	t_backdrop_cache	backdrops[BACKDROP_CACHE_MAX];
-	uint64_t			backdrop_tick;
+	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
@@ -3100,7 +3064,6 @@ int				render_background_replace_exact(t_render_ctx *ctx,
 int				render_background_replace_visual(t_render_ctx *ctx,
 					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(t_render_ctx *ctx);
-void				render_background_cache_reset(t_render_ctx *ctx);
 void				render_backdrop_forget(t_render_ctx *ctx);
 const uint32_t		*render_backdrop_pixels(const t_render_ctx *ctx,
 					int *width, int *height);

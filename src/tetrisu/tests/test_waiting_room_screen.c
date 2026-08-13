@@ -174,7 +174,7 @@ static void	test_the_legend_fits_the_narrowest_panel(void)
 	index = 0;
 	while (index < sizeof("<>RSBKCL") - 1)
 	{
-		key = "<>RSBKCL" + index;
+		key = &"<>RSBKCL"[index];
 		assert(memchr(wide, *key, strlen(wide)) != NULL);
 		assert(memchr(narrow, *key, strlen(narrow)) != NULL);
 		index++;
