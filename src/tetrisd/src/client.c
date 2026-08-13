@@ -7,11 +7,8 @@ static void	release(t_client *cli);
 /**
  * @brief Takes ownership of an accepted connection and starts its handshake.
  *
- * The client is registered before its handshake runs, so the connection limit
- * is enforced at accept time - a peer beyond it is refused before any crypto
- * is spent on it - and so a shutdown can reach a peer that never finishes one.
- * From here the handshake pool owns the descriptor until it hands the
- * established session back to the reactor.
+ * The connection id is claimed, and its accept line written, before the pool is
+ * signalled: a worker can fail and log the instant it is woken.
  *
  * @param srv Server the connection belongs to.
  * @param fd Accepted socket descriptor; closed here on failure.
@@ -37,8 +34,11 @@ int	client_spawn(t_server *srv, int fd)
 		outbox_destroy(&cli->outbox);
 		return (close(fd), free(cli), -1);
 	}
+	cli->conn_id = ++srv->next_conn_id;
+	logger_emit(&srv->log, COREIPC_LOG_INFO, "conn %u accepted", cli->conn_id);
 	if (handshake_pool_submit(&srv->pool, cli) != 0)
 	{
+		logger_emit(&srv->log, COREIPC_LOG_WARNING, "conn %u refused: the handshake pool would not take it", cli->conn_id);
 		registry_remove(&srv->reg, cli);
 		outbox_destroy(&cli->outbox);
 		return (close(fd), free(cli), -1);
@@ -49,10 +49,7 @@ int	client_spawn(t_server *srv, int fd)
 /**
  * @brief Moves a handshaken connection into the event loop.
  *
- * This is the handoff: from here the socket is non-blocking and the reactor is
- * its only reader and its only writer, so the session's sequence counters have
- * exactly one owner. A client that cannot be adopted is ended rather than left
- * connected but unwatched.
+ * From here the reactor is the socket's only reader and only writer.
  *
  * @param cli Client whose handshake succeeded.
  */
@@ -67,25 +64,21 @@ void	client_adopt(t_client *cli)
 	ev.data.ptr = cli;
 	if (unixsock_set_nonblock(cli->fd) != 0 || epoll_ctl(cli->srv->epoll_fd, EPOLL_CTL_ADD, cli->fd, &ev) != 0)
 	{
-		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING, "cannot watch fd %d: %s", cli->fd, strerror(errno));
+		logger_emit(&cli->srv->log, COREIPC_LOG_WARNING, "conn %u cannot watch fd %d: %s", cli->conn_id, cli->fd, strerror(errno));
 		client_kill(cli);
 		return ;
 	}
 	cli->watched = true;
 	registry_mark_state(&cli->srv->reg, cli, CLI_ANONYMOUS);
+	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "conn %u handshake ok", cli->conn_id);
 }
 
 /**
  * @brief Ends a client: forfeit, unlink, and park it for the reaper.
  *
- * The order is the lifetime rule: the player leaves the room first (a
- * disconnect mid-game is a forfeit), then the client is unlinked
- * from the registry so nothing can address it as that player again, and only
- * then is the socket shut down.
- *
- * Nothing is freed here. A batch of epoll events may hold several pointers to
- * this client, so it goes on the zombie list and client_reap releases it once
- * the whole batch has been processed.
+ * The order is the lifetime rule: forfeit the room, unlink from the registry,
+ * then shut the socket down. Nothing is freed here - a batch of epoll events
+ * may still hold pointers to this client, so client_reap frees it.
  *
  * @param cli Client to end; a second call and a NULL are both ignored.
  */
@@ -109,10 +102,8 @@ void	client_kill(t_client *cli)
 /**
  * @brief Frees every client killed during the batch that has just finished.
  *
- * This is the only free() site for a client, and calling it anywhere other
- * than between batches turns a stale epoll_event.data.ptr into a use-after
- * free - the one rule in the reactor that a later change can break without a
- * single test noticing.
+ * The only free() site for a client: calling it anywhere but between batches
+ * turns a stale epoll_event.data.ptr into a use-after-free.
  *
  * @param srv Server whose zombie list is drained.
  */
@@ -151,7 +142,7 @@ static void	unwatch(t_client *cli)
  */
 static void	release(t_client *cli)
 {
-	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "client %s disconnected", cli->username[0] != '\0' ? cli->username : "(anonymous)");
+	logger_emit(&cli->srv->log, COREIPC_LOG_INFO, "conn %u %s disconnected", cli->conn_id, cli->username[0] != '\0' ? cli->username : "(anonymous)");
 	session_close(&cli->sess);
 	close(cli->fd);
 	outbox_destroy(&cli->outbox);

@@ -11,13 +11,9 @@ static int		expire_one(t_client *cli, uint64_t now, int soonest);
 /**
  * @brief Starts the pool of workers that run the secure handshake.
  *
- * The handshake is the one thing in tetrisd that genuinely blocks: six ordered
- * I/O steps around two RSA operations, waiting on a nonce from a peer that has
- * not authenticated itself yet. Putting it on the reactor would stutter every
- * running game, so it stays on threads that are allowed to wait.
- *
- * The queues are sized to the client limit because a client is registered
- * before it is submitted, so no more than that many can ever be in flight.
+ * The handshake is the one thing in tetrisd that genuinely blocks, so it stays
+ * off the reactor. The queues are sized to the client limit, since a client is
+ * registered before it is submitted.
  *
  * @param pool Pool to start.
  * @param srv Server owning the credentials, the logger, and the wake pipe.
@@ -102,21 +98,10 @@ int	handshake_pool_take(t_handshake_pool *pool, t_client **out)
 /**
  * @brief Shuts down any handshake that has run out of time, and says when next.
  *
- * The socket deadline alone is not enough. SO_RCVTIMEO bounds one recv, and
- * libtetrissh loops until it has the bytes it asked for, so a peer that sends
- * one byte just before every timeout keeps a worker forever without ever
- * tripping it. Shutting the socket down is what makes the worker's next read
- * return: the worker is blocked inside the handshake and cannot check a clock.
- *
- * The budget runs from the moment a worker picks the connection up, not from
- * when it was accepted. Charging queue time to the client would mean that
- * whoever queues behind an attacker inherits whatever the attacker left over -
- * so a full pool would start refusing honest logins, which is the outcome this
- * exists to prevent. A queued client holds no worker; the pool's own bounded
- * handshakes are what bound its wait.
- *
- * The returned wait is what the reactor gives epoll_wait, so a server with
- * nothing handshaking still sleeps indefinitely.
+ * SO_RCVTIMEO bounds one recv, so a peer sending one byte before every timeout
+ * would keep a worker forever; shutting the socket down is what makes the
+ * blocked worker's next read return. The budget runs from the moment a worker
+ * picks the connection up, so queue time is charged to nobody.
  *
  * @param pool Pool to sweep.
  * @return Milliseconds until the earliest remaining deadline, or -1 when no
@@ -147,11 +132,9 @@ int	handshake_pool_expire(t_handshake_pool *pool)
 /**
  * @brief Stops every worker and waits for each to finish.
  *
- * Sockets are shut down before the workers are joined, so a peer that
- * connected and went quiet does not hold shutdown open for its whole deadline.
- * A worker that finds the pool stopped still drains what is queued - it
- * reports each as failed without touching the socket - so nothing is left
- * behind for the caller to find.
+ * Sockets are shut down before the workers are joined, so a peer that went
+ * quiet does not hold shutdown open for its whole deadline. A worker finding
+ * the pool stopped still drains the queue, reporting each client as failed.
  *
  * @param pool Pool to stop; safe when it never started.
  */
@@ -308,7 +291,7 @@ static void	run_handshake(t_handshake_pool *pool, t_client *cli, bool live)
 			pool->srv->credentials) != 0)
 	{
 		logger_emit(&pool->srv->log, COREIPC_LOG_WARNING,
-			"handshake failed on fd %d", cli->fd);
+			"conn %u handshake failed", cli->conn_id);
 		return ;
 	}
 	cli->handshake_ok = true;
@@ -317,10 +300,8 @@ static void	run_handshake(t_handshake_pool *pool, t_client *cli, bool live)
 /**
  * @brief Puts a per-read and per-write deadline on a socket being handshaken.
  *
- * This bounds one blocking call, which is the common case: a peer that
- * connects and says nothing releases its worker here without the reactor
- * having to intervene. It is not the whole guarantee - handshake_pool_expire
- * is - but it keeps the ordinary case off the reactor's plate.
+ * This bounds one blocking call, which covers the common case without the
+ * reactor intervening. handshake_pool_expire is the whole guarantee.
  *
  * @param fd Socket the handshake will run over.
  * @param timeout_ms How long a single read or write may take.
@@ -342,9 +323,8 @@ static int	set_recv_deadline(int fd, int timeout_ms)
 /**
  * @brief Expires one in-flight handshake, or folds it into the earliest wait.
  *
- * A connection is shut down once, and then ignored: its worker is already on
- * its way to reporting the failure, so keeping it in the wait would spin the
- * reactor on a deadline that can never move.
+ * A connection is shut down once and then ignored: keeping it in the wait
+ * would spin the reactor on a deadline that can never move.
  *
  * @param cli Client whose handshake is being timed.
  * @param now The current monotonic-ish millisecond reading.

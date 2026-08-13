@@ -186,10 +186,13 @@ deps-info:
 #                                    PLAY                                      #
 ################################################################################
 
+
 # HOST= plays on another server:           make play HOST=tetrish.dev
 # PLAY_ARGS= passes anything else through: make play-image PLAY_ARGS=--rebuild
 PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 
+# run the game locally (local server)
+# make play PLAY_ARGS=--local
 play:
 	@ bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
 

@@ -8,23 +8,16 @@ static int	read_text(t_request_context *ctx, char *raw, size_t raw_cap,
 /**
  * @brief CHAT /room/<name> - posts one line to the room's feed (UC-09).
  *
- * The order of the refusals is the specification's, and it matters. The rate
- * limit is taken first so a client cannot probe which rooms exist by spamming
- * a room it is not in; membership before muting so a muted player learns no
- * more about a room than anyone else; and the text is validated last, because
- * a message nobody was allowed to send should not be told it was malformed.
- *
- * The sender is on the receiving end too. A feed everyone sees identically,
- * in one order the server chose, is simpler to reason about than one where
- * each client splices its own messages into what it was sent - and it is what
- * makes a `seq` meaningful.
+ * The order of the refusals is the specification's, and it matters: rate limit,
+ * membership, muting, then the text - so a refusal never tells a client more
+ * about a room than it is entitled to know. The sender is on the receiving end
+ * too, which is what makes a `seq` meaningful.
  *
  * @param msg The request (unused; the body is read through the context).
  * @param context The request context.
  * @return 200 when broadcast, 429 rate-limited, 404 when not in that room,
  *         403 when muted, 400 when the text is unsendable, 500 when the line
- *         could not be built - which is the server's fault, not the sender's,
- *         and must not be answered with a seq nobody will ever receive.
+ *         could not be built.
  */
 int	chat_handler(const t_htttp_message *msg, void *context)
 {
@@ -68,12 +61,9 @@ int	chat_handler(const t_htttp_message *msg, void *context)
 /**
  * @brief Reads the message text and says which way it was unsendable.
  *
- * The line is read into a buffer twice the width of the field it has to fit,
- * so a message that is merely too long arrives whole and can be named as such.
- * "bad-text" and "too-long" ask a client for two different things - trim it,
- * or stop sending control characters - and one status for both left it unable
- * to tell which. A line longer even than the wide buffer is still bad-text:
- * the server has not read enough of it to say anything more precise.
+ * The line is read into a buffer twice the width of the field it must fit, so
+ * a merely-too-long message can be named "too-long" rather than "bad-text" -
+ * the two ask the client for different fixes.
  *
  * @param ctx Request context holding the body.
  * @param raw Wide scratch buffer the line is read into first.
@@ -104,11 +94,9 @@ static int	read_text(t_request_context *ctx, char *raw, size_t raw_cap,
 /**
  * @brief Checks that a message can be put on the wire and drawn safely.
  *
- * request_body_field already stops at the newline that ends the line, so what
- * is left to refuse is a message that is empty or carries a control character
- * - an escape sequence arriving as chat is somebody else's cursor. The body
- * codec enforces the same rule; failing here is what turns it into a 400
- * instead of a message silently going nowhere.
+ * What is left to refuse is a message that is empty or carries a control
+ * character - an escape sequence arriving as chat is somebody else's cursor.
+ * The body codec enforces the same rule; failing here makes it a 400.
  *
  * @param text The candidate message.
  * @return true when the text is non-empty and entirely printable.
