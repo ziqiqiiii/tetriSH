@@ -44,6 +44,26 @@
 # define BODY_ITEM_NAME_MAX	32
 # define BODY_ROOM_MEMBERS_MAX	99
 /*
+** Rows a PLAYERS listing carries (UC-26 ext 2b). A row count and not a byte
+** count, so a fixture can prove truncation and a reader can predict it; the
+** overflow travels as an `Omitted: <n>` header, the body being a bare sequence
+** of rows with nowhere to put it. 256 rather than tetrisd's 4096-client limit
+** because a worst-case row is ~86 bytes and 256 of them stay well inside a
+** 32 KB control body.
+*/
+# define BODY_PLAYERS_MAX	256
+/*
+** What the username column reads for a connection that has not logged in - a
+** Client but not yet a Player. The same word tetrisd's Access line uses, so
+** the two renderings of one connection agree.
+**
+** The wire cannot tell this from a player registered under that exact name,
+** since db_username_valid permits printable ASCII without spaces. That is a
+** property of a space-delimited row format rather than of this codec, so the
+** struct carries `authenticated` and callers read that instead of the name.
+*/
+# define BODY_ANONYMOUS		"(anonymous)"
+/*
 ** How many other players' boards one STATE snapshot carries.
 **
 ** One, because that is Double. It is a deliberate cap and not a placeholder:
@@ -491,6 +511,63 @@ typedef struct s_body_leaderboard_row
 }	t_body_leaderboard_row;
 
 /*
+** UC-22 Health: a daemon's report of its own condition, answered over the
+** Control channel. There is no "health" field - the fields are the Health, and
+** a daemon that answers at all has made the only summary judgement it could.
+**
+** `tick_ms` is the interval the daemon is *configured* for and is labelled
+** `configured` on the wire. Nothing measures an observed rate, and echoing
+** .tetrishrc back while implying measurement would be worse than saying
+** nothing.
+**
+** `sink_reaching` is whether this daemon's log records are reaching the Sink
+** or falling back to its own stderr. It is not a count of anything: Dropped,
+** Rejected and Degraded are three different quantities and none of them is
+** this.
+*/
+typedef struct s_body_health
+{
+	int64_t		pid;
+	uint64_t	uptime_ms;
+	int			connections;
+	int			rooms;
+	int			tick_ms;
+	bool		sink_reaching;
+}	t_body_health;
+
+/*
+** One UC-26 PLAYERS row: <connection> <username> <room>.
+**
+** A connection that has not logged in is a Client but not a Player, and is
+** still listed - an Administrator deciding whether the server is busy needs
+** the connection count, not just the authenticated part of it. Such a row
+** carries authenticated=false and encodes its name as BODY_ANONYMOUS.
+**
+** `room` is empty for a connection sitting in no room, and encodes as `-`.
+*/
+typedef struct s_body_player_row
+{
+	uint64_t	connection;
+	bool		authenticated;
+	char		username[BODY_USER_MAX];
+	char		room[BODY_NAME_MAX];
+}	t_body_player_row;
+
+/*
+** UC-27: the producer-side Dropped counter - log records tetrisd never sent
+** because its ring buffer was full.
+**
+** It is a struct around one number rather than a bare integer so that
+** tetrislogd's Rejected and Degraded counts could join it without changing the
+** body type, should those ever become reachable over a wire. They are not the
+** same quantity and must never be added to this one.
+*/
+typedef struct s_body_dropped
+{
+	uint64_t	dropped;
+}	t_body_dropped;
+
+/*
 ** One item on the store front: what it is, what it costs, what to call it.
 **
 ** Ownership is deliberately absent - it is a fact about a player, not about
@@ -612,5 +689,17 @@ int	body_leaderboard_decode(const char *buf, size_t len, t_body_leaderboard_row 
 /* CATALOGUE.C */
 int	body_catalogue_encode(const t_body_catalogue *in, char *out, size_t cap);
 int	body_catalogue_decode(const char *buf, size_t len, t_body_catalogue *out);
+
+/* HEALTH.C */
+int	body_health_encode(const t_body_health *in, char *out, size_t cap);
+int	body_health_decode(const char *buf, size_t len, t_body_health *out);
+
+/* PLAYERS.C */
+int	body_players_encode(const t_body_player_row *rows, size_t count, char *out, size_t cap);
+int	body_players_decode(const char *buf, size_t len, t_body_player_row *rows, size_t cap, size_t *count);
+
+/* DROPPED.C */
+int	body_dropped_encode(const t_body_dropped *in, char *out, size_t cap);
+int	body_dropped_decode(const char *buf, size_t len, t_body_dropped *out);
 
 # endif
