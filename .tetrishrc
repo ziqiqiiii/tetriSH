@@ -1,0 +1,99 @@
+# .tetrishrc — tetriSH shell start-up file
+# One command per line; # and blank lines ignored. $PWD/bin is on PATH.
+# Each daemon also parses its own `export <PREFIX>_*` lines out of this file,
+# so nothing is hard-coded. Relative paths resolve against the daemon's cwd.
+
+################################################################################
+#                              shell-wide settings                             #
+################################################################################
+
+# Timezone every log line is spelled in (records store epoch ms). Pinned so the
+# same run reads identically on every host.
+export TZ=Asia/Singapore
+
+################################################################################
+#                              tetrisd settings                                #
+################################################################################
+
+# Listen port; 0 lets the kernel pick (tests). SIGHUP re-reads these keys.
+export TETRISD_PORT=4242
+
+# Player store (append-only log) and read-only character/theme catalogues.
+export TETRISD_DATA_DIR=tmp/tetrisd
+export TETRISD_CONFIG_DIR=lib/libmacminidb/config
+
+# Secure-session credentials — `make certs`. Missing cert or key aborts boot.
+export TETRISD_CERT_PATH=certs/server.crt
+export TETRISD_KEY_PATH=certs/server.key
+export TETRISD_CA_PATH=certs/ca.crt
+
+# Log socket; must equal TETRISLOGD_SOCKET_PATH below. Records are dropped,
+# never blocked on, when the logger is slow or absent.
+export TETRISD_LOG_IPC=tmp/tetrisd/tetrislogd.sock
+export TETRISD_LOG_LEVEL=info
+
+# Pidfile (flock'd while running): tetrisctl's target, single-instance guard,
+# and staleness test in one.
+export TETRISD_PID_PATH=tmp/tetrisd/tetrisd.pid
+
+# stderr after boot succeeds — last-resort copy of records the logger refused.
+# A failed boot still prints to the terminal.
+export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err
+
+# Connection ceiling and the period of the one gravity timer, in ms.
+export TETRISD_MAX_CLIENTS=64
+export TETRISD_TICK_MS=12
+
+# Slots in a Battle Royale room (Single and Double are fixed at 1 and 2).
+export TETRISD_BR_SLOTS=4
+
+# Per-connection input bucket for MOVE/ROTATE/DROP: BURST tokens refilling at
+# RATE/s. Draining it earns 429 + Retry-After.
+export TETRISD_INPUT_BURST=120
+export TETRISD_INPUT_RATE=60
+
+# Handshake pool — the one blocking call left. WORKERS bounds new-connection
+# arrival rate (not concurrent play); TIMEOUT_MS caps one handshake.
+export TETRISD_HANDSHAKE_WORKERS=4
+export TETRISD_HANDSHAKE_TIMEOUT_MS=5000
+
+################################################################################
+#                            tetrislogd settings                               #
+################################################################################
+
+# Datagram socket it binds. Keep identical to TETRISD_LOG_IPC above.
+export TETRISLOGD_SOCKET_PATH=tmp/tetrisd/tetrislogd.sock
+
+# Sink file. Rotate from outside: move it, then `kill -HUP`. Config is cold —
+# SIGHUP reopens this path, it does not reload settings.
+export TETRISLOGD_LOG_PATH=tmp/tetrislogd/tetrislogd.log
+
+# Pidfile — the single-instance guard.
+export TETRISLOGD_PID_PATH=tmp/tetrislogd/tetrislogd.pid
+
+# stderr after detaching; degraded records land here.
+export TETRISLOGD_ERR_PATH=tmp/tetrislogd/tetrislogd.err
+
+################################################################################
+#                                 tetrisu                                      #
+################################################################################
+
+# Where the client dials. PORT must match TETRISD_PORT, and CA_PATH must be the
+# CA that signed the server's certificate or the session is refused — a wrong CA
+# does not announce itself, it just silently drops you to local Solo.
+# `make certs` mints a matching set; `make play HOST=<addr>` picks the demo CA.
+export TETRISU_HOST=127.0.0.1
+export TETRISU_PORT=4242
+export TETRISU_CA_PATH=certs/demo-ca.crt
+
+################################################################################
+#                                 daemons                                      #
+################################################################################
+
+# The only place launch order is written down; `tetrisctl stop` reverses it, so
+# tetrisd's shutdown still reaches the log. Pidfiles come from the prefixes above.
+export TETRISCTL_DAEMONS="tetrislogd tetrisd"
+
+# Each binary double-forks and returns only once up, so this fails loudly.
+# `tetrisctl status` / `stop` manage the stack afterwards.
+tetrisctl start

@@ -1,0 +1,12 @@
+# clangd config for libhtttp — teaches the language server where htttp.h lives.
+# The header sits in include/, not beside the .c files, so without a hint clangd
+# floods every source/test with bogus "file not found" errors on #include
+# "htttp.h". The Makefile passes -Iinclude, but clangd has no compile_commands
+# database here, so it runs a generic fallback whose working directory is the
+# *source file's own directory* (src/ or tests/). A plain -Iinclude would then
+# resolve to src/include (nonexistent); -I../include resolves to lib/libhtttp/
+# include for every .c under src/ and tests/ (all exactly one level deep). Build
+# flags are unchanged; this only affects the editor.
+CompileFlags:
+  Add:
+    - -I../include

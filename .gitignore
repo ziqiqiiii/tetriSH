@@ -1,6 +1,9 @@
 # Prerequisites
 *.d
 
+# macOS Finder metadata
+.DS_Store
+
 # Object files
 *.o
 *.ko
@@ -15,6 +18,30 @@
 # Precompiled Headers
 *.gch
 *.pch
+
+# Session credentials. Everything here is minted locally by `make certs` and
+# ignored, with one deliberate exception: demo-ca.crt is the public CA of the
+# demo server, committed so a downloaded client can verify it without being
+# handed a file out of band.
+#
+# It is a separate path from ca.crt rather than the same file because the two
+# have opposite lifetimes. ca.crt is scratch - generate_certs.sh owns it, and
+# reissues it whenever this machine needs to serve - while demo-ca.crt is a
+# promise to every client already in the wild and must never be rewritten. When
+# they shared a path, `make certs` and `make play` replaced the promise with
+# scratch, and no client could reach the demo server again.
+#
+# The pattern is `certs/*` and not `certs/`: git does not descend into an
+# excluded directory, so a `!certs/demo-ca.crt` under `certs/` would never be
+# reached and the negation would silently do nothing.
+certs/*
+!certs/demo-ca.crt
+
+# Build output directories
+bin/
+tests/bin/
+tests/tmp/
+**/tests/tmp/
 
 # Libraries
 *.lib
@@ -41,6 +68,9 @@
 *.su
 *.idb
 *.pdb
+vgcore.*
+core
+core.*
 
 # Kernel Module Compile Results
 *.mod*
@@ -53,3 +83,14 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# clangd compilation database (generated; machine-specific absolute paths)
+compile_commands.json
+.cache/
+
+# settings
+settings*
+
+.scratch/*
+docs/adr/*
+tmp/*

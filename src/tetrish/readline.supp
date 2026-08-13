@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions.
+#
+# GNU readline never frees a handful of internal allocations (keymaps,
+# terminal state, the line buffer) before the process exits. These show up
+# under AddressSanitizer as leaks originating in libreadline's xmalloc, even
+# though our own cleanup (rl_clear_history, freeing rl_line_buffer) is correct.
+# Suppress only those so genuine leaks in our code are still reported.
+leak:libreadline
+leak:xmalloc
