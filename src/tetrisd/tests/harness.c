@@ -245,6 +245,54 @@ int	hc_request(t_harness *hc, const char *method, const char *path, const char *
 }
 
 /**
+ * @brief Sends one request and does not wait to be told it stood.
+ *
+ * The half of hc_request that writes, for the one thing a request/response
+ * client cannot express: two players acting at the same instant. Waiting for
+ * the first answer before sending the second puts a round trip between them,
+ * and a round trip is long enough for the server's tick to land in - which is
+ * the difference between two boards stopping together and two boards stopping
+ * one after the other.
+ *
+ * The reply is still coming and is left on the socket for hc_recv or the next
+ * hc_request to pick up.
+ *
+ * @param hc Connected client.
+ * @param method HTTTP method.
+ * @param path Request path.
+ * @param body Request body, or NULL.
+ * @return 0 when the request went out, -1 otherwise.
+ */
+int	hc_send(t_harness *hc, const char *method, const char *path,
+		const char *body)
+{
+	t_htttp_message	req;
+	char			pid[32];
+	int				rc;
+
+	htttp_message_init(&req);
+	rc = -1;
+	if (htttp_message_make_request(&req, method, path) == HTTTP_OK)
+	{
+		if (hc->authed)
+		{
+			snprintf(pid, sizeof(pid), "%llu",
+				(unsigned long long)hc->player_id);
+			htttp_message_set_header(&req, "Player-Id", pid);
+		}
+		if (body != NULL)
+		{
+			htttp_message_set_header(&req, "Content-Type",
+				HTTTP_CONTENT_TYPE_COMMAND);
+			htttp_message_set_body(&req, body, strlen(body));
+		}
+		rc = send_message(hc, &req);
+	}
+	htttp_message_free(&req);
+	return (rc);
+}
+
+/**
  * @brief Receives the next message of any kind, waiting up to a timeout.
  *
  * @param hc Connected client.

@@ -29,6 +29,11 @@ static t_app_provider_result	net_equip_item(void *userdata,
 				t_app_catalogue_kind kind, uint32_t item_id,
 				t_app_settings_view_model *view);
 static t_app_provider_result	write_result(int status);
+static void			refuse_sign_up(const t_net_result *result,
+				t_app_auth_view_model *view);
+static void			refuse_login(const t_net_result *result,
+				t_app_auth_view_model *view);
+static t_app_provider_result	credential_refusal_result(int status);
 static void			build_settings(t_app_net_session *session,
 				const t_body_profile *profile,
 				t_app_settings_view_model *view);
@@ -116,6 +121,7 @@ static t_app_provider_result	net_sign_up_action(void *userdata,
 	if (userdata == NULL || username == NULL || password == NULL
 		|| username[0] == '\0' || password[0] == '\0' || view == NULL)
 		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
 	session = (t_app_net_session *)userdata;
 	if (!session_ready_for_credentials(session))
 		return (APP_PROVIDER_UNAVAILABLE);
@@ -123,8 +129,10 @@ static t_app_provider_result	net_sign_up_action(void *userdata,
 	if (net_signup(&session->net, username, password, &result) != 0)
 		return (APP_PROVIDER_UNAVAILABLE);
 	if (result.status != 201)
-		return (APP_PROVIDER_INVALID);
-	memset(view, 0, sizeof(*view));
+	{
+		refuse_sign_up(&result, view);
+		return (credential_refusal_result(result.status));
+	}
 	snprintf(session->username, sizeof(session->username), "%s", username);
 	return (APP_PROVIDER_OK);
 }
@@ -141,6 +149,7 @@ static t_app_provider_result	net_login_action(void *userdata,
 	if (userdata == NULL || username == NULL || password == NULL
 		|| username[0] == '\0' || password[0] == '\0' || view == NULL)
 		return (APP_PROVIDER_INVALID);
+	memset(view, 0, sizeof(*view));
 	session = (t_app_net_session *)userdata;
 	if (!session_ready_for_credentials(session))
 		return (APP_PROVIDER_UNAVAILABLE);
@@ -148,7 +157,10 @@ static t_app_provider_result	net_login_action(void *userdata,
 	if (net_login(&session->net, username, password, &result) != 0)
 		return (APP_PROVIDER_UNAVAILABLE);
 	if (result.status != 200)
-		return (APP_PROVIDER_INVALID);
+	{
+		refuse_login(&result, view);
+		return (credential_refusal_result(result.status));
+	}
 	snprintf(session->username, sizeof(session->username), "%s",
 		session->net.username);
 	session->score = 0;
@@ -157,11 +169,77 @@ static t_app_provider_result	net_login_action(void *userdata,
 		session->score = (int64_t)strtoll(field, NULL, 10);
 	if (net_result_field(&result, "wallet", field, sizeof(field)) != NULL)
 		session->wallet = (int64_t)strtoll(field, NULL, 10);
-	memset(view, 0, sizeof(*view));
 	view->signed_in = true;
 	snprintf(view->username, sizeof(view->username), "%s", username);
 	snprintf(view->message, sizeof(view->message), "WELCOME TO TETRISU!");
 	return (APP_PROVIDER_OK);
+}
+
+/**
+ * @brief Gives each refused registration a status the account owner can act on.
+ *
+ * The protocol status remains the authority. `reason bad-username` refines the
+ * server's 400, while 409 is the unambiguous duplicate-name response. Keeping
+ * these words in the auth view model lets the form stay provider-agnostic and
+ * avoids collapsing every refusal into "check your account details".
+ */
+static void	refuse_sign_up(const t_net_result *result,
+		t_app_auth_view_model *view)
+{
+	const char	*message;
+
+	if (result->status == 409)
+		message = "USERNAME ALREADY EXISTS";
+	else if (result->status == 400
+		&& strcmp(result->reason, "bad-username") == 0)
+		message = "USERNAME IS NOT ALLOWED";
+	else if (result->status == 400)
+		message = "CHECK USERNAME AND PASSWORD";
+	else if (result->status == 429)
+		message = "TOO MANY ATTEMPTS - TRY LATER";
+	else if (result->status >= 500)
+		message = "SERVER COULD NOT CREATE ACCOUNT";
+	else
+		message = "ACCOUNT CREATION WAS REFUSED";
+	snprintf(view->message, sizeof(view->message), "%s", message);
+}
+
+/**
+ * @brief Gives each refused sign-in a concise, non-enumerating explanation.
+ *
+ * A 401 deliberately does not distinguish an unknown username from a wrong
+ * password; tetrisd gives both the same response to avoid account discovery.
+ */
+static void	refuse_login(const t_net_result *result,
+		t_app_auth_view_model *view)
+{
+	const char	*message;
+
+	if (result->status == 401)
+		message = "WRONG USERNAME OR PASSWORD";
+	else if (result->status == 400)
+		message = "CHECK USERNAME AND PASSWORD";
+	else if (result->status == 409)
+		message = "SESSION IS ALREADY SIGNED IN";
+	else if (result->status == 429)
+		message = "TOO MANY ATTEMPTS - TRY LATER";
+	else if (result->status >= 500)
+		message = "SERVER COULD NOT SIGN IN";
+	else
+		message = "SIGN IN WAS REFUSED";
+	snprintf(view->message, sizeof(view->message), "%s", message);
+}
+
+/**
+ * @brief Preserves the provider contract while carrying precise refusal copy.
+ */
+static t_app_provider_result	credential_refusal_result(int status)
+{
+	if (status == 429)
+		return (APP_PROVIDER_UNAVAILABLE);
+	if (status >= 500)
+		return (APP_PROVIDER_ERROR);
+	return (APP_PROVIDER_INVALID);
 }
 
 /*

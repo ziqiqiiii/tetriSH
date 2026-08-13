@@ -31,6 +31,14 @@ static void	apply_opponent_game(t_solo_game *game,
 				const t_body_opponent *opponent);
 static void	apply_opponent_card(t_mp_match_state *state, int index,
 				const t_body_opponent *opponent);
+static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
+				uint64_t local);
+static void	apply_arena_card(t_mp_match_state *state,
+				const t_body_arena_slot *card, uint64_t local, bool *seated);
+static void	forget_empty_seats(t_mp_match_state *state, const bool *seated);
+static void	count_the_arena(t_mp_match_state *state);
+static void	apply_arena_mask(t_board *board,
+				const t_body_arena_slot *card);
 
 /**
  * @brief Remembers which room's game this client is about to render.
@@ -90,6 +98,25 @@ bool	net_match_apply(t_net_client *net, t_mp_match_state *state)
 	state->incoming_garbage = snap->pending;
 	apply_countdown(state, snap);
 	apply_opponents(state, snap);
+	apply_arena(state, snap, net->player_id);
+	/*
+	 * The room's own head count, straight from the frame. It used to be
+	 * derived by counting the opponents the frame carried, which in a Battle
+	 * Royale is at most one - so a forty-player match read ALIVE 2/40. It
+	 * cannot be counted from the arena either, because most frames carry no
+	 * arena at all and the number would drop to zero between pushes.
+	 */
+	if (snap->players > 0)
+	{
+		state->players_total = snap->players;
+		state->players_alive = snap->alive;
+	}
+	/*
+	 * The placing arrives with the result still `none`, which is what makes
+	 * "eliminated, now watching" a state the screen can draw rather than
+	 * something it only learns when the match ends.
+	 */
+	state->local_rank = snap->rank;
 	apply_result(state, snap);
 	net->applied_seq = snap->seq;
 	return (true);
@@ -128,6 +155,59 @@ int	net_match_send_action(t_net_client *net, t_solo_action action)
 	if (net == NULL || net->state != NET_IN_GAME)
 		return (-1);
 	return (net_solo_send_action(net, action));
+}
+
+/**
+ * @brief Tells the server which kind of rival to aim this player's garbage at.
+ *
+ * It is send-and-report rather than send-and-wait: a refused mode leaves the
+ * previous one standing and says so, and what confirms a mode took is the next
+ * arena, where the cards the mode singles out come back marked.
+ *
+ * The mode travels as a word rather than as the enum's number. Both ends share
+ * the enum, but a body that spelled it as an integer would make a reordering
+ * of the four a silent change of meaning on the wire.
+ *
+ * @param net Client with a match running.
+ * @param mode The mode the player selected.
+ * @param out Receives the status and any refusal reason; may be NULL.
+ * @return 0 when the server answered, -1 on a transport failure.
+ */
+int	net_match_set_target(t_net_client *net, t_target_mode mode,
+		t_net_result *out)
+{
+	t_net_result	result;
+	char			path[NET_PATH_MAX];
+	char			body[32];
+
+	if (net == NULL || net->state != NET_IN_GAME || net->room[0] == '\0')
+		return (-1);
+	snprintf(path, sizeof(path), "%s%s", TETRISU_ROUTE_ROOM, net->room);
+	snprintf(body, sizeof(body), "mode %s\n", net_target_mode_word(mode));
+	memset(&result, 0, sizeof(result));
+	if (net_request(net, "TARGET", path, body, &result) != 0)
+		return (-1);
+	if (out != NULL)
+		*out = result;
+	return (0);
+}
+
+/**
+ * @brief Names one targeting mode the way the wire spells it.
+ *
+ * @param mode The mode.
+ * @return The word for it; "random" for anything unrecognised, which is the
+ *         mode every other one falls back to anyway.
+ */
+const char	*net_target_mode_word(t_target_mode mode)
+{
+	if (mode == TARGET_KO)
+		return ("ko");
+	if (mode == TARGET_ATTACKERS)
+		return ("attackers");
+	if (mode == TARGET_BADGES)
+		return ("badges");
+	return ("random");
 }
 
 /**
@@ -227,7 +307,17 @@ static void	apply_opponents(t_mp_match_state *state, const t_body_state *snap)
 {
 	size_t	index;
 
-	memset(state->opponents, 0, sizeof(state->opponents));
+	/*
+	 * Double's cards are cleared and rewritten from every frame, because every
+	 * Double frame carries the rival. A Battle Royale's are not: its cards come
+	 * from the arena, which rides a slower clock, so most frames say nothing
+	 * about them - and clearing on those would blank the whole screen between
+	 * pushes, which is the exact failure the codec's `arena absent` exists to
+	 * avoid. There the clearing belongs to apply_arena, which does it only when
+	 * a push has arrived to replace them.
+	 */
+	if (state->mode != APP_GAME_MODE_BATTLE_ROYALE)
+		memset(state->opponents, 0, sizeof(state->opponents));
 	if (snap->opponent_count == 0)
 	{
 		solo_game_init(&state->opponent_game, 0);
@@ -343,6 +433,203 @@ static void	apply_opponent_card(t_mp_match_state *state, int index,
 			cell.type = (t_cell_type)opponent->cells[row][col].type;
 			cell.color = opponent->cells[row][col].color;
 			board_set(&state->opponents[index].board, col, row, cell);
+			col++;
+		}
+		row++;
+	}
+}
+
+/**
+ * @brief Replaces the arena from a push, or leaves it alone when there is none.
+ *
+ * A push is the complete roster, so the cards are cleared and rewritten: a seat
+ * the push does not mention is a seat nobody is in, and that is the only way a
+ * player who left stops being drawn. An eliminated player is still in the push,
+ * with their alive bit clear - absence means "gone from the room", never
+ * "knocked out".
+ *
+ * A frame carrying no arena is not an empty arena. Most frames carry none,
+ * because the arena rides a slower clock than the board does, and clearing on
+ * those would blink the whole screen between pushes. `arena_present` is the
+ * difference and it is why the codec sends `absent` rather than a count of 0.
+ *
+ * The clearing is of the seats the push did not mention, and not of the whole
+ * array, because a card is allowed to arrive without a board: a dead board
+ * never changes again, so the server sends its mask on every fifth push only
+ * and the client keeps the one it holds in between. Blanking every card first
+ * and rewriting the ones the push describes throws that away four pushes in
+ * five, and a knocked-out player's thumbnail blinks for the rest of the match.
+ *
+ * @param state Match model to write.
+ * @param snap Snapshot that may carry an arena.
+ * @param local This client's player id, so its own card can be marked.
+ */
+static void	apply_arena(t_mp_match_state *state, const t_body_state *snap,
+		uint64_t local)
+{
+	bool	seated[MP_ARENA_SEATS];
+	size_t	index;
+
+	if (!snap->arena_present)
+		return ;
+	memset(seated, 0, sizeof(seated));
+	index = 0;
+	while (index < snap->arena_count && index < BODY_ARENA_MAX)
+	{
+		apply_arena_card(state, &snap->arena[index], local, seated);
+		index++;
+	}
+	forget_empty_seats(state, seated);
+	count_the_arena(state);
+}
+
+/**
+ * @brief Reads the two HUD numbers that are properties of the whole arena.
+ *
+ * Both were invented before the server sent them: the knockout count was never
+ * written by any line in the client, and the attacker count was set once to
+ * the constant 2 by the fixture and never moved. They are read here rather
+ * than per card because each is a fact about the room - how many rivals this
+ * player has buried, and how many of them are currently burying them.
+ *
+ * @param state Match model whose arena has just been replaced.
+ */
+static void	count_the_arena(t_mp_match_state *state)
+{
+	int	attackers;
+	int	slot;
+
+	attackers = 0;
+	slot = 0;
+	while (slot < MP_ARENA_SEATS)
+	{
+		if (state->opponents[slot].present)
+		{
+			if (state->opponents[slot].local)
+				state->ko_count = state->opponents[slot].ko;
+			else if (state->opponents[slot].targeting_local)
+				attackers++;
+		}
+		slot++;
+	}
+	state->incoming_attackers = attackers;
+}
+
+/**
+ * @brief Blanks every seat the push did not carry a card for.
+ *
+ * A push is the whole roster, so a seat missing from it is a seat nobody is
+ * in - a player who left the room rather than one who was knocked out, whose
+ * card is still sent with its alive bit clear.
+ *
+ * @param state Match model holding the cards.
+ * @param seated Which seats the push described.
+ */
+static void	forget_empty_seats(t_mp_match_state *state, const bool *seated)
+{
+	int	slot;
+
+	slot = 0;
+	while (slot < MP_ARENA_SEATS)
+	{
+		if (!seated[slot])
+			memset(&state->opponents[slot], 0,
+				sizeof(state->opponents[slot]));
+		slot++;
+	}
+}
+
+/**
+ * @brief Files one card under the seat it belongs to.
+ *
+ * The slot is the index, not the order the card arrived in. Two things depend
+ * on it: a card keeps its place on screen across pushes, so nobody slides
+ * sideways when a player above them is knocked out; and the slot is what every
+ * later feature names - a target, an attacker, a line on the knockout feed.
+ *
+ * @param state Match model holding the cards.
+ * @param card The card to file.
+ * @param local The player id this frame was built for.
+ * @param seated Records that this seat was in the push.
+ */
+static void	apply_arena_card(t_mp_match_state *state,
+		const t_body_arena_slot *card, uint64_t local, bool *seated)
+{
+	int	slot;
+
+	slot = card->slot;
+	if (slot < 1 || slot >= MP_ARENA_SEATS)
+		return ;
+	seated[slot] = true;
+	state->opponents[slot].present = true;
+	state->opponents[slot].alive = (card->flags & BODY_ARENA_ALIVE) != 0;
+	state->opponents[slot].targeting_local
+		= (card->flags & BODY_ARENA_ATTACKING_YOU) != 0;
+	state->opponents[slot].targeted_by_local
+		= (card->flags & BODY_ARENA_TARGETED_BY_YOU) != 0;
+	state->opponents[slot].local = (local != 0 && card->player_id == local);
+	state->opponents[slot].garbage_pending = card->pending;
+	state->opponents[slot].ko = card->ko;
+	state->opponents[slot].rank = card->rank;
+	state->opponents[slot].lines = card->lines;
+	/*
+	 * The seat, which a room numbers from 1 - not the seat plus one. Until the
+	 * arena carries a username, the seat is the only name a card has, and a
+	 * card that said P2 while the roster said seat 1 was two names for one
+	 * player.
+	 */
+	snprintf(state->opponents[slot].name,
+		sizeof(state->opponents[slot].name), "P%d", card->slot);
+	/*
+	 * A card without a mask is a dead board that has not changed since the
+	 * last one carrying one, so the board already held is still correct and is
+	 * deliberately left standing.
+	 */
+	if (card->cells_valid)
+		apply_arena_mask(&state->opponents[slot].board, card);
+}
+
+/**
+ * @brief Turns a card's cells back into a board the renderer can draw.
+ *
+ * A nibble each: 0 empty, 1 garbage, 2 upward a piece in the seven types' own
+ * order. The type goes into the cell's colour because that is where
+ * piece_stamp puts it, so a rival's stack draws in the same colours the
+ * player's own board does and only garbage is grey - which the tile renderer
+ * already knew how to do, since it has always drawn CELL_GARBAGE differently.
+ *
+ * Every filled cell used to get one colour, because one bit per cell is all
+ * the wire carried. That was the whole of "every block in Battle Royale is
+ * grey".
+ *
+ * @param board Board to overwrite.
+ * @param card The card to read.
+ */
+static void	apply_arena_mask(t_board *board, const t_body_arena_slot *card)
+{
+	t_cell			cell;
+	unsigned char	code;
+	int				row;
+	int				col;
+
+	board_init(board);
+	row = 0;
+	while (row < BOARD_HEIGHT && row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH && col < BODY_BOARD_COLS)
+		{
+			code = card->cells[row][col];
+			memset(&cell, 0, sizeof(cell));
+			if (code == 1)
+				cell.type = CELL_GARBAGE;
+			else if (code >= 2)
+			{
+				cell.type = CELL_FILLED;
+				cell.color = (uint8_t)(code - 2);
+			}
+			if (cell.type != CELL_EMPTY)
+				board_set(board, col, row, cell);
 			col++;
 		}
 		row++;

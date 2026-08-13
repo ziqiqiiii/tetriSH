@@ -480,35 +480,26 @@ Two ways to break the rule, both of which shipped:
   outgoing one, rendered, and parked afterwards. On the first sign-in the
   outgoing plane was the full-screen login artwork: 31 s, in one call.
 
-The fix is one shape: an outgoing backdrop leaves the rendered area **before**
-the frame is drawn — parked off-screen if something still wants it, destroyed
-outright if not, because a plane freed *after* the render has already been
-transmitted by it.
+The fix is one shape: destroy the outgoing backdrop **before** the replacement
+frame is drawn. Destroying it *after* the render is too late; that frame already
+included it.
 
 ```c
-if (old_plane != NULL && !backdrop_is_cached(ctx, old_plane))
+if (old_plane != NULL)
 {
     ncplane_destroy(old_plane);
     ctx->bg_plane = NULL;
 }
-else
-    backdrop_park(ctx, old_plane);       /* ncplane_move_yx off the top */
 if (notcurses_render(ctx->nc) != 0)
     ...
 ```
 
-With that, a backdrop swap is 46-56 ms cold and 1-3 ms warm at 210x71.
-
-**Parking is a movable-tier optimisation, and it is gated as one.** The whole
-value of retaining a backdrop is being able to move it back later, which is
-exactly what `TETRISU_PIXELS_STATIONARY` forbids. `backdrop_remember()` refuses
-on any tier where `render_pixel_planes_reliable()` is false, which leaves
-`backdrop_restack()` and `backdrop_park()` inert — they are both predicated on
-cache membership — so sixel, the framebuffer and the cell tier keep the plain
-destroy-and-rebuild behaviour that predates the cache. **If you add a plane
-that survives a screen change, gate it the same way.** A cache that quietly
-moves sprixels on a tier that cannot move them is the failure this rule exists
-to prevent, and it will not show up on your Kitty terminal.
+**Do not retain full-screen backdrops across screen changes.** Notcurses permits
+sprixel planes to move, but the macOS Kitty path used here did not reliably
+erase an off-screen plane or repaint it when it returned. The cache then held a
+correct plane graph while the terminal showed stale artwork. One live backdrop
+keeps the lifecycle deterministic across pixel backends. Smaller planes that
+move within one screen are still gated by `render_pixel_planes_reliable()`.
 
 **Do not reach for a cell blitter to make a backdrop cheap.** It works — cell
 blitting the pixel backdrops took a swap from 15,386 ms to 2 ms — and it is not
@@ -687,7 +678,7 @@ and to the terminal you developed in.
 | A typed letter fires a command, or a command types a letter | one key handler for a screen that has a text field | split the handler by mode; inside a field every printable key is text |
 | A held key drops letters out of a typed field | a coalesce predicate that folds more than movement keys | never coalesce printable characters |
 | A long username or id walks through the cell frame | a cell-mode value drawn without a width clip | route every cell write through one clipping helper |
-| Entering a screen takes seconds, and leaving it takes seconds again | the outgoing backdrop left stacked under the incoming one, so its sprixel is re-sent every visit | park the retained backdrop off the top of the screen |
+| Returning from sign-up leaves its artwork behind | an off-screen cached sprixel did not erase or repaint reliably on macOS Kitty | destroy the outgoing backdrop before rendering its replacement |
 | One transition freezes for tens of seconds while others are instant | rendered with the outgoing backdrop still covered, and moved it away afterwards | move or destroy the old plane *before* `notcurses_render()` |
 | A modal is drawn through by the screen it covers | a cell plane over a sprixel; z-order cannot fix it | compose the modal in RGBA and blit it |
 | Keys pressed during a slow transition fire on the next screen | `discard_queued_input()` on exits only, not on entries | discard on any transition the user waits through |

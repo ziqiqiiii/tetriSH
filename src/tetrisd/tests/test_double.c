@@ -16,7 +16,7 @@
 
 // Static Functions
 static void	test_readiness_is_the_rooms_and_survives_a_refresh(void);
-static void	test_both_declaring_ready_opens_the_select_window(void);
+static void	test_the_owners_start_opens_the_select_window(void);
 static void	test_withdrawing_in_the_window_does_not_deal_the_match(void);
 static void	test_a_dealt_match_is_held_before_it_begins(void);
 static void	test_the_hold_refuses_inputs(void);
@@ -26,6 +26,7 @@ static void	test_a_top_out_ends_the_match_for_both_players(void);
 static void	test_both_players_are_recorded_once_each(void);
 static void	test_an_unowned_fighter_is_refused(void);
 static void	test_a_declared_fighter_is_the_matchs(void);
+static void	test_a_fighter_does_not_move_seats_with_its_owner(void);
 
 static int		player(t_fixture *fx, t_harness *hc, const char *name);
 static t_item_id	starter_character(t_fixture *fx, t_player_id pid);
@@ -51,7 +52,7 @@ static int		recorded(t_fixture *fx, t_player_id pid, bool won);
 int	main(void)
 {
 	test_readiness_is_the_rooms_and_survives_a_refresh();
-	test_both_declaring_ready_opens_the_select_window();
+	test_the_owners_start_opens_the_select_window();
 	test_withdrawing_in_the_window_does_not_deal_the_match();
 	test_a_dealt_match_is_held_before_it_begins();
 	test_the_hold_refuses_inputs();
@@ -61,6 +62,7 @@ int	main(void)
 	test_both_players_are_recorded_once_each();
 	test_an_unowned_fighter_is_refused();
 	test_a_declared_fighter_is_the_matchs();
+	test_a_fighter_does_not_move_seats_with_its_owner();
 	return (0);
 }
 
@@ -84,7 +86,11 @@ static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
 	assert(list_room(&amber, path, &snapshot) == 200);
-	assert(!snapshot.members[0].ready && !snapshot.members[1].ready);
+	/* seated is ready: joining and holding the connection is the declaration */
+	assert(snapshot.members[0].ready && snapshot.members[1].ready);
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(!snapshot.members[0].ready);
 	assert(simple(&amber, "READY", path, "ready 1") == 200);
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.members[0].ready);
@@ -101,17 +107,19 @@ static void	test_readiness_is_the_rooms_and_survives_a_refresh(void)
 }
 
 /*
-** Both seats declaring is what commits a Double room, and the player who
-** declares last is as often the joiner as the owner - so the start cannot be
-** the owner's request. Nobody sends START here.
+** The owner's START is what commits a Double room. Declaring used to be the
+** other route in, back when a seat arrived not ready and saying so was a
+** deliberate act; a seat arrives ready now, so every seat being ready is true
+** from the moment the room fills and says nothing about whether anybody wants
+** to play yet.
 **
-** What declaring no longer does is deal the boards. It opens the
-** character-select window instead, and the boards are dealt when both seats
-** have named a fighter - which is the same READY route carrying one. Locking
-** in early is what ends the window early: neither player waits out the clock
-** once there is nothing left to decide.
+** What starting does not do is deal the boards. It opens the character-select
+** window instead, and the boards are dealt when both seats have named a
+** fighter - which is the READY route carrying one. Locking in early is what
+** ends the window early: neither player waits out the clock once there is
+** nothing left to decide.
 */
-static void	test_both_declaring_ready_opens_the_select_window(void)
+static void	test_the_owners_start_opens_the_select_window(void)
 {
 	t_body_state	state;
 	t_body_room		snapshot;
@@ -126,9 +134,11 @@ static void	test_both_declaring_ready_opens_the_select_window(void)
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1") == 200);
-	assert(hc_wait_state(&amber, &state, 300) != 0);
-	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	/* both seats are ready on arrival, so nothing here declares it */
+	assert(list_room(&amber, path, &snapshot) == 200);
+	assert(snapshot.members[0].ready && snapshot.members[1].ready);
+	assert(snapshot.status != BODY_ROOM_SELECTING);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	/* committed, holding a clock, and no board dealt to either of them */
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.status == BODY_ROOM_SELECTING);
@@ -154,7 +164,7 @@ static void	test_both_declaring_ready_opens_the_select_window(void)
 	hc_close(&amber);
 	hc_close(&blake);
 	fx_stop(&fx);
-	printf("PASS test_both_declaring_ready_opens_the_select_window\n");
+	printf("PASS test_the_owners_start_opens_the_select_window\n");
 }
 
 /*
@@ -180,8 +190,7 @@ static void	test_withdrawing_in_the_window_does_not_deal_the_match(void)
 	assert(fx_start(&fx) == 0);
 	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1") == 200);
-	assert(simple(&blake, "READY", path, "ready 1") == 200);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	assert(list_room(&amber, path, &snapshot) == 200);
 	assert(snapshot.status == BODY_ROOM_SELECTING);
 	pick = starter_character(&fx, amber.player_id);
@@ -744,6 +753,9 @@ static void	test_an_unowned_fighter_is_refused(void)
 	stranger = unowned_character(&fx, amber.player_id);
 	assert(stranger != 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
+	/* Withdrawn first, so the refusal below has something to fail to change:
+	 * a seat arrives ready, and "still ready" would prove nothing. */
+	assert(simple(&amber, "READY", path, "ready 0") == 200);
 	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n",
 		(unsigned)stranger);
 	assert(simple(&amber, "READY", path, body) == 403);
@@ -785,8 +797,7 @@ static void	test_a_declared_fighter_is_the_matchs(void)
 	owned = starter_character(&fx, amber.player_id);
 	assert(owned != 0);
 	snprintf(path, sizeof(path), "/room/%s", room);
-	assert(simple(&amber, "READY", path, "ready 1\n") == 200);
-	assert(simple(&blake, "READY", path, "ready 1\n") == 200);
+	assert(simple(&amber, "START", path, NULL) == 200);
 	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
 	assert(simple(&amber, "READY", path, body) == 200);
 	owned = starter_character(&fx, blake.player_id);
@@ -800,6 +811,59 @@ static void	test_a_declared_fighter_is_the_matchs(void)
 	hc_close(&blake);
 	fx_stop(&fx);
 	printf("PASS test_a_declared_fighter_is_the_matchs\n");
+}
+
+/*
+** A fighter belongs to the player who chose it, not to the chair they chose it
+** from.
+**
+** Ownership succession does not hand a seat over - it *moves* the successor
+** into the seat the departing owner vacated and clears the one they were in.
+** The declared character used to be filed under a seat index, and only the
+** board was moved to follow the player, so a successor arrived in the owner's
+** chair wearing the fighter the person who left had declared there, and their
+** own choice was left behind at a seat nobody was sitting in any more.
+**
+** Which the room then read as a decision they had made: a seat naming a
+** character is what server_room_all_locked counts as locked in, so a room could
+** deal a match around a choice nobody made, and the player whose choice was
+** stranded was dealt whatever their account had equipped instead. It was
+** invisible because falling back to the equipped fighter is also what a client
+** with no selector asks for.
+*/
+static void	test_a_fighter_does_not_move_seats_with_its_owner(void)
+{
+	t_body_room	snapshot;
+	t_fixture	fx;
+	t_harness	amber;
+	t_harness	blake;
+	t_item_id	owned;
+	char		room[ROOM_NAME_MAX];
+	char		path[64];
+	char		body[64];
+
+	assert(fx_start(&fx) == 0);
+	assert(seat_two(&fx, &amber, &blake, room, sizeof(room)) == 0);
+	owned = starter_character(&fx, amber.player_id);
+	assert(owned != 0);
+	snprintf(path, sizeof(path), "/room/%s", room);
+	snprintf(body, sizeof(body), "ready 1\ncharacter %u\n", (unsigned)owned);
+	assert(simple(&amber, "READY", path, body) == 200);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(snapshot.members[0].player_id == amber.player_id);
+	assert(snapshot.members[0].character == (uint32_t)owned);
+	/* the owner leaves, and blake is moved into the seat they vacated */
+	assert(simple(&amber, "LEAVE", path, NULL) == 200);
+	assert(list_room(&blake, path, &snapshot) == 200);
+	assert(snapshot.member_count == 1);
+	assert(snapshot.members[0].player_id == blake.player_id);
+	assert(snapshot.members[0].owner);
+	/* the chair came with the room; the fighter did not come with the chair */
+	assert(snapshot.members[0].character == 0);
+	hc_close(&amber);
+	hc_close(&blake);
+	fx_stop(&fx);
+	printf("PASS test_a_fighter_does_not_move_seats_with_its_owner\n");
 }
 
 /**

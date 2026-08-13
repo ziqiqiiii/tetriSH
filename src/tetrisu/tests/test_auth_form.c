@@ -7,6 +7,7 @@ static void	test_server_check_state(void);
 static void	test_a_refused_certificate_does_not_read_as_unreachable(void);
 static void	test_refused_primary_explains_itself(void);
 static void	test_validation_and_submission(void);
+static void	test_provider_refusal_reaches_the_form(void);
 static void	test_a_username_the_server_would_refuse_is_caught_here(void);
 static void	test_secondary_actions(void);
 
@@ -20,9 +21,52 @@ int	main(void)
 	test_a_refused_certificate_does_not_read_as_unreachable();
 	test_refused_primary_explains_itself();
 	test_validation_and_submission();
+	test_provider_refusal_reaches_the_form();
 	test_a_username_the_server_would_refuse_is_caught_here();
 	test_secondary_actions();
 	return (0);
+}
+
+static t_app_provider_result	refuse_existing_account(void *userdata,
+	const char *username, const char *password, const char *domain,
+	t_app_auth_view_model *view)
+{
+	(void)userdata;
+	(void)username;
+	(void)password;
+	(void)domain;
+	snprintf(view->message, sizeof(view->message),
+		"USERNAME ALREADY EXISTS");
+	return (APP_PROVIDER_INVALID);
+}
+
+/*
+** Provider-specific account failures belong on the form. Returning only
+** APP_PROVIDER_INVALID used to erase the server's useful distinction and show
+** the same CHECK YOUR ACCOUNT DETAILS message for every refusal.
+*/
+static void	test_provider_refusal_reaches_the_form(void)
+{
+	t_app_data_provider		provider;
+	t_app_auth_view_model	view;
+	t_auth_form				form;
+
+	auth_form_init(&form, AUTH_FORM_SIGN_UP);
+	snprintf(form.username, sizeof(form.username), "PixelPlayer");
+	snprintf(form.password, sizeof(form.password), "cute-pass");
+	snprintf(form.confirm, sizeof(form.confirm), "%s", form.password);
+	snprintf(form.domain, sizeof(form.domain), "play.example.com");
+	assert(auth_form_begin_server_check(&form));
+	auth_form_finish_server_check(&form, true, NULL);
+	assert(auth_form_validate(&form));
+	memset(&provider, 0, sizeof(provider));
+	provider.sign_up = refuse_existing_account;
+	memset(&view, 0x7f, sizeof(view));
+	assert(auth_form_submit(&form, &provider, &view) == APP_PROVIDER_INVALID);
+	assert(form.feedback == AUTH_FEEDBACK_ERROR);
+	assert(!view.signed_in);
+	assert(strcmp(form.status, "USERNAME ALREADY EXISTS") == 0);
+	printf("PASS test_provider_refusal_reaches_the_form\n");
 }
 
 static void	test_login_focus_order(void)

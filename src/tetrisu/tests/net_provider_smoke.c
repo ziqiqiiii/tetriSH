@@ -101,6 +101,19 @@ static int	check_signup_and_login(t_app_net_session *session,
 	if (provider->sign_up(session, name, "hunter2", "127.0.0.1", &view)
 		!= APP_PROVIDER_OK)
 		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->sign_up(session, name, "hunter2", "127.0.0.1", &view)
+		!= APP_PROVIDER_INVALID)
+		return (0);
+	if (strcmp(view.message, "USERNAME ALREADY EXISTS") != 0)
+		return (0);
+	memset(&view, 0, sizeof(view));
+	if (provider->login(session, name, "wrong-password", "127.0.0.1", &view)
+		!= APP_PROVIDER_INVALID)
+		return (0);
+	if (strcmp(view.message, "WRONG USERNAME OR PASSWORD") != 0)
+		return (0);
+	memset(&view, 0, sizeof(view));
 	if (provider->login(session, name, "hunter2", "127.0.0.1", &view)
 		!= APP_PROVIDER_OK)
 		return (0);
@@ -234,8 +247,9 @@ static int	check_create_and_join_room(t_app_data_provider *provider,
 		return (0);
 	if (created.id[0] == '\0' || created.mode != APP_GAME_MODE_DOUBLE)
 		return (0);
+	/* seated is ready: joining and holding the connection is the declaration */
 	if (created.player_count != 1 || !created.players[0].owner
-		|| created.players[0].ready)
+		|| !created.players[0].ready)
 		return (0);
 	memset(&joined, 0, sizeof(joined));
 	if (provider->load_room(session, created.id, &joined) != APP_PROVIDER_OK)

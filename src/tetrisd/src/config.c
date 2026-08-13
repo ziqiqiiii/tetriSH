@@ -41,6 +41,7 @@ void	config_defaults(t_config *cfg)
 	cfg->br_slots = TETRISD_DEFAULT_BATTLE_ROYALE_SLOTS;
 	cfg->handshake_workers = TETRISD_DEFAULT_HANDSHAKE_WORKERS;
 	cfg->handshake_timeout_ms = TETRISD_DEFAULT_HANDSHAKE_TIMEOUT_MS;
+	cfg->bot_accounts = TETRISD_DEFAULT_BOT_ACCOUNTS;
 }
 
 /**
@@ -119,18 +120,27 @@ int	config_set(t_config *cfg, const char *key, const char *value)
 	if (strcmp(key, "INPUT_RATE") == 0)
 		return (set_int(&cfg->input_rate, value, TETRISD_INPUT_LIMIT_MIN, TETRISD_INPUT_LIMIT_MAX));
 	/*
-	 * The ceiling is TD_MAX_GAMES and not ROOM_MAX_SLOTS: the room domain
-	 * seats 99, but a room only runs TD_MAX_GAMES boards, so a larger number
-	 * here seated players the tick would never deal a game to - every input
-	 * they sent came back 409 with nothing to explain it, and room_is_over
-	 * could not see them at all.
+	 * The ceiling is TD_MAX_GAMES, which is now the domain's own ROOM_MAX_SLOTS
+	 * and so no longer narrows anything. It stays written as TD_MAX_GAMES
+	 * because the constraint is real whatever the two numbers are: a room seats
+	 * what the domain allows but only runs TD_MAX_GAMES boards, and a larger
+	 * number here seated players the tick would never deal a game to - every
+	 * input they sent came back 409 with nothing to explain it, and
+	 * room_is_over could not see them at all.
+	 *
+	 * The floor is 4 rather than 2 because it is a Battle Royale key. Two
+	 * players in a room is Double, which has its own mode and its own seating,
+	 * and docs/CONTEXT.md puts the mode's own floor at 4.
 	 */
 	if (strcmp(key, "BR_SLOTS") == 0)
-		return (set_int(&cfg->br_slots, value, 2, TD_MAX_GAMES));
+		return (set_int(&cfg->br_slots, value, 4, TD_MAX_GAMES));
 	if (strcmp(key, "HANDSHAKE_WORKERS") == 0)
 		return (set_int(&cfg->handshake_workers, value, 1, TETRISD_HANDSHAKE_WORKERS_MAX));
 	if (strcmp(key, "HANDSHAKE_TIMEOUT_MS") == 0)
 		return (set_int(&cfg->handshake_timeout_ms, value, TETRISD_HANDSHAKE_TIMEOUT_MIN, TETRISD_HANDSHAKE_TIMEOUT_MAX));
+	/* 0 is a real setting: a server that hands out no bots at all. */
+	if (strcmp(key, "BOT_ACCOUNTS") == 0)
+		return (set_int(&cfg->bot_accounts, value, 0, TETRISD_BOT_ACCOUNTS_MAX));
 	return (-1);
 }
 
@@ -383,6 +393,7 @@ static int	apply_env(t_config *cfg)
 		"TETRISD_BR_SLOTS", 
 		"TETRISD_HANDSHAKE_WORKERS", 
 		"TETRISD_HANDSHAKE_TIMEOUT_MS", 
+		"TETRISD_BOT_ACCOUNTS", 
 		NULL
 	};
 	const char			*value;

@@ -220,6 +220,7 @@ static int	bring_up(t_server *srv, const t_config *cfg)
 		logger_emit(&srv->log, COREIPC_LOG_ERROR, "cannot open the player store");
 		return (-1);
 	}
+	bot_pool_open(srv, cfg->bot_accounts);
 	if (registry_init(&srv->reg, (size_t)cfg->max_clients) != 0)
 		return (-1);
 	srv->scratch = malloc(TETRISSH_MAX_PLAINTEXT);

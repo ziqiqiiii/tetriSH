@@ -78,15 +78,20 @@ void	test_buy_and_equip(void)
 
 	db = fresh_db();
 	assert(db_signup(db, "zoe", "h", "s", &id) == DB_OK);
-	// Character 2 (Mirurun) costs 10; fresh wallet is 0.
-	assert(db_buy_character(db, id, 2) == DB_INSUFFICIENT);
-	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
+	// Character 3 (Princess) costs 10; fresh wallet is 0.
+	assert(db_buy_character(db, id, 3) == DB_INSUFFICIENT);
+	// Character 2 (Mirurun) costs nothing, so the same empty wallet buys it.
+	// A free item is still bought rather than granted - it has to leave the
+	// same owned list and answer the same ownership probe as a paid one.
 	assert(db_buy_character(db, id, 2) == DB_OK);
 	assert(db_buy_character(db, id, 2) == DB_EXISTS);
+	assert(db_record_game(db, id, 0, 800, false) == DB_OK);
+	assert(db_buy_character(db, id, 3) == DB_OK);
+	assert(db_buy_character(db, id, 3) == DB_EXISTS);
 	assert(db_equip_character(db, id, 2) == DB_OK);
-	assert(db_equip_character(db, id, 3) == DB_NOT_OWNED);
+	assert(db_equip_character(db, id, 4) == DB_NOT_OWNED);
 	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
-	assert(db_player_owns_character(db, id, 3) == DB_FALSE);
+	assert(db_player_owns_character(db, id, 4) == DB_FALSE);
 	// A NULL handle is undeterminable, not a plain "does not own".
 	assert(db_player_owns_character(NULL, id, 2) == DB_UNKNOWN);
 	assert(db_player_owns_theme(NULL, id, 1) == DB_UNKNOWN);
@@ -214,6 +219,10 @@ void	test_durability_roundtrip(void)
 	db = fresh_db();
 	assert(db_signup(db, "amber", "hashZ", "saltZ", &id) == DB_OK);
 	assert(db_record_game(db, id, 250, 1000, true) == DB_OK);
+	// One paid and one free, because they are recovered by the same replay and
+	// a free purchase writes an owned id with no wallet movement behind it -
+	// the half a "the wallet is right" assertion cannot see.
+	assert(db_buy_character(db, id, 3) == DB_OK);
 	assert(db_buy_character(db, id, 2) == DB_OK);
 	assert(db_equip_character(db, id, 2) == DB_OK);
 	db_close(db);
@@ -223,6 +232,7 @@ void	test_durability_roundtrip(void)
 	assert(out.wallet_points == 1000 - 10);
 	assert(out.current_equipped_character == 2);
 	assert(db_player_owns_character(db, id, 2) == DB_TRUE);
+	assert(db_player_owns_character(db, id, 3) == DB_TRUE);
 	assert(db_rank(db, id, &rank) == DB_OK && rank == 1);
 	db_close(db);
 	printf("PASS test_durability_roundtrip\n");
@@ -309,10 +319,63 @@ void	test_a_username_the_wire_cannot_carry_is_refused(void)
 	printf("PASS test_a_username_the_wire_cannot_carry_is_refused\n");
 }
 
+// A reserved name is not a person's to take, and the account behind one is
+// never on the board. Exclusion is at the three writes, not in the two
+// readers, so this asserts the readers rather than the guards: what must be
+// true is that a bot cannot be found on a page or given a rank, however it
+// got into the store.
+void	test_a_reserved_account_is_never_ranked(void)
+{
+	t_db			*db;
+	t_player_id		person;
+	t_player_id		bot;
+	t_rank_entry	top[8];
+	size_t			n;
+	size_t			rank;
+
+	db = fresh_db();
+	assert(db_signup(db, "BOT_01", "h", "s", &bot) == DB_INVALID);
+	assert(db_signup(db, "bot_01", "h", "s", &bot) == DB_INVALID);
+	assert(db_signup_reserved(db, "amber", "h", "s", &bot) == DB_INVALID);
+	assert(db_signup(db, "amber", "h", "s", &person) == DB_OK);
+	assert(db_signup_reserved(db, "BOT_01", "h", "s", &bot) == DB_OK);
+	assert(db_signup_reserved(db, "BOT_01", "h", "s", &bot) == DB_EXISTS);
+	// A bot plays real games, and a real game is what would rank it.
+	assert(db_record_game(db, bot, 99999, 10, true) == DB_OK);
+	assert(db_record_game(db, person, 10, 1, true) == DB_OK);
+	assert(db_leaderboard(db, top, 8, &n) == DB_OK && n == 1);
+	assert(strcmp(top[0].username, "amber") == 0);
+	assert(db_rank(db, person, &rank) == DB_OK && rank == 1);
+	// The bot is a player in every other respect: it logs in, it is found, and
+	// its account counters are kept. What it does not have is a best game -
+	// the score is the skip list's key, so a bot with one recorded and no
+	// place on the board would have a ranking field that means nothing.
+	{
+		t_player	out;
+
+		assert(db_login(db, "BOT_01", "h", &out) == DB_OK);
+		assert(out.player_id == bot);
+		assert(out.games_played == 1 && out.games_won == 1);
+		assert(out.lifetime_points == 99999 && out.wallet_points == 10);
+		assert(out.leaderboard_score == 0);
+	}
+	db_close(db);
+	// A replay of the log must not put back what the writes kept out.
+	assert(db_open(DATA_DIR, CFG_DIR, &db) == DB_OK);
+	assert(db_leaderboard(db, top, 8, &n) == DB_OK && n == 1);
+	assert(strcmp(top[0].username, "amber") == 0);
+	db_close(db);
+	assert(db_username_is_reserved("BOT_01") && db_username_is_reserved("bot_"));
+	assert(!db_username_is_reserved("BOT") && !db_username_is_reserved("amber"));
+	assert(!db_username_is_reserved(NULL));
+	printf("PASS test_a_reserved_account_is_never_ranked\n");
+}
+
 int	main(void)
 {
 	test_signup_and_login();
 	test_a_username_the_wire_cannot_carry_is_refused();
+	test_a_reserved_account_is_never_ranked();
 	test_get_salt();
 	test_buy_and_equip();
 	test_equipping_a_theme_leaves_the_character_alone();

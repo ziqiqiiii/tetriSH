@@ -43,7 +43,7 @@ static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
 static void	draw_targeting(struct ncplane *plane,
 				const t_mp_match_state *state, const t_mp_rect *rect);
 static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
-				const t_mp_match_state *state, int first_index, int count);
+				const t_mp_match_state *state, const int *slots, int count);
 static void	draw_abilities(struct ncplane *plane, const t_mp_rect *rect,
 				const t_mp_match_state *state, bool compact);
 static void	draw_result(struct ncplane *plane,
@@ -87,9 +87,15 @@ bool	render_multiplayer_match_show(t_render_ctx *ctx,
 	 * A notification card is a bitmap over bitmaps, and notcurses wipes the
 	 * sprixel underneath rather than overlapping it. The panels it covered
 	 * are cached by signature, so nothing else would ever consider them
-	 * stale - the screen has to be told to rebuild instead of trusting it.
+	 * stale - the screen has to be told they are.
+	 *
+	 * A live match says so the cheap way. Its regions are separately cached
+	 * planes over cell chrome, so restaging repaints the bitmaps the card
+	 * touched and leaves the rest alone; every other screen is one bitmap and
+	 * has nothing smaller than itself to offer, so it rebuilds.
 	 */
-	if (render_notification_take_repaint(ctx))
+	if (render_notification_take_repaint(ctx)
+		&& !render_multiplayer_match_pixel_restage(ctx, state))
 		rebuild_background = true;
 	if (!render_compatibility_mode(ctx)
 		&& render_multiplayer_match_pixel_show(ctx, state, rebuild_background))
@@ -311,23 +317,45 @@ static void	draw_battle_royale(struct ncplane *plane,
 	const t_mp_match_state *state, const t_mp_match_layout *layout)
 {
 	char	line[APP_TEXT_MAX * 2];
+	int		cards[MP_ARENA_SEATS];
 	int		opponents;
 	int		left_count;
 
 	set_fg(plane, MATCH_PINK_R, MATCH_PINK_G, MATCH_PINK_B);
 	put_centered(plane, 0, 0, layout->cols, ":: BATTLE ROYALE ::", true);
-	snprintf(line, sizeof(line), "SCORE %" PRIu64 "   ALIVE %d/%d   K.O. %02d",
-		state->local_game.scoring.total, state->players_alive,
-		state->players_total, state->ko_count);
+	/*
+	 * A player who has been eliminated is still here, and until now the screen
+	 * said nothing about it: their board stopped and the HUD went on counting
+	 * a score that could not change. The placing arrives the moment it is
+	 * taken, so the line says what they are - out, and where - rather than
+	 * leaving them to work it out from a board that no longer moves.
+	 */
+	if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+		snprintf(line, sizeof(line),
+			"SPECTATING - YOU PLACED #%d   ALIVE %d/%d   K.O. %02d",
+			state->local_rank, state->players_alive, state->players_total,
+			state->ko_count);
+	else
+		snprintf(line, sizeof(line),
+			"SCORE %" PRIu64 "   ALIVE %d/%d   K.O. %02d",
+			state->local_game.scoring.total, state->players_alive,
+			state->players_total, state->ko_count);
 	set_fg(plane, MATCH_GOLD_R, MATCH_GOLD_G, MATCH_GOLD_B);
 	put_centered(plane, 1, 0, layout->cols, line, true);
 	draw_targeting(plane, state, &layout->targeting);
 	draw_board(plane, &layout->local_board, &state->local_game, "YOUR BOARD");
-	opponents = state->players_total - 1;
+	/*
+	 * The cards are filed by seat, so the array is sparse: a seat nobody is in
+	 * is a hole in it, not a card at the end. Walking it by position would
+	 * draw those holes as empty boxes and stop before the last rival in a room
+	 * that has ever had somebody leave, so the occupied seats are gathered
+	 * first and the grid is laid out over that.
+	 */
+	opponents = mp_match_collect_cards(state, cards, MP_ARENA_SEATS);
 	left_count = (opponents + 1) / 2;
-	draw_mini_arena(plane, &layout->left_opponents, state, 0, left_count);
-	draw_mini_arena(plane, &layout->right_opponents, state, left_count,
-		opponents - left_count);
+	draw_mini_arena(plane, &layout->left_opponents, state, cards, left_count);
+	draw_mini_arena(plane, &layout->right_opponents, state,
+		cards + left_count, opponents - left_count);
 	if (state->incoming_attackers > 0)
 	{
 		set_fg(plane, MATCH_RED_R, MATCH_RED_G, MATCH_RED_B);
@@ -343,9 +371,18 @@ static void	draw_battle_royale(struct ncplane *plane,
 	put_centered(plane, layout->rows - 3, 0, layout->cols,
 		state->status, false);
 	set_fg(plane, MATCH_LAVENDER_R, MATCH_LAVENDER_G, MATCH_LAVENDER_B);
-	put_centered(plane, layout->rows - 1, 0, layout->cols,
-		"W KOs  A RANDOMS  S ATTACKERS  D BADGES   |   ARROWS/Z/X/SPACE/C PLAY",
-		false);
+	/*
+	 * The controls line has to stop offering what no longer works. A
+	 * spectator has no board to steer and no target to choose; what they
+	 * still have is the arena and the room they are watching it in.
+	 */
+	if (state->local_rank > 0 && state->phase != MP_MATCH_FINISHED)
+		put_centered(plane, layout->rows - 1, 0, layout->cols,
+			"YOU ARE OUT - WATCHING THE ROOM UNTIL IT IS DECIDED", false);
+	else
+		put_centered(plane, layout->rows - 1, 0, layout->cols,
+			"W KOs  A RANDOMS  S ATTACKERS  D BADGES   |   "
+			"ARROWS/Z/X/SPACE/C PLAY", false);
 }
 
 static void	draw_board(struct ncplane *plane, const t_mp_rect *rect,
@@ -409,7 +446,8 @@ static void	draw_targeting(struct ncplane *plane,
 {
 	const char	*labels[4] = {"W KOs", "A RANDOMS", "S ATTACKERS", "D BADGES"};
 	t_target_mode	modes[4] = {TARGET_KO, TARGET_RANDOM,
-		TARGET_ATTACKERS, TARGET_TOP_SCORE};
+		TARGET_ATTACKERS, TARGET_BADGES};
+	char	label[APP_TEXT_MAX];
 	int	positions[4][2];
 	int	index;
 
@@ -430,14 +468,16 @@ static void	draw_targeting(struct ncplane *plane,
 			? MATCH_GOLD_G : MATCH_LAVENDER_G,
 			state->target_mode == modes[index]
 			? MATCH_GOLD_B : MATCH_LAVENDER_B);
+		mp_match_target_label(state, modes[index], labels[index], label,
+			sizeof(label));
 		put_clipped(plane, positions[index][0], positions[index][1],
-			12, labels[index]);
+			16, label);
 		index++;
 	}
 }
 
 static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
-	const t_mp_match_state *state, int first_index, int count)
+	const t_mp_match_state *state, const int *slots, int count)
 {
 	const struct s_mp_opponent_snapshot	*opponent;
 	t_cell	board_cell;
@@ -464,10 +504,10 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 	if (cell_width < 5 || cell_height < 5)
 		return ;
 	index = 0;
-	while (index < count && first_index + index < APP_ROOM_MAX_PLAYERS - 1)
+	while (index < count)
 	{
-		opponent = &state->opponents[first_index + index];
-		player = first_index + index + 2;
+		opponent = &state->opponents[slots[index]];
+		player = slots[index];
 		x = rect->x + (index % grid_cols) * cell_width;
 		y = rect->y + (index / grid_cols) * cell_height;
 		cell = (t_mp_rect){x, y, cell_width - 1, cell_height - 1};
@@ -481,6 +521,18 @@ static void	draw_mini_arena(struct ncplane *plane, const t_mp_rect *rect,
 			set_fg(plane, MATCH_RED_R, MATCH_RED_G, MATCH_RED_B);
 			put_centered(plane, y + cell_height / 2, x,
 				cell.width, "KO", true);
+			/*
+			 * The placing goes under the badge, because a card that only says
+			 * KO tells a player somebody is gone and not how far in they are
+			 * themselves. It is on the wire the moment the elimination is
+			 * taken, so there is nothing to wait for.
+			 */
+			if (opponent->rank > 0 && cell_height >= 5)
+			{
+				snprintf(label, sizeof(label), "#%d", opponent->rank);
+				put_centered(plane, y + cell_height / 2 + 1, x,
+					cell.width, label, false);
+			}
 		}
 		else
 		{
@@ -914,3 +966,4 @@ static void	effect_line(const t_solo_effects *effects, char *out, size_t size)
 	else if (effects->mirror > 0)
 		snprintf(out, size, "MIRROR READY");
 }
+

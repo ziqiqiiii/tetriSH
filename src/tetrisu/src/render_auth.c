@@ -202,19 +202,15 @@ bool	render_auth_hit_test(const t_render_ctx *ctx, const t_auth_form *form,
  * so leaving the artwork for the next screen to "replace" only worked where
  * replacing it happened to destroy it.
  *
- * It did not always. render_background_replace() parks an outgoing plane
- * instead of destroying it whenever the backdrop cache is holding it, and
- * parking is a move - which erases the terminal-side image only on a terminal
- * that genuinely implements sprixel movement. Where it does not, the sign-in
- * artwork stayed on the glass and the home screen's cell backdrop was drawn
- * underneath it: signing in appeared to change nothing, and so did every
- * later visit to home.
+ * A retained-backdrop experiment violated that contract on macOS Kitty:
+ * moving the outgoing artwork off-screen did not erase it reliably, and
+ * moving the login plane back did not make it reappear. The sign-up artwork
+ * therefore stayed on the glass while the form state had already returned to
+ * login.
  *
  * So the artwork is destroyed here, at the one site that knows the screen is
- * being left. render_background_destroy() empties the retained cache with it,
- * so nothing can restack the sign-in art later either. The next screen pays
- * for one backdrop it was already going to build - reflow_home() replaces the
- * background on this path regardless.
+ * being left. The next screen pays for one backdrop it was already going to
+ * build - reflow_home() replaces the background on this path regardless.
  */
 void	render_auth_destroy(t_render_ctx *ctx)
 {

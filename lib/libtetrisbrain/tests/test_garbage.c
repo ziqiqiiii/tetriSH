@@ -58,7 +58,7 @@ void test_target_mode_enum_values(void)
 	assert(TARGET_RANDOM    == 0);
 	assert(TARGET_ATTACKERS == 1);
 	assert(TARGET_KO        == 2);
-	assert(TARGET_TOP_SCORE == 3);
+	assert(TARGET_BADGES == 3);
 	printf("PASS test_target_mode_enum_values\n");
 }
 

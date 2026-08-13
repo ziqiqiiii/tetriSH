@@ -55,7 +55,8 @@ it.** Every `< 0` in `main.c`'s screen dispatch is a quit; that is a
 reasonable default for a screen that genuinely failed, and a disaster for one
 that merely found the world had moved on while it was away.
 
-The related design gap is still open, and worth naming: a Double room is
-destroyed when its match ends, so "play again" is currently "go back and make
-another room". `double-mode-plan.md` lists rematch as an open question. Going
-back a screen is the honest answer until that is decided, not the final one.
+The related design gap named here has since been closed. At the time a Double
+room was destroyed when its match ended, so "play again" meant "go back and
+make another room", and going back a screen was the honest answer rather than
+the final one. `room_rematch` is the final one: a match can end without the
+room ending, and both players come back to the seats they never left.

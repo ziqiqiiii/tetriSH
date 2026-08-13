@@ -94,7 +94,17 @@ Each item costs a flat number of `wallet_points`.
 
 **Characters:**
 
-Each character is worth 10 wallet_points (about 2 games).
+| Character | Cost (wallet_points) | Est. games to get it |
+|---|---|---|
+| Halloween | — | Free (starting character) |
+| Mirurun | Free | — |
+| Princess | 10 | ~2 games |
+| Wolf-man | 10 | ~2 games |
+
+Mirurun is free for the same reason "Design and AI" is: a player who has never
+finished a game has an empty wallet, and one paid character against one free
+one is the difference between a marketplace they can look at and one they can
+use. Halloween is granted at signup and never appears as a purchase.
 
 **Themes:**
 

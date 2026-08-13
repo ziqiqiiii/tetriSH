@@ -83,7 +83,8 @@ int	body_state_encode(const t_body_state *in, char *out, size_t cap)
 		|| encode_stats(in, out, cap, &off) != 0
 		|| encode_timers(in, out, cap, &off) != 0
 		|| encode_board(in, out, cap, &off) != 0
-		|| encode_opponents(in, out, cap, &off) != 0)
+		|| encode_opponents(in, out, cap, &off) != 0
+		|| body_arena_encode(in, out, cap, &off) != 0)
 		return (body_fail(ERANGE));
 	return ((int)off);
 }
@@ -115,6 +116,7 @@ int	body_state_decode(const char *buf, size_t len, t_body_state *out)
 		|| decode_timers(&c, out) != 0
 		|| decode_board(&c, out) != 0
 		|| decode_opponents(&c, out) != 0
+		|| body_arena_decode(&c, out) != 0
 		|| !body_at_end(&c))
 		return (body_fail(EBADMSG));
 	return (0);
@@ -150,7 +152,9 @@ static int	validate_state(const t_body_state *in)
 		return (-1);
 	if (validate_cells(in) != 0)
 		return (-1);
-	return (validate_opponents(in));
+	if (validate_opponents(in) != 0)
+		return (-1);
+	return (body_arena_validate(in));
 }
 
 /**

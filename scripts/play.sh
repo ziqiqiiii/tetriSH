@@ -423,6 +423,12 @@ ensure_native_client() {
     make -C src/tetrisu DEPS_READY=1 \
         AUTO_INSTALL_DEPS="$AUTO_INSTALL_DEPS" || die "tetrisu did not build"
     make bin-link >/dev/null 2>&1 || true
+    # Not fatal: the client plays without it, and only bots break. Worth saying
+    # out loud, because the failure it causes surfaces four screens later as a
+    # room that will not fill.
+    if [ ! -x bin/tetrisu-bot ] && [ ! -x src/tetrisu/bin/tetrisu-bot ]; then
+        warn "tetrisu-bot is missing - [B] in a waiting room will refuse"
+    fi
     ok "tetrisu is built"
 }
 

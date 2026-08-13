@@ -176,6 +176,17 @@ waiting room with chat and a pre-match countdown — while the authoritative
   supports capacities from 4 through 99, requires every occupied player to be
   ready, and waits for the room owner to press `S`. Both paths run the same
   five-second countdown, and un-readying during it cancels it.
+- `B` adds a bot and `K` kicks the last one, owner only, up to
+  `BOT_FARM_HAND_MAX` (4) and never past the room's free seats — four is what
+  reaches a Battle Royale's minimum from one player. **`F1` is a stress tool,
+  not a feature:** it fills every free seat up to `BOT_FARM_MAX` (50), stopping
+  on the first refusal and reporting how many actually started. It exists to
+  measure what a crowded Battle Royale costs, which nothing else in the client
+  could ask. It is on a function key and is deliberately absent from the hint
+  line — no letter a player might reach for should start fifty processes. Each
+  bot is a child process, so pressing it forks up to fifty before the frame
+  ends, and the server's account pool (`TETRISD_BOT_ACCOUNTS`, 64) is the other
+  ceiling.
 - Entering a waiting room plays the short dialog acknowledgement once. It uses
   the menu-select mix level (48 rather than the normal gameplay 72), so the cue
   stays softer than match effects and remains governed by the shared volume.

@@ -2,15 +2,17 @@
 
 // Static Functions
 static void		room_close(t_server_room *server_room);
+static bool		name_is_bot(const char *username);
+static bool		room_holds_only_bots(const t_server_room *server_room);
 static void		room_blank(t_server_room *server_room);
 static void		bind_client(t_client *cli, t_server_room *server_room, int slot);
 static bool		room_probe(void *ctx, t_player_id pid);
 static int		deal_games(t_server_room *server_room);
 static void		tick_room(t_server_room *server_room, int elapsed_ms);
 static void		advance_and_push(t_server_room *server_room, int elapsed_ms);
-static void		push_all(t_server_room *server_room, int n, const t_body_state *snaps, const t_player_id *pids);
 static void		push_state(t_server_room *server_room, const char *room_name, t_player_id pid, const t_body_state *snap);
-static int		tick_once(t_server_room *server_room, int elapsed_ms, t_body_state *snaps, t_player_id *pids);
+static void		advance_games(t_server_room *server_room, int elapsed_ms);
+static void		build_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
 static void		number_snapshot(t_server_room *server_room, t_player_id pid, t_body_state *snap);
 static void		decorate_snapshot(t_server_room *server_room, int slot, t_body_state *snap);
 static void		fill_opponents(t_server_room *server_room, int subject, t_body_state *snap);
@@ -21,8 +23,42 @@ static int		spend_countdown(t_server_room *server_room, int elapsed_ms);
 static void		mark_all_dirty(t_server_room *server_room);
 static void		spread_dirty(t_server_room *server_room);
 static void		settle_garbage(t_server_room *server_room);
-static int		slot_of_player(const t_server_room *server_room, t_player_id pid);
+static int		slot_of_player(const t_server_room *server_room,
+					t_player_id pid);
+static const t_participant	*participant_of(const t_server_room *server_room,
+								t_player_id pid);
+static t_participant		*participant_open(t_server_room *server_room,
+								t_player_id pid);
+static t_item_id			participant_character(
+								const t_server_room *server_room,
+								t_player_id pid);
+static void					participant_close(t_server_room *server_room,
+								t_player_id pid);
 static int		count_live_games(const t_server_room *server_room);
+static uint32_t	room_random(t_server_room *server_room);
+static int		candidate_slots(t_server_room *server_room, int from_slot,
+					int *out);
+static int		slots_matching_mode(t_server_room *server_room, int from_slot,
+					int *out);
+static int		live_slots(t_server_room *server_room, int from_slot,
+					int *out);
+static bool		mode_fans_out(t_target_mode mode);
+static bool		wanted_by_mode(t_server_room *server_room, int from_slot,
+					int slot, int tallest);
+static int		stack_height(const t_game *game);
+static int		tallest_in_room(const t_server_room *server_room);
+static void		place_leaver(t_server_room *server_room, t_player_id pid);
+static void		settle_attacks(t_server_room *server_room);
+static void		note_attacker(t_participant *victim, t_player_id from,
+					uint64_t when_ms);
+static bool		is_attacking(const t_participant *victim, t_player_id who,
+					uint64_t now_ms);
+static void		sweep_eliminations(t_server_room *server_room);
+static int		place_eliminated(t_server_room *server_room, int placing);
+static void		credit_knockout(t_server_room *server_room,
+					t_participant *victim, int placing);
+static const char	*name_of_player(const t_server_room *server_room,
+						t_player_id pid);
 static void		settle_results(t_server_room *server_room);
 static bool		room_is_over(t_server_room *server_room);
 static void		record_and_reset(t_server_room *server_room);
@@ -31,6 +67,16 @@ static void		award_game(t_server *srv, const t_game *game, bool won);
 static void		narrate_departure(t_server_room *server_room, const char *who, const char *name, const t_release_result *res);
 static void		rehome_successor(t_server_room *server_room, t_client *leaver, const t_release_result *res);
 static int		slot_holding(const t_server_room *server_room, t_player_id pid);
+static void		settle_selection(t_server_room *server_room);
+static bool		arena_tick(t_server_room *server_room, int elapsed_ms);
+static void		note_arena_change(t_server_room *server_room);
+static void		fill_arena(t_server_room *server_room, int subject,
+					t_body_state *snap);
+static void		fill_card(t_server_room *server_room, int slot, int subject,
+					t_body_arena_slot *out, int tallest);
+static void		fill_cells(const t_game *game, t_body_arena_slot *out);
+static void		count_players(const t_server_room *server_room,
+					t_body_state *snap);
 static int		game_holding(const t_server_room *server_room, t_player_id pid);
 
 /*
@@ -312,7 +358,7 @@ t_join_verdict	server_room_seat(t_server_room *server_room, t_client *cli,
 bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
 			bool ready, t_item_id character)
 {
-	int	slot;
+	t_participant	*participant;
 
 	if (server_room == NULL || cli == NULL)
 		return (false);
@@ -330,14 +376,19 @@ bool	server_room_set_ready(t_server_room *server_room, t_client *cli,
 	 * the select window and have the room deal the match on the strength of
 	 * it - the opposite of what they asked for. Withdrawing therefore takes
 	 * the fighter back with it, and the seat is unlocked again.
+	 *
+	 * It is written against the player and not against the seat they are in.
+	 * Filed by seat, a declaration made before an owner left was read back
+	 * from the seat the successor was moved out of, which is the whole of the
+	 * bug t_participant exists to close.
 	 */
-	slot = slot_of_player(server_room, cli->player_id);
-	if (slot < 0)
+	participant = participant_open(server_room, cli->player_id);
+	if (participant == NULL)
 		return (true);
 	if (!ready)
-		server_room->character[slot] = 0;
+		participant->character = 0;
 	else if (character != 0)
-		server_room->character[slot] = character;
+		participant->character = character;
 	return (true);
 }
 
@@ -363,6 +414,133 @@ static int	slot_of_player(const t_server_room *server_room, t_player_id pid)
 		slot++;
 	}
 	return (-1);
+}
+
+/**
+ * @brief Finds the match record belonging to a player, if they have one.
+ *
+ * The one lookup every match fact goes through, and the reason nothing in this
+ * file indexes a result, a placing or a fighter by seat.
+ *
+ * A player with no record is not an error and is answered with NULL: records
+ * are opened when a match is set up, so anyone asking before that - a lobby
+ * snapshot of a room nobody has readied in - is asking about a match that does
+ * not exist yet.
+ *
+ * @param server_room Room to search.
+ * @param pid The player to find.
+ * @return Their record, or NULL when this room holds none for them.
+ */
+static const t_participant	*participant_of(const t_server_room *server_room,
+	t_player_id pid)
+{
+	int	index;
+
+	if (server_room == NULL || pid == 0)
+		return (NULL);
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+			return (&server_room->participants[index]);
+		index++;
+	}
+	return (NULL);
+}
+
+/**
+ * @brief Finds a player's match record, opening a blank one if they have none.
+ *
+ * Every writer goes through this rather than through participant_of, so a fact
+ * about a match can be written down the first time there is one to write -
+ * there is no separate moment at which the room has to remember to create the
+ * record first.
+ *
+ * The array is TD_MAX_GAMES wide and a room seats at most that many players, so
+ * the full answer is unreachable while every record belongs to somebody seated.
+ * It is still answered rather than assumed: the caller has a player id and no
+ * room to put it in, and inventing a seat for them would be worse than saying
+ * so.
+ *
+ * @param server_room Room to search.
+ * @param pid The player to find or admit.
+ * @return Their record, or NULL when the room has no free one.
+ */
+static t_participant	*participant_open(t_server_room *server_room,
+	t_player_id pid)
+{
+	int	index;
+	int	free_slot;
+
+	if (server_room == NULL || pid == 0)
+		return (NULL);
+	free_slot = -1;
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+			return (&server_room->participants[index]);
+		if (free_slot < 0 && server_room->participants[index].player_id == 0)
+			free_slot = index;
+		index++;
+	}
+	if (free_slot < 0)
+		return (NULL);
+	memset(&server_room->participants[free_slot], 0, sizeof(t_participant));
+	server_room->participants[free_slot].player_id = pid;
+	return (&server_room->participants[free_slot]);
+}
+
+/**
+ * @brief Reads the fighter a player declared for this match.
+ *
+ * Its own function because the answer for a player who has declared nothing and
+ * the answer for a player with no record at all are the same one - 0, meaning
+ * "whatever the account has equipped" - and every reader wants that collapse.
+ *
+ * @param server_room Room holding the match.
+ * @param pid The player to ask about.
+ * @return The declared character id, or 0 when none was declared.
+ */
+static t_item_id	participant_character(const t_server_room *server_room,
+	t_player_id pid)
+{
+	const t_participant	*participant;
+
+	participant = participant_of(server_room, pid);
+	if (participant == NULL)
+		return (0);
+	return (participant->character);
+}
+
+/**
+ * @brief Releases a player's match record.
+ *
+ * Records are bounded, so one belonging to a player who is no longer in the
+ * room is not merely stale - it is a record the next player to sit down cannot
+ * have. A room whose seats turn over enough times would run out and quietly
+ * stop recording what anybody declared.
+ *
+ * @param server_room Room holding the record.
+ * @param pid The player whose record is released.
+ */
+static void	participant_close(t_server_room *server_room, t_player_id pid)
+{
+	int	index;
+
+	if (server_room == NULL || pid == 0)
+		return ;
+	index = 0;
+	while (index < TD_MAX_GAMES)
+	{
+		if (server_room->participants[index].player_id == pid)
+		{
+			memset(&server_room->participants[index], 0,
+				sizeof(t_participant));
+			return ;
+		}
+		index++;
+	}
 }
 
 /**
@@ -468,17 +646,17 @@ t_start_verdict	server_room_start(t_server_room *server_room, t_client *cli)
  */
 bool	server_room_begin_selection(t_server_room *server_room)
 {
-	int	slot;
+	int	index;
 
 	if (server_room == NULL || server_room->room == NULL)
 		return (false);
 	if (room_begin_selection(server_room->room) != 0)
 		return (false);
-	slot = 0;
-	while (slot < TD_MAX_GAMES)
+	index = 0;
+	while (index < TD_MAX_GAMES)
 	{
-		server_room->character[slot] = 0;
-		slot++;
+		server_room->participants[index].character = 0;
+		index++;
 	}
 	server_room->select_ms = TETRISD_MATCH_SELECT_MS;
 	server_room->select_second = -1;
@@ -517,7 +695,8 @@ bool	server_room_all_locked(const t_server_room *server_room)
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (server_room->room->slots[slot].occupied
-			&& server_room->character[slot] == 0)
+			&& participant_character(server_room,
+				server_room->room->slots[slot].membership.player_id) == 0)
 			return (false);
 		slot++;
 	}
@@ -678,6 +857,32 @@ bool	server_room_is_solo(const t_server_room *server_room)
 }
 
 /**
+ * @brief Reports whether readiness alone is enough to commit this room.
+ *
+ * Double, and only Double. Two players readying is the whole of a Double room's
+ * agreement - there is nobody else to wait for, and the player who declares
+ * last is as often the joiner as the owner, so requiring the owner to then
+ * press start would be a second confirmation of a decision already unanimous.
+ *
+ * A Battle Royale is the opposite case. It starts below capacity by design, so
+ * "everybody who is here is ready" is true of four people in a forty-seat room
+ * and says nothing about whether the match should begin - it is the owner's
+ * call, which is what docs/use_cases.md has always specified and what the
+ * client's waiting room has always drawn. Readiness there is a signal to the
+ * owner rather than a trigger.
+ *
+ * Single has no readiness to speak of and reaches its game through START.
+ *
+ * @param server_room Room to ask.
+ * @return true when the last readiness should commit the room by itself.
+ */
+bool	server_room_starts_on_ready(const t_server_room *server_room)
+{
+	return (server_room != NULL && server_room->room != NULL
+		&& server_room->room->mode == MODE_DOUBLE);
+}
+
+/**
  * @brief Removes a client from its room, forfeiting any game in progress.
  *
  * Leaving, topping out, and losing the connection are the same event:
@@ -701,29 +906,126 @@ void	server_room_forfeit(t_server *srv, t_client *cli)
 	if (server_room != NULL)
 	{
 		snprintf(name, sizeof(name), "%s", server_room->room->name);
+		place_leaver(server_room, cli->player_id);
 		forfeit_slot(server_room, cli->binding.slot_index, &finished);
+		/*
+		 * The match record leaves with the player, unless a match is running -
+		 * then it is theirs until that match ends. forfeit_slot has just reset
+		 * their board, so during a game the record is the only thing left
+		 * holding what they did in it. Outside one there is nothing to hold,
+		 * and it is asked before room_release because that is the last moment
+		 * the room still says what it was doing.
+		 */
+		if (server_room->room->status != ROOM_IN_GAME)
+			participant_close(server_room, cli->player_id);
 		memset(&res, 0, sizeof(res));
 		room_release(server_room->room, cli->player_id, room_probe, srv, &res);
 		rehome_successor(server_room, cli, &res);
 		narrate_departure(server_room, cli->username, name, &res);
-		/*
-		 * Leaving during the select window closes it. The room can no longer
-		 * deal the match it was setting up, and whoever is left would sit on
-		 * a roster screen waiting out a clock with nothing behind it.
-		 */
 		if (server_room->room->status == ROOM_SELECTING)
-		{
-			room_abort_selection(server_room->room);
-			server_room->select_ms = 0;
-			server_room->select_second = -1;
-			server_room->ticking = false;
-		}
+			settle_selection(server_room);
 	}
 	if (finished.player_id != 0)
 		award_game(srv, &finished, false);
 	if (server_room != NULL)
 		room_close(server_room);
 	server_room_unbind(cli);
+	/*
+	 * A seat has just been released, so a room may now be holding nothing but
+	 * bots. Asking here would mean killing a client from inside the path a
+	 * client is killed by, and each of those kills would land in this function
+	 * again, on a room this frame is still holding - which is how a room
+	 * outlives itself. The loop asks instead, once, after the batch.
+	 */
+	srv->bot_rooms_due = true;
+}
+
+/**
+ * @brief Ends every room that has nothing left in it but bots.
+ *
+ * Bots are a convenience the room's players filled empty seats with, and they
+ * have nobody to be a convenience for once the last person has gone. Left
+ * alone they play on: the room stays in the lobby, the seats stay taken, and
+ * each of them holds one of the pool's accounts against the next person who
+ * wants bots of their own.
+ *
+ * Killed rather than unseated, because a bot's seat is released by exactly the
+ * path every dropped connection takes, and inventing a second way to vacate a
+ * seat is inventing a second way for the two halves of a Room to disagree.
+ * Closing the room is then room_close's own business, on the last one out.
+ *
+ * The registry is snapshotted first and the kills happen against the snapshot,
+ * so no room is walked while the lobby is destroying it.
+ *
+ * @param srv Server whose rooms are examined.
+ */
+void	server_rooms_evict_abandoned(t_server *srv)
+{
+	t_client	*cli;
+	size_t		count;
+	size_t		index;
+
+	if (srv == NULL || !srv->bot_rooms_due)
+		return ;
+	srv->bot_rooms_due = false;
+	count = registry_snapshot(&srv->reg, srv->sweep,
+			(size_t)srv->cfg.max_clients);
+	index = 0;
+	while (index < count)
+	{
+		cli = srv->sweep[index++];
+		if (cli->dead || !name_is_bot(cli->username))
+			continue ;
+		if (room_holds_only_bots(server_room_resolve(srv, cli, NULL)))
+			client_kill(cli);
+	}
+}
+
+/**
+ * @brief Reports whether a username belongs to one of the pool's accounts.
+ *
+ * The name is the whole of the test, because the store's reserved prefix is
+ * the only thing separating an account nobody can sign up for from a person's
+ * - db_signup refuses the prefix, so no player can ever answer true here by
+ * choosing a username.
+ *
+ * @param username Name to examine.
+ * @return true when it names a bot.
+ */
+static bool	name_is_bot(const char *username)
+{
+	return (username != NULL && strncmp(username, DB_RESERVED_PREFIX,
+			strlen(DB_RESERVED_PREFIX)) == 0);
+}
+
+/**
+ * @brief Reports whether every occupant of a room is a bot.
+ *
+ * Asked of the seats rather than of the registry, because a Slot already
+ * carries the username it was seated with and that is the same fact one
+ * lookup further away.
+ *
+ * An empty room answers false: it has no bots to evict, and room_close has
+ * already taken it.
+ *
+ * @param server_room Room to examine, which may be NULL.
+ * @return true when the room has occupants and none of them is a person.
+ */
+static bool	room_holds_only_bots(const t_server_room *server_room)
+{
+	int	slot;
+
+	if (server_room == NULL || server_room->room->number_of_players == 0)
+		return (false);
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& !name_is_bot(server_room->room->slots[slot].membership.username))
+			return (false);
+		slot++;
+	}
+	return (true);
 }
 
 /**
@@ -793,7 +1095,8 @@ bool	server_room_snapshot(const t_server_room *server_room,
 			out->members[out->member_count].ready
 				= slot->status == SLOT_READY;
 			out->members[out->member_count].character
-				= (uint32_t)server_room->character[index];
+				= (uint32_t)participant_character(server_room,
+					slot->membership.player_id);
 			snprintf(out->members[out->member_count].username,
 				sizeof(out->members[out->member_count].username), "%s",
 				slot->membership.username);
@@ -894,14 +1197,18 @@ static void	room_blank(t_server_room *server_room)
 	server_room->countdown_second = -1;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
+	memset(server_room->participants, 0, sizeof(server_room->participants));
+	server_room->arena_ms = 0;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = false;
+	server_room->alive = 0;
+	server_room->match_ms = 0;
+	server_room->rng = 0;
 	slot = 0;
 	while (slot < TD_MAX_GAMES)
 	{
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
-		server_room->result[slot] = BODY_RESULT_NONE;
-		server_room->rank[slot] = 0;
-		server_room->character[slot] = 0;
 		slot++;
 	}
 }
@@ -944,33 +1251,74 @@ static bool	room_probe(void *ctx, t_player_id pid)
 /**
  * @brief Deals every seated player a board.
  *
+ * A match record is opened here as well as a board, and this is what makes
+ * every player in a running match have one: readiness opens a record only for
+ * those who declared, and a Battle Royale is started by its owner over seats
+ * that need never have. settle_results then has somewhere to write a verdict
+ * for each of them without deciding, at the end of a match, who was in it.
+ *
  * @param server_room Room whose game is starting.
  * @return The number of games started.
  */
 static int	deal_games(t_server_room *server_room)
 {
-	t_slot		*slots;
-	uint32_t	seed;
-	int			started;
-	int			i;
+	t_participant	*participant;
+	t_slot			*slots;
+	uint32_t		seed;
+	int				started;
+	int				i;
 
 	slots = server_room->room->slots;
+	server_room->arena_ms = TETRISD_BR_ARENA_MS;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = true;
+	server_room->match_ms = 0;
+	/*
+	 * One seed for the room, taken once. Everything drawn during the match
+	 * comes out of it in order, so the same seed replays the same match - which
+	 * is what lets a test assert which rival a draw named rather than only that
+	 * it named one.
+	 */
+	server_room->rng = (uint32_t)(clock_now_ms()
+			^ ((uint64_t)server_room->index << 16));
 	started = 0;
 	i = 0;
 	while (i < server_room->room->slot_count && i < TD_MAX_GAMES)
 	{
 		if (slots[i].occupied)
 		{
+			participant = participant_open(server_room,
+					slots[i].membership.player_id);
 			seed = (uint32_t)(clock_now_ms() + (uint64_t)i * 7919u
 					+ slots[i].membership.player_id);
 			game_start(&server_room->games[i], slots[i].membership.player_id,
 				seed);
-			server_room->games[i].character_id = server_room->character[i];
+			if (participant != NULL)
+			{
+				server_room->games[i].character_id = participant->character;
+				/*
+				 * The record survives the room between matches - it is what
+				 * carried the fighter here from READY - so everything the
+				 * last match wrote on it is cleared by the one starting.
+				 * Leaving it would open a rematch with the placings and the
+				 * knockouts of the game before it already written down.
+				 */
+				participant->alive = true;
+				participant->rank = 0;
+				participant->ko = 0;
+				participant->result = BODY_RESULT_NONE;
+				participant->last_attacker_id = 0;
+				memset(participant->attackers, 0,
+					sizeof(participant->attackers));
+				participant->attacker_next = 0;
+				participant->target_mode = TARGET_RANDOM;
+			}
 			server_room->dirty[i] = true;
 			started++;
 		}
 		i++;
 	}
+	server_room->alive = started;
 	return (started);
 }
 
@@ -989,6 +1337,12 @@ static void	tick_room(t_server_room *server_room, int elapsed_ms)
 	}
 	if (server_room->countdown_ms > 0)
 		elapsed_ms = spend_countdown(server_room, elapsed_ms);
+	/*
+	 * The match's own clock, and the countdown is not part of it: nobody can
+	 * attack anybody while every board is being held, so a window measured
+	 * from the deal would start three seconds spent.
+	 */
+	server_room->match_ms += (uint64_t)elapsed_ms;
 	advance_and_push(server_room, elapsed_ms);
 	if (!room_is_over(server_room))
 		return ;
@@ -1107,36 +1461,63 @@ static void	mark_all_dirty(t_server_room *server_room)
  * already inactive, so there is no gravity left to apply and the pass exists
  * only to carry out the snapshot that says so.
  *
+ * Three passes, and the order between them is the point. Every board is
+ * advanced before any garbage is settled, and all of that happens before any
+ * board is projected - so no player is ever shown a room half a tick old, with
+ * their own board advanced and a rival's not. That guarantee is about the three
+ * passes and not about collecting anything, which is why the third one is free
+ * to encode and push each snapshot as it builds it.
+ *
+ * It used to collect instead: one t_body_state per seat into an array on this
+ * stack, and a second walk to push them. At sixteen seats that is 17 KB and
+ * unremarkable, and at ninety-nine it is 103 KB - survivable, but paid on the
+ * reactor's own stack on every tick of every room, to hold snapshots that are
+ * each read exactly once by the line that would have followed. It also grows
+ * with the body: the arena section adds ~4 KB to a t_body_state, which takes
+ * the array past half a megabyte without anything about this function
+ * changing. One snapshot, reused, is a kilobyte whatever the room holds and
+ * whatever the body grows into.
+ *
  * @param server_room Room to advance.
  * @param elapsed_ms Milliseconds to advance by.
  */
 static void	advance_and_push(t_server_room *server_room, int elapsed_ms)
 {
-	t_body_state	snaps[TD_MAX_GAMES];
-	t_player_id		pids[TD_MAX_GAMES];
+	t_body_state	snap;
+	char			name[ROOM_NAME_MAX];
+	bool			arena;
+	int				slot;
 
-	push_all(server_room, tick_once(server_room, elapsed_ms, snaps, pids),
-		snaps, pids);
-}
-
-/**
- * @brief Pushes a tick's snapshots to the players they belong to.
- *
- * @param server_room Room the snapshots came from.
- * @param n Number of snapshots collected.
- * @param snaps The snapshots.
- * @param pids The matching subject player ids.
- */
-static void	push_all(t_server_room *server_room, int n,
-				const t_body_state *snaps, const t_player_id *pids)
-{
-	char	name[ROOM_NAME_MAX];
-
+	advance_games(server_room, elapsed_ms);
+	settle_garbage(server_room);
+	/*
+	 * Both of these read what the boards did this tick and write it down
+	 * against the players who did it, so they sit between the advance and the
+	 * projection: after every board has moved, before any of them is drawn.
+	 * The elimination sweep in particular has to run once for the whole room
+	 * rather than per board - see sweep_eliminations for why a tie cannot be
+	 * broken by the order these loops walk the seats in.
+	 */
+	settle_attacks(server_room);
+	sweep_eliminations(server_room);
+	spread_dirty(server_room);
+	note_arena_change(server_room);
+	arena = arena_tick(server_room, elapsed_ms);
 	snprintf(name, sizeof(name), "%s", server_room->room->name);
-	while (n > 0)
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		n--;
-		push_state(server_room, name, pids[n], &snaps[n]);
+		if (server_room->games[slot].player_id != 0
+			&& server_room->dirty[slot])
+		{
+			build_snapshot(server_room, slot, &snap);
+			if (arena)
+				fill_arena(server_room, slot, &snap);
+			push_state(server_room, name,
+				server_room->games[slot].player_id, &snap);
+			server_room->dirty[slot] = false;
+		}
+		slot++;
 	}
 }
 
@@ -1180,19 +1561,18 @@ static void	push_state(t_server_room *server_room, const char *room_name,
 }
 
 /**
- * @brief Advances every live game in the room and collects what changed.
+ * @brief Applies gravity to every live game in the room.
+ *
+ * The first of advance_and_push's three passes. It is its own function because
+ * the ordering guarantee depends on it finishing before the next one starts,
+ * and a pass with a name is harder to fold into the loop that follows it.
  *
  * @param server_room Room to advance.
  * @param elapsed_ms Milliseconds since the previous tick.
- * @param snaps Receives one snapshot per changed game.
- * @param pids Receives the matching subject player ids.
- * @return Number of snapshots collected.
  */
-static int	tick_once(t_server_room *server_room, int elapsed_ms,
-			t_body_state *snaps, t_player_id *pids)
+static void	advance_games(t_server_room *server_room, int elapsed_ms)
 {
 	int	slot;
-	int	n;
 
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
@@ -1202,28 +1582,25 @@ static int	tick_once(t_server_room *server_room, int elapsed_ms,
 			server_room->dirty[slot] = true;
 		slot++;
 	}
-	settle_garbage(server_room);
-	spread_dirty(server_room);
-	n = 0;
-	slot = 0;
-	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
-	{
-		if (server_room->games[slot].player_id != 0)
-		{
-			if (server_room->dirty[slot])
-			{
-				server_room->games[slot].seq++;
-				game_snapshot(&server_room->games[slot], &snaps[n]);
-				decorate_snapshot(server_room, slot, &snaps[n]);
-				pids[n] = server_room->games[slot].player_id;
-				number_snapshot(server_room, pids[n], &snaps[n]);
-				server_room->dirty[slot] = false;
-				n++;
-			}
-		}
-		slot++;
-	}
-	return (n);
+}
+
+/**
+ * @brief Projects one seat's board into the snapshot its player is owed.
+ *
+ * The sequence number is stepped here rather than by the caller, because it
+ * counts snapshots taken of this board and this is the only place one is.
+ *
+ * @param server_room Room holding the seat.
+ * @param slot 0-based slot to project.
+ * @param snap Receives the snapshot, overwriting whatever it held.
+ */
+static void	build_snapshot(t_server_room *server_room, int slot,
+			t_body_state *snap)
+{
+	server_room->games[slot].seq++;
+	game_snapshot(&server_room->games[slot], snap);
+	decorate_snapshot(server_room, slot, snap);
+	number_snapshot(server_room, server_room->games[slot].player_id, snap);
 }
 
 /**
@@ -1249,6 +1626,19 @@ static void	spread_dirty(t_server_room *server_room)
 	int	slot;
 
 	if (server_room_is_solo(server_room))
+		return ;
+	/*
+	 * Double only. It exists because a Double frame carries the other board
+	 * inside it, so anybody's move stales everybody's frame. A Battle Royale
+	 * carries the other boards in the arena, which has its own clock - so a
+	 * player's frame is stale when their own board changes and at no other
+	 * time, and the rest is the arena's business.
+	 *
+	 * Left in place it is the whole cost of the mode: ninety-nine boards
+	 * encoded, sealed and written on every tick, for frames whose only change
+	 * is somebody else's piece falling one row.
+	 */
+	if (server_room_is_arena(server_room))
 		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
@@ -1280,29 +1670,67 @@ static void	spread_dirty(t_server_room *server_room)
  * queue, and game_take_cleared is still called so nothing accumulates against
  * a mode change that never comes.
  *
+ * A clear can be owed to more than one board. Attackers and KOs answer with
+ * every rival they matched rather than with one drawn from them
+ * (server_room_targets_of), so the rows go to all of them - each gets the
+ * whole amount, because the garbage a clear is worth is a property of the
+ * clear and dividing it between the victims would make choosing a crowded
+ * mode a way of hitting softer.
+ *
  * @param server_room Room whose clears are being charged.
  */
 static void	settle_garbage(t_server_room *server_room)
 {
+	int	targets[TD_MAX_GAMES];
 	int	slot;
-	int	target;
-	int	cleared;
-	int	fry;
+	int	count;
 
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		cleared = game_take_cleared(&server_room->games[slot]);
-		fry = game_take_fry(&server_room->games[slot]);
-		target = server_room_target_of(server_room, slot);
-		if (target < 0)
-		{
-			slot++;
-			continue ;
-		}
+		count = server_room_targets_of(server_room, slot, targets);
+		server_room_charge_targets(server_room, slot, targets, count);
+		slot++;
+	}
+}
+
+/**
+ * @brief Puts one slot's clear and fry onto every board it is owed to.
+ *
+ * Split out of settle_garbage because the loop over the victims is the only
+ * thing that changed when a Target became a set, and the sender's bookkeeping
+ * is the same whether it is owed to one board or eight. Public for the reason
+ * server_room_target_of is: it is the half of the tick a test can drive
+ * without a socket, and the alternative is asserting the fan-out by
+ * reimplementing it.
+ *
+ * The two takes happen before the count is looked at, so a room with nobody
+ * to charge still drains what the board cleared. Letting it accumulate would
+ * hand the whole backlog to the first rival a mode change found.
+ *
+ * @param server_room Room being charged.
+ * @param from The 0-based slot that cleared.
+ * @param targets The 0-based victim slots.
+ * @param count How many of them.
+ */
+void	server_room_charge_targets(t_server_room *server_room, int from,
+		const int *targets, int count)
+{
+	int	cleared;
+	int	fry;
+	int	index;
+
+	cleared = game_take_cleared(&server_room->games[from]);
+	fry = game_take_fry(&server_room->games[from]);
+	if (count <= 0 || (cleared <= 0 && fry <= 0))
+		return ;
+	index = 0;
+	while (index < count)
+	{
 		if (cleared > 0)
-			game_queue_garbage(&server_room->games[target],
-				garbage_lines_from_clear(cleared));
+			game_queue_garbage(&server_room->games[targets[index]],
+				garbage_lines_from_clear(cleared),
+				server_room->games[from].player_id);
 		/*
 		 * Fry's rows go on whole rather than through
 		 * garbage_lines_from_clear's N-1: they are not a clear being
@@ -1312,27 +1740,31 @@ static void	settle_garbage(t_server_room *server_room)
 		 * made.
 		 */
 		if (fry > 0)
-			game_queue_ability_garbage(&server_room->games[target], fry);
-		if (cleared > 0 || fry > 0)
-		{
-			server_room->dirty[target] = true;
-			server_room->dirty[slot] = true;
-		}
-		slot++;
+			game_queue_ability_garbage(&server_room->games[targets[index]],
+				fry, server_room->games[from].player_id);
+		server_room->dirty[targets[index]] = true;
+		index++;
 	}
+	server_room->dirty[from] = true;
 }
 
 /**
  * @brief Names the player a slot's clears and abilities are aimed at.
  *
- * Double's answer is the whole of it today: the other occupied slot, if
- * somebody is still playing in it. Single answers -1, which is the same answer
- * as an opponent who has already topped out, and both mean "nothing crosses" -
- * so no caller needs to know which of the two it got.
+ * Single answers -1, which is the same answer as a room where nobody else is
+ * still playing, and both mean "nothing crosses" - so no caller needs to know
+ * which of the two it got.
  *
- * Battle Royale is the reason this is a function rather than an expression.
- * Its four targeting modes (docs/CONTEXT.md) all reduce to "which slot", and
- * this is where they will land; nothing above it will have to change.
+ * Double answers the other seat, and reaches it without touching the room's
+ * randomness: there is one candidate, and drawing from a set of one is a
+ * ceremony. Battle Royale narrows the live opponents by the sender's declared
+ * mode and then draws from what is left, which is what makes a mode a
+ * preference rather than an aim - a player chooses a kind of rival and the
+ * room chooses which one.
+ *
+ * A mode whose set is empty - nobody has attacked you yet, nobody has a
+ * knockout - falls back to every live opponent rather than dropping the
+ * attack. Choosing a mode must never cost a player the garbage they earned.
  *
  * @param server_room Room to resolve within.
  * @param from_slot The 0-based slot acting.
@@ -1340,20 +1772,313 @@ static void	settle_garbage(t_server_room *server_room)
  */
 int	server_room_target_of(t_server_room *server_room, int from_slot)
 {
-	int	slot;
+	int	candidates[TD_MAX_GAMES];
+	int	count;
 
 	if (server_room == NULL || server_room->room == NULL
 		|| server_room_is_solo(server_room))
 		return (-1);
+	count = candidate_slots(server_room, from_slot, candidates);
+	if (count <= 0)
+		return (-1);
+	if (count == 1)
+		return (candidates[0]);
+	return (candidates[room_random(server_room) % (uint32_t)count]);
+}
+
+/**
+ * @brief Names every player a slot's clears and abilities are aimed at.
+ *
+ * Two of the four modes name a person and two name a situation, and that is
+ * the whole rule for how many boards an attack reaches:
+ *
+ *   Randoms  - no preference, so one rival, drawn.
+ *   Badges   - the rivals holding knockouts, which is a crowd late in a
+ *              match; one of them, drawn, or a Battle Royale's whole
+ *              back half would take every clear anybody made.
+ *   KOs      - the tallest stack in the room. Usually one player; more only
+ *              when they are level, and two players who are equally close to
+ *              topping out are equally the answer, so both are hit.
+ *   Attackers- everyone whose garbage is currently landing on this player.
+ *              Hitting back at one of several attackers and letting the rest
+ *              carry on is the thing the mode exists to stop.
+ *
+ * The fan-out is over the *matched* set only. A mode that matched nobody
+ * still falls back to every live opponent (candidate_slots), and that
+ * fallback is drawn from rather than sprayed - it is the room saying "no
+ * preference applies", which is Randoms, and Randoms hits one person. Without
+ * that distinction, declaring Attackers before anybody had attacked would hit
+ * the entire room.
+ *
+ * @param server_room Room to resolve within.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the 0-based Target slots; at least TD_MAX_GAMES wide.
+ * @return How many Targets were written, 0 when there are none.
+ */
+int	server_room_targets_of(t_server_room *server_room, int from_slot,
+		int *out)
+{
+	const t_participant	*sender;
+	int					count;
+
+	if (server_room == NULL || server_room->room == NULL || out == NULL
+		|| server_room_is_solo(server_room))
+		return (0);
+	sender = participant_of(server_room,
+			server_room->games[from_slot].player_id);
+	count = slots_matching_mode(server_room, from_slot, out);
+	if (count > 0 && sender != NULL && mode_fans_out(sender->target_mode))
+		return (count);
+	if (count == 0)
+		count = live_slots(server_room, from_slot, out);
+	if (count == 0)
+		return (0);
+	out[0] = out[room_random(server_room) % (uint32_t)count];
+	return (1);
+}
+
+/**
+ * @brief Whether this mode hits everyone it matched or one drawn from them.
+ *
+ * @param mode The sender's declared mode.
+ * @return true when every match is a Target.
+ */
+static bool	mode_fans_out(t_target_mode mode)
+{
+	return (mode == TARGET_ATTACKERS || mode == TARGET_KO);
+}
+
+/**
+ * @brief Records which kind of rival this player wants their garbage to go to.
+ *
+ * The mode is remembered on the participant record and not on the seat, for
+ * the reason every match fact is: a promoted successor moves seats mid-match
+ * and would otherwise inherit the preference of whoever sat there before.
+ *
+ * @param server_room Room the player is playing in.
+ * @param cli The client declaring a mode.
+ * @param mode The mode declared.
+ * @return true when it was recorded, false when this client is not playing
+ *         in this room.
+ */
+bool	server_room_set_target(t_server_room *server_room, t_client *cli,
+			t_target_mode mode)
+{
+	t_participant	*participant;
+
+	if (server_room_game_of(server_room, cli) == NULL)
+		return (false);
+	participant = participant_open(server_room, cli->player_id);
+	if (participant == NULL)
+		return (false);
+	participant->target_mode = mode;
+	/*
+	 * The arena draws which card this player is aiming at, and a mode is a
+	 * change to that even though no board moved.
+	 */
+	server_room->arena_dirty = true;
+	return (true);
+}
+
+/**
+ * @brief Gathers the slots this sender's mode is willing to aim at.
+ *
+ * Two passes over the same live opponents: the mode's own set first, and
+ * every live opponent when that came back empty. The fallback is the whole of
+ * what "an empty candidate set falls back to Randoms" means, and writing it
+ * as a second pass rather than as a special case per mode is what keeps each
+ * mode's rule to one line.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the candidate slots.
+ * @return How many candidates there are.
+ */
+static int	candidate_slots(t_server_room *server_room, int from_slot, int *out)
+{
+	int	count;
+
+	count = slots_matching_mode(server_room, from_slot, out);
+	if (count > 0)
+		return (count);
+	return (live_slots(server_room, from_slot, out));
+}
+
+/**
+ * @brief The live opponents this sender's declared mode singles out.
+ *
+ * No fallback: an empty answer means the mode matched nobody, and that is a
+ * fact its callers need. server_room_targets_of decides whether to spray or
+ * to draw on exactly this distinction, and folding the fallback in here is
+ * what would let "Attackers, before anybody attacked" hit the whole room.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the matched slots.
+ * @return How many matched.
+ */
+static int	slots_matching_mode(t_server_room *server_room, int from_slot,
+		int *out)
+{
+	int	tallest;
+	int	count;
+	int	slot;
+
+	tallest = tallest_in_room(server_room);
+	count = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (slot != from_slot && server_room->games[slot].player_id != 0
+			&& server_room->games[slot].active
+			&& wanted_by_mode(server_room, from_slot, slot, tallest))
+			out[count++] = slot;
+		slot++;
+	}
+	return (count);
+}
+
+/**
+ * @brief Every opponent still playing, whatever mode was declared.
+ *
+ * @param server_room Room to gather from.
+ * @param from_slot The 0-based slot acting.
+ * @param out Receives the live slots.
+ * @return How many there are.
+ */
+static int	live_slots(t_server_room *server_room, int from_slot, int *out)
+{
+	int	count;
+	int	slot;
+
+	count = 0;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
 		if (slot != from_slot && server_room->games[slot].player_id != 0
 			&& server_room->games[slot].active)
-			return (slot);
+			out[count++] = slot;
 		slot++;
 	}
-	return (-1);
+	return (count);
+}
+
+/**
+ * @brief Decides whether one live opponent is the kind this sender is after.
+ *
+ * The four modes of the Tetris 99 idiom, and each is one question about the
+ * candidate: are they closest to topping out, are they attacking me, have they
+ * buried anybody. Randoms asks nothing, which is why it is both the default
+ * and the fallback.
+ *
+ * KOs is a comparison rather than a property - "the tallest stack" means
+ * nothing without the rest of the room - so the room's tallest is measured
+ * once by the caller and passed in. A tie puts every one of them in the urn,
+ * which is the same rule the placings use and for the same reason: nothing
+ * observable separates them.
+ *
+ * @param server_room Room being resolved in.
+ * @param from_slot The 0-based slot acting.
+ * @param slot The 0-based candidate.
+ * @param tallest The tallest live stack in the room.
+ * @return true when the candidate belongs in the sender's set.
+ */
+static bool	wanted_by_mode(t_server_room *server_room, int from_slot, int slot,
+		int tallest)
+{
+	const t_participant	*sender;
+	const t_participant	*candidate;
+
+	sender = participant_of(server_room,
+			server_room->games[from_slot].player_id);
+	if (sender == NULL || sender->target_mode == TARGET_RANDOM)
+		return (true);
+	if (sender->target_mode == TARGET_KO)
+		return (stack_height(&server_room->games[slot]) >= tallest
+			&& tallest > 0);
+	if (sender->target_mode == TARGET_ATTACKERS)
+		return (is_attacking(sender, server_room->games[slot].player_id,
+				server_room->match_ms));
+	candidate = participant_of(server_room,
+			server_room->games[slot].player_id);
+	return (candidate != NULL && candidate->ko > 0);
+}
+
+/**
+ * @brief How tall one board's stack is.
+ *
+ * A height and not a row index, so that "taller" and "closer to topping out"
+ * are the same number going the same way.
+ *
+ * @param game The board to measure.
+ * @return The height in rows, 0 for an empty board.
+ */
+static int	stack_height(const t_game *game)
+{
+	int	row;
+	int	col;
+
+	row = 0;
+	while (row < BOARD_HEIGHT)
+	{
+		col = 0;
+		while (col < BOARD_WIDTH)
+		{
+			if (board_get(&game->board, col, row).type != CELL_EMPTY)
+				return (BOARD_HEIGHT - row);
+			col++;
+		}
+		row++;
+	}
+	return (0);
+}
+
+/**
+ * @brief The tallest stack among the boards still being played.
+ *
+ * @param server_room Room to measure.
+ * @return The height in rows, 0 when nobody is playing.
+ */
+static int	tallest_in_room(const t_server_room *server_room)
+{
+	int	best;
+	int	slot;
+
+	best = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].active
+			&& stack_height(&server_room->games[slot]) > best)
+			best = stack_height(&server_room->games[slot]);
+		slot++;
+	}
+	return (best);
+}
+
+/**
+ * @brief Draws the next number from the room's own randomness.
+ *
+ * An xorshift, seeded once when the match is dealt, so a match replays the
+ * same way from the same seed and a targeting test can assert which rival a
+ * draw named. It lives here rather than in libtetrisbrain because the brain
+ * is pure by contract and what this draws is a fact about a room.
+ *
+ * @param server_room Room whose sequence is advanced.
+ * @return The next value.
+ */
+static uint32_t	room_random(t_server_room *server_room)
+{
+	uint32_t	x;
+
+	x = server_room->rng;
+	if (x == 0)
+		x = 0x9e3779b9u;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	server_room->rng = x;
+	return (x);
 }
 
 /**
@@ -1384,6 +2109,42 @@ t_game	*server_room_target_game(t_server_room *server_room,
 }
 
 /**
+ * @brief Every game one client's abilities land on.
+ *
+ * The plural of server_room_target_game, and the same resolution garbage
+ * uses - an offensive ability and a clear are the same act aimed the same
+ * way, so a mode that hits three boards with rows hits three boards with
+ * Thwack too.
+ *
+ * @param server_room Room to resolve within.
+ * @param cli The connection acting.
+ * @param out Receives the Targets' games; at least TD_MAX_GAMES wide.
+ * @return How many Targets were written, 0 when there are none.
+ */
+int	server_room_target_games(t_server_room *server_room, const t_client *cli,
+		t_game **out)
+{
+	int	slots[TD_MAX_GAMES];
+	int	count;
+	int	from;
+	int	index;
+
+	if (server_room == NULL || cli == NULL || out == NULL)
+		return (0);
+	from = slot_of_player(server_room, cli->player_id);
+	if (from < 0)
+		return (0);
+	count = server_room_targets_of(server_room, from, slots);
+	index = 0;
+	while (index < count)
+	{
+		out[index] = &server_room->games[slots[index]];
+		index++;
+	}
+	return (count);
+}
+
+/**
  * @brief Writes onto a snapshot the facts that belong to the room, not to the
  *        game it came from.
  *
@@ -1396,6 +2157,11 @@ t_game	*server_room_target_game(t_server_room *server_room,
  * active and unpaused - it is simply not being advanced - so the game has no
  * way to describe itself as held.
  *
+ * The verdict is looked up by the player whose board this is and not by the
+ * seat holding it. The two can disagree - a promoted successor's board follows
+ * them into the seat they were moved to - and of the two it is the player the
+ * result was ever about.
+ *
  * @param server_room Room the snapshot came from.
  * @param slot 0-based slot the snapshot belongs to.
  * @param snap Snapshot to decorate.
@@ -1403,11 +2169,19 @@ t_game	*server_room_target_game(t_server_room *server_room,
 static void	decorate_snapshot(t_server_room *server_room, int slot,
 		t_body_state *snap)
 {
+	const t_participant	*participant;
+
 	snap->countdown_ms = server_room->countdown_ms;
 	if (server_room->countdown_ms > 0)
 		snap->phase = BODY_PHASE_COUNTDOWN;
-	snap->result = server_room->result[slot];
-	snap->rank = server_room->rank[slot];
+	participant = participant_of(server_room,
+			server_room->games[slot].player_id);
+	if (participant != NULL)
+	{
+		snap->result = participant->result;
+		snap->rank = participant->rank;
+	}
+	count_players(server_room, snap);
 	fill_opponents(server_room, slot, snap);
 }
 
@@ -1435,6 +2209,14 @@ static void	fill_opponents(t_server_room *server_room, int subject,
 	int	slot;
 
 	snap->opponent_count = 0;
+	/*
+	 * Double's section, and Double's only. A Battle Royale's rivals ride the
+	 * arena, so filling this as well would send one of ninety-eight rivals a
+	 * second time at full fidelity - 470 bytes of board, chosen by whichever
+	 * seat came first, drawn by nothing.
+	 */
+	if (server_room_is_arena(server_room))
+		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
@@ -1504,7 +2286,8 @@ static void	project_opponent(t_server_room *server_room, int slot,
 	out->charge = game->charge.charges;
 	if (out->charge > BODY_CHARGE_MAX)
 		out->charge = BODY_CHARGE_MAX;
-	out->character = (uint32_t)server_room->character[slot];
+	out->character = (uint32_t)participant_character(server_room,
+			game->player_id);
 	snprintf(out->username, sizeof(out->username), "%s",
 		server_room->room->slots[slot].membership.username);
 	row = 0;
@@ -1612,6 +2395,287 @@ static int	count_live_games(const t_server_room *server_room)
 }
 
 /**
+ * @brief Places a player who is leaving a match they were still in.
+ *
+ * Quitting at 40th place records 40th and not a bare defeat, which is the
+ * whole point of taking a placing when a player stops rather than when the
+ * match does. It has to happen here, before the seat is released and the board
+ * is reset: a moment later there is nothing left to say this player was in the
+ * match at all, and the elimination sweep will never see them.
+ *
+ * The leaver takes their placing alone rather than joining a tick's group.
+ * A departure arrives on a request and not on the clock, so there is nothing
+ * for it to be simultaneous with - the tie rule exists for boards that stopped
+ * on the same authoritative tick.
+ *
+ * @param server_room Room being left.
+ * @param pid The player leaving it.
+ */
+static void	place_leaver(t_server_room *server_room, t_player_id pid)
+{
+	t_participant	*participant;
+
+	if (server_room->room->status != ROOM_IN_GAME
+		|| server_room_is_solo(server_room))
+		return ;
+	participant = participant_open(server_room, pid);
+	if (participant == NULL || !participant->alive)
+		return ;
+	participant->alive = false;
+	participant->rank = server_room->alive;
+	if (participant->rank < 1)
+		participant->rank = 1;
+	if (server_room->alive > 0)
+		server_room->alive--;
+	server_room->arena_dirty = true;
+}
+
+/**
+ * @brief Files every attack that landed this tick against the player it hit.
+ *
+ * The rows land at a lock, which happens inside a game and can happen on an
+ * input as easily as on the clock, so the report is collected here rather than
+ * raised from there: every tick asks every board whether anything landed on it
+ * since the last one, and files what it is told.
+ *
+ * It is filed under the receiver and not the sender because both readers ask
+ * the receiver's question - who buried me (the knockout) and who is attacking
+ * me (the arena's flag). The sender is a player id and not a seat because a
+ * seat is somebody else's a moment after its owner leaves.
+ *
+ * @param server_room Room whose boards are being asked.
+ */
+static void	settle_attacks(t_server_room *server_room)
+{
+	t_participant	*victim;
+	t_player_id		from;
+	int				slot;
+
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		from = game_take_attacker(&server_room->games[slot]);
+		victim = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (from != 0 && victim != NULL && from != victim->player_id)
+		{
+			victim->last_attacker_id = from;
+			note_attacker(victim, from, server_room->match_ms);
+			server_room->arena_dirty = true;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Remembers one attacker on the victim's ring, oldest overwritten.
+ *
+ * A repeat attacker is moved forward rather than added again: the ring answers
+ * "who has landed rows on me lately", and one player landing eight in a row
+ * would otherwise be the whole of the answer.
+ *
+ * @param victim The player who took the rows.
+ * @param from The player who sent them.
+ * @param when_ms The room's match clock at the landing.
+ */
+static void	note_attacker(t_participant *victim, t_player_id from,
+		uint64_t when_ms)
+{
+	int	index;
+
+	index = 0;
+	while (index < TETRISD_BR_ATTACKER_RING)
+	{
+		if (victim->attackers[index].player_id == from)
+		{
+			victim->attackers[index].when_ms = when_ms;
+			return ;
+		}
+		index++;
+	}
+	index = victim->attacker_next % TETRISD_BR_ATTACKER_RING;
+	victim->attackers[index].player_id = from;
+	victim->attackers[index].when_ms = when_ms;
+	victim->attacker_next = (index + 1) % TETRISD_BR_ATTACKER_RING;
+}
+
+/**
+ * @brief Reports whether one player has landed rows on another lately.
+ *
+ * @param victim The player being attacked; NULL is nobody being attacked.
+ * @param who The player who might be attacking them.
+ * @param now_ms The room's match clock now.
+ * @return true when their rows landed inside TETRISD_BR_ATTACKER_MS.
+ */
+static bool	is_attacking(const t_participant *victim, t_player_id who,
+		uint64_t now_ms)
+{
+	int	index;
+
+	if (victim == NULL || who == 0)
+		return (false);
+	index = 0;
+	while (index < TETRISD_BR_ATTACKER_RING)
+	{
+		if (victim->attackers[index].player_id == who
+			&& now_ms - victim->attackers[index].when_ms
+			<= (uint64_t)TETRISD_BR_ATTACKER_MS)
+			return (true);
+		index++;
+	}
+	return (false);
+}
+
+/**
+ * @brief Places everybody eliminated this tick, and credits who buried them.
+ *
+ * The placing is taken here rather than at the end of the match, because here
+ * it is a fact - how many players were still in it when this one stopped
+ * being one - and at the end it is the same number for everybody who lost.
+ *
+ * It is a two-pass step and not a per-board side effect, and that is the whole
+ * of the design. A tick advances every board before anything is settled, so
+ * two players can top out inside one authoritative tick with nothing to
+ * separate them but the order this loop walks the seats in. Letting that
+ * decide would mean seat 31 places 7th and seat 72 places 8th for identical
+ * deaths - an array index deciding a result. So everybody who went out on one
+ * tick shares one placing, and the next elimination skips the numbers they
+ * took, which is how every sport handles a tie and the only rule here that
+ * needs no tiebreak nobody can observe.
+ *
+ * @param server_room Room whose eliminations are being placed.
+ */
+static void	sweep_eliminations(t_server_room *server_room)
+{
+	int	placing;
+	int	group;
+
+	if (server_room_is_solo(server_room) || server_room->alive <= 0)
+		return ;
+	group = place_eliminated(server_room, 0);
+	if (group == 0)
+		return ;
+	placing = server_room->alive - group + 1;
+	if (placing < 1)
+		placing = 1;
+	place_eliminated(server_room, placing);
+	server_room->alive -= group;
+	if (server_room->alive < 0)
+		server_room->alive = 0;
+	server_room->arena_dirty = true;
+}
+
+/**
+ * @brief Counts the players eliminated this tick, or places them.
+ *
+ * Two passes over one condition, written once: called with a placing of 0 it
+ * only counts, which is what the group's shared number is computed from, and
+ * called with the placing it writes it. A player is eliminated when their
+ * record still says alive and the board they were playing has stopped - a
+ * board that is gone entirely belongs to somebody who left, and forfeiting
+ * places them on its own.
+ *
+ * @param server_room Room being swept.
+ * @param placing The placing to write, or 0 to count only.
+ * @return How many players the sweep found.
+ */
+static int	place_eliminated(t_server_room *server_room, int placing)
+{
+	t_participant	*participant;
+	int				found;
+	int				slot;
+
+	found = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		participant = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (participant != NULL && participant->alive
+			&& !server_room->games[slot].active)
+		{
+			found++;
+			if (placing > 0)
+			{
+				participant->alive = false;
+				participant->rank = placing;
+				credit_knockout(server_room, participant, placing);
+				server_room->dirty[slot] = true;
+			}
+		}
+		slot++;
+	}
+	return (found);
+}
+
+/**
+ * @brief Credits the knockout and tells the room about it.
+ *
+ * The credit goes to whoever last landed rows on this board, and to nobody at
+ * all when that is nobody: a player who buried themselves is not somebody
+ * else's knockout, which is what keeps the count a measure of aggression
+ * rather than of luck. An attacker who has since left the room still gets it -
+ * the record survives the seat and the connection both.
+ *
+ * The line goes out on the chat lane, which is the lane's whole reason for
+ * existing: a room narrating ninety-eight knockouts must not be able to fill a
+ * response FIFO and close a slow connection.
+ *
+ * @param server_room Room the knockout happened in.
+ * @param victim The player who was eliminated.
+ * @param placing The placing they finished at.
+ */
+static void	credit_knockout(t_server_room *server_room, t_participant *victim,
+		int placing)
+{
+	t_participant	*killer;
+	const char		*who;
+
+	who = name_of_player(server_room, victim->player_id);
+	if (who == NULL)
+		who = "somebody";
+	killer = participant_open(server_room, victim->last_attacker_id);
+	if (killer == NULL)
+	{
+		room_narrate(server_room, "PLAYER %s was knocked out (#%d)",
+			who, placing);
+		return ;
+	}
+	killer->ko++;
+	if (name_of_player(server_room, killer->player_id) == NULL)
+		room_narrate(server_room, "PLAYER %s was knocked out (#%d)",
+			who, placing);
+	else
+		room_narrate(server_room, "PLAYER %s knocked out PLAYER %s (#%d)",
+			name_of_player(server_room, killer->player_id), who, placing);
+}
+
+/**
+ * @brief Names the player sitting in this room, if they still are.
+ *
+ * @param server_room Room to look in.
+ * @param pid The player to name.
+ * @return Their username, or NULL when they are no longer seated here.
+ */
+static const char	*name_of_player(const t_server_room *server_room,
+						t_player_id pid)
+{
+	int	slot;
+
+	if (pid == 0)
+		return (NULL);
+	slot = 0;
+	while (slot < server_room->room->slot_count)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& server_room->room->slots[slot].membership.player_id == pid)
+			return (server_room->room->slots[slot].membership.username);
+		slot++;
+	}
+	return (NULL);
+}
+
+/**
  * @brief Decides how the match ended for each player, once, before the last
  *        snapshot goes out.
  *
@@ -1625,28 +2689,44 @@ static int	count_live_games(const t_server_room *server_room)
  * phase already says so, so the result stays NONE and its snapshot is
  * unchanged.
  *
+ * A seat with no game in it is skipped by the lookup rather than by a test of
+ * its own: it has no player id, and no record can be opened for player 0.
+ *
  * @param server_room Room whose match has just ended.
  */
 static void	settle_results(t_server_room *server_room)
 {
-	int	slot;
+	t_participant	*participant;
+	int				slot;
 
 	if (server_room_is_solo(server_room))
 		return ;
 	slot = 0;
 	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
 	{
-		if (server_room->games[slot].player_id != 0)
+		participant = participant_open(server_room,
+				server_room->games[slot].player_id);
+		if (participant != NULL)
 		{
 			if (server_room->games[slot].active)
 			{
-				server_room->result[slot] = BODY_RESULT_WON;
-				server_room->rank[slot] = 1;
+				participant->result = BODY_RESULT_WON;
+				participant->rank = 1;
+				participant->alive = false;
 			}
 			else
 			{
-				server_room->result[slot] = BODY_RESULT_LOST;
-				server_room->rank[slot] = count_live_games(server_room) + 1;
+				participant->result = BODY_RESULT_LOST;
+				/*
+				 * The placing the elimination already took, and the count
+				 * only when there is none. A player is placed the moment
+				 * they go out (sweep_eliminations), so by the time the match
+				 * ends every loser has a number that says where they
+				 * finished; recomputing it here would flatten all of them
+				 * onto the same one, which is exactly what this used to do.
+				 */
+				if (participant->rank == 0)
+					participant->rank = count_live_games(server_room) + 1;
 			}
 			server_room->dirty[slot] = true;
 		}
@@ -1695,23 +2775,25 @@ static void	record_and_reset(t_server_room *server_room)
 		}
 		game_reset(&server_room->games[slot]);
 		server_room->dirty[slot] = false;
-		/*
-		 * The verdict has already gone out - advance_and_push sent it a
-		 * moment ago and this is the last thing the match does - so it is
-		 * cleared here rather than left for room_blank, which a room that
-		 * survives its match never reaches. Left standing, the next match
-		 * would open with the last one's WON or LOST in its first snapshot.
-		 */
-		server_room->result[slot] = BODY_RESULT_NONE;
-		server_room->rank[slot] = 0;
-		/*
-		 * The fighter goes with the match it was chosen for. A room that kept
-		 * it would open its next select window with every seat already
-		 * locked, and start again before anybody had looked at the roster.
-		 */
-		server_room->character[slot] = 0;
 		slot++;
 	}
+	/*
+	 * Every match fact goes with the match it was about, and it goes here
+	 * rather than in room_blank, which a room that survives its match never
+	 * reaches. Left standing, the verdicts would open the next match with the
+	 * last one's WON or LOST in its first snapshot - advance_and_push sent
+	 * them a moment ago and this is the last thing the match does - and the
+	 * declared fighters would open the next select window with every seat
+	 * already locked, starting it again before anybody had looked at the
+	 * roster.
+	 */
+	memset(server_room->participants, 0, sizeof(server_room->participants));
+	server_room->arena_ms = 0;
+	server_room->arena_push = 0;
+	server_room->arena_dirty = false;
+	server_room->alive = 0;
+	server_room->match_ms = 0;
+	server_room->rng = 0;
 	server_room->select_ms = 0;
 	server_room->select_second = -1;
 	/*
@@ -1870,6 +2952,334 @@ static void	rehome_successor(t_server_room *server_room, t_client *leaver,
 	server_room->dirty[to] = server_room->dirty[from];
 	game_reset(&server_room->games[from]);
 	server_room->dirty[from] = false;
+}
+
+/**
+ * @brief Reports whether this room draws its rivals as an arena.
+ *
+ * Battle Royale, and the question is asked rather than the mode compared,
+ * because everything that turns on it turns on the same fact: the other boards
+ * ride the arena section on their own clock instead of riding every frame.
+ *
+ * @param server_room Room to ask.
+ * @return true when the room's mode is Battle Royale.
+ */
+bool	server_room_is_arena(const t_server_room *server_room)
+{
+	return (server_room != NULL && server_room->room != NULL
+		&& server_room->room->mode == MODE_BATTLE_ROYALE);
+}
+
+/**
+ * @brief Spends the arena's clock, and says whether one is owed now.
+ *
+ * The arena is not pushed on its own - there is no second message to push it
+ * in, because a client holds one STATE mailbox slot and a second push would
+ * free the first. So this only decides whether the *next* snapshot each player
+ * is built carries an arena, and marking every game dirty is how the snapshots
+ * get built at all on a tick where nobody's own board moved.
+ *
+ * A push is skipped when no card has changed since the last one. That is
+ * almost never true while a match is being played and is true for the whole of
+ * a countdown, for a room whose last two players are stalling, and for the
+ * moments after a match ends - and it costs one flag to notice. It is only
+ * safe because every arena that does go out is the complete roster: skipping a
+ * push that would have said nothing leaves the client correct, where skipping
+ * a *card* would leave it permanently wrong.
+ *
+ * @param server_room Room whose clock is being spent.
+ * @param elapsed_ms Milliseconds this tick is worth.
+ * @return true when this tick's snapshots should carry an arena.
+ */
+static bool	arena_tick(t_server_room *server_room, int elapsed_ms)
+{
+	if (!server_room_is_arena(server_room))
+		return (false);
+	server_room->arena_ms -= elapsed_ms;
+	if (server_room->arena_ms > 0)
+		return (false);
+	server_room->arena_ms = TETRISD_BR_ARENA_MS;
+	if (!server_room->arena_dirty)
+		return (false);
+	server_room->arena_dirty = false;
+	server_room->arena_push++;
+	mark_all_dirty(server_room);
+	return (true);
+}
+
+/**
+ * @brief Notices that some card in the arena is no longer what was last sent.
+ *
+ * Asked before the clock is spent and never after, because arena_tick marks
+ * every game dirty in order to build the snapshots that carry the arena - so
+ * reading the flags afterwards would find the dirt it had just created and the
+ * room would never skip a push at all.
+ *
+ * Any board changing counts. Nothing finer is worth the bookkeeping: a card
+ * carries the settled stack and not the falling piece, so most ticks do not
+ * actually change a card, but telling those apart would mean asking the game
+ * whether the change was a lock - and the answer only saves pushes in a room
+ * where somebody is playing, which is the room that can least afford the
+ * question.
+ *
+ * @param server_room Room to inspect.
+ */
+static void	note_arena_change(t_server_room *server_room)
+{
+	int	slot;
+
+	if (!server_room_is_arena(server_room) || server_room->arena_dirty)
+		return ;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->dirty[slot])
+		{
+			server_room->arena_dirty = true;
+			return ;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Writes every occupied seat's card into one player's snapshot.
+ *
+ * The whole roster every time, which is what makes the card list also the
+ * roster: a client replaces its arena from the push, so a seat that does not
+ * appear is a seat nobody is in. An eliminated player's card is still written,
+ * with the alive bit clear - absence has to mean "not in this room" and never
+ * "knocked out", or a knockout would look like a disconnection.
+ *
+ * It is built per recipient rather than once and shared, because two of the
+ * flags are about the person being sent it rather than about the player on the
+ * card. That is the whole of the per-subject cost, and it is why the subject is
+ * a parameter.
+ *
+ * @param server_room Room being projected.
+ * @param subject The 0-based slot the snapshot belongs to.
+ * @param snap Snapshot receiving the arena.
+ */
+static void	fill_arena(t_server_room *server_room, int subject,
+		t_body_state *snap)
+{
+	int	tallest;
+	int	slot;
+
+	/*
+	 * Measured once for the whole arena rather than once per card. It is what
+	 * the KOs mode compares against, and asking it per card would make one
+	 * snapshot walk every board as many times as the room has seats - for a
+	 * number that is the same for all of them.
+	 */
+	tallest = tallest_in_room(server_room);
+	snap->arena_present = true;
+	snap->arena_count = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->room->slots[slot].occupied
+			&& snap->arena_count < BODY_ARENA_MAX)
+		{
+			fill_card(server_room, slot, subject,
+				&snap->arena[snap->arena_count], tallest);
+			snap->arena_count++;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Projects one seat onto one card of the arena.
+ *
+ * The cells are the expensive part and the part that can be left out. A live
+ * board carries one on every push because it is what the card is for. A dead
+ * board carries one every fifth push, because it will never change again and
+ * the client keeps what it has in between - so a match gets cheaper as it
+ * thins out rather than staying at its opening cost until the last player.
+ *
+ * The attacking-you flag is the one fact on the card that is about the person
+ * being sent it rather than about the player on it, and it is the whole reason
+ * the arena is built per recipient instead of once and shared: this card is
+ * outlined in red on your screen and nobody else's. It is read off the
+ * recipient's own attacker ring, so it says "their rows landed on me lately"
+ * and not "they are aiming at me" - an attack that has been sent and not yet
+ * landed is already on the wire as your pending count.
+ *
+ * Targeted-by-you is the other, and it is a set rather than a person: a mode
+ * narrows who this player's garbage can reach and the room draws from what is
+ * left, so what a card can honestly say is "you are aiming at this kind of
+ * rival" and never "at this one".
+ *
+ * @param server_room Room holding the seat.
+ * @param slot The 0-based slot to project.
+ * @param subject The 0-based slot this snapshot is being built for.
+ * @param out Receives the card.
+ */
+static void	fill_card(t_server_room *server_room, int slot, int subject,
+		t_body_arena_slot *out, int tallest)
+{
+	const t_game		*game;
+	const t_participant	*participant;
+	const t_participant	*watcher;
+
+	game = &server_room->games[slot];
+	memset(out, 0, sizeof(*out));
+	out->slot = server_room->room->slots[slot].index;
+	out->player_id = server_room->room->slots[slot].membership.player_id;
+	out->lines = game->lines;
+	out->pending = game->pending_garbage + game->pending_ability_garbage;
+	if (game->active)
+		out->flags |= BODY_ARENA_ALIVE;
+	if (game_phase(game) == BODY_PHASE_CLEARING)
+		out->flags |= BODY_ARENA_CLEARING;
+	participant = participant_of(server_room, out->player_id);
+	if (participant != NULL)
+	{
+		out->rank = participant->rank;
+		out->ko = participant->ko;
+	}
+	watcher = participant_of(server_room,
+			server_room->games[subject].player_id);
+	if (is_attacking(watcher, out->player_id, server_room->match_ms))
+		out->flags |= BODY_ARENA_ATTACKING_YOU;
+	/*
+	 * The rivals this player's mode has singled out. Under Attackers and KOs
+	 * that is exactly who the next clear lands on, because those two hit
+	 * everything they matched - the outline is a promise the resolution
+	 * keeps. Under Badges it is the urn and not the ball: one of the marked
+	 * cards is drawn, and marking the rest is still worth doing because the
+	 * mode is a statement about which crowd a player is playing against.
+	 * Under Randoms nothing is marked, which is the honest drawing of "no
+	 * preference": every live rival is eligible, and outlining all of them
+	 * says nothing.
+	 */
+	if (game->active && slot != subject && watcher != NULL
+		&& watcher->target_mode != TARGET_RANDOM
+		&& wanted_by_mode(server_room, subject, slot, tallest))
+		out->flags |= BODY_ARENA_TARGETED_BY_YOU;
+	if (game->active
+		|| server_room->arena_push % TETRISD_BR_ARENA_DEAD_EVERY == 0)
+	{
+		out->flags |= BODY_ARENA_MASK_PRESENT;
+		fill_cells(game, out);
+	}
+}
+
+/**
+ * @brief Packs one board into the card's cells, a nibble each.
+ *
+ * 0 for empty, 1 for garbage, and 2 upward for a piece in the seven types'
+ * own order - which is what a stamped cell already carries in its colour,
+ * because piece_stamp writes the type there.
+ *
+ * It was one bit per cell until a player pointed out that every block in the
+ * mode drew grey, and it could not have drawn anything else: the wire carried
+ * a silhouette, so the client painted every filled cell the same colour and a
+ * row of somebody else's garbage looked exactly like a row they had built. A
+ * nibble is four times a bit and still a quarter of what a full board spends.
+ *
+ * The falling piece is deliberately not stamped in. It is one tetromino out of
+ * a stack twenty rows deep, it moves every tick, and stamping it would make
+ * every live card differ from the last push whether or not anything settled -
+ * which is exactly the comparison the skip-when-unchanged rule depends on.
+ *
+ * @param game The board to read.
+ * @param out Receives the cells.
+ */
+static void	fill_cells(const t_game *game, t_body_arena_slot *out)
+{
+	t_cell	cell;
+	int		row;
+	int		col;
+
+	row = 0;
+	while (row < BODY_BOARD_ROWS)
+	{
+		col = 0;
+		while (col < BODY_BOARD_COLS)
+		{
+			cell = board_get(&game->board, col, row);
+			if (cell.type == CELL_GARBAGE)
+				out->cells[row][col] = 1;
+			else if (cell.type != CELL_EMPTY)
+				out->cells[row][col] = (unsigned char)(2 + (cell.color & 7));
+			col++;
+		}
+		row++;
+	}
+}
+
+/**
+ * @brief Writes the room's own head count onto a snapshot.
+ *
+ * Both numbers go out on every frame, arena or not, and neither is recoverable
+ * from the cards: most frames carry no arena at all, so a client counting them
+ * would read ALIVE 0/0 between pushes and the number a Battle Royale is played
+ * against would flicker.
+ *
+ * @param server_room Room being counted.
+ * @param snap Snapshot receiving the counts.
+ */
+static void	count_players(const t_server_room *server_room, t_body_state *snap)
+{
+	int	slot;
+
+	snap->players = 0;
+	snap->alive = 0;
+	slot = 0;
+	while (slot < server_room->room->slot_count && slot < TD_MAX_GAMES)
+	{
+		if (server_room->games[slot].player_id != 0)
+		{
+			snap->players++;
+			if (server_room->games[slot].active)
+				snap->alive++;
+		}
+		slot++;
+	}
+}
+
+/**
+ * @brief Decides what a departure does to an open character-select window.
+ *
+ * The window used to close unconditionally, which is right for Double and
+ * hands a Battle Royale one player a cancel button: thirty people join, the
+ * owner starts, and one disconnect two seconds into the roster ends it for
+ * everybody. The rule is the one the room already uses everywhere else - is it
+ * still startable?
+ *
+ * Below min_to_start the window closes, because the room can no longer deal
+ * the match it was setting up and whoever is left would sit on a roster screen
+ * waiting out a clock with nothing behind it. Losing one of two players is
+ * exactly that case, so Double's behaviour falls out of this rather than being
+ * a special case beside it.
+ *
+ * Above it the window keeps running on its own clock - and may now be over,
+ * which is why this asks. The player who left took their declared fighter with
+ * them (server_room_forfeit closed their record), so a room waiting on that one
+ * seat is waiting for nobody, and without this check it would sit out the full
+ * TETRISD_MATCH_SELECT_MS before dealing a match everybody had already chosen
+ * for.
+ *
+ * Nothing here is the owner's: a window is the room's once it is open, so a
+ * departure that also changes the owner changes nothing about this.
+ *
+ * @param server_room Room whose window is being reconsidered.
+ */
+static void	settle_selection(t_server_room *server_room)
+{
+	if (server_room->room->number_of_players
+		< server_room->room->min_to_start)
+	{
+		room_abort_selection(server_room->room);
+		server_room->select_ms = 0;
+		server_room->select_second = -1;
+		server_room->ticking = false;
+		return ;
+	}
+	if (server_room_all_locked(server_room))
+		(void)server_room_autostart(server_room);
 }
 
 /**

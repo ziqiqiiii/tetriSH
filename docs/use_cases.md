@@ -118,6 +118,7 @@ Every use case's wire request and the status codes it can return. Two transports
 | UC-10 Single Player | play via UC-13; server `db_record_game` on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-11 Double | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per player** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
 | UC-12 Battle Royale | UC-13 inputs + UC-14 ability; `STATE` pushed; server `db_record_game` **per participant** on game-over | HTTTP → tetrisd | `200` per input | `409` invalid move |
+| UC-12 Declare Targeting mode | `TARGET /room/<id>` body `mode random\|ko\|attackers\|badges` | HTTTP → tetrisd | `200` | • `400` not a mode<br>• `404` not seated there<br>• `409` `not-battle-royale` / `not-playing`<br>• `429` rate-limited |
 | UC-13 Control Piece | `MOVE`/`ROTATE`/`DROP /room/<id>/player/<pid>` body `LEFT\|RIGHT` / `CW\|CCW` / `SOFT\|HARD` | HTTTP → tetrisd | `200` accepted | • `409` INVALID_MOVE (+authoritative pos)<br>• `400` bad body |
 | — `STATE /room/<id>/player/<pid>` | server-originated push, one subject per snapshot (no client status) | HTTTP ← tetrisd | pushed | — |
 | UC-15/16 Browse Store | `LIST /store` | HTTTP → tetrisd | `200` (both catalogues, ids + prices) | `500` |
@@ -733,20 +734,23 @@ stateDiagram-v2
 **Main Success Scenario**
 1. System renders own **Board** (center) with piece queue, hold column, and live **Scores**, surrounded by grids showing other players' boards.
 2. Players control pieces concurrently.
-3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against a Target — a random other player still in the game, in the same room — and inserted at the bottom of that player's board at their next piece lock (server-routed).
+3. When a Player clears N lines (N ≥ 2) in one move, N−1 rows become garbage queued against every Target and inserted at the bottom of those players' boards at their next piece lock (server-routed). Who the Targets are is the sender's declared **Targeting mode**, and the mode also decides how many:
+   - **Attackers** (whoever has landed rows on them inside `TETRISD_BR_ATTACKER_MS`) and **KOs** (every stack level with the tallest in the room) hit *everyone* they matched. Answering one of three attackers and leaving the other two is the thing Attackers exists to prevent, and two players equally close to topping out are equally the answer.
+   - **Randoms** (everybody still in) and **Badges** (whoever holds Knockouts) hit *one*, drawn from the room's own seeded random source. Both match a crowd — late in a match most of the room holds a Knockout — so spraying either would put one clear onto most of the board.
+   Every Target is queued the whole N−1; the rows are never divided between them, or choosing a crowded mode would be a way of hitting softer. A mode whose set is empty falls back to Randoms — one player, drawn — rather than dropping the attack, so declaring Attackers before anybody has attacked never hits the whole room.
 4. Server pushes `STATE` updates for all visible boards.
-5. Players are eliminated as they top out; play continues until a winner/last-standing remains.
+5. Players are eliminated as they top out. Each takes a **Placing** at that moment — the number of players still in the match, including them — and everybody eliminated on the same server tick shares one Placing, with the next elimination skipping the numbers they took. The Top-out is credited as a **Knockout** to whoever's garbage most recently *landed* on that board, or to nobody when they buried themselves, and either way it is narrated on the room's feed. Play continues until a last-standing player remains.
 6. At game-over, System records the final ranking and calls `db_record_game(...)` once per **participant who was still in the game at game-over** (last-standing `won=true`, others `won=false`), crediting points (line clears / KOs / win) and updating the leaderboard.
 
 **Extensions / Alternate Flows**
 - **2a. Player activates an equipped ability:**
     - UC-14 Activate Gaiden Ability (`«extend»`).
 - **5a. Player is KO'd:**
-    - Their board is marked eliminated; they wait out the remainder until a winner is decided, and are recorded at game-over with their finishing rank (`won=false`).
+    - Their board is marked eliminated and their Placing is sent to them at once, with no result beside it: they are out of the match, still in the room, and spectating. They wait out the remainder until a winner is decided, and are recorded at game-over with that Placing (`won=false`).
 - **5b. Player quits/disconnects mid-game:**
     - Server removes them from the match; remaining players play on.
     - If the departing Player owns the room, ownership is transferred and the remaining players are notified → see [UC-07a](#uc-07a--transfer-room-ownership-included-by-uc-07--uc-11--uc-12--uc-24).
-    - The quitter **is** recorded as a forfeit (`db_record_game` with `won=false`, their score so far). Each remaining player is recorded normally at game-over.
+    - The quitter takes a Placing at the moment they leave, alone rather than as part of a tick's group, and **is** recorded as a forfeit (`db_record_game` with `won=false`, their score so far). Quitting in 40th place records 40th. Each remaining player is recorded normally at game-over.
     - **5b-i. Only one player remains:** They win by default; the match ends and they are recorded (`won=true`).
 
 **Exceptions**

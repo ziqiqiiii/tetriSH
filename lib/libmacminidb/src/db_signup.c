@@ -13,7 +13,8 @@
 #include "internal.h"
 
 // Static Functions
-static t_player	*make_player(t_db *db, const char *username, const char *pw, const char *salt);
+static t_player		*make_player(t_db *db, const char *username, const char *pw, const char *salt);
+static t_db_result	signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id);
 
 /**
  * @brief Create a new player under a unique username.
@@ -38,6 +39,50 @@ static t_player	*make_player(t_db *db, const char *username, const char *pw, con
  */
 t_db_result	db_signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id)
 {
+	if (username && db_username_is_reserved(username))
+		return (DB_INVALID);
+	return (signup(db, username, password_hashed, salt, out_id));
+}
+
+/**
+ * @brief Create an account the store owns, kept off the leaderboard.
+ *
+ * The name has to be reserved, which is the mirror of db_signup refusing one:
+ * between the two there is no way to end up with a person holding a bot's
+ * account or a bot holding a place on the board.
+ *
+ * @param db The handle.
+ * @param username Desired unique username; must be reserved.
+ * @param password_hashed The pre-hashed password to store.
+ * @param salt The salt that was used, stored alongside.
+ * @param out_id Receives the new player's id on success.
+ * @return DB_OK, DB_INVALID, DB_EXISTS, or DB_IO_ERROR.
+ */
+t_db_result	db_signup_reserved(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id)
+{
+	if (!db_username_is_reserved(username))
+		return (DB_INVALID);
+	return (signup(db, username, password_hashed, salt, out_id));
+}
+
+/**
+ * @brief Create a player, ranking it only if its name is a person's.
+ *
+ * The skip list is the leaderboard, so staying out of it is the whole of what
+ * makes a reserved account unranked - here, in recovery, and in db_record_game.
+ * Excluding at the three writes rather than filtering the two reads is what
+ * keeps `whatever is in the list is rankable` true, and with it db_leaderboard
+ * and db_rank unchanged and unable to disagree with each other.
+ *
+ * @param db The handle.
+ * @param username The desired username.
+ * @param password_hashed The pre-hashed password to store.
+ * @param salt The salt that was used.
+ * @param out_id Receives the new player's id on success.
+ * @return DB_OK, DB_INVALID, DB_EXISTS, or DB_IO_ERROR.
+ */
+static t_db_result	signup(t_db *db, const char *username, const char *password_hashed, const char *salt, t_player_id *out_id)
+{
 	t_player	*p;
 
 	if (!db || !username || !password_hashed || !salt || !out_id)
@@ -51,7 +96,8 @@ t_db_result	db_signup(t_db *db, const char *username, const char *password_hashe
 	if (!p)
 		return (pthread_rwlock_unlock(&db->lock), DB_IO_ERROR);
 	hashmap_put(db->players, p);
-	skiplist_insert(db->board, p);
+	if (!db_username_is_reserved(username))
+		skiplist_insert(db->board, p);
 	*out_id = p->player_id;
 	db_persist(db, p);
 	pthread_rwlock_unlock(&db->lock);

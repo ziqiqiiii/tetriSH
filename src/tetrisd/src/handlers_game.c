@@ -270,9 +270,12 @@ static int	activate(t_request_context *ctx, t_server_room *server_room,
 			const t_ability_def *def, int column)
 {
 	t_ability_verdict	verdict;
+	t_game				*targets[TD_MAX_GAMES];
+	int					count;
 
-	verdict = game_ability(server_room_game_of(server_room, ctx->cli),
-			server_room_target_game(server_room, ctx->cli), def, column);
+	count = server_room_target_games(server_room, ctx->cli, targets);
+	verdict = game_ability_spread(server_room_game_of(server_room, ctx->cli),
+			targets, count, def, column);
 	server_room_mark_dirty(server_room, ctx->cli);
 	if (verdict != ABILITY_ACTIVATED)
 		return (request_refuse(ctx, ability_verdict_reason(verdict)));

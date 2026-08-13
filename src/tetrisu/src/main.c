@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 # define SETTINGS_INPUT_BATCH_MAX	64
 # define LEADERBOARD_INPUT_BATCH_MAX	64
@@ -35,6 +36,13 @@ typedef struct s_mp_session
 	 * bought, and the Marketplace is where buying happens.
 	 */
 	t_app_catalogue_view_model	characters;
+	/*
+	 * The bots this player has added to this room, as child processes. They
+	 * live on the session rather than on the room model because they are this
+	 * client's processes and not the room's members: the server knows them
+	 * only as four more clients that logged in.
+	 */
+	t_bot_farm					bots;
 }	t_mp_session;
 
 // Static Functions
@@ -44,6 +52,13 @@ static void	restore_after_notification(t_render_ctx *ctx,
 				const t_menu_selection *menu);
 static bool	toggle_ready(const t_app_data_provider *provider,
 				t_app_room_view_model *room, t_mp_session *session);
+static bool	add_bot(t_mp_session *session, int ceiling);
+static void	fill_bots(t_mp_session *session);
+static void	kick_bot(t_mp_session *session,
+				const t_app_room_view_model *room);
+static t_bot_level	default_bot_level(void);
+static t_room_feedback	start_blocker_for(t_mp_session *session,
+					const t_app_room_view_model *room);
 static void	load_room_characters(const t_app_data_provider *provider,
 				t_mp_session *session);
 static void	cycle_character(t_mp_session *session, int delta);
@@ -122,6 +137,9 @@ static bool	send_room_chat(const t_app_data_provider *provider,
 					t_waiting_room_state *state);
 static void	refresh_waiting_room(const t_app_data_provider *provider,
 					t_mp_session *session, bool *changed);
+static void	reap_lost_bots(t_mp_session *session);
+static bool	can_add_bot(const t_mp_session *session, int ceiling);
+static int	pending_bots(const t_mp_session *session);
 static int	waiting_room_wait_ms(const t_waiting_room_state *state,
 					uint64_t countdown_deadline, uint64_t refresh_deadline,
 					bool polling);
@@ -148,7 +166,7 @@ static void	apply_domain_to_config(t_net_config *cfg, const char *domain);
 /**
  * @brief Entry point for the screen-navigation and rendering loop.
  */
-int	main(void)
+int	main(int argc, char **argv)
 {
 	t_app_navigation	navigation;
 	t_app_data_provider	provider;
@@ -167,6 +185,12 @@ int	main(void)
 	bool				direct_match_preview;
 	bool				direct_screen;
 
+	(void)argc;
+	/*
+	 * Before anything opens a screen, because it is the last of the three
+	 * answers to "where is tetrisu-bot" and the only one main is holding.
+	 */
+	bot_farm_remember_self(argv[0]);
 	menu.selected = 0;
 	sign_in_modal_init(&sign_in);
 	memset(&mp_session, 0, sizeof(mp_session));
@@ -410,6 +434,14 @@ int	main(void)
 	render_menu_destroy(&ctx);
 	render_background_destroy(&ctx);
 	render_teardown(&ctx);
+	/*
+	 * The last chance to collect the bots. Every ordinary way out of a room
+	 * has already done it, so reaching here with children still running means
+	 * the client is exiting from somewhere that did not - and a bot whose
+	 * parent is gone would notice through its deadman pipe anyway, but a
+	 * process this one started is this one's to wait for.
+	 */
+	bot_farm_clear(&mp_session.bots);
 	if (net_session.connected)
 		net_disconnect(&net_session.net);
 	if (g_exit_reason != NULL)
@@ -1149,7 +1181,6 @@ static int	run_settings_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 			{
 				tetrisu_visual_selection_bind(ctx, provider,
 					&view.data.settings);
-				render_background_cache_reset(ctx);
 				audio_transition_music(audio, ctx->theme_assets.music, 0);
 			}
 			if (equip_result == SETTINGS_EQUIP_LOCKED)
@@ -1392,7 +1423,6 @@ static bool	apply_marketplace_equip(t_render_ctx *ctx, t_audio_ctx *audio,
 		tetrisu_visual_selection_bind(ctx, provider, &view->data.marketplace);
 		if (!marketplace_focused_is_character(state))
 		{
-			render_background_cache_reset(ctx);
 			audio_transition_music(audio, ctx->theme_assets.music, 0);
 			theme_changed = true;
 		}
@@ -1920,6 +1950,16 @@ static int	run_waiting_room_screen(t_render_ctx *ctx, t_audio_ctx *audio,
 				refresh_deadline = now + WAITING_ROOM_REFRESH_MS;
 				refresh_waiting_room(provider, session, &room_changed);
 				/*
+				 * On the roster's own cadence, because a bot dying and a seat
+				 * vanishing are the same event seen from the two ends. It is
+				 * also the only thing that ever notices: nothing else in the
+				 * client waits on these children, so before this a bot that
+				 * was refused stayed in the farm as a zombie, held a place
+				 * against the limit of four, and left BOT ADDED on a screen
+				 * whose roster never grew.
+				 */
+				reap_lost_bots(session);
+				/*
 				 * A poll that found nothing at the other end is the room's
 				 * heartbeat failing. Staying here would leave the player
 				 * watching a roster that has stopped updating; leaving lets
@@ -2052,6 +2092,259 @@ static bool	toggle_ready(const t_app_data_provider *provider,
 	return (true);
 }
 
+/**
+ * @brief Add one bot to this room, as a child of this process.
+ *
+ * The bot joins over its own socket, from the server's own account pool, so
+ * nothing here names an account and nothing here seats anybody: the roster
+ * grows when the room's next refresh shows one more member, exactly as it
+ * would for a person who walked in.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ * @param ceiling The most bots this caller will have running at once.
+ * @return true when a bot was started; the feedback says why when not.
+ */
+static bool	add_bot(t_mp_session *session, int ceiling)
+{
+	char	binary[BOT_PATH_MAX];
+
+	if (!can_add_bot(session, ceiling))
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_LIMIT;
+		return (false);
+	}
+	if (bot_farm_binary(binary, sizeof(binary)) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_MISSING;
+		return (false);
+	}
+	if (bot_farm_add(&session->bots, session->room_id,
+			default_bot_level()) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_UNAVAILABLE;
+		return (false);
+	}
+	session->room_state.feedback = ROOM_FEEDBACK_BOT_ADDED;
+	return (true);
+}
+
+/**
+ * @brief F1: fill every free seat with bots, past the limit B stops at.
+ *
+ * A stress tool and not a feature. B offers four because four is what a person
+ * needs - it reaches a Battle Royale's minimum from one player - and there was
+ * no way at all to see what a room of fifty boards costs, which is the question
+ * this mode is hardest to answer without.
+ *
+ * It loops on the same add_bot that B uses, at the other ceiling, and stops on
+ * the first refusal: the free-seat half of can_add_bot counts the bots already
+ * started against the seats the last refresh showed, so each pass through here
+ * makes the next one one seat tighter and the loop ends on the room's own limit
+ * without needing to know it. A refusal is not an error - it is where the room
+ * or the farm ran out - so the count is what the screen is told, and it is the
+ * count that is worth reading anyway.
+ *
+ * Every bot is a process, and this forks up to fifty of them before the frame
+ * ends. That stall is the honest cost of the thing being measured.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+static void	fill_bots(t_mp_session *session)
+{
+	int	added;
+
+	added = 0;
+	while (add_bot(session, BOT_FARM_MAX))
+		added++;
+	session->room_state.feedback_value = added;
+	if (added > 0)
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_FILLED;
+}
+
+/**
+ * @brief Would adding a bot now actually put one in this room?
+ *
+ * Two limits, and the second is the one that was missing. The ceiling is what
+ * this client will run at once; the free seats are what the room will take, and
+ * a Double room is two seats with the player in one of them - so a second B
+ * there forked a process whose whole life was a handshake and a refusal, while
+ * the screen said a bot had been added.
+ *
+ * The ceiling is a parameter because there are two of them: B stops at
+ * BOT_FARM_HAND_MAX and F1 goes on to BOT_FARM_MAX. Everything else about the
+ * question is the same either way, and the free-seat half is the half that
+ * actually refuses in practice.
+ *
+ * Asked by the key and by the line that advertises the key, so the room cannot
+ * offer a way out that it will then turn down.
+ *
+ * @param session The multiplayer session, for its farm and its room.
+ * @param ceiling The most bots this caller is willing to have running.
+ * @return true when a bot may be started.
+ */
+static bool	can_add_bot(const t_mp_session *session, int ceiling)
+{
+	if (session->bots.count >= ceiling)
+		return (false);
+	return (pending_bots(session)
+		< waiting_room_free_seats(&session->room_view.data.room));
+}
+
+/**
+ * @brief How many started bots have not taken a seat yet.
+ *
+ * The farm counts processes and the roster counts seats, and between pressing
+ * B and the next refresh the two disagree by exactly the bot that is still
+ * connecting. That difference is what a free seat has to be measured against:
+ * counting only the roster would let four presses of B spawn four bots into
+ * one empty seat.
+ *
+ * @param session The multiplayer session, for its farm and its room.
+ * @return The count, never negative.
+ */
+static int	pending_bots(const t_mp_session *session)
+{
+	int	pending;
+
+	pending = session->bots.count
+		- waiting_room_bot_seat_count(&session->room_view.data.room);
+	if (pending < 0)
+		return (0);
+	return (pending);
+}
+
+/**
+ * @brief Collect any bot that stopped on its own, and say that one did.
+ *
+ * A bot fails after the fork, not during it: the account pool, the JOIN, the
+ * room that filled first are all things the child learns over its own socket
+ * long after B answered BOT ADDED. So this is the only place the room can find
+ * out, and it finds out the one way a parent ever does - the child exited.
+ *
+ * The reason is not knowable from here and is not guessed at. It is in the
+ * bot's log, which is what the message points at.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+static void	reap_lost_bots(t_mp_session *session)
+{
+	/*
+	 * The accounts first, because a bot that has just logged in is the same
+	 * event from the other end as a seat appearing, and this runs on the
+	 * roster's cadence. A name read here is what makes that seat kickable.
+	 */
+	bot_farm_collect_names(&session->bots);
+	if (bot_farm_reap_exited(&session->bots) > 0)
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_LOST;
+}
+
+/**
+ * @brief Kick the bot the roster pointer is on, and never anybody else.
+ *
+ * There is no authorisation question and no route, because a bot is this
+ * client's own child: kicking is a signal, and a client can only signal the
+ * processes it started. A seat holding a person answers that rather than doing
+ * something to them.
+ *
+ * @param session The multiplayer session, whose farm and feedback are set.
+ */
+/**
+ * @brief K: let go of the bot the roster pointer is on.
+ *
+ * It used to drop whichever bot was added last, because that was the only one
+ * the farm could name: the parent forks a child and the child walks the
+ * server's pool for the first free BOT_ account, so which name it ends up
+ * under is not decidable here. The report pipe closed that gap, and this is
+ * what it was for - the roster line the player is pointing at names an
+ * account, and the farm can now be asked for the child holding it.
+ *
+ * Only this client's own children can go. Kicking is a signal to a process and
+ * not a request to the server, so a person, or a bot another client started,
+ * is refused rather than silently turned into "the last one added" - which is
+ * exactly the behaviour this replaces.
+ *
+ * @param session The multiplayer session, for its farm, cursor and feedback.
+ * @param room The room snapshot the pointer indexes.
+ */
+static void	kick_bot(t_mp_session *session, const t_app_room_view_model *room)
+{
+	const char	*username;
+
+	username = waiting_room_seat_username(room,
+			session->room_state.roster_cursor);
+	if (username == NULL)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NONE;
+		return ;
+	}
+	if (!waiting_room_seat_is_bot(room, session->room_state.roster_cursor))
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NOT_MINE;
+		return ;
+	}
+	if (!bot_farm_holds(&session->bots, username))
+	{
+		session->room_state.feedback = session->bots.count > 0
+			? ROOM_FEEDBACK_BOT_NOT_READY : ROOM_FEEDBACK_BOT_NOT_MINE;
+		return ;
+	}
+	if (bot_farm_drop_named(&session->bots, username) != 0)
+	{
+		session->room_state.feedback = ROOM_FEEDBACK_BOT_NONE;
+		return ;
+	}
+	session->room_state.feedback = ROOM_FEEDBACK_BOT_KICKED;
+}
+
+/**
+ * @brief The difficulty a new bot is added at.
+ *
+ * TETRISU_BOT_LEVEL for now, defaulting to normal. It belongs in Settings -
+ * one setting for the room rather than a prompt per bot, because four prompts
+ * to add four bots is worse than one choice made once.
+ *
+ * @return The level to spawn at.
+ */
+static t_bot_level	default_bot_level(void)
+{
+	t_bot_level	level;
+
+	level = BOT_NORMAL;
+	bot_level_parse(getenv("TETRISU_BOT_LEVEL"), &level);
+	return (level);
+}
+
+/**
+ * @brief Why this room will not start, and what the player can do about it.
+ *
+ * A Battle Royale needs four and a player with two laptops has two, so "not
+ * enough players" on its own is a dead end - the room cannot be started and
+ * the screen has not said that anything can be done. When the shortfall is
+ * one a bot could fill, the message carries the way out with it.
+ *
+ * Only when pressing B would actually work: start_blocker has already turned
+ * a non-owner away with ROOM_FEEDBACK_NOT_OWNER, and the farm is checked here
+ * so a player who has already added four is told the plain fact rather than
+ * pointed at a key that will refuse them.
+ *
+ * @param session The multiplayer session, whose farm and feedback value are read.
+ * @param room Room snapshot to test.
+ * @return The blocker to show, or ROOM_FEEDBACK_NONE when the start may go on.
+ */
+static t_room_feedback	start_blocker_for(t_mp_session *session,
+	const t_app_room_view_model *room)
+{
+	t_room_feedback	blocker;
+
+	blocker = waiting_room_start_blocker(room);
+	if (blocker != ROOM_FEEDBACK_NEED_PLAYERS)
+		return (blocker);
+	session->room_state.feedback_value = waiting_room_players_needed(room);
+	if (can_add_bot(session, BOT_FARM_HAND_MAX))
+		return (ROOM_FEEDBACK_NEED_PLAYERS_BOT);
+	return (blocker);
+}
+
 static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 	const t_app_data_provider *provider, t_app_navigation *navigation,
 	t_mp_session *session, t_room_action action)
@@ -2092,13 +2385,27 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		audio_play_menu_select(audio);
 		if (session->room_state.counting_down)
 			return (true);
-		blocker = waiting_room_start_blocker(room);
+		blocker = start_blocker_for(session, room);
 		if (blocker != ROOM_FEEDBACK_NONE)
 			session->room_state.feedback = blocker;
 		else if (waiting_room_counts_down_here(provider))
 			(void)waiting_room_begin_countdown(&session->room_state);
 		else
 			return (launch_match(ctx, audio, provider, navigation, session));
+		return (true);
+	}
+	if (action == ROOM_ACTION_ADD_BOT || action == ROOM_ACTION_KICK_BOT
+		|| action == ROOM_ACTION_FILL_BOTS)
+	{
+		audio_play_menu_select(audio);
+		if (!waiting_room_local_is_owner(room))
+			session->room_state.feedback = ROOM_FEEDBACK_NOT_OWNER;
+		else if (action == ROOM_ACTION_ADD_BOT)
+			(void)add_bot(session, BOT_FARM_HAND_MAX);
+		else if (action == ROOM_ACTION_FILL_BOTS)
+			fill_bots(session);
+		else
+			kick_bot(session, room);
 		return (true);
 	}
 	if (action == ROOM_ACTION_SEND_CHAT)
@@ -2124,13 +2431,23 @@ static bool	apply_room_action(t_render_ctx *ctx, t_audio_ctx *audio,
 		if (app_room_view_leave(provider, room->id) == APP_PROVIDER_OK)
 		{
 			audio_play_menu_select(audio);
+			/*
+			 * The bots go with the player who added them. Leaving them behind
+			 * would strand seats nobody can reach: the only client that can
+			 * stop them is the one that started them, and it has just walked
+			 * out of the room they are in.
+			 */
+			bot_farm_clear(&session->bots);
 			(void)app_navigation_dispatch(navigation, APP_NAV_BACK);
 		}
 		else
 			session->room_state.feedback = ROOM_FEEDBACK_UNAVAILABLE;
 	}
 	else if (action == ROOM_ACTION_QUIT)
+	{
+		bot_farm_clear(&session->bots);
 		(void)app_navigation_dispatch(navigation, APP_NAV_QUIT);
+	}
 	return (true);
 }
 
@@ -2234,6 +2551,17 @@ static bool	handle_network_drop(t_render_ctx *ctx, t_audio_ctx *audio,
 	session->has_catalogue = false;
 	memset(mp_session->room_id, 0, sizeof(mp_session->room_id));
 	mp_session->create_pending = false;
+	/*
+	 * The screen being abandoned is torn down here, because the one place that
+	 * ordinarily does it cannot. leave_multiplayer runs immediately after a
+	 * multiplayer screen returns and refuses while the navigation still names
+	 * one - which it does, since nothing has moved it yet; this function is
+	 * what moves it, and it runs on the *next* pass of the loop. So a drop in a
+	 * room left its planes alive, and LOGIN and HOME drew underneath them: the
+	 * player signed in again and was still looking at the room they had lost.
+	 */
+	if (is_multiplayer_screen(navigation->current))
+		render_multiplayer_destroy(ctx);
 	sign_in_again = confirmation_prompt_run(ctx, audio,
 			CONFIRM_CONNECTION_LOST);
 	navigation->previous = navigation->current;

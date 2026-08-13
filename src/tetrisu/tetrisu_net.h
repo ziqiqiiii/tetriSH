@@ -264,6 +264,31 @@ int		net_chat_send(t_net_client *net, const char *room, const char *text,
 ** which is what tetrisd sends back, so a caller never has to re-read to find
 ** out what the wallet is now.
 */
+/*
+** What a player can ask of their own board. It lives here rather than beside
+** the Solo view model because it is what goes on the wire: MOVE, ROTATE, DROP
+** and HOLD are the requests, and the renderer's job is only to decide which
+** key produced which one.
+*/
+typedef enum e_solo_action
+{
+	SOLO_MOVE_LEFT,
+	SOLO_MOVE_RIGHT,
+	SOLO_ROTATE_CW,
+	SOLO_ROTATE_CCW,
+	SOLO_SOFT_DROP,
+	SOLO_HARD_DROP,
+	SOLO_HOLD
+}	t_solo_action;
+
+/*
+** The two halves of playing a match that need no screen: taking the seat, and
+** sending an action into it. Everything else in net_match.c speaks in view
+** models and stays in tetrisu.h with the renderer that reads them.
+*/
+int		net_match_join(t_net_client *net, const char *room);
+int		net_match_send_action(t_net_client *net, t_solo_action action);
+
 int		net_profile(t_net_client *net, t_body_profile *out);
 int		net_catalogue(t_net_client *net, t_body_catalogue *out);
 int		net_buy(t_net_client *net, bool character, uint32_t item_id,

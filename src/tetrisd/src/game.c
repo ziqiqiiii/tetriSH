@@ -11,6 +11,7 @@ static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
 static void				drain_garbage(t_game *g);
 static void				inject_rows(t_game *g, int lines);
+static int				next_garbage_hole(t_game *g);
 static void				age_server_effects(t_game *g);
 static void				drain_abilities(t_game *g);
 static void				apply_bomb(t_game *g);
@@ -48,6 +49,8 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 	effect_state_init(&g->effects);
 	g->player_id = pid;
 	g->seed = seed;
+	g->garbage_seq = seed ^ 0x9e3779b9u;
+	g->garbage_hole = -1;
 	g->hold = BODY_HOLD_EMPTY;
 	g->lines = 0;
 	g->level = level_from_lines(0);
@@ -560,6 +563,18 @@ static void	drain_garbage(t_game *g)
 	int	ordinary;
 
 	ordinary = g->pending_garbage;
+	/*
+	 * The landing is what credits an attacker, not the sending. Rows queued
+	 * against a player who clears them away first were never a knockout, and
+	 * rows that arrive after their sender has left the room still are one.
+	 * Pals is deliberately not an exception: it turns the rows around, but
+	 * they landed, and the flag it feeds is "somebody is attacking you".
+	 */
+	if (ordinary > 0 || g->pending_ability_garbage > 0)
+	{
+		g->landed_from = g->garbage_from;
+		g->garbage_from = 0;
+	}
 	g->pending_garbage = 0;
 	/*
 	 * Pals turns the ordinary kind upside down: rows that would have raised
@@ -579,7 +594,7 @@ static void	drain_garbage(t_game *g)
 }
 
 /**
- * @brief Puts n garbage rows on the board, one at a time so the hole walks.
+ * @brief Puts n garbage rows on the board, one at a time so the hole moves.
  *
  * @param g Game to raise.
  * @param lines How many rows; zero or fewer is a no-op.
@@ -590,11 +605,51 @@ static void	inject_rows(t_game *g, int lines)
 		lines = BOARD_HEIGHT;
 	while (lines > 0)
 	{
-		board_inject_garbage(&g->board, 1,
-			(int)(g->garbage_seq % (uint32_t)BOARD_WIDTH));
-		g->garbage_seq++;
+		board_inject_garbage(&g->board, 1, next_garbage_hole(g));
 		lines--;
 	}
+}
+
+/**
+ * @brief Draws the column the next garbage row leaves open.
+ *
+ * It was `garbage_seq % BOARD_WIDTH` off a counter incremented once per row,
+ * which is a staircase and not a draw: every run of garbage left its holes on
+ * columns 0, 1, 2, 3 in order, and a player taking ten rows got a diagonal
+ * straight across the board. "The hole walks instead of stacking" was the
+ * right worry answered by the wrong arithmetic - walking by exactly one column
+ * is the most legible pattern there is, and the only reason it went unnoticed
+ * is that it takes a Battle Royale's worth of garbage to see the shape.
+ *
+ * So the column is drawn, from the same LCG apply_bomb uses, and only the
+ * column used last is excluded - which is what the original worry was actually
+ * about. Drawing over BOARD_WIDTH - 1 and stepping past the previous hole
+ * keeps every remaining column equally likely; a rejection loop would have
+ * been the same distribution with a branch that can spin.
+ *
+ * The state is the game's own and seeded from the game's own seed, so a match
+ * replayed from one seed lands the same rows in the same places, which is what
+ * lets a test assert where a hole went at all. No randomness enters
+ * libtetrisbrain: the column arrives there as an argument.
+ *
+ * @param g Game whose queue is being drained.
+ * @return A column in [0, BOARD_WIDTH), never the one drawn immediately before.
+ */
+static int	next_garbage_hole(t_game *g)
+{
+	int	column;
+
+	g->garbage_seq = g->garbage_seq * 1664525u + 1013904223u;
+	if (g->garbage_hole < 0 || BOARD_WIDTH < 2)
+		column = (int)((g->garbage_seq >> 16) % (uint32_t)BOARD_WIDTH);
+	else
+	{
+		column = (int)((g->garbage_seq >> 16) % (uint32_t)(BOARD_WIDTH - 1));
+		if (column >= g->garbage_hole)
+			column++;
+	}
+	g->garbage_hole = column;
+	return (column);
 }
 
 /**
@@ -627,13 +682,20 @@ static void	age_server_effects(t_game *g)
  * Only room.c calls this: a game does not know it has an opponent. A game that
  * is over takes nothing.
  *
+ * The sender is carried rather than used. A board does not know who it is
+ * playing and does not start now: the id is held until the lock that lands
+ * the rows and handed back to room.c there, which is the only module that
+ * knows what a player is.
+ *
  * @param g Game the rows are owed to.
  * @param lines How many rows; zero or fewer is a no-op.
+ * @param from The player who sent them.
  */
-void	game_queue_garbage(t_game *g, int lines)
+void	game_queue_garbage(t_game *g, int lines, t_player_id from)
 {
 	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
 		return ;
+	g->garbage_from = from;
 	g->pending_garbage += lines;
 	if (g->pending_garbage > BOARD_HEIGHT)
 		g->pending_garbage = BOARD_HEIGHT;
@@ -648,14 +710,36 @@ void	game_queue_garbage(t_game *g, int lines)
  *
  * @param g Game the rows are owed to.
  * @param lines How many rows; zero or fewer is a no-op.
+ * @param from The player who sent them.
  */
-void	game_queue_ability_garbage(t_game *g, int lines)
+void	game_queue_ability_garbage(t_game *g, int lines, t_player_id from)
 {
 	if (g == NULL || lines <= 0 || !g->active || g->topped_out)
 		return ;
+	g->garbage_from = from;
 	g->pending_ability_garbage += lines;
 	if (g->pending_ability_garbage > BOARD_HEIGHT)
 		g->pending_ability_garbage = BOARD_HEIGHT;
+}
+
+/**
+ * @brief Takes the id of whoever last landed rows on this board.
+ *
+ * Taken rather than read: it is a one-shot report of something that happened
+ * at the last lock, and a second reader would file the same attack twice.
+ *
+ * @param g Game to take from.
+ * @return The player who sent the rows that landed, or 0 when none did.
+ */
+t_player_id	game_take_attacker(t_game *g)
+{
+	t_player_id	from;
+
+	if (g == NULL)
+		return (0);
+	from = g->landed_from;
+	g->landed_from = 0;
+	return (from);
 }
 
 /**

@@ -34,7 +34,7 @@
  * stacks the join field under the table rather than beside it, which is what
  * keeps that minimum inside a conventional 80-column terminal.
  */
-# define MP_COMPAT_MIN_COLS	58
+/* MP_COMPAT_MIN_COLS is in tetrisu.h: the legend has to fit inside it. */
 # define MP_COMPAT_MIN_ROWS	20
 # define MP_COL_ID		4
 # define MP_COL_MODE	18
@@ -526,15 +526,18 @@ static void	draw_waiting_room(struct ncplane *plane,
 	while (index < visible && row < rows - 7)
 	{
 		slot = start + index;
-		if (slot < room->player_count)
+		if (slot == state->roster_cursor)
+			set_colour(plane, MP_GOLD_R, MP_GOLD_G, MP_GOLD_B);
+		else if (slot < room->player_count)
 			set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
 		else
 			set_colour(plane, MP_DISABLED_R, MP_DISABLED_G, MP_DISABLED_B);
 		waiting_room_slot_label(room, slot, line, sizeof(line));
+		put_line(plane, row, 1, 2, slot == state->roster_cursor ? ">" : " ");
 		put_line(plane, row, 3, 30, line);
 		if (slot < room->player_count)
 		{
-			if (room->players[slot].ready)
+			if (waiting_room_seat_ready(room, slot))
 				set_colour(plane, MP_GREEN_R, MP_GREEN_G, MP_GREEN_B);
 			else
 				set_colour(plane, MP_AMBER_R, MP_AMBER_G, MP_AMBER_B);
@@ -566,8 +569,7 @@ static void	draw_waiting_room(struct ncplane *plane,
 		put_centered(plane, rows - 3, cols, line, false);
 	}
 	set_colour(plane, MP_CREAM_R, MP_CREAM_G, MP_CREAM_B);
-	put_centered(plane, rows - 2, cols,
-		"[<>] FIGHTER [R] READY [S] START [C] CHAT [L] LEAVE", false);
+	put_centered(plane, rows - 2, cols, waiting_room_legend(cols), false);
 }
 
 /**

@@ -665,7 +665,7 @@ static void	draw_room_chrome(uint32_t *pixels, int width, int height,
 		ROOM_REF_CONTROLS_Y - 16, MULTIPLAYER_REFERENCE_WIDTH
 		- 2 * ROOM_REF_CONTENT_X, g_mp_lavender);
 	draw_text_ref(pixels, width, height, layout, font,
-		"[LEFT/RIGHT] FIGHTER   [R] READY   [S] START   [C] CHAT   [L] LEAVE",
+		waiting_room_legend(0),
 		ROOM_REF_CONTENT_X, ROOM_REF_CONTROLS_Y,
 		MULTIPLAYER_REFERENCE_WIDTH - 2 * ROOM_REF_CONTENT_X, 13, g_mp_cream,
 		true);
@@ -828,6 +828,14 @@ static int	compose_room_regions(t_render_ctx *ctx,
 	base = room_players_signature(room, ctx->mp_static_signature);
 	signature = mp_hash(&state->roster_offset, sizeof(state->roster_offset),
 			base);
+	/*
+	 * The pointer as well as the window. Moving the pointer inside a window
+	 * that does not scroll changes which row is drawn gold and nothing else,
+	 * so leaving it out of the signature makes the arrows look broken on every
+	 * roster short enough to fit.
+	 */
+	signature = mp_hash(&state->roster_cursor, sizeof(state->roster_cursor),
+			signature);
 	changed = 0;
 	if (ctx->mp_slots_plane == NULL || signature != ctx->mp_slots_signature)
 	{
@@ -1251,21 +1259,22 @@ static bool	compose_slots(t_render_ctx *ctx, const t_app_room_view_model *room,
 		slot = start + index;
 		y = ROOM_REF_SLOTS_Y + ROOM_REF_SLOT_FIRST_Y
 			+ index * ROOM_REF_SLOT_STEP_Y;
-		if (slot == room->local_slot && slot < room->player_count)
+		if (waiting_room_seat_index(room, slot) == room->local_slot
+			&& slot < room->player_count)
 			fill_ref_rect(pixels, layout->pixel_width, layout->pixel_height,
 				layout, ROOM_REF_SLOTS_X - 8, y - 8, ROOM_REF_SLOTS_WIDTH,
 				ROOM_REF_SLOT_HEIGHT, g_mp_focus_plate, 220u);
 		waiting_room_slot_label(room, slot, line, sizeof(line));
 		draw_text_ref(pixels, layout->pixel_width, layout->pixel_height, layout,
 			font, line, ROOM_REF_SLOTS_X + 12, y, ROOM_REF_SLOT_BADGE_X - 24,
-			ROOM_REF_ROW_GLYPH, slot < room->player_count
-			? g_mp_cream : g_mp_disabled, false);
+			ROOM_REF_ROW_GLYPH, slot == state->roster_cursor ? g_mp_gold
+			: slot < room->player_count ? g_mp_cream : g_mp_disabled, false);
 		badge = waiting_room_badge_text(room, slot);
 		if (badge[0] != '\0')
 			draw_text_ref(pixels, layout->pixel_width, layout->pixel_height,
 				layout, font, badge, ROOM_REF_SLOTS_X + ROOM_REF_SLOT_BADGE_X,
 				y, ROOM_REF_SLOTS_WIDTH - ROOM_REF_SLOT_BADGE_X - 12,
-				ROOM_REF_ROW_GLYPH, room->players[slot].ready
+				ROOM_REF_ROW_GLYPH, waiting_room_seat_ready(room, slot)
 				? g_mp_green : g_mp_amber, false);
 		index++;
 	}

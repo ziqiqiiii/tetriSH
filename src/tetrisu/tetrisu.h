@@ -9,6 +9,7 @@
 # include <limits.h>
 # include <poll.h>
 # include <stdint.h>
+# include <stdarg.h>
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
@@ -159,14 +160,6 @@
 # define AUTH_FIELD_MAX	128
 # define AUTH_STATUS_MAX	96
 # define AUTH_OVERLAY_PLANE_MAX	16
-/*
- * Six covers Home, auth, Settings, Leaderboard, Marketplace and the duel hall
- * - every backdrop reachable without passing through one that clears the cache
- * - so the common navigation never evicts. Each retained entry costs its bitmap
- * twice, once in this process and once in the terminal, which is what caps it.
- */
-# define BACKDROP_CACHE_MAX		6
-# define BACKDROP_PATH_MAX		256
 # define AUTH_PASSWORD_MIN	4
 # define APP_CATALOGUE_MAX_ITEMS	8
 # define APP_LEADERBOARD_MAX_ENTRIES	10
@@ -176,6 +169,14 @@
 # define APP_LOBBY_MAX_ROOMS	8
 # define LOBBY_VISIBLE_ROOMS	6
 # define APP_ROOM_MAX_PLAYERS	99
+
+/*
+** The card array is indexed by seat, and a room numbers its seats from 1 - so
+** it is one wider than the room is, and seat 0 is a hole nobody is ever in.
+** Sized to the seat count instead, the last seat of a full room had nowhere to
+** live and every loop that walked the array stopped one short of it.
+*/
+# define MP_ARENA_SEATS			(APP_ROOM_MAX_PLAYERS + 1)
 # define SOLO_NEXT_COUNT	3
 # define SOLO_CRYSTAL_CAPACITY	10
 # define SOLO_CRYSTAL_LINES_PER_CHARGE	2
@@ -723,7 +724,13 @@
 # define MP_MATCH_FRAME_MS	16
 # define MP_MATCH_MAX_CATCHUP_MS	1000
 # define MP_MATCH_INPUT_BATCH_MAX	64
-# define MP_BR_OPPONENT_COUNT	98
+/*
+** The one colour every arena card is drawn in. The wire carries a bit per cell
+** and nothing else, so a thumbnail has no per-cell colour to draw - and at the
+** size a card is rendered it could not show one. What a card says is the shape
+** of the stack and how high it has got.
+*/
+# define MP_ARENA_CARD_COLOR	7
 # define MP_MATCH_STATUS_MAX	96
 /* " SELECTED - AWAITING SERVER TARGET AUTHORITY" - the fixed half of the
 ** ability banner, so the name in front of it can be cut to fit */
@@ -1475,7 +1482,55 @@ typedef enum e_room_feedback
 	ROOM_FEEDBACK_CHAT_SENT,
 	ROOM_FEEDBACK_CHAT_EMPTY,
 	ROOM_FEEDBACK_CHAT_FULL,
-	ROOM_FEEDBACK_VOLUME
+	ROOM_FEEDBACK_VOLUME,
+	/*
+	 * The five a bot can produce. ROOM_FEEDBACK_BOT_NONE is the answer to K
+	 * with nothing to kick, and is deliberately not silence: a key that
+	 * sometimes does nothing and never says so reads as a key that is broken.
+	 */
+	/*
+	 * "not enough players" said two ways. The plain one is a fact; the _BOT
+	 * one is a fact and a way out of it, and is only chosen when pressing B
+	 * would actually help - the owner, with room in the farm for another.
+	 */
+	ROOM_FEEDBACK_NEED_PLAYERS_BOT,
+	ROOM_FEEDBACK_BOT_ADDED,
+	ROOM_FEEDBACK_BOT_KICKED,
+	ROOM_FEEDBACK_BOT_LIMIT,
+	ROOM_FEEDBACK_BOT_NONE,
+	/*
+	 * Two ways for B to fail, kept apart because they are fixed differently.
+	 * _MISSING is a build or a layout - tetrisu-bot is not where tetrisu is -
+	 * and the player can do something about it. _UNAVAILABLE is the machine
+	 * refusing a fork or a pipe, and they cannot.
+	 */
+	ROOM_FEEDBACK_BOT_MISSING,
+	ROOM_FEEDBACK_BOT_UNAVAILABLE,
+	/*
+	 * The third way, and the only one that is not known when B is pressed: the
+	 * child started and then stopped. Everything a bot can fail at - the server
+	 * having no account pool, a refused JOIN, a room that filled first - happens
+	 * after the fork has already succeeded, so B answered BOT ADDED and the
+	 * seat never appeared. This is what the room says instead once the process
+	 * is collected, and it names the log because the reason is written there.
+	 */
+	ROOM_FEEDBACK_BOT_LOST,
+	/*
+	 * F1's answer, and it carries feedback_value: filling stops on the first
+	 * refusal, so how many actually started is the only useful thing to say.
+	 * A stress tool, not a feature - see BOT_FARM_MAX.
+	 */
+	ROOM_FEEDBACK_BOT_FILLED,
+	/*
+	 * K's two refusals, and they are different problems. _BOT_NOT_MINE is a
+	 * seat holding a person, or a bot some other client started: kicking is a
+	 * signal to a child process, so only this client's own children can be
+	 * kicked, whatever the roster shows. _BOT_NOT_READY is one of this
+	 * client's bots that has not reported its account yet - it exists, it is
+	 * simply not identifiable for the second or two before it logs in.
+	 */
+	ROOM_FEEDBACK_BOT_NOT_MINE,
+	ROOM_FEEDBACK_BOT_NOT_READY
 }	t_room_feedback;
 
 typedef enum e_room_action
@@ -1490,6 +1545,19 @@ typedef enum e_room_action
 	ROOM_ACTION_LAUNCH,
 	ROOM_ACTION_VOLUME_DOWN,
 	ROOM_ACTION_VOLUME_UP,
+	/*
+	 * Adding and kicking a bot. Both are the owner's, for the same reason
+	 * starting is - and kicking is only ever a bot, because a bot is this
+	 * client's own child process and a person is not.
+	 */
+	ROOM_ACTION_ADD_BOT,
+	ROOM_ACTION_KICK_BOT,
+	/*
+	 * F1: fill the room with bots past the four B offers. Deliberately not on
+	 * a letter and deliberately not advertised in the hint line - it is here to
+	 * measure what fifty boards cost, not to be found by a player.
+	 */
+	ROOM_ACTION_FILL_BOTS,
 	ROOM_ACTION_QUIT
 }	t_room_action;
 
@@ -1518,6 +1586,15 @@ typedef struct s_waiting_room_state
 	char			character_name[APP_TEXT_MAX];
 	bool			counting_down;
 	int				countdown;
+	/*
+	 * Where the roster's pointer is, and where the visible window starts.
+	 *
+	 * They are two numbers because up and down move the first and the second
+	 * only follows. It used to be one: the arrows scrolled the window and
+	 * nothing was ever pointed at, so K could only mean "the last bot added"
+	 * - which is not a thing anybody is looking at when they press it.
+	 */
+	int				roster_cursor;
 	int				roster_offset;
 	t_room_feedback	feedback;
 	int				feedback_value;
@@ -1541,6 +1618,22 @@ typedef struct s_mp_rect
 ** large enough that the per-plane overhead stays negligible.
 */
 # define MP_MATCH_BOARD_BANDS 5
+
+/*
+** How many horizontal strips each half of the arena is cut into.
+**
+** The arena used to be two planes, one per half, each invalidated by a
+** signature folded over every card on that side - so one rival moving one
+** piece re-drew and re-encoded forty-nine boards. At a Battle Royale's arena
+** cadence that is most of both halves, most of the time, and it is the whole
+** of why the mode felt heavy next to Double: Double's boards have been banded
+** since the input-latency work and a moving piece there re-encodes one strip.
+**
+** Six because the bands are cut on card-row boundaries and a full room lays
+** out around ten rows a side; fewer than the rows is fine and more is waste,
+** since a band that contains no row boundary can never be the only one dirty.
+*/
+# define MP_ARENA_BANDS 6
 /*
 ** The floor under how often the opponent's region is re-presented, in
 ** milliseconds. 50 is 20 Hz, which is faster than a piece falls at any level
@@ -1552,6 +1645,21 @@ typedef struct s_mp_rect
 ** verdict are read from the model rather than from what was last drawn.
 */
 # define MP_MATCH_OPPONENT_PRESENT_MS 50
+
+/*
+ * How wide the outer ring on a card is that the local player is either being
+ * attacked by or has singled out. Three pixels of a different colour is not
+ * something anybody picks out of a screen of ninety-eight thumbnails; width is
+ * what carries at that size, and the colour only says which of the two it is.
+ */
+# define MP_MATCH_CARD_MARK_PX 7
+
+/*
+ * How tall the name-and-score strip under a board is. It sits outside the
+ * banded board region on a plane of its own, so a caller asking whether a
+ * board was damaged has to add this to reach it.
+ */
+# define MP_MATCH_CAPTION_PX 66
 /*
 ** How many rows below the falling piece stay visible under Dark. Enough to
 ** place the piece in your hand and nothing else, which is the ability's whole
@@ -2025,32 +2133,6 @@ typedef struct s_theme_assets
 	char	wolfman[APP_ASSET_PATH_MAX];
 }	t_theme_assets;
 
-/*
- * One retained backdrop. Transferring a full-screen bitmap is the dominant
- * cost of a screen change - tens of seconds through a macOS pty at a large
- * window - so each backdrop's plane is kept and restacked on revisit. Entries
- * are keyed by the artwork and the construction that produced it, and are only
- * reused while the plane still occupies the geometry the caller wants.
- */
-typedef struct s_backdrop_cache
-{
-	char				path[BACKDROP_PATH_MAX];
-	bool				exact;
-	bool				stretch;
-	struct ncplane		*plane;
-	uint32_t			*pixels;
-	int					pixels_width;
-	int					pixels_height;
-	/*
-	 * The geometry the plane is for, not the geometry it currently sits at:
-	 * an idle backdrop is parked off-screen rather than left stacked under the
-	 * live one, so its own coordinates say nothing about whether it still fits.
-	 */
-	int					rows;
-	int					cols;
-	uint64_t			used;
-}	t_backdrop_cache;
-
 // Bundles every notcurses handle the render layer needs across calls. The
 // background geometry records the rendered image size, so menu overlays can
 // follow the art even when notcurses scales it to different terminals.
@@ -2058,15 +2140,13 @@ typedef struct
 {
 	struct notcurses	*nc;
 	struct ncplane		*std;
-	struct ncplane		*bg_plane;
 	/*
-	 * Backdrops outlive the screens drawn over them. A sprixel is bound to its
-	 * plane until that plane is re-blitted, resized or destroyed, so destroying
-	 * one is what forces its whole bitmap back down the pty; keeping it lets a
-	 * revisit cost a restack instead of a retransfer.
+	 * The one backdrop that exists. A retained-plane cache was tried and
+	 * reverted after macOS Kitty transitions left parked sprixels on the glass
+	 * and failed to restore the one moved back. Screen changes therefore replace
+	 * and destroy one backdrop atomically; see docs/adding-a-screen.md.
 	 */
-	t_backdrop_cache	backdrops[BACKDROP_CACHE_MAX];
-	uint64_t			backdrop_tick;
+	struct ncplane		*bg_plane;
 	struct ncplane		*menu_plane;
 	struct ncplane		*menu_labels_plane;
 	struct ncplane		*screen_plane;
@@ -2159,8 +2239,20 @@ typedef struct
 	 */
 	uint64_t			mp_match_opponent_due_ms;
 	bool				mp_match_opponent_deferred;
-	struct ncplane		*mp_match_left_plane;
-	struct ncplane		*mp_match_right_plane;
+	/*
+	 * The arena, as horizontal strips per half rather than one plane per half.
+	 * [0] is the left column of cards, [1] the right. See MP_ARENA_BANDS.
+	 */
+	struct ncplane		*mp_match_arena_planes[2][MP_ARENA_BANDS];
+	uint64_t			mp_match_arena_signatures[2][MP_ARENA_BANDS];
+	/*
+	 * The draining bar and the seconds beside it on the character-select
+	 * window, which is the only part of that screen a clock moves. It is a
+	 * region so that a tick redraws a number instead of the screen: the phase
+	 * had no incremental path at all, so every second cost a full rebuild.
+	 */
+	struct ncplane		*mp_match_selection_plane;
+	uint64_t			mp_match_selection_signature;
 	struct ncplane		*mp_match_loadout_plane;
 	struct ncplane		*mp_match_ability_plane;
 	/*
@@ -2206,6 +2298,14 @@ typedef struct
 	t_mp_board_cache	mp_match_boards[MP_MATCH_BOARD_CACHES];
 	uint64_t			mp_match_caption_signature;
 	/*
+	** The cells a notification card wiped, in the canvas' own pixels, waiting
+	** for the frame that will repair them. A match repairs the regions this
+	** rectangle touches instead of rebuilding the screen, which is what a
+	** Battle Royale knockout used to cost.
+	*/
+	t_mp_rect			mp_match_damage;
+	bool				mp_match_damaged;
+	/*
 	 * The stationary tier recomposes the whole frame on every focus change, so
 	 * the equipped portrait is kept decoded rather than re-read from disk each
 	 * time. The source path is the cache key.
@@ -2245,6 +2345,35 @@ typedef struct
 	** about the terminal's contents, which is what every renderer shares.
 	*/
 	bool				notification_repaint;
+	/*
+	** Which terminal cells the cards took, as one rectangle: where they were
+	** before this change and where they are after it, unioned.
+	**
+	** A screen that can repair part of itself needs to know which part, and
+	** the flag above does not say. The union is reset only once a consumer has
+	** taken the flag, so two changes arriving between one screen and the next
+	** accumulate instead of the second losing the first's cells.
+	*/
+	int					notification_damage_y;
+	int					notification_damage_x;
+	int					notification_damage_rows;
+	int					notification_damage_cols;
+	/*
+	** What the cards last said, and where they last said it.
+	**
+	** The content signature is what the planes were built from - kind, title,
+	** message, percent, and the fade opacity in coarse steps. A refresh whose
+	** content matches the last one has nothing to rebuild, and returning early
+	** is the whole difference between a card sitting on screen for a second
+	** and a second of destroying and re-emitting sixels underneath it.
+	**
+	** The layout signature is only where the planes are. A repaint is owed to
+	** the screens when a card vacates cells - appearing, moving, resizing or
+	** expiring - and not when it merely fades in place, because fading damages
+	** no cell the card was not already covering. Raising the flag for a fade
+	** step is what turned one volume keypress into a screen rebuild per frame.
+	*/
+	uint64_t			notification_content_signature;
 	t_pixel_asset		leaderboard_font;
 	uint32_t			*leaderboard_pixels;
 	int					leaderboard_pixels_width;
@@ -2339,8 +2468,7 @@ typedef struct
 	uint64_t			mp_match_static_signature;
 	uint64_t			mp_match_local_signature;
 	uint64_t			mp_match_opponent_signature;
-	uint64_t			mp_match_left_signature;
-	uint64_t			mp_match_right_signature;
+
 	uint64_t			mp_match_loadout_signature;
 	uint64_t			mp_match_opponent_loadout_signature;
 	uint64_t			mp_match_hud_signature;
@@ -2389,16 +2517,7 @@ typedef enum e_solo_phase
 	SOLO_GAME_OVER
 }	t_solo_phase;
 
-typedef enum e_solo_action
-{
-	SOLO_MOVE_LEFT,
-	SOLO_MOVE_RIGHT,
-	SOLO_ROTATE_CW,
-	SOLO_ROTATE_CCW,
-	SOLO_SOFT_DROP,
-	SOLO_HARD_DROP,
-	SOLO_HOLD
-}	t_solo_action;
+/* t_solo_action moved to tetrisu_net.h - it is what goes on the wire. */
 
 typedef enum e_solo_event
 {
@@ -2577,6 +2696,16 @@ typedef struct s_mp_match_state
 	int				ko_count;
 	int				incoming_attackers;
 	/*
+	** This player's placing, as soon as it is a fact rather than at the end
+	** of the match. The server takes it the moment somebody is eliminated and
+	** sends it with the result still `none`, and that pair - a dead board and
+	** no verdict - is the spectating state: out of the match, still watching
+	** it, and able to be told how far they got straight away.
+	**
+	** 0 while they are still playing.
+	*/
+	int				local_rank;
+	/*
 	** Garbage rows queued against this player and not yet landed. They arrive
 	** at the next piece lock, so between being told and being buried there is
 	** a piece to place - which is the whole reason the count is shown. It is
@@ -2592,15 +2721,45 @@ typedef struct s_mp_match_state
 	*/
 	uint32_t		opponent_character;
 	int				hovered_ability;
+	/*
+	** The arena, indexed by the seat each card sits in rather than by where it
+	** appeared in the frame.
+	**
+	** A push is the whole roster, so a seat the push does not mention is
+	** blanked - `present` means "somebody is in this seat now". A seat it does
+	** mention keeps the board it already holds unless the card carried a mask,
+	** because a dead board never changes again and its mask rides only every
+	** fifth push. Indexing by slot is what
+	** keeps a card in the same place on screen between pushes: filed by
+	** position in the frame, every rival above a knocked-out player would slide
+	** one square left the moment that player was removed from the roster, and
+	** the whole arena would shuffle every few seconds.
+	**
+	** It is sized for every seat and not for every seat but one, because the
+	** server's arena includes the recipient's own card - `local` is which one
+	** that is. Drawing your own thumbnail among the others is what makes the
+	** arena a picture of the room rather than a picture of everyone else.
+	**
+	** The board holds only what a card can show: the mask on the wire is one
+	** bit per cell, so every filled cell arrives as the same colour. That is
+	** not a loss - a thumbnail a few terminal cells wide could not draw a
+	** tetromino's colour, which is why the wire does not spend sixteen times
+	** the bytes carrying it.
+	*/
 	struct s_mp_opponent_snapshot
 	{
 		t_board		board;
 		bool		present;
 		bool		alive;
+		bool		local;
 		bool		targeting_local;
+		bool		targeted_by_local;
 		int			garbage_pending;
+		int			ko;
+		int			rank;
+		int			lines;
 		char		name[APP_TEXT_MAX];
-	} opponents[APP_ROOM_MAX_PLAYERS - 1];
+	} opponents[MP_ARENA_SEATS];
 	char				opponent_name[APP_TEXT_MAX];
 	char				room_id[APP_TEXT_MAX];
 	char				status[MP_MATCH_STATUS_MAX];
@@ -2655,6 +2814,14 @@ typedef struct s_match_authority
 	bool			online;
 	bool			lost;
 	int				local_slot;
+	/*
+	** The last feed line this match has already announced, by the room's own
+	** sequence number. It is a sequence and not a count because the feed ring
+	** drops its oldest line when it fills, so "how many have I seen" stops
+	** being an answer the moment a room is talkative - which a Battle Royale
+	** narrating its knockouts is by definition.
+	*/
+	uint64_t		feed_seen;
 }	t_match_authority;
 
 typedef struct s_solo_render
@@ -3017,12 +3184,18 @@ int				render_background_replace_exact(t_render_ctx *ctx,
 int				render_background_replace_visual(t_render_ctx *ctx,
 					struct ncvisual *ncv, bool stretch);
 void				render_background_destroy(t_render_ctx *ctx);
-void				render_background_cache_reset(t_render_ctx *ctx);
 void				render_backdrop_forget(t_render_ctx *ctx);
 const uint32_t		*render_backdrop_pixels(const t_render_ctx *ctx,
 					int *width, int *height);
 int				render_geometry_refresh(t_render_ctx *ctx, bool repaint);
 bool				render_terminal_geometry_changed(const t_render_ctx *ctx);
+/*
+** Writes one line into the match trace, when TETRISU_MATCH_TRACE names a file.
+** Diagnostic only, and a no-op otherwise. It is public because what is worth
+** tracing is not always in the file that owns the trace: a knockout rebuilding
+** the whole screen is decided by the geometry check in render_background.c.
+*/
+void				render_match_trace_note(const char *format, ...);
 bool				render_pixel_planes_reliable(const t_render_ctx *ctx);
 bool				render_pixels_available(const t_render_ctx *ctx);
 bool				render_plane_geometry_matches(struct ncplane *plane, int y,
@@ -3288,10 +3461,43 @@ bool			waiting_room_send_chat(t_app_room_view_model *room,
 					t_waiting_room_state *state);
 const char		*waiting_room_status_text(const t_app_room_view_model *room,
 					const t_waiting_room_state *state, char *out, size_t size);
+/*
+** The narrowest panel the cell renderer will draw into. It is here rather than
+** beside the renderer because it is also the legend's budget: put_centered
+** clips to two columns less than this, so a control line longer than
+** MP_COMPAT_MIN_COLS - 2 loses whichever keys are printed last. Stating the
+** two constants apart is how that happened once already.
+*/
+# define MP_COMPAT_MIN_COLS	58
+
+/*
+** The waiting room's control legend, in two lengths. See waiting_room_legend:
+** the short one abbreviates every key rather than dropping any, because a
+** legend that omits a control on a narrow terminal is a bug that looks like a
+** layout choice.
+*/
+# define WAITING_ROOM_LEGEND \
+	"[<>] FIGHTER [R] READY [S] START [B] BOT [K] KICK [C] CHAT [L] LEAVE"
+# define WAITING_ROOM_LEGEND_SHORT \
+	"[<>]FIGHT [R]EADY [S]TART [B]OT [K]ICK [C]HAT [L]EAVE"
+
+int				waiting_room_players_needed(
+					const t_app_room_view_model *room);
+const char		*waiting_room_legend(int cols);
+int				waiting_room_seat_index(const t_app_room_view_model *room,
+					int position);
+bool			waiting_room_seat_ready(const t_app_room_view_model *room,
+					int position);
+bool			waiting_room_seat_is_bot(const t_app_room_view_model *room,
+					int position);
+int				waiting_room_bot_seat_count(const t_app_room_view_model *room);
+const char		*waiting_room_seat_username(const t_app_room_view_model *room,
+					int position);
+int				waiting_room_free_seats(const t_app_room_view_model *room);
 const char		*waiting_room_slot_label(const t_app_room_view_model *room,
-					int index, char *out, size_t size);
+					int position, char *out, size_t size);
 const char		*waiting_room_badge_text(const t_app_room_view_model *room,
-					int index);
+					int position);
 const char		*waiting_room_feedback_text(const t_waiting_room_state *state,
 					char *out, size_t size);
 bool			waiting_room_is_under_way(
@@ -3336,7 +3542,23 @@ bool			mp_match_movement_event(const t_mp_match_state *state,
 					const t_solo_handling_config *config, uint32_t key,
 					ncintype_e event_type, t_solo_action *action);
 void			mp_match_apply_room(t_mp_match_state *state,
-					const t_app_room_view_model *room, int preview_players);
+					const t_app_room_view_model *room, int preview_players,
+					bool seed_boards);
+int				mp_match_collect_cards(const t_mp_match_state *state,
+					int *slots, int cap);
+int				mp_match_target_candidates(const t_mp_match_state *state);
+void			mp_match_target_label(const t_mp_match_state *state,
+					t_target_mode mode, const char *name, char *out,
+					size_t size);
+/*
+** The bands the arena is drawn in, nearest first. They are an order and not a
+** layout: which column a card lands in is the renderer's, and which seat it
+** lives in never changes (see t_mp_match_state.opponents).
+*/
+# define MP_ARENA_TIER_ATTACKING	0
+# define MP_ARENA_TIER_AIMED_AT		1
+# define MP_ARENA_TIER_ALIVE		2
+# define MP_ARENA_TIER_OUT			3
 
 /* RENDER_MULTIPLAYER.C */
 bool			render_mp_mode_show(t_render_ctx *ctx,
@@ -3360,6 +3582,8 @@ void			render_multiplayer_match_destroy(t_render_ctx *ctx);
 bool			render_multiplayer_match_pixel_show(t_render_ctx *ctx,
 					const t_mp_match_state *state, bool rebuild_background);
 void			render_multiplayer_match_pixel_destroy(t_render_ctx *ctx);
+bool			render_multiplayer_match_pixel_restage(t_render_ctx *ctx,
+					const t_mp_match_state *state);
 int				render_multiplayer_match_deferred_ms(const t_render_ctx *ctx);
 
 /* MULTIPLAYER_MATCH_MODE.C */
@@ -3545,12 +3769,20 @@ bool			net_solo_apply(t_net_client *net, t_solo_game *game);
 void			net_state_apply(const t_body_state *snap, t_solo_game *game);
 bool			net_solo_pending(const t_net_client *net);
 
-/* NET_MATCH.C — Double played against tetrisd; both boards arrive together */
-int				net_match_join(t_net_client *net, const char *room);
+/*
+** NET_MATCH.C — Double played against tetrisd; both boards arrive together.
+**
+** net_match_join and net_match_send_action are declared in tetrisu_net.h
+** instead, because they are the two a bot needs and a bot has no screen. The
+** rest stay here: they speak in view models and ability enums that only a
+** client with something to draw on has any use for.
+*/
 bool			net_match_apply(t_net_client *net, t_mp_match_state *state);
 int				net_match_action(t_net_client *net, t_solo_action action,
 					t_net_result *out);
-int				net_match_send_action(t_net_client *net, t_solo_action action);
+int				net_match_set_target(t_net_client *net, t_target_mode mode,
+					t_net_result *out);
+const char		*net_target_mode_word(t_target_mode mode);
 int				net_match_ability(t_net_client *net, t_solo_ability ability,
 					t_net_result *out);
 
@@ -3563,6 +3795,10 @@ int				match_authority_fd(const t_match_authority *authority);
 bool			match_authority_pending(const t_match_authority *authority);
 bool			match_authority_action(t_match_authority *authority,
 					t_mp_match_state *state, t_solo_action action);
+bool			match_authority_knockout(t_match_authority *authority,
+					char *out, size_t size);
+bool			match_authority_target(t_match_authority *authority,
+					t_mp_match_state *state, t_target_mode mode);
 bool			match_authority_ability(t_match_authority *authority,
 					t_mp_match_state *state, t_solo_ability ability);
 bool			match_authority_update(t_match_authority *authority,

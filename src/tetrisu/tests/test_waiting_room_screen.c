@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 static void	test_double_needs_both_players_ready(void);
 static void	test_battle_royale_needs_four_and_everyone_ready(void);
@@ -12,6 +13,11 @@ static void	test_chat_ring_drops_the_oldest(void);
 static void	test_slot_labels_and_badges(void);
 static void	test_status_and_feedback_copy(void);
 static void	test_launch_action_matches_the_mode(void);
+static void	test_bot_keys_and_seat_marks(void);
+static void	test_free_seats_bound_what_b_may_fill(void);
+static void	test_the_legend_fits_the_narrowest_panel(void);
+static void	test_a_short_room_says_how_short_and_what_to_do(void);
+static void	test_the_newest_arrival_is_on_the_first_line(void);
 static void	build_room(t_app_room_view_model *room, t_app_game_mode mode,
 				int players, int ready);
 
@@ -29,7 +35,236 @@ int	main(void)
 	test_slot_labels_and_badges();
 	test_status_and_feedback_copy();
 	test_launch_action_matches_the_mode();
+	test_bot_keys_and_seat_marks();
+	test_free_seats_bound_what_b_may_fill();
+	test_the_legend_fits_the_narrowest_panel();
+	test_a_short_room_says_how_short_and_what_to_do();
+	test_the_newest_arrival_is_on_the_first_line();
 	return (0);
+}
+
+/*
+** A Battle Royale shows eight lines of ninety-nine, so a player who joins -
+** or a bot that is added - used to land out of sight at the bottom and the
+** room looked like nothing had happened. The roster reads newest first now.
+**
+** What is pinned here is that the reversal covers the occupied block and
+** stops there: the empty seats keep their order, "the first player_count
+** lines are taken" stays true, and every occupancy test in the renderers is
+** still reading the same thing it was.
+*/
+static void	test_the_newest_arrival_is_on_the_first_line(void)
+{
+	t_app_room_view_model	room;
+	char					line[APP_TEXT_MAX * 2];
+	int						position;
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 0);
+	/* player3 arrived last and is on line 1; the owner has sunk to line 4. */
+	assert(waiting_room_seat_index(&room, 0) == 3);
+	assert(waiting_room_seat_index(&room, 3) == 0);
+	assert(strstr(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"player3") != NULL);
+	assert(strstr(waiting_room_slot_label(&room, 3, line, sizeof(line)),
+			"(owner)") != NULL);
+	/* The line number is the line, not the seat: it still counts 1, 2, 3... */
+	assert(strncmp(waiting_room_slot_label(&room, 0, line, sizeof(line)),
+			"1. ", 3) == 0);
+	/* Empty seats are untouched, and are still the ones past player_count. */
+	position = room.player_count;
+	while (position < waiting_room_slot_count(&room))
+	{
+		assert(waiting_room_seat_index(&room, position) == position);
+		assert(strstr(waiting_room_slot_label(&room, position, line,
+					sizeof(line)), "(empty)") != NULL);
+		position++;
+	}
+	/* One player is its own newest, and an empty room has no lines at all. */
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 0);
+	assert(waiting_room_seat_index(&room, 0) == 0);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 0, 0);
+	assert(waiting_room_seat_index(&room, 0) == 0);
+	assert(waiting_room_seat_index(NULL, 0) == -1);
+	assert(waiting_room_seat_index(&room, -1) == -1);
+	printf("PASS test_the_newest_arrival_is_on_the_first_line\n");
+}
+
+/*
+** B and K are the two keys that fill and empty a seat, and both are the
+** owner's - the screen only says which action was asked for, and main.c is
+** where a non-owner is turned away, so what is asserted here is the mapping
+** and the mark rather than the permission.
+**
+** The mark is read off the username, because that is all the server says
+** about a bot: it is an ordinary client on an ordinary account, and the only
+** thing that distinguishes the account is the prefix no person may sign up
+** with. That is what makes a bot visible as one to *every* client in the
+** room, not only to the one that spawned it.
+*/
+static void	test_bot_keys_and_seat_marks(void)
+{
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
+	char					line[APP_TEXT_MAX * 2];
+	int						line_of_seat_2;
+	int						owner_line;
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	waiting_room_state_init(&state);
+	assert(waiting_room_handle_key(&state, &room, 'b') == ROOM_ACTION_ADD_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'B') == ROOM_ACTION_ADD_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'k') == ROOM_ACTION_KICK_BOT);
+	assert(waiting_room_handle_key(&state, &room, 'K') == ROOM_ACTION_KICK_BOT);
+	/*
+	** The mark is asked for by line, not by seat, so the fixture names the
+	** seat it wants marked and then asks which line that seat is on. Writing
+	** the answer in as a constant would make this a test of the ordering
+	** rather than of the mark.
+	*/
+	line_of_seat_2 = 0;
+	while (waiting_room_seat_index(&room, line_of_seat_2) != 2)
+		line_of_seat_2++;
+	/* A person is never marked, whatever their seat. */
+	assert(!waiting_room_seat_is_bot(&room, line_of_seat_2));
+	assert(strstr(waiting_room_slot_label(&room, line_of_seat_2, line,
+				sizeof(line)), "(bot)") == NULL);
+	snprintf(room.players[2].username, sizeof(room.players[2].username),
+		"BOT_02");
+	assert(waiting_room_seat_is_bot(&room, line_of_seat_2));
+	assert(strstr(waiting_room_slot_label(&room, line_of_seat_2, line,
+				sizeof(line)), "(bot)") != NULL);
+	/* An owner is an owner first: the two tags never both appear. */
+	owner_line = 0;
+	while (waiting_room_seat_index(&room, owner_line) != 0)
+		owner_line++;
+	snprintf(room.players[0].username, sizeof(room.players[0].username),
+		"BOT_01");
+	assert(strstr(waiting_room_slot_label(&room, owner_line, line,
+				sizeof(line)), "(owner)") != NULL);
+	assert(strstr(waiting_room_slot_label(&room, owner_line, line,
+				sizeof(line)), "(bot)") == NULL);
+	assert(!waiting_room_seat_is_bot(&room, 99));
+	assert(!waiting_room_seat_is_bot(NULL, 0));
+	printf("PASS test_bot_keys_and_seat_marks\n");
+}
+
+/*
+** How many bots a room will take is a fact about its seats, and a Double room
+** is the case that says so: two seats with the player in one, so exactly one
+** bot fits and the second press of B is a process whose entire life is a
+** handshake and a refusal. main.c does the arithmetic - free seats against the
+** bots it has started that are not seated yet - and these are the two numbers
+** it does it with.
+**
+** A bot seat is counted off the roster rather than off the farm on purpose:
+** the two disagree by exactly the bot that is still connecting, which is the
+** gap the caller needs.
+*/
+static void	test_free_seats_bound_what_b_may_fill(void)
+{
+	t_app_room_view_model	room;
+
+	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 0);
+	assert(waiting_room_free_seats(&room) == 1);
+	assert(waiting_room_bot_seat_count(&room) == 0);
+	/* The bot arrives: the seat is gone and it is visibly a bot's. */
+	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 0);
+	snprintf(room.players[1].username, sizeof(room.players[1].username),
+		"BOT_01");
+	assert(waiting_room_free_seats(&room) == 0);
+	assert(waiting_room_bot_seat_count(&room) == 1);
+	/* A Battle Royale is ninety-nine seats, so the farm is what binds there. */
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 0);
+	assert(waiting_room_free_seats(&room) == APP_ROOM_MAX_PLAYERS - 1);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 0);
+	snprintf(room.players[2].username, sizeof(room.players[2].username),
+		"BOT_07");
+	snprintf(room.players[3].username, sizeof(room.players[3].username),
+		"BOT_08");
+	assert(waiting_room_bot_seat_count(&room) == 2);
+	/* Neither answer may be a guess when there is no room to read. */
+	assert(waiting_room_free_seats(NULL) == 0);
+	assert(waiting_room_bot_seat_count(NULL) == 0);
+	room.capacity = 0;
+	assert(waiting_room_free_seats(&room) == 0);
+	printf("PASS test_free_seats_bound_what_b_may_fill\n");
+}
+
+/*
+** Adding two keys to the legend made it 68 characters, on a line that fitted
+** the narrowest supported panel exactly. put_centered clips to two columns
+** less than the panel, so the overflow took `[C] CHAT [L] LEAVE` off the end -
+** advertising the key that fills a seat by dropping the one that gets a player
+** out of the room.
+**
+** Both forms are asserted to fit, and the short one is asserted to still name
+** every key: abbreviating is fine, and quietly omitting a control on a small
+** terminal is the same bug written more politely.
+*/
+static void	test_the_legend_fits_the_narrowest_panel(void)
+{
+	const char	*wide;
+	const char	*narrow;
+	const char	*key;
+	size_t		index;
+
+	wide = waiting_room_legend(0);
+	narrow = waiting_room_legend(MP_COMPAT_MIN_COLS);
+	assert(strlen(narrow) <= (size_t)MP_COMPAT_MIN_COLS - 2);
+	assert(strcmp(wide, WAITING_ROOM_LEGEND) == 0);
+	assert(strcmp(narrow, WAITING_ROOM_LEGEND_SHORT) == 0);
+	/* A panel with room for the whole thing gets the whole thing. */
+	assert(strcmp(waiting_room_legend((int)strlen(wide) + 2), wide) == 0);
+	assert(strcmp(waiting_room_legend((int)strlen(wide) + 1), narrow) == 0);
+	index = 0;
+	while (index < sizeof("<>RSBKCL") - 1)
+	{
+		key = &"<>RSBKCL"[index];
+		assert(memchr(wide, *key, strlen(wide)) != NULL);
+		assert(memchr(narrow, *key, strlen(narrow)) != NULL);
+		index++;
+	}
+	printf("PASS test_the_legend_fits_the_narrowest_panel\n");
+}
+
+/*
+** "not enough players" on its own is a dead end in a Battle Royale: the
+** minimum is four, a player with two laptops has two, and the screen has not
+** said that anything can be done about it. The shortfall is a number here so
+** that the message can carry the way out with it.
+*/
+static void	test_a_short_room_says_how_short_and_what_to_do(void)
+{
+	t_app_room_view_model	room;
+	t_waiting_room_state	state;
+	char					line[APP_TEXT_MAX * 2];
+
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 1, 1);
+	assert(waiting_room_players_needed(&room)
+		== WAITING_ROOM_ROYALE_MIN_PLAYERS - 1);
+	assert(waiting_room_start_blocker(&room) == ROOM_FEEDBACK_NEED_PLAYERS);
+	build_room(&room, APP_GAME_MODE_DOUBLE, 1, 1);
+	assert(waiting_room_players_needed(&room) == 1);
+	build_room(&room, APP_GAME_MODE_BATTLE_ROYALE, 4, 4);
+	assert(waiting_room_players_needed(&room) == 0);
+	assert(waiting_room_players_needed(NULL) == 0);
+	/* Both messages name the number, and only one of them names the key. */
+	waiting_room_state_init(&state);
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS;
+	state.feedback_value = 3;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "3") != NULL && strstr(line, "PLAYERS") != NULL);
+	assert(strstr(line, "B") == NULL);
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS_BOT;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "3") != NULL && strstr(line, "PRESS B") != NULL);
+	assert(strlen(line) <= (size_t)MP_COMPAT_MIN_COLS - 4);
+	/* One missing player is not "1 MORE PLAYERS". */
+	state.feedback = ROOM_FEEDBACK_NEED_PLAYERS;
+	state.feedback_value = 1;
+	waiting_room_feedback_text(&state, line, sizeof(line));
+	assert(strstr(line, "PLAYERS") == NULL && strstr(line, "PLAYER") != NULL);
+	printf("PASS test_a_short_room_says_how_short_and_what_to_do\n");
 }
 
 /**
@@ -170,7 +405,16 @@ static void	test_battle_royale_capacity_and_roster_bounds(void)
 }
 
 /**
- * @brief The eight-row window can reach every seat in a 99-player room.
+ * @brief The arrows move a pointer, and the window only follows it.
+ *
+ * The pointer is the whole point. It used to be the window that moved and
+ * nothing was ever pointed at, which is why K could only mean "the bot added
+ * last" - there was no other answer available to it. So the first assertion
+ * here is the one that changed: a step down inside a window that already shows
+ * that row scrolls nothing.
+ *
+ * The eight-row window still has to reach every seat of a 99-player room, and
+ * the pointer still has to stop at both ends rather than running past them.
  */
 static void	test_roster_pagination(void)
 {
@@ -184,25 +428,34 @@ static void	test_roster_pagination(void)
 	before = state;
 	assert(waiting_room_handle_key(&state, &room, NCKEY_DOWN)
 		== ROOM_ACTION_NONE);
-	assert(state.roster_offset == 1);
+	assert(state.roster_cursor == 1);
+	assert(state.roster_offset == 0);
 	assert(waiting_room_state_view_changed(&before, &state));
-	(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
-	assert(state.roster_offset == 9);
+	/* Down to the last visible row still scrolls nothing. */
+	step = state.roster_cursor;
+	while (step++ < WAITING_ROOM_VISIBLE_PLAYERS - 1)
+		(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
+	assert(state.roster_cursor == WAITING_ROOM_VISIBLE_PLAYERS - 1);
+	assert(state.roster_offset == 0);
+	/* One past it scrolls by exactly one, and the pointer stays visible. */
+	(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
+	assert(state.roster_cursor == WAITING_ROOM_VISIBLE_PLAYERS);
+	assert(state.roster_offset == 1);
 	step = 0;
-	while (step++ < 20)
+	while (step++ < 40)
 		(void)waiting_room_handle_key(&state, &room, NCKEY_PGDOWN);
+	assert(state.roster_cursor == APP_ROOM_MAX_PLAYERS - 1);
 	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
 		- WAITING_ROOM_VISIBLE_PLAYERS);
-	(void)waiting_room_handle_key(&state, &room, NCKEY_UP);
-	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
-		- WAITING_ROOM_VISIBLE_PLAYERS - 1);
-	(void)waiting_room_handle_key(&state, &room, NCKEY_PGUP);
-	assert(state.roster_offset == APP_ROOM_MAX_PLAYERS
-		- WAITING_ROOM_VISIBLE_PLAYERS * 2 - 1);
+	step = 0;
+	while (step++ < 40)
+		(void)waiting_room_handle_key(&state, &room, NCKEY_PGUP);
+	assert(state.roster_cursor == 0);
+	assert(state.roster_offset == 0);
 	(void)waiting_room_handle_key(&state, &room, 'c');
 	before = state;
 	(void)waiting_room_handle_key(&state, &room, NCKEY_DOWN);
-	assert(state.roster_offset == before.roster_offset);
+	assert(state.roster_cursor == before.roster_cursor);
 	printf("PASS test_roster_pagination\n");
 }
 
@@ -367,7 +620,14 @@ static void	test_slot_labels_and_badges(void)
 	assert(strcmp(waiting_room_badge_text(&room, 0), "ready") == 0);
 	assert(waiting_room_badge_text(&room, 1)[0] == '\0');
 	build_room(&room, APP_GAME_MODE_DOUBLE, 2, 1);
-	assert(strcmp(waiting_room_badge_text(&room, 1), "not ready") == 0);
+	/*
+	** Two seats, and only the owner is ready. The badge follows the line
+	** rather than the seat, so the newest arrival's "not ready" is the one on
+	** the first line - reading it off players[position] would have printed the
+	** owner's badge against the other player's name.
+	*/
+	assert(strcmp(waiting_room_badge_text(&room, 0), "not ready") == 0);
+	assert(strcmp(waiting_room_badge_text(&room, 1), "ready") == 0);
 	assert(waiting_room_badge_text(NULL, 0)[0] == '\0');
 	assert(waiting_room_toggle_ready(&room));
 	assert(!waiting_room_local_ready(&room));
@@ -420,6 +680,23 @@ static void	test_status_and_feedback_copy(void)
 	state.feedback = ROOM_FEEDBACK_VOLUME;
 	assert(strstr(waiting_room_feedback_text(&state, line, sizeof(line)),
 			"70%") != NULL);
+	/*
+	** Every bot outcome says something, the last one included. A bot fails
+	** after the fork has already succeeded, so BOT_ADDED is printed before
+	** anything can go wrong and BOT_LOST is the only line that ever corrects
+	** it - silence there is the bug this whole set is here for.
+	*/
+	feedback = ROOM_FEEDBACK_NEED_PLAYERS_BOT;
+	while (feedback <= ROOM_FEEDBACK_BOT_LOST)
+	{
+		state.feedback = (t_room_feedback)feedback;
+		assert(waiting_room_feedback_text(&state, line, sizeof(line))[0]
+			!= '\0');
+		feedback++;
+	}
+	state.feedback = ROOM_FEEDBACK_BOT_LOST;
+	assert(strstr(waiting_room_feedback_text(&state, line, sizeof(line)),
+			BOT_LOG_NAME) != NULL);
 	assert(!waiting_room_navigation_keys_coalesce(NCKEY_UP, NCKEY_UP));
 	assert(waiting_room_action_leaves_screen(ROOM_ACTION_LAUNCH));
 	assert(!waiting_room_action_leaves_screen(ROOM_ACTION_SEND_CHAT));

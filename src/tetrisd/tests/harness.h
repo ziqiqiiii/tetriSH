@@ -43,6 +43,7 @@ void	fx_stop(t_fixture *fx);
 int		hc_connect(t_harness *hc, const t_fixture *fx);
 void	hc_close(t_harness *hc);
 int		hc_request(t_harness *hc, const char *method, const char *path, const char *body, t_htttp_message *out);
+int		hc_send(t_harness *hc, const char *method, const char *path, const char *body);
 int		hc_recv(t_harness *hc, t_htttp_message *out, int timeout_ms);
 int		hc_wait_state(t_harness *hc, t_body_state *out, int timeout_ms);
 int		hc_wait_chat(t_harness *hc, t_body_chat *out, int timeout_ms);

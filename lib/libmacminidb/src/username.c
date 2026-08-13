@@ -54,3 +54,35 @@ bool	db_username_valid(const char *username)
 	}
 	return (true);
 }
+
+/**
+ * @brief Reports whether a name belongs to the store rather than to a person.
+ *
+ * This is a policy and not a format, which is why it is a second question
+ * rather than a stricter db_username_valid: a reserved name is perfectly
+ * representable, and the store creates them itself through db_signup_reserved.
+ * What it may not do is arrive from a sign-up form.
+ *
+ * The match is case-insensitive, because the point is that nobody is confused
+ * about who they are playing against, and `bot_01` beside `BOT_01` in a seat
+ * list is exactly that confusion.
+ *
+ * @param username Candidate name, NUL-terminated.
+ * @return true when the name is reserved for the store's own accounts.
+ */
+bool	db_username_is_reserved(const char *username)
+{
+	size_t	index;
+
+	if (!username)
+		return (false);
+	index = 0;
+	while (index < sizeof(DB_RESERVED_PREFIX) - 1)
+	{
+		if (toupper((unsigned char)username[index])
+			!= DB_RESERVED_PREFIX[index])
+			return (false);
+		index++;
+	}
+	return (true);
+}

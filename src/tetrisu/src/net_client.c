@@ -1,4 +1,5 @@
 #include "tetrisu.h"
+#include "tetrisu_bot.h"
 
 #include <netdb.h>
 #include <netinet/in.h>
@@ -112,6 +113,14 @@ int	net_connect(t_net_client *net, const t_net_config *cfg)
 		return (-1);
 	}
 	net->state = NET_CONNECTED;
+	/*
+	** Here rather than at the screens, so that no path can open a session
+	** without the bots learning where it went. A player types the address into
+	** SERVER ID and it lives in this cfg and nowhere else - not in the
+	** environment a forked bot inherits - which is why four bots once spawned
+	** looking for a server on the player's own laptop.
+	*/
+	bot_farm_remember_server(cfg->host, cfg->port, cfg->ca_path);
 	return (0);
 }
 

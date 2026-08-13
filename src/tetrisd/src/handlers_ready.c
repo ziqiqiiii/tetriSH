@@ -61,11 +61,17 @@ int	ready_handler(const t_htttp_message *msg, void *context)
 		return (404);
 	if (!server_room_set_ready(server_room, ctx->cli, ready, character))
 		return (request_refuse(ctx, "already-started"));
+	/*
+	 * Only the lock starts anything from here. Readiness used to open the
+	 * select window as soon as the last seat declared it, which worked while
+	 * a seat arrived not ready and declaring was a deliberate act. A seat now
+	 * arrives ready, so "every seat is ready" is true from the moment the room
+	 * fills, and this branch would have opened the window on whatever the next
+	 * READY happened to be - including one withdrawing it. The owner's START
+	 * is the one route that asks for a match now.
+	 */
 	if (server_room_all_locked(server_room))
 		(void)server_room_autostart(server_room);
-	else if (server_room_all_ready(server_room)
-		&& !server_room_is_solo(server_room))
-		(void)server_room_begin_selection(server_room);
 	if (!server_room_snapshot(server_room, &snapshot))
 		return (500);
 	len = body_room_encode(&snapshot, ctx->body, sizeof(ctx->body));

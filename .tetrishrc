@@ -40,12 +40,21 @@ export TETRISD_PID_PATH=tmp/tetrisd/tetrisd.pid
 # A failed boot still prints to the terminal.
 export TETRISD_ERR_PATH=tmp/tetrisd/tetrisd.err
 
-# Connection ceiling and the period of the one gravity timer, in ms.
-export TETRISD_MAX_CLIENTS=64
+# Simultaneous connections, and the period of the server's one gravity timer
+# in milliseconds. Every playing room advances on the same tick.
+#
+# One full Battle Royale is 99 players, so a cap below that would make the
+# mode's own maximum unreachable before anything else refused it.
+export TETRISD_MAX_CLIENTS=128
 export TETRISD_TICK_MS=12
 
 # Slots in a Battle Royale room (Single and Double are fixed at 1 and 2).
-export TETRISD_BR_SLOTS=4
+#
+# The full 99, because a seat nobody sits in costs nothing: every projection
+# walks occupied slots only, so what the room is sent scales with how many
+# people are in it and not with how big it is. Sizing this to an expected
+# turnout would only cap a room that filled.
+export TETRISD_BR_SLOTS=99
 
 # Per-connection input bucket for MOVE/ROTATE/DROP: BURST tokens refilling at
 # RATE/s. Draining it earns 429 + Retry-After.
@@ -56,6 +65,17 @@ export TETRISD_INPUT_RATE=60
 # arrival rate (not concurrent play); TIMEOUT_MS caps one handshake.
 export TETRISD_HANDSHAKE_WORKERS=4
 export TETRISD_HANDSHAKE_TIMEOUT_MS=5000
+
+# How many accounts the server keeps for the bots a player fills a room with.
+# They are named BOT_01 upward, created at boot if absent, never ranked, and a
+# player cannot sign up as one - the BOT_ prefix is refused.
+#
+# Sized rather than fixed at four because a bot holds one connection like
+# anybody else: four names would be four bots for the whole server, and the
+# fifth would displace the first out of a match in progress. 64 leaves room for
+# the client's F1 to fill one room with fifty bots and still serve others. Set
+# it to 0 for a server that hands out no bots.
+export TETRISD_BOT_ACCOUNTS=64
 
 ################################################################################
 #                            tetrislogd settings                               #
