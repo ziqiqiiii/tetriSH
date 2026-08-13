@@ -11,6 +11,7 @@ Part of the [ CoreStack Challenge 50.003 × 50.005 ](https://natalieagus.github.
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [Player Manual](#player-manual)
 - [Modes](#modes)
 - [Controls](#controls)
 - [Run the Server Yourself](#run-the-server-yourself)
@@ -70,7 +71,7 @@ Full use-case detail is in [`docs/use_cases.md`](docs/use_cases.md); ability tex
 |---|---|---|
 | Linux | native or container | yes |
 | WSL | native or container | yes |
-| macOS | container only — `make play-image` | no — Darwin ships no `epoll`, `timerfd` or POSIX `mqueue` |
+| macOS | native or container | no — Darwin ships no `epoll`, `timerfd` or POSIX `mqueue` |
 
 | Dependency | Needed for | Missing means |
 |---|---|---|
@@ -106,6 +107,17 @@ Either installs what is missing, compiles it, opens a kitty window and starts th
 
 ---
 
+## Player Manual
+
+Twenty pages on playing the game rather than building it — the cover and the one-minute boot below, and every character, ability, and mode inside. Click either page for the whole thing.
+
+<p align="center">
+  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/cover.png" alt="Player manual cover" width="45%"></a>
+  <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="45%"></a>
+</p>
+
+---
+
 ## Modes
 
 | To play | Run |
@@ -137,7 +149,7 @@ Menu screens label their own keys. These are the ones they do not.
 | `C` | Hold |
 | `1`–`4` | Use the charged ability in that slot |
 | `W` `A` `S` `D` | Declare a targeting mode — KOs, Randoms, Attackers, Badges (Battle Royale only) |
-| `←` / `→`, `Enter` | Pick and lock a fighter, during the character-select window |
+| `←` `→` `↑` `↓` or `A` / `D`, then `Enter` | Cycle and lock a fighter, during the character-select window |
 | `P` | Pause — Solo only |
 | `R` | Restart, on the Solo game-over screen |
 | `Esc` / `Q` | Leave the match |
@@ -188,14 +200,18 @@ tetrish$ tetrisctl start
 
 On the sign-in screen, **SERVER ID** is `localhost` or `127.0.0.1` (the default), then **CHECK SERVER** before **LOGIN** or **SIGN UP**.
 
-**4. Inspect, rotate logs, and stop:**
+**4. Inspect and stop:**
 ```
-tetrish$ tetrisctl status
-tetrish$ tetrisctl rotate          # reopen the logs, once something has moved them
+tetrish$ tetrisctl status          # pidfile rows first, then Health from the running server
+tetrish$ tetrisctl rooms           # open rooms, the same view LIST /rooms serves
+tetrish$ tetrisctl players         # established connections
+tetrish$ tetrisctl dropped-logs    # records the producer-side ring buffer had to drop
 tetrish$ tetrisctl stop            # reverse of launch order, blocks until down
 ```
 
-`rotate` is the operator's half of a log rotation: the file is moved by [`scripts/logrotate.sh`](scripts/logrotate.sh)'s rule or by hand, and the daemon holding it only lets go of that inode on `SIGHUP`.
+The last three ask a running `tetrisd` over its local-only Control channel (`TETRISD_CONTROL_PATH`), so they refuse when it is down while `start`/`status`/`stop`/`restart` still work off the pidfile alone.
+
+Log rotation needs no verb: [`scripts/logrotate.sh`](scripts/logrotate.sh)'s rule moves the sink and its `postrotate` sends `SIGHUP` to the pid in the pidfile, which is what makes the daemon let go of the renamed inode.
 
 ---
 
@@ -231,7 +247,7 @@ MacMini_tetriSH/
 │   ├── tetrisctl/     Admin CLI owning both daemons' lifecycle → tetrisctl
 │   └── tetrisu/       Terminal client → tetrisu
 ├── lib/               Statically linked libraries (libXXX/libXXX.a)
-├── docs/              Architecture, glossary, specs, diagrams, post-mortems
+├── docs/              Architecture, glossary, specs, diagrams, post-mortems, player manual
 ├── scripts/           Dependency install, container, and play entry points
 ├── certs/             Development CA and server certificate (make certs)
 ├── .tetrishrc         Shell start-up file; the only place config keys live
@@ -253,7 +269,21 @@ make -C src/tetrish unit FILTER=lexer
 make -C src/tetrish integration
 ```
 
-The client's end-to-end suites drive a real `tetrisu` against a real `tetrisd` and live in `src/tetrisu/tests/integration/` — session and login, Solo, Double, the Battle Royale arena, the store, chat, and bots:
+The client's end-to-end suites drive a real `tetrisu` against a real `tetrisd` and live in `src/tetrisu/tests/integration/`:
+
+| Suite | Covers |
+|---|---|
+| `test_net_session.sh` | What a session leaves behind — no leaked descriptor, `SIGNUP` binding a player, no stranded seat |
+| `test_net_provider.sh` | The provider vtable behind CHECK SERVER, sign-up, login, Settings |
+| `test_net_solo.sh` | `JOIN` / `START`, every gameplay action, `STATE` decoded into the Solo view model |
+| `test_solo_authority.sh` | The seam above the wire — the client's 3-2-1 holding the server's clock, and the fall back to local rules when the session goes |
+| `test_net_double.sh` | Two clients through one Double match on a real server |
+| `test_net_arena.sh` | Four clients in one Battle Royale — a complete roster, cards filed by seat, the room's own head count |
+| `test_net_store.sh` | `LIST /store`, `PROFILE`, `BUY`, `EQUIP` |
+| `test_net_chat.sh` | Room chat, as the feed the server sends back |
+| `test_bots.sh` | One person and three bots in a Battle Royale — seats filled from the server's pool, boards that change, the room emptied again |
+
+Each runs on its own:
 
 ```bash
 bash src/tetrisu/tests/integration/test_net_arena.sh
@@ -274,6 +304,8 @@ Everything compiles clean under `-Wall -Wextra -Werror`, and test binaries pass 
 | [`docs/game-economics.md`](docs/game-economics.md) | Points, pricing, rewards |
 | [`docs/themes.md`](docs/themes.md) | Theme catalogue and the source of truth for ability text |
 | [`docs/naming.md`](docs/naming.md) | Naming conventions; §2 is the live prefix namespace |
+| [`docs/manual/`](docs/manual/tetrish-player-manual.pdf) | The twenty-page player manual, plus the cover and quick-start pages the README shows |
+| [`docs/tetrisu-local-to-tetrisd.md`](docs/tetrisu-local-to-tetrisd.md) | The plan that moved Solo off local rules onto server authority — a record, written before the migration it describes |
 | [`docs/test_plan.md`](docs/test_plan.md) | Cross-component test plan |
 | [`docs/diagrams/`](docs/diagrams/) | Class, sequence, domain, component, and use-case diagrams |
 | [`docs/bugs/`](docs/bugs/) | Post-mortems: what broke, the fix, the lesson |
