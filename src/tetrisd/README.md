@@ -63,7 +63,7 @@ Two of the eleven need something beyond a queue entry:
 
 **Dark is also the one ability a server cannot carry out.** Every other effect is a rule about what a player may *do*, enforced by refusing the input; Dark is a rule about what they may *see*. So it rides the wire as a count and `tetrisu` blanks the cells outside a window under the falling piece — applied to the drawn grid and not to the board, so the hidden rows still collide. The player is blinded, not helped.
 
-Bomb's scatter and garbage's hole column both walk from the game's own counters rather than from a random source. `libtetrisbrain` owns no RNG by contract, and a scatter that moves with how long a game has run is unpredictable to a player without being unreproducible to a test.
+Bomb's scatter and garbage's hole column both come from the game's own seeded state rather than from a random source. `libtetrisbrain` owns no RNG by contract, and a game seeded once has to replay the same way twice or no test could assert where anything landed. The hole was a plain counter taken modulo `BOARD_WIDTH` until it was found drawing a diagonal straight across the board — see `docs/bugs/the_garbage_holes_marched_in_a_line.md`.
 
 ---
 

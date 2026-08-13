@@ -626,13 +626,24 @@ typedef struct s_game
 	int					dark_pieces;
 	int					pals_pieces;
 	/*
-	** Which column the next garbage row leaves open. Derived from a counter
-	** rather than drawn, so the hole walks instead of stacking - the same
-	** fairness trick apply_fry uses, and for the same reason: no randomness
-	** enters libtetrisbrain, and a run of rows with the hole in one place
-	** would be a wall rather than a handicap.
+	** Where the holes in this game's garbage go: an LCG state seeded from the
+	** game's own seed, and the column the last row left open.
+	**
+	** `garbage_seq` was a plain counter and the column was `garbage_seq %
+	** BOARD_WIDTH`, which put the holes on 0, 1, 2, 3 in order - a diagonal
+	** across the board rather than the scatter it was meant to be. It is a
+	** state now and next_garbage_hole draws from it, excluding only the
+	** previous column, which is all "a run of rows with the hole in one place
+	** would be a wall" ever asked for.
+	**
+	** Seeded rather than drawn from the C library because a match replayed
+	** from one seed has to land the same rows in the same places, and because
+	** no randomness enters libtetrisbrain - the column crosses as an argument.
+	** `garbage_hole` is -1 until the first row lands, so that draw is uniform
+	** over every column instead of over nine of them.
 	*/
 	uint32_t			garbage_seq;
+	int					garbage_hole;
 	/*
 	** Who sent the rows waiting in the two queues, and who sent the rows that
 	** landed at the last lock.

@@ -11,6 +11,7 @@ static bool				advance_clear(t_game *g, int *remaining_ms);
 static bool				advance_active(t_game *g, int *remaining_ms);
 static void				drain_garbage(t_game *g);
 static void				inject_rows(t_game *g, int lines);
+static int				next_garbage_hole(t_game *g);
 static void				age_server_effects(t_game *g);
 static void				drain_abilities(t_game *g);
 static void				apply_bomb(t_game *g);
@@ -51,6 +52,8 @@ void	game_start(t_game *g, t_player_id pid, uint32_t seed)
 	effect_state_init(&g->effects);
 	g->player_id = pid;
 	g->seed = seed;
+	g->garbage_seq = seed ^ 0x9e3779b9u;
+	g->garbage_hole = -1;
 	g->hold = BODY_HOLD_EMPTY;
 	g->lines = 0;
 	g->level = level_from_lines(0);
@@ -659,7 +662,7 @@ static void	drain_garbage(t_game *g)
 }
 
 /**
- * @brief Puts n garbage rows on the board, one at a time so the hole walks.
+ * @brief Puts n garbage rows on the board, one at a time so the hole moves.
  *
  * @param g Game to raise.
  * @param lines How many rows; zero or fewer is a no-op.
@@ -670,11 +673,51 @@ static void	inject_rows(t_game *g, int lines)
 		lines = BOARD_HEIGHT;
 	while (lines > 0)
 	{
-		board_inject_garbage(&g->board, 1,
-			(int)(g->garbage_seq % (uint32_t)BOARD_WIDTH));
-		g->garbage_seq++;
+		board_inject_garbage(&g->board, 1, next_garbage_hole(g));
 		lines--;
 	}
+}
+
+/**
+ * @brief Draws the column the next garbage row leaves open.
+ *
+ * It was `garbage_seq % BOARD_WIDTH` off a counter incremented once per row,
+ * which is a staircase and not a draw: every run of garbage left its holes on
+ * columns 0, 1, 2, 3 in order, and a player taking ten rows got a diagonal
+ * straight across the board. "The hole walks instead of stacking" was the
+ * right worry answered by the wrong arithmetic - walking by exactly one column
+ * is the most legible pattern there is, and the only reason it went unnoticed
+ * is that it takes a Battle Royale's worth of garbage to see the shape.
+ *
+ * So the column is drawn, from the same LCG apply_bomb uses, and only the
+ * column used last is excluded - which is what the original worry was actually
+ * about. Drawing over BOARD_WIDTH - 1 and stepping past the previous hole
+ * keeps every remaining column equally likely; a rejection loop would have
+ * been the same distribution with a branch that can spin.
+ *
+ * The state is the game's own and seeded from the game's own seed, so a match
+ * replayed from one seed lands the same rows in the same places, which is what
+ * lets a test assert where a hole went at all. No randomness enters
+ * libtetrisbrain: the column arrives there as an argument.
+ *
+ * @param g Game whose queue is being drained.
+ * @return A column in [0, BOARD_WIDTH), never the one drawn immediately before.
+ */
+static int	next_garbage_hole(t_game *g)
+{
+	int	column;
+
+	g->garbage_seq = g->garbage_seq * 1664525u + 1013904223u;
+	if (g->garbage_hole < 0 || BOARD_WIDTH < 2)
+		column = (int)((g->garbage_seq >> 16) % (uint32_t)BOARD_WIDTH);
+	else
+	{
+		column = (int)((g->garbage_seq >> 16) % (uint32_t)(BOARD_WIDTH - 1));
+		if (column >= g->garbage_hole)
+			column++;
+	}
+	g->garbage_hole = column;
+	return (column);
 }
 
 /**
