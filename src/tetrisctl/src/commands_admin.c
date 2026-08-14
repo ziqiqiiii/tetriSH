@@ -3,7 +3,7 @@
 // Static Functions
 static const t_managed	*channel_daemon(const t_ctl *ctl, const char *only);
 static const t_managed	*find_channel(const t_ctl *ctl, const char *only);
-static int				ask(const t_ctl *ctl, const char *only, const char *method, char *body, size_t cap, size_t *len);
+static int	ask(const t_ctl *ctl, const char *only, const char *method, const char *path, char *body, size_t cap, size_t *len);
 static void				print_rooms(const char *body, size_t len);
 static void				print_players(const char *body, size_t len);
 static const char		*mode_name(t_body_mode mode);
@@ -31,7 +31,7 @@ int	rooms_command(const t_ctl *ctl, const char *only)
 	static char	body[TETRISCTL_CONTROL_BODY_MAX];
 	size_t		len;
 
-	if (ask(ctl, only, "ROOMS", body, sizeof(body), &len) != 0)
+	if (ask(ctl, only, "ROOMS", TETRISCTL_CONTROL_ROUTE, body, sizeof(body), &len) != 0)
 		return (-1);
 	daemon_report_break();
 	print_rooms(body, len);
@@ -51,7 +51,7 @@ int	players_command(const t_ctl *ctl, const char *only)
 	static char	body[TETRISCTL_CONTROL_BODY_MAX];
 	size_t		len;
 
-	if (ask(ctl, only, "PLAYERS", body, sizeof(body), &len) != 0)
+	if (ask(ctl, only, "PLAYERS", TETRISCTL_CONTROL_ROUTE, body, sizeof(body), &len) != 0)
 		return (-1);
 	daemon_report_break();
 	print_players(body, len);
@@ -76,7 +76,7 @@ int	dropped_command(const t_ctl *ctl, const char *only)
 	t_body_dropped	dropped;
 	size_t			len;
 
-	if (ask(ctl, only, "DROPPED", body, sizeof(body), &len) != 0)
+	if (ask(ctl, only, "DROPPED", TETRISCTL_CONTROL_ROUTE, body, sizeof(body), &len) != 0)
 		return (-1);
 	if (body_dropped_decode(body, len, &dropped) != 0)
 	{
@@ -117,7 +117,7 @@ int	health_report(const t_ctl *ctl, const char *only)
 	*/
 	if (find_channel(ctl, only) == NULL)
 		return (0);
-	if (ask(ctl, only, "STATUS", body, sizeof(body), &len) != 0)
+	if (ask(ctl, only, "STATUS", TETRISCTL_CONTROL_ROUTE, body, sizeof(body), &len) != 0)
 		return (-1);
 	if (body_health_decode(body, len, &health) != 0)
 	{
@@ -219,7 +219,7 @@ static const t_managed	*find_channel(const t_ctl *ctl, const char *only)
  * @param len Receives the body length.
  * @return 0 on a 200, -1 otherwise.
  */
-static int	ask(const t_ctl *ctl, const char *only, const char *method, char *body, size_t cap, size_t *len)
+static int	ask(const t_ctl *ctl, const char *only, const char *method, const char *path, char *body, size_t cap, size_t *len)
 {
 	const t_managed	*d;
 	char			reason[256];
@@ -228,7 +228,7 @@ static int	ask(const t_ctl *ctl, const char *only, const char *method, char *bod
 	d = channel_daemon(ctl, only);
 	if (d == NULL)
 		return (-1);
-	status = control_ask(d, method, body, cap, len);
+	status = control_ask(d, method, path, body, cap, len);
 	if (status < 0)
 	{
 		snprintf(reason, sizeof(reason),
