@@ -166,7 +166,7 @@ int				stop_command(const t_ctl *ctl, const char *only);
 int				restart_command(const t_ctl *ctl, const char *only);
 
 /* CONTROL.C */
-int				control_ask(const t_managed *d, const char *method, char *body, size_t cap, size_t *body_len);
+int				control_ask(const t_managed *d, const char *method, const char *path, char *body, size_t cap, size_t *body_len);
 
 /* COMMANDS_ADMIN.C */
 int				rooms_command(const t_ctl *ctl, const char *only);
