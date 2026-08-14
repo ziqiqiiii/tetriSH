@@ -2,10 +2,10 @@
 
 // Static Functions
 static int	ctl_connect(const t_managed *d);
-static int	send_request(int fd, const char *method);
 static int	read_response(int fd, char *body, size_t cap, size_t *body_len);
 static int	take_status(t_htttp_message *resp, char *body, size_t cap, size_t *body_len);
 static int	deadline_socket(int fd);
+static int	send_request(int fd, const char *method, const char *path);
 
 /*
 ** The asking end of the Control channel.
@@ -32,12 +32,13 @@ static int	deadline_socket(int fd);
  * @return The HTTTP status code on an answered request, or -1 when the
  *         channel could not be reached or the reply made no sense.
  */
-int	control_ask(const t_managed *d, const char *method, char *body, size_t cap, size_t *body_len)
+int	control_ask(const t_managed *d, const char *method, const char *path, char *body, size_t cap, size_t *body_len)
 {
 	int	status;
 	int	fd;
 
-	if (d == NULL || method == NULL || body == NULL || body_len == NULL)
+	if (d == NULL || method == NULL || path == NULL || body == NULL
+		|| body_len == NULL)
 		return (-1);
 	*body_len = 0;
 	if (d->control_path[0] == '\0')
@@ -46,7 +47,7 @@ int	control_ask(const t_managed *d, const char *method, char *body, size_t cap, 
 	if (fd < 0)
 		return (-1);
 	status = -1;
-	if (send_request(fd, method) == 0)
+	if (send_request(fd, method, path) == 0)
 		status = read_response(fd, body, cap, body_len);
 	close(fd);
 	return (status);
@@ -84,7 +85,7 @@ static int	ctl_connect(const t_managed *d)
  * @param method Method to send.
  * @return 0 on success, -1 on failure.
  */
-static int	send_request(int fd, const char *method)
+static int	send_request(int fd, const char *method, const char *path)
 {
 	t_htttp_message	req;
 	unsigned char	prefix[TETRISCTL_LENGTH_PREFIX_BYTES];
@@ -93,8 +94,7 @@ static int	send_request(int fd, const char *method)
 	int				rc;
 
 	htttp_message_init(&req);
-	if (htttp_message_make_request(&req, method,
-			TETRISCTL_CONTROL_ROUTE) != HTTTP_OK
+	if (htttp_message_make_request(&req, method, path) != HTTTP_OK
 		|| htttp_message_set_header(&req, "Host", "tetrish.local") != HTTTP_OK
 		|| htttp_message_set_header(&req, "Client",
 			TETRISCTL_COMPONENT_NAME) != HTTTP_OK

@@ -8,6 +8,7 @@ static unsigned int	players_handler(t_control_connection *conn, size_t *omitted)
 static unsigned int	dropped_handler(t_control_connection *conn);
 static size_t		collect_players(t_server *srv, t_body_player_row *rows, size_t cap, size_t *omitted);
 static void			access_line(t_control_connection *conn, const t_htttp_message *msg, unsigned int status);
+static unsigned int	kick_handler(t_control_connection *conn, const t_htttp_message *msg);
 
 /*
 ** The four read-only admin routes, every one of them answered on the reactor.
@@ -72,6 +73,13 @@ void	control_handle_frame(t_control_connection *conn, const unsigned char *frame
  */
 static unsigned int	route(t_control_connection *conn, const t_htttp_message *msg, size_t *omitted)
 {
+	if (strncmp(msg->path, TETRISD_CONTROL_ROUTE_PLAYER,
+			strlen(TETRISD_CONTROL_ROUTE_PLAYER)) == 0)
+	{
+		if (strcmp(msg->method, "KICK") == 0)
+			return (kick_handler(conn, msg));
+		return (404u);
+	}
 	if (strcmp(msg->path, TETRISD_CONTROL_ROUTE) != 0)
 		return (404u);
 	if (strcmp(msg->method, "STATUS") == 0)
@@ -178,6 +186,26 @@ static unsigned int	dropped_handler(t_control_connection *conn)
 	return (200u);
 }
 
+static unsigned int	kick_handler(t_control_connection *conn, const t_htttp_message *msg)
+{
+	t_player_id	pid;
+	t_client	*target;
+
+	pid = request_player_id(msg->path
+			+ strlen(TETRISD_CONTROL_ROUTE_PLAYER), NULL);
+	if (pid == 0)
+		return (400u);
+	target = registry_find_other(&conn->srv->reg, pid, NULL);
+	if (target == NULL)
+		return (404u);
+	logger_emit(&conn->srv->log, COREIPC_LOG_WARNING,
+		"admin kicked conn %u player %llu (%s)", target->conn_id,
+		(unsigned long long)pid, target->username);
+	client_kill(target);
+	conn->srv->control.body_len = 0;
+	return (200u);
+}
+
 /**
  * @brief Walks the connection registry into player rows.
  *
@@ -237,3 +265,4 @@ static void	access_line(t_control_connection *conn, const t_htttp_message *msg, 
 	logger_emit(&conn->srv->log, COREIPC_LOG_INFO, "admin (admin) %s %s -> %u",
 		msg->method, msg->path, status);
 }
+
