@@ -334,3 +334,19 @@ static const char	*status_name(t_body_room_status status)
 		return ("IN_GAME");
 	return ("FINISHED");
 }
+
+int	kick_command(const t_ctl *ctl, const char *pid, const char *only)
+{
+	static char	body[TETRISCTL_CONTROL_BODY_MAX];
+	char		path[TETRISCTL_CONFIG_LINE_MAX];
+	size_t		len;
+
+	if (pid == NULL || pid[0] == '\0')
+		return (daemon_report_error(TETRISCTL_COMPONENT_NAME, "kick",
+				"needs a player id"), -1);
+	snprintf(path, sizeof(path), "%s%s", TETRISCTL_CONTROL_ROUTE_PLAYER, pid);
+	if (ask(ctl, only, "KICK", path, body, sizeof(body), &len) != 0)
+		return (-1);
+	printf("  kicked player %s\n", pid);
+	return (0);
+}

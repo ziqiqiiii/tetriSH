@@ -65,6 +65,7 @@
 # define TETRISCTL_CONTROL_MS		3000
 # define TETRISCTL_LENGTH_PREFIX_BYTES	4
 # define TETRISCTL_CONTROL_ROUTE	"/admin"
+# define TETRISCTL_CONTROL_ROUTE_PLAYER "/admin/player/"
 # define TETRISCTL_CONTROL_BODY_MAX	32768
 /*
 ** Rows a `rooms` listing will decode into. LOBBY_MAX_ROOMS is tetrisd's, and
@@ -172,5 +173,6 @@ int				rooms_command(const t_ctl *ctl, const char *only);
 int				players_command(const t_ctl *ctl, const char *only);
 int				dropped_command(const t_ctl *ctl, const char *only);
 int				health_report(const t_ctl *ctl, const char *only);
+int kick_command(const t_ctl *ctl, const char *pid, const char *only);
 
 # endif

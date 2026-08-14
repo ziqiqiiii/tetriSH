@@ -65,6 +65,8 @@ static int	dispatch(const t_ctl *ctl, const char *verb, const char *only)
 		return (players_command(ctl, only));
 	if (strcmp(verb, "dropped-logs") == 0)
 		return (dropped_command(ctl, only));
+	if (strcmp(verb, "kick") == 0)
+		return (kick_command(ctl, only));
 	daemon_report_error(TETRISCTL_COMPONENT_NAME, verb, "unknown command");
 	usage();
 	return (-1);
@@ -80,6 +82,7 @@ static int	usage(void)
 	fprintf(stderr,
 		"usage: %s [-f <rc>] start|status|stop|restart [daemon]\n"
 		"       %s rooms|players|dropped-logs [daemon]\n"
+		"       %s kick [daemon]\n"
 		"       the daemons and their launch order come from %sDAEMONS\n"
 		"       in .tetrishrc; stop and restart reverse that order\n"
 		"       rooms, players and dropped-logs ask the running daemon over\n"
