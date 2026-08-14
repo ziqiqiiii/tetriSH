@@ -1,7 +1,7 @@
 #include "tetrisctl.h"
 
 // Static Functions
-static int	dispatch(const t_ctl *ctl, const char *verb, const char *only);
+static int	dispatch(const t_ctl *ctl, int argc, char **argv);
 static int	usage(void);
 
 /**
@@ -36,7 +36,7 @@ int	main(int argc, char **argv)
 		daemon_report_error(TETRISCTL_COMPONENT_NAME, ctl.rc_path, "cannot read the roster");
 		return (EXIT_FAILURE);
 	}
-	if (dispatch(&ctl, argv[i], i + 1 < argc ? argv[i + 1] : NULL) != 0)
+	if (dispatch(&ctl, argc - i, argv + i) != 0)
 		return (EXIT_FAILURE);
 	return (EXIT_SUCCESS);
 }
@@ -49,8 +49,13 @@ int	main(int argc, char **argv)
  * @param only One daemon's name, or NULL for all of them.
  * @return 0 on success, -1 on failure or an unknown verb.
  */
-static int	dispatch(const t_ctl *ctl, const char *verb, const char *only)
+static int	dispatch(const t_ctl *ctl, int argc, char **argv)
 {
+	const char	*verb;
+	const char	*only;
+
+	verb = argv[0];
+	only = argc > 1 ? argv[1] : NULL;
 	if (strcmp(verb, "start") == 0)
 		return (start_command(ctl, only));
 	if (strcmp(verb, "status") == 0)
@@ -66,7 +71,7 @@ static int	dispatch(const t_ctl *ctl, const char *verb, const char *only)
 	if (strcmp(verb, "dropped-logs") == 0)
 		return (dropped_command(ctl, only));
 	if (strcmp(verb, "kick") == 0)
-		return (kick_command(ctl, only));
+		return (kick_command(ctl, only, argc > 2 ? argv[2] : NULL));
 	daemon_report_error(TETRISCTL_COMPONENT_NAME, verb, "unknown command");
 	usage();
 	return (-1);
@@ -82,12 +87,12 @@ static int	usage(void)
 	fprintf(stderr,
 		"usage: %s [-f <rc>] start|status|stop|restart [daemon]\n"
 		"       %s rooms|players|dropped-logs [daemon]\n"
-		"       %s kick [daemon]\n"
+		"       %s kick <player-id> [daemon]\n"
 		"       the daemons and their launch order come from %sDAEMONS\n"
 		"       in .tetrishrc; stop and restart reverse that order\n"
 		"       rooms, players and dropped-logs ask the running daemon over\n"
 		"       its control channel, so they need it up\n",
-		TETRISCTL_COMPONENT_NAME,
+		TETRISCTL_COMPONENT_NAME, TETRISCTL_COMPONENT_NAME,
 		TETRISCTL_COMPONENT_NAME, TETRISCTL_CONFIG_KEY_PREFIX);
 	return (EXIT_FAILURE);
 }
