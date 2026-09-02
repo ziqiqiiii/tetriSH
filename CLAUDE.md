@@ -44,6 +44,7 @@ make check-deps   # verify dependencies without changing the system
 make clean / fclean / re
 make reset        # stop running daemons, then fclean + wipe their runtime state (tmp/, archive/, bin/)
 make play         # set up everything and launch a client against a server
+make play-init    # the same, but never opens a window: runs in the current terminal
 ```
 
 Set `AUTO_INSTALL_DEPS=0` to make the dependency step check-only (CI). Root

@@ -108,7 +108,7 @@ make play          # client built on this host
 make play-image    # client built in a container instead
 ```
 
-Either installs what is missing, compiles it, opens a kitty window and starts the game in it. Every step checks before it acts, so re-running is how you restart.
+Either installs what is missing, compiles it, and starts the game — in a kitty window, or in the terminal you ran it from when that terminal already draws the board. `make play-init` always does the latter and skips the terminal step entirely. Every step checks before it acts, so re-running is how you restart.
 
 <p align="center">
   <a href="docs/manual/tetrish-player-manual.pdf"><img src="docs/manual/img/quick-start.png" alt="Player manual quick start page" width="62%"></a>
@@ -121,6 +121,7 @@ Either installs what is missing, compiles it, opens a kitty window and starts th
 | To play | Run |
 |---|---|
 | On the shared server (default) | `make play` |
+| In the current terminal, no window | `make play-init` |
 | On another server | `make play HOST=tetrish.dev` |
 | On a server started here | `make play PLAY_ARGS=--local` |
 | With no server at all — Solo on local rules | `make play PLAY_ARGS=--offline` |
