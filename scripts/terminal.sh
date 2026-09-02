@@ -120,6 +120,70 @@ current_term_has_graphics() {
     return 1
 }
 
+# The kitty hosting this session, as a path, or empty when it cannot be told.
+# KITTY_PID is the kitty process itself, so the OS says where its executable
+# lives - which is what separates "sitting in a kitty that can draw" from
+# "sitting in a kitty that merely identifies as one".
+hosting_kitty() {
+    local pid="${KITTY_PID:-}"
+    [ -n "$pid" ] || return 0
+    if [ -e "/proc/$pid/exe" ]; then
+        readlink "/proc/$pid/exe" 2>/dev/null || true
+    elif [ "$UNAME_S" = "Darwin" ]; then
+        ps -o comm= -p "$pid" 2>/dev/null || true
+    fi
+}
+
+# A session inside a kitty is worth running in place only when the window that
+# hosts it can actually parse the graphics protocol. The host's own binary is
+# checked first: TERM and KITTY_WINDOW_ID are set by every kitty, including the
+# distro builds too old to draw, and running in place in one of those would
+# fill the screen with Malformed GraphicsCommand where the window path repairs
+# the install and draws correctly. When the host cannot be resolved (no
+# KITTY_PID to follow, or a kernel that hides it), the kitty this machine would
+# open is the best available proxy.
+in_drawable_kitty() {
+    local host
+    host="$(hosting_kitty)"
+    if [ -n "$host" ]; then
+        [ -x "$host" ] || return 1
+        kitty_usable "$host"
+        return $?
+    fi
+    kitty_find usable >/dev/null
+}
+
+# The window we are sitting in already draws the board, so opening one would
+# only add a second copy of the terminal the user is in. Asked only when the
+# caller has not forced TETRISU_TERMINAL: naming a terminal asks for a window
+# in it even from inside that one.
+in_drawable_terminal() {
+    [ -n "${TETRISU_TERMINAL:-}" ] && return 1
+    case "${TERM_PROGRAM:-}" in
+        WezTerm|ghostty)
+            return 0
+            ;;
+        kitty)
+            in_drawable_kitty
+            return $?
+            ;;
+    esac
+    case "${TERM:-}" in
+        *ghostty*)
+            return 0
+            ;;
+        *kitty*)
+            in_drawable_kitty
+            return $?
+            ;;
+    esac
+    if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+        in_drawable_kitty
+        return $?
+    fi
+    [ -n "${WEZTERM_PANE:-}" ]
+}
+
 # Names the terminal to use: kitty, wezterm, or none.
 #
 # "none" is not a failure — it is the correct answer whenever there is no
@@ -628,6 +692,10 @@ case "$action" in
         fi
         ;;
     install)
+        if in_drawable_terminal; then
+            ok "already inside a terminal that draws the board; nothing to install"
+            exit 0
+        fi
         choice="$(choose_terminal)"
         [ "$choice" = "none" ] && { ok "no terminal needed; running in place"; exit 0; }
         ensure_terminal "$choice" >/dev/null || exit 1
@@ -636,6 +704,10 @@ case "$action" in
     launch)
         [ "${1:-}" = "--" ] && shift
         [ $# -gt 0 ] || die "launch needs a command after --"
+        if in_drawable_terminal; then
+            ok "already inside a terminal that draws the board; running in place"
+            run_in_place "$@"
+        fi
         choice="$(choose_terminal)"
         if [ "$choice" = "none" ]; then
             run_in_place "$@"

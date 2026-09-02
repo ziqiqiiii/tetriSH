@@ -23,7 +23,11 @@
 #   make del-db       drop the player store (the one target that deletes it)
 #   make re           fclean + all
 #
-#   make play         install + compile on this host, then play in kitty
+#   make play         install + compile on this host, then play; when the
+#                     terminal already draws the board the game runs there
+#                     instead of in a new window
+#   make play-init    the same, with the terminal step skipped: the client
+#                     runs in the terminal make was invoked in
 #   make play-image   the same, built in a container instead of on this host
 #
 #   make play PLAY_ARGS=--local           play against a server on this machine
@@ -195,6 +199,14 @@ PLAY_HOST_ARG	 = $(if $(HOST),--host $(HOST))
 play:
 	@ bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
 
+# Never opens a window: TETRISU_TERMINAL is forced to none, so the terminal
+# step is skipped and the client runs in the terminal make was invoked in.
+# Everything else - dependencies, build, server handling - is the same play.sh
+# path; forcing the variable here (rather than trusting the environment) is
+# what overrides a TETRISU_TERMINAL the user may have set.
+play-init:
+	@ TETRISU_TERMINAL=none bash ./scripts/play.sh --native $(PLAY_HOST_ARG) $(PLAY_ARGS)
+
 PLAY_REBUILD_ARG	 = $(if $(REBUILD),--rebuild)
 
 play-image:
@@ -252,5 +264,5 @@ re: fclean all
 ################################################################################
 
 .PHONY:		all deps install-deps check-deps deps-info libs shell daemons \
-			bin-link run certs stack test play play-local play-image \
+			bin-link run certs stack test play play-init play-local play-image \
 			clean fclean daemons-stop reset del-db re
